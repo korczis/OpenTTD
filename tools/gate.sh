@@ -19,8 +19,10 @@ Usage: $SELF <smoke|change|full> [options]
 
   change  Standard check before calling a task done. Configures build/
           if missing, incremental build, full existing ctest suite,
-          diff hygiene, and a summary of untracked/modified files to
-          review for accidental generated output.
+          diff hygiene, a check that generated Prismatic MCP contributor
+          docs aren't stale (tools/check-prismatic-docs.sh), and a summary
+          of untracked/modified files to review for accidental generated
+          output.
 
   full    Expensive clean-room validation: wipes and recreates
           build-fullgate/, configures + builds + tests from scratch.
@@ -82,6 +84,9 @@ cmd_smoke() {
 
 cmd_change() {
   diff_check
+
+  echo "==> tools/check-prismatic-docs.sh"
+  tools/check-prismatic-docs.sh
 
   if [[ ! -f build/CMakeCache.txt ]]; then
     echo "==> cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo (initial configure)"
