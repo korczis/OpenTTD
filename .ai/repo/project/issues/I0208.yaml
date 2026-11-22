@@ -1,0 +1,39 @@
+id: I0208
+milestone: the-panel-has-integrity
+title: "One selection model links every view: a pick in the map, a graph, a table, the plan or the cluster selects the same entity in every other view and in the address"
+slug: shared-selection-model
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Add one selection store to the shell's kit (static/shell.js, exported through components.js) holding typed entity references (company, town, industry, station, vehicle, tile, plan pair, instance) and a client state model that applies event-stream updates to the last snapshot and re-reads on a gap. Every registered view subscribes: a pick in one highlights the entity in all, writes `sel=<kind>:<id>` into the address (patchAddress), survives a reload and crosses pages through links that carry it. Moving the game camera to the selection goes through the existing authorised client tool (/api/view/tool, I0043) and only when the owner arms it. Per-page focus keys such as ov_focus become views of the shared selection, not a second mechanism."
+why: "External review 2026-11-22 (digest A-54). Selection is per page today: components.js:49 `patchAddress` writes each page's own keys, overview.js:18-20 keeps its own `ov_focus`, and world.js:172 and :180 move the camera from the plan and portfolio rows only (goTo, world.js:200, through /api/view/tool at :195). Each page opens its own EventSource and reconciles nothing against a snapshot (app.js:246 and :323, overview.js:305). Rule project.panel-charts-go-through-one-layer asks that a company mark focus that company in every chart; no store makes that hold across pages."
+scope:
+  - "tools/research/mcp-panel/static/shell.js"
+  - "tools/research/mcp-panel/static/components.js"
+  - "tools/research/mcp-panel/static/overview.js"
+  - "tools/research/mcp-panel/static/world.js"
+  - "tools/research/mcp-panel/static/app.js"
+  - "tools/research/mcp-panel/static/viz.js"
+  - "tools/research/mcp-panel/test/**"
+  - ".ai/repo/rules/project/panel-charts-go-through-one-layer.v1.md"
+non_scope:
+  - "Moving the game camera without the owner's arming"
+  - "A new event transport; the existing /api/events/stream stays the source"
+depends_on:
+  - I0204
+  - I0207
+serves:
+  - "openttd-validates-agent-driven-engineering#every-panel-control-works"
+acceptance_criteria:
+  - "One store module; one-kit.test.mjs fails on a second selection or focus mechanism in a page script"
+  - "A fake-DOM test picks a station in the World map and asserts its highlight in the plan table, the world graph and the overview, and `sel=station:<id>` in the address; a reload restores it"
+  - "The client state model applies a fixture event sequence to a snapshot, detects a gap and re-reads; a test covers both"
+  - "A pick moves the camera only when the input switch is armed; with it off the view says why"
+  - "The rule's 'Linked' requirement names the shared selection and mcp-overview-check drives a cross-view pick"
+validation:
+  - "node --test tools/research/mcp-panel/test/*.test.mjs"
+  - "tools/research/e2e-coverage"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -1,0 +1,36 @@
+id: I0204
+milestone: the-panel-has-integrity
+title: "One schema-driven control renderer draws the bot settings and every hub operation form, honours min, max, step and enum, and never lets a refresh overwrite a draft"
+slug: one-schema-control-renderer
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Fold bots.js `kindOf`/`controlMarkup` and components.js `schemaFields`/`operationForm` into one renderer in components.js that takes a JSON Schema (an AI setting is mapped to one: integer with minimum, maximum, multipleOf from step, enum from labels, a world-id reference as a choice source) and returns Flowbite Pro controls with a dirty state. The bot card and the hub catalogue both use it; a refresh merges into a dirty form instead of replacing it; a value outside the schema is refused before any request."
+why: "External review 2026-11-22 (digest A-48). Two renderers remain on master: components.js:58 `schemaFields` and :199 `operationForm` for hub operations, and bots.js:27 `kindOf` and :89 `controlMarkup` for AI settings. schemaFields (components.js:58-70) maps only type and enum, so minimum, maximum and multipleOf are dropped for every hub form, while bots.js:112-114 honours min/max/step for settings only. Dirty-state handling exists only in bots.js (:184 isDirty)."
+scope:
+  - "tools/research/mcp-panel/static/components.js"
+  - "tools/research/mcp-panel/static/bots.js"
+  - "tools/research/mcp-panel/static/catalogue.js"
+  - "tools/research/mcp-panel/test/components.test.mjs"
+  - "tools/research/mcp-panel/test/components-dom.test.mjs"
+  - "tools/research/mcp-panel/test/bots.test.mjs"
+  - "tools/research/mcp-panel/test/one-kit.test.mjs"
+non_scope:
+  - "New settings or new hub operations"
+  - "Rewriting the catalogue page's layout"
+depends_on:
+  - I0203
+serves:
+  - "openttd-validates-agent-driven-engineering#every-panel-control-works"
+acceptance_criteria:
+  - "bots.js defines no control markup of its own; kindOf and controlMarkup are gone and one-kit.test.mjs fails if a second renderer returns"
+  - "A hub operation whose schema has minimum, maximum or multipleOf gets an input that enforces them, and a value outside is refused in the page with the bound shown; tests cover integer, number, enum, boolean and a reference choice"
+  - "A refresh while a field is dirty keeps the draft and marks the server's newer value beside it; a test drives it in the fake DOM"
+  - "mcp-ui-crawl-check drives the bot editor and one hub form with no DEAD or SILENT control"
+validation:
+  - "node --test tools/research/mcp-panel/test/*.test.mjs"
+  - "tools/research/e2e-coverage"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

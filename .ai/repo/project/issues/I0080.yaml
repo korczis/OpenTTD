@@ -18,6 +18,8 @@ scope:
   - ".ai/repo/project/issues/I0080.yaml"
   - ".ai/repo/knowledge/curated/**"
 depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#decisions-publish-structured-events"
 acceptance_criteria:
   - "A ZeroMQ SUB client on the endpoint from GET /api/bus receives every bus event in order, topic = kind, envelope schema prismatic-bus/v1 with instance, session, seed, game_tick and game_date"
   - "The instance's registry record names the bus endpoint and the store file"

@@ -1,0 +1,30 @@
+id: I0197
+milestone: the-live-agent-workbench
+title: "The monthly replan holds a cooldown and a hysteresis band, re-plans on a significant event, and records a typed hold with its reason instead of a proposal"
+slug: replan-cooldown-hysteresis
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Make the running replan loop stable rather than merely periodic: after a plan is applied, no new switch is proposed for a declared cooldown in game months; a new plan must beat the live one by a declared minimum gain (the hysteresis band) before it is proposed; a significant event (a line losing money for a quarter, a competitor overtaking on a transport type, the loan nearing its limit) triggers a round outside the monthly tick; and every round ends in one typed verdict, PROPOSE or HOLD with a reason code, published as a plan.* event. The constants stay editable while the service runs."
+why: "External review 2026-11-22 (digest B-12). tools/research/mcp-panel/rhai/replan.rhai already runs a receding horizon: once a game month (EVERY_MONTHS, :44), a payback model gate (MIN_PAYS and HORIZON_MONTHS, :50-51, described at :20-26), and no new proposal while one waits (:201-205). git grep for hysteres, cooldown, debounce, thrash and no_action under tools/research/mcp-panel/rhai and tools/research/mcp-rhai/src on origin/master finds nothing, so a plan applied this month can be switched again next month on a marginal gain, and a hold is prose, not a typed event."
+scope:
+  - "tools/research/mcp-panel/rhai/replan.rhai"
+  - "tools/research/mcp-rhai/src/panel_events.rs"
+  - "research/mechanisms/planner-and-algoglyph.md"
+non_scope:
+  - "The per-setting approvals replan.rhai still submits; ADR 0038 slice 2 (peer worktree fix/approval-core, which claims tools/research/mcp-panel/rhai) turns them into one plan submission, and this issue lands after it"
+  - "Changing a bot default; that needs held-start pairs (history-tuning-is-held-start-proven)"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#the-workbench-drives-the-game-end-to-end"
+acceptance_criteria:
+  - "A REPLAN_ONCE run on a fixture state inside the cooldown, and one inside the band, each publish a plan.* hold event with its reason code and propose nothing"
+  - "A fixture significant event triggers a round outside the monthly tick"
+  - "The plan.* kinds table declares the verdict event and the store's plan view shows it"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-panel-check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

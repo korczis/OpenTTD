@@ -1,6 +1,9 @@
 <p align="center">
-  <a href="#plug-in-an-llm-it-asks-before-it-acts">
-    <img src="docs/screenshots/game-finances.png" alt="A live research game on loopback: the planned bot's finances, the owner's spectator view and the bot playing through the embedded MCP server" width="100%">
+  <a href="#how-it-fits-together">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/atlas/hero-dark.svg">
+      <img src="docs/atlas/hero-light.svg" alt="Illustration of the loop this fork exists for: on an isometric map a planner prices candidate rail lines between a forest and a sawmill and picks one; the change waits at the approval boundary as pending_approval; once approved it runs as Command<>::Post, the game's own command system; the result is observed as VERIFIED_SUCCESS or EXECUTED_UNVERIFIED" width="100%">
+    </picture>
   </a>
 </p>
 
@@ -13,30 +16,23 @@
 </p>
 
 <p align="center">
-  <a href="https://korczis.github.io/OpenTTD/"><img alt="Site" src="https://img.shields.io/badge/site-korczis.github.io%2FOpenTTD-d11f1a?style=for-the-badge&labelColor=0b0b0b"></a>
-  <a href="https://github.com/korczis/OpenTTD/actions/workflows/surfaces.yml"><img alt="Surfaces" src="https://img.shields.io/github/actions/workflow/status/korczis/OpenTTD/surfaces.yml?branch=master&label=docs%20check&style=for-the-badge&labelColor=0b0b0b"></a>
-  <a href="https://github.com/korczis/OpenTTD/wiki"><img alt="Wiki" src="https://img.shields.io/badge/wiki-same%20docs-ece4d6?style=for-the-badge&labelColor=0b0b0b"></a>
-  <a href="COPYING.md"><img alt="License GPL-2.0" src="https://img.shields.io/badge/license-GPL--2.0-ece4d6?style=for-the-badge&labelColor=0b0b0b"></a>
-</p>
-
-<p align="center">
-  <a href="#plug-in-an-llm-it-asks-before-it-acts"><b>LLM over MCP</b></a> &nbsp;&middot;&nbsp;
-  <a href="#script-a-live-game-in-rhai"><b>Rhai</b></a> &nbsp;&middot;&nbsp;
-  <a href="#plans-in-a-sentence"><b>Plans in a sentence</b></a> &nbsp;&middot;&nbsp;
-  <a href="#the-planner-against-itself"><b>Bot duels</b></a> &nbsp;&middot;&nbsp;
-  <a href="#what-the-duels-have-taught-so-far"><b>Findings</b></a> &nbsp;&middot;&nbsp;
-  <a href="#against-other-ais-the-lan-battle"><b>AI battle</b></a> &nbsp;&middot;&nbsp;
-  <a href="#rail-lines-that-pay"><b>Rail</b></a> &nbsp;&middot;&nbsp;
-  <a href="#towns-that-say-yes"><b>Towns</b></a> &nbsp;&middot;&nbsp;
-  <a href="#every-event-on-a-bus-and-in-a-store"><b>Events</b></a> &nbsp;&middot;&nbsp;
-  <a href="#a-real-place-as-the-map"><b>Real place</b></a> &nbsp;&middot;&nbsp;
-  <a href="#a-real-game-over-the-internet"><b>Real game</b></a> &nbsp;&middot;&nbsp;
-  <a href="#beyond-the-game"><b>Beyond the game</b></a> &nbsp;&middot;&nbsp;
-  <a href="#counted-from-the-source"><b>Numbers</b></a> &nbsp;&middot;&nbsp;
-  <a href="#how-it-compares"><b>How it compares</b></a> &nbsp;&middot;&nbsp;
+  <a href="#what-this-fork-is-for"><b>What it is</b></a> &nbsp;&middot;&nbsp;
+  <a href="#three-things-to-try"><b>Try it</b></a> &nbsp;&middot;&nbsp;
+  <a href="#how-it-fits-together"><b>How it fits</b></a> &nbsp;&middot;&nbsp;
+  <a href="#evidence-before-claims"><b>Evidence</b></a> &nbsp;&middot;&nbsp;
+  <a href="https://korczis.github.io/OpenTTD/atlas.html"><b>Research Atlas</b></a> &nbsp;&middot;&nbsp;
   <a href="#quick-start"><b>Quick start</b></a> &nbsp;&middot;&nbsp;
   <a href="#00-about-this-fork"><b>Full story</b></a>
 </p>
+
+<p align="center"><sub>
+  <a href="https://korczis.github.io/OpenTTD/">site</a> &middot;
+  <a href="https://github.com/korczis/OpenTTD/wiki">wiki</a> (the same documents) &middot;
+  <a href="https://github.com/korczis/OpenTTD/actions/workflows/surfaces.yml">docs check</a> &middot;
+  <a href="COPYING.md">GPL-2.0</a> &middot;
+  the hero is an illustration drawn by <a href="tools/research/atlas/README.md"><code>atlas render</code></a> in the
+  <a href="tools/research/noirgfx/style.toml">NoirGFX palette</a>, not a screenshot
+</sub></p>
 
 > [!IMPORTANT]
 > **Not the official OpenTTD.** `korczis/OpenTTD` is a personal research fork. It sends nothing
@@ -92,6 +88,132 @@ is [a real game against real opponents over the internet](#a-real-game-over-the-
 All three need this fork's research build: the MCP server is compiled into it, default OFF and
 loopback only.
 
+## How it fits together
+
+One loopback machine runs the game and the agents. Nothing an agent does bypasses the game's own
+command system, and every connection below is one of three kinds, told by its stroke: **solid**
+for a command or a call, **dotted** for observed data (a read, an event, a publication), **thick**
+for approval, validation and evidence. Every part opens its page; the
+[Research Atlas](https://korczis.github.io/OpenTTD/atlas.html?view=graph#graph) draws this same
+diagram as a graph you can select, filter by kind and follow.
+
+```mermaid
+flowchart LR
+    %% atlas: architecture | How the pieces connect
+    owner(["Owner"])
+    llm(["LLM / MCP client"])
+
+    subgraph game["OpenTTD (deterministic lockstep)"]
+        gui["GUI client<br/>~ console + toolbar menu"]
+        srv["Dedicated server<br/>command system"]
+        mcp["Embedded MCP server<br/>loopback, compile-gated, default OFF"]
+    end
+
+    subgraph surfaces["One catalogue, derived surfaces"]
+        swagger["Swagger / OpenAPI"]
+        rhai["Rhai: every tool,<br/>command and route a function"]
+    end
+
+    subgraph brain["Plan, then play"]
+        planner["AlgoGlyph planner<br/>live prices · bridges &amp; tunnels"]
+        bot["PrismaticAI<br/>company AI"]
+        human["mcp-human<br/>plays through the UI"]
+    end
+
+    subgraph evidence["Evidence"]
+        results[("research/results<br/>duel · A/B · battle records")]
+        gate["tools/gate.sh · surfaces check<br/>PASS · FAIL · PARTIAL · NOT RUN"]
+        atlas["README and Research Atlas<br/>derived from the records"]
+    end
+
+    hub["Control panel &amp; hub<br/>holds the token · every instance"]
+    bus[("ZeroMQ bus +<br/>DuckDB store")]
+    steward["Rhai steward &amp; monitor<br/>line targets · lost trains"]
+    board["Majordomus board"]
+
+    owner ==>|approves the exact arguments| hub
+    owner -->|plays, watches| gui
+    llm -->|stdio proxy| hub
+    gui <--> srv
+    srv --- mcp
+    hub -->|tool calls| mcp
+    mcp -.->|live state| hub
+    mcp -.->|catalogue| swagger & rhai
+    rhai --> hub
+    human -->|windows, cursor| hub
+    hub -->|kernel calls| planner
+    planner -.->|portfolio| bot
+    bot -->|game commands| srv
+    hub -.->|every event| bus
+    bus -.->|history, calibration| planner
+    rhai --> steward
+    steward -->|line targets| bot
+    steward -.->|lost and broken trains| board
+    bus -.->|monthly digest| board
+    bus -.->|a duel's plan, logs, months| results
+    results -.->|derived| atlas
+    gate ==>|fails on drift| atlas
+    gate ==>|build and tests| srv
+
+    click owner "research/concepts/human-in-the-loop.md" "human in the loop"
+    click llm "research/mcp-api.md" "the MCP API"
+    click gui "research/mcp-control.md" "panel, console, Rhai and hub"
+    click srv "research/concepts/deterministic-lockstep.md" "deterministic lockstep"
+    click mcp "research/mechanisms/mcp-server-in-the-engine.md" "the MCP server in the engine"
+    click swagger "research/mechanisms/control-panel.md" "the control panel"
+    click rhai "research/mechanisms/rhai-scripting.md" "Rhai scripting"
+    click planner "research/mechanisms/planner-and-algoglyph.md" "planner and AlgoGlyph"
+    click bot "research/mechanisms/prismatic-ai.md" "PrismaticAI"
+    click human "research/mcp-human.md" "mcp-human"
+    click hub "research/mechanisms/hub.md" "the hub"
+    click bus "research/mechanisms/event-bus-and-store.md" "event bus and store"
+    click steward "research/mechanisms/rail-steward-and-monitor.md" "rail steward and monitor"
+    click board "research/mechanisms/majordomus-supervision.md" "Majordomus supervision"
+    click results "research/mechanisms/duels.md" "duels"
+    click gate "research/mechanisms/validation-gate.md" "the validation gate"
+    click atlas "research/mechanisms/published-surfaces.md" "published surfaces"
+```
+
+## Evidence before claims
+
+What the recorded experiments support, counted from [`research/results/`](research/results/) by
+[`tools/research/atlas`](tools/research/atlas/README.md) on every `tools/surfaces/surfaces sync`,
+and checked on every commit. Each row names how to read it and the chain that proves it: the
+dataset, the experiment, the tool that wrote it and the rule or audit that says what it may claim.
+Negative results stay in: a regression, a loss, a replay that differs.
+
+<!-- atlas:begin -->
+<!-- generated by tools/research/atlas render; edit the records or the tool, not this block -->
+
+| | What it counts | How to read it | Evidence |
+|---:|---|---|---|
+| **80** | duel records | plus 5 A/B records: each a separate experiment with its own seed, length and bot revision, not one sample | [dataset](research/results/) → [experiment](research/mechanisms/duels.md) → [source](tools/research/mcp-duel) → [validation](research/duel-evidence-audit.md) · [explore](https://korczis.github.io/OpenTTD/atlas.html?view=explorer) |
+| **29 of 85** | records that are paired comparisons | one game, a held start, every month recorded: the only rows a tuning claim may rest on | [dataset](research/results/) → [experiment](research/duel-evidence-audit.md) → [source](tools/research/mcp-duel) → [validation](.ai/repo/rules/project/a-tuning-claim-needs-held-start-pairs.v1.md) · [explore](https://korczis.github.io/OpenTTD/atlas.html?view=explorer&class=valid) |
+| **21 of 29** | paired records where the planned bot ended ahead | per record, across seeds, lengths and bot revisions; a tally, not an effect size | [dataset](research/results/) → [experiment](research/duel-evidence-audit.md) → [source](tools/research/mcp-duel) → [validation](.ai/repo/rules/project/a-tuning-claim-needs-held-start-pairs.v1.md) · [explore](https://korczis.github.io/OpenTTD/atlas.html?view=explorer&class=valid) |
+| **68 of 79** | duels whose rival ran no train | counted over the duels that record the rival's fleet (1 of 80 do not): the planned railway mostly met a rival on buses or autopilot, not another railway | [dataset](research/results/) → [experiment](research/duel-evidence-audit.md) → [source](tools/research/mcp-duel) → [validation](research/duel-evidence-audit.md) · [explore](https://korczis.github.io/OpenTTD/atlas.html?view=explorer&confounder=rival+ran+no+train) |
+| **2.0** | PrismaticAI's best average rank, newest LAN battle | PrismaticAI GA g347.3 of 10 contestants over 41 matches; AAAHogEx won with 4.0 points per match | [dataset](research/results/battle-20261122T045411-a80cc94a.json) → [experiment](research/results/battle-20261122T045411-a80cc94a.md) → [source](tools/research/ai-battle/battle.py) → [validation](.ai/repo/rules/project/prismatic-ai-is-never-last.v1.md) · [explore](https://korczis.github.io/OpenTTD/atlas.html?view=battle) |
+| **0 of 4** | battle replays identical on another arena | a match does not yet replay the same on another machine: a standing is per host until it does | [dataset](research/results/battle-20261122T045411-a80cc94a.json) → [experiment](research/results/battle-20261122T045411-a80cc94a.md) → [source](tools/research/ai-battle/battle.py) → [validation](.ai/repo/rules/project/battle-records-are-reproducible.v1.md) · [explore](https://korczis.github.io/OpenTTD/atlas.html?view=battle) |
+| **17 / 24** | parts and connections of the architecture | drawn from the README's own diagram; every part opens its page, every connection has a kind | [dataset](README.md) → [experiment](research/mechanisms/README.md) → [source](tools/research/atlas/src/flowchart.rs) → [validation](.ai/repo/rules/project/published-surfaces-are-derived.v1.md) · [explore](https://korczis.github.io/OpenTTD/atlas.html?view=graph) |
+
+```mermaid
+pie showData title Duel and A/B records by comparability (85 records)
+    %% links: https://korczis.github.io/OpenTTD/atlas.html?view=explorer&class=valid | https://korczis.github.io/OpenTTD/atlas.html?view=explorer&class=limited
+    "valid" : 29
+    "limited" : 56
+```
+
+Classes, derived per record by [`atlas`](tools/research/atlas/README.md): **valid**: a paired comparison: both companies in one game, from a held start, every month recorded; **limited**: comparable with a stated caveat: the start was not held, the two arms ran as two games, or the record was reconstructed; **invalid**: not a comparison: months missing, or the run fell back.
+
+<!-- atlas:end -->
+
+**Explore it.** The [Research Atlas](https://korczis.github.io/OpenTTD/atlas.html) draws the same
+projection interactively: filter every duel and A/B record by seed, length, rival, start and
+confounder and compare its two companies month by month; follow one seed through the bot's
+revisions, regressions marked; read the LAN battle's leaderboard and every record's headline; walk
+this README's diagrams as graphs. Every view lives in the URL, and every mark opens its record.
+It is read-only and built from versioned records, never from a running game; the live game has the
+[control panel and the hub](#the-control-panel-and-the-hub) on loopback.
+
 ## Plug in an LLM: it asks before it acts
 
 The game carries an MCP server of its own (compile-gated, default OFF, loopback only). An agent
@@ -100,8 +222,11 @@ changes the world only through the game's own command system: every game command
 (`openttd.cmd.<Command>`) and every Script API function (`openttd.api.<Class>.<Function>`) is a
 tool, and so are the company AIs (`openttd.ai.*`) and the owner's window (`openttd.view.*`). A call
 that changes the game waits until the operator approves those exact arguments, in the console
-(`prismatic_mcp approve <id>`) or in the panel. The bot's yes/no questions appear in the game
-itself, and the owner can let them confirm themselves after a countdown.
+(`prismatic_mcp approve <id>`), in the panel, or in the game's own *Prismatic control* window
+(first row of the fork's toolbar menu), which lists every approval waiting, the latest decisions and
+their verdicts, and accepts an approval only from the owner's own click
+([details](research/mcp-control.md#the-prismatic-control-window-in-the-game)). The bot's yes/no
+questions appear in the game itself, and the owner can let them confirm themselves after a countdown.
 
 ```bash
 tools/gate.sh research    # once: the MCP-enabled build and its tests
@@ -113,12 +238,23 @@ claude mcp add openttd -- "$PWD/tools/research/mcp-auto/openttd-mcp-stdio"
 
 ```mermaid
 flowchart LR
+  %% atlas: approval | From intent to evidence
   client["MCP client<br/>(Claude Code, any agent)"] -- stdio --> stdio["openttd-mcp-stdio"]
-  stdio -- HTTP --> panel["panel<br/>(holds the token)"]
+  stdio -- "HTTP, loopback" --> panel["panel<br/>(holds the token)"]
   panel --> mcp["MCP server<br/>in the game"]
   mcp -. "read: openttd://map, towns,<br/>stations, vehicles, companies …" .-> client
-  mcp -- "act: openttd.cmd.&lt;Command&gt;" --> pending["pending approval"]
-  pending -- "operator approves" --> post["Command&lt;&gt;::Post<br/>(the game's own command system)"]
+  mcp -- "act: openttd.cmd.&lt;Command&gt;" --> pending["status pending_approval<br/>bound to the exact arguments"]
+  pending == "operator approves" ==> post["Command&lt;&gt;::Post<br/>(the game's own command system)"]
+  post -. "observed afterwards" .-> verdict["verdict<br/>VERIFIED_SUCCESS · VERIFIED_FAILURE<br/>· EXECUTED_UNVERIFIED"]
+  verdict -. "read back" .-> client
+
+  click client "research/mcp-api.md" "any MCP client, tool names with underscores"
+  click stdio "tools/research/mcp-auto/openttd-mcp-stdio" "the stdio proxy; it never sees the token"
+  click panel "research/mechanisms/control-panel.md" "the panel holds the bearer token in memory"
+  click mcp "research/mechanisms/mcp-server-in-the-engine.md" "compile-gated, loopback only"
+  click pending "research/mechanisms/approval-gate.md" "proposing is not doing: a mutation waits for the owner"
+  click post "src/command_func.h" "the command system every client runs in lockstep"
+  click verdict "src/prismatic_mcp/prismatic_mcp_server.cpp" "the verdict the server records once the command has run"
 ```
 
 The proxy never sees the bearer token: the panel holds it and the proxy only forwards JSON-RPC
@@ -210,7 +346,7 @@ generated from the recorded runs in [`research/results/`](research/results/) by
 
 > **Best run: 6,026,776 vs 4,971,339** company value, planned bot vs the same bot unplanned, one game, one map (seed 4242, 120 months) — [evidence](research/results/duel-20261119T124719-seed4242.md). The planned bot won **68 of 80** recorded duels.
 >
-> That tally counts separate experiments, not one: the records run 6 to 120 months, 31 of them from a held start, with bot revisions and settings that changed between runs (each row's label names its change). In 69 of 80 the rival ran no train. Which rival each record ran against, and what company value counts and leaves out, is in the [duel evidence audit](research/duel-evidence-audit.md).
+> That tally counts separate experiments, not one: the records run 6 to 120 months, 31 of them from a held start, with bot revisions and settings that changed between runs (each row's label names its change). In 68 of the 79 that record the rival's fleet, the rival ran no train. Which rival each record ran against, and what company value counts and leaves out, is in the [duel evidence audit](research/duel-evidence-audit.md).
 
 ```mermaid
 ---
@@ -648,23 +784,22 @@ from the code. The right-hand column says what was counted.
 |---|---|---|
 | **146** | [game commands, each an MCP tool an agent can call (`openttd.cmd.*`)](research/mcp-api.md) | `DEF_CMD_TRAIT\(Commands::` in `src/*_cmd.h` |
 | **22** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
-| **30** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
+| **34** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **46** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **48** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **12** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
-| **17** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
+| **18** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **37** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
-| **105** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
+| **205** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **98** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
-| **885** | published documents on the site and the wiki | published documents under `/` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 46
+    "research tools and checks (tools/research/, shell and Python)" : 48
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 12
-    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 17
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 18
 ```
 <!-- surfaces:end facts -->
 
@@ -828,66 +963,6 @@ same way, run under [Majordomus](https://majordomus.dev) task lifecycle and peer
 </td>
 </tr>
 </table>
-
-### How it fits together
-
-One loopback machine runs the game and the agents; every arrow below is a governed, derived
-channel, and nothing an agent does bypasses the game's own command system.
-
-```mermaid
-flowchart LR
-    owner([Owner]):::owner
-    llm(["LLM / MCP client"]):::owner
-
-    subgraph game["OpenTTD (deterministic lockstep)"]
-        gui["GUI client<br/>~ console + toolbar menu"]
-        srv["Dedicated server<br/>command system"]
-    end
-
-    subgraph mcp["Embedded MCP server (loopback, compile-gated, default OFF)"]
-        tools["Tools &amp; resources<br/>read state · gated mutations"]
-    end
-
-    subgraph surfaces["One catalogue, derived surfaces"]
-        console["~ console: mcp &lt;tool&gt;"]
-        swagger["Swagger / OpenAPI"]
-        rhai["Rhai: every tool,<br/>command and route a function"]
-    end
-
-    subgraph brain["Plan, then play"]
-        planner["AlgoGlyph planner<br/>DAG · live prices · bridges &amp; tunnels"]
-        bot["PrismaticAI / mcp-human<br/>plays through the UI"]
-    end
-
-    hub["Control panel &amp; hub<br/>WebSocket · every instance"]
-    bus[("ZeroMQ bus +<br/>DuckDB store")]
-    steward["Rhai steward &amp; monitor<br/>line targets · lost trains"]
-    board["Majordomus board"]
-
-    owner -->|watches, approves,<br/>auto-answers| gui
-    llm -->|stdio proxy| hub
-    gui <--> srv
-    gui --- mcp
-    srv --- mcp
-    mcp --> tools
-    tools --> console & swagger & rhai
-    console --- gui
-    rhai --> hub
-    planner --> bot
-    bot -->|commands| srv
-    tools --> hub
-    hub --> planner
-    hub --> bus
-    bus -->|history, calibration,<br/>duel records| planner
-    rhai --> steward
-    steward -->|line targets| bot
-    steward --> board
-    bus -->|monthly digest| board
-
-    classDef owner fill:#d11f1a,stroke:#0b0b0b,color:#ece4d6;
-    classDef core fill:#0b0b0b,stroke:#d11f1a,color:#ece4d6;
-    class gui,srv,tools core;
-```
 
 ### The fork in action
 
@@ -1552,6 +1627,19 @@ Milestones of the plan with the issues done and still open, derived from the iss
 | M8 | [Planning decisions read recorded history from the store and publish what they chose as data](.ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml) | 7/7 | — |
 | M9 | [Rhai is a live IDE: edited, run, debugged and inspected in the panel, and it reaches Prismatic's models and blackboard](.ai/repo/project/milestones/rhai-is-a-live-ide.yaml) | 6/6 | — |
 | M10 | [Every status surface and record says what the code does today, and a capability matrix proves it](.ai/repo/project/milestones/records-and-status-tell-the-truth.yaml) | 0/7 | I0110, I0111, I0112, I0113, I0114, I0115, I0116 |
+| M11 | [The fork's own toolchain carries no open dependency vulnerability, and new alerts are seen and triaged](.ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml) | 1/1 | — |
+| M12 | [Every changed line is run by a test, and a coverage gate refuses a change whose new lines no test ran](.ai/repo/project/milestones/every-changed-line-is-tested.yaml) | 0/4 | I0180, I0181, I0189, I0190 |
+| M13 | [Every AI battle match records why each company won or lost, with the settings it actually ran under, and replays identically on another arena](.ai/repo/project/milestones/every-battle-match-explains-itself.yaml) | 0/7 | I0118, I0119, I0120, I0121, I0122, I0123, I0124 |
+| M14 | [PrismaticAI grows its fleet and survives its own failures](.ai/repo/project/milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml) | 0/13 | I0125, I0126, I0127, I0128, I0129, I0130, I0131, I0132, I0133, I0134, I0135, I0136, I0137 |
+| M15 | [The planner reads one coherent world and prices it from the game](.ai/repo/project/milestones/the-planner-reads-one-coherent-priced-world.yaml) | 0/12 | I0138, I0139, I0140, I0141, I0142, I0143, I0144, I0145, I0146, I0147, I0148, I0149 |
+| M16 | [Battlebrain owns the freight-line decision live, behind gates and a rollback switch](.ai/repo/project/milestones/battlebrain-decides-live-with-rollback.yaml) | 0/11 | I0150, I0151, I0152, I0153, I0154, I0155, I0156, I0157, I0158, I0159, I0160 |
+| M17 | [Evaluations are fair, pre-registered and paired: every claim about the bot, the planner, AlgoGlyph or Prismatic rests on a protocol fixed before its first run](.ai/repo/project/milestones/evaluations-are-fair-pre-registered-and-paired.yaml) | 0/7 | I0161, I0162, I0163, I0164, I0165, I0166, I0167 |
+| M18 | [Prismatic closes one real loop: retrieve, coordinate, decide, act, observe, in one recorded run against live services](.ai/repo/project/milestones/prismatic-closes-one-real-loop.yaml) | 0/12 | I0168, I0169, I0170, I0171, I0172, I0173, I0174, I0175, I0176, I0177, I0178, I0179 |
+| M19 | [Governed access is authenticated, and every capability is derived onto every surface and exercised live](.ai/repo/project/milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml) | 0/7 | I0182, I0183, I0184, I0185, I0186, I0187, I0188 |
+| M20 | [The live agent workbench: in-game commands, Rhai revisions with rollback, AlgoGlyph flows](.ai/repo/project/milestones/the-live-agent-workbench.yaml) | 0/10 | I0192, I0193, I0194, I0195, I0196, I0197, I0198, I0199, I0200, I0201 |
+| M21 | [The panel has integrity: every control works, every view is derived](.ai/repo/project/milestones/the-panel-has-integrity.yaml) | 0/8 | I0203, I0204, I0205, I0206, I0207, I0208, I0209, I0211 |
+| M22 | [AlgoGlyph is accountable: cost fixtures, plan receipts, predicted versus actual, fault injection](.ai/repo/project/milestones/algoglyph-is-accountable.yaml) | 0/6 | I0212, I0213, I0214, I0215, I0216, I0217 |
+| M23 | [A remote human plays the bot over the internet](.ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml) | 0/2 | I0218, I0219 |
 <!-- surfaces:end ai-plan -->
 
 <!-- surfaces:begin ai-plan as=bar -->
@@ -1567,12 +1655,12 @@ config:
 ---
 xychart-beta
     title "Issues done (bar) and planned (line) per milestone, in plan order"
-    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10"]
+    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21", "M22", "M23"]
     %% series: Issues done | Issues planned
-    %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml | .ai/repo/project/milestones/records-and-status-tell-the-truth.yaml
+    %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml | .ai/repo/project/milestones/records-and-status-tell-the-truth.yaml | .ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml | .ai/repo/project/milestones/every-changed-line-is-tested.yaml | .ai/repo/project/milestones/every-battle-match-explains-itself.yaml | .ai/repo/project/milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml | .ai/repo/project/milestones/the-planner-reads-one-coherent-priced-world.yaml | .ai/repo/project/milestones/battlebrain-decides-live-with-rollback.yaml | .ai/repo/project/milestones/evaluations-are-fair-pre-registered-and-paired.yaml | .ai/repo/project/milestones/prismatic-closes-one-real-loop.yaml | .ai/repo/project/milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml | .ai/repo/project/milestones/the-live-agent-workbench.yaml | .ai/repo/project/milestones/the-panel-has-integrity.yaml | .ai/repo/project/milestones/algoglyph-is-accountable.yaml | .ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml
     y-axis "Issues done" 0 --> 58.3
-    bar [2, 4, 8, 10, 53, 7, 1, 7, 6, 0]
-    line [2, 4, 8, 10, 53, 7, 1, 7, 6, 7]
+    bar [2, 4, 8, 10, 53, 7, 1, 7, 6, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    line [2, 4, 8, 10, 53, 7, 1, 7, 6, 7, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 6, 2]
 ```
 <!-- surfaces:end ai-plan -->
 

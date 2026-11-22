@@ -1,0 +1,23 @@
+id: evaluations-are-fair-pre-registered-and-paired
+title: "Evaluations are fair, pre-registered and paired: every claim about the bot, the planner, AlgoGlyph or Prismatic rests on a protocol fixed before its first run"
+slug: evaluations-are-fair-pre-registered-and-paired
+order: 150
+priority: p1
+problem: "The fork's comparative claims are measured, but not in a design that settles them. research/duel-evidence-audit.md:31 says the scoreboard's tally of wins counts separate experiments; the frozen planner set ran once per seed (:45-47), and its repeats against the autopilot and its 120-month runs were never run (:103), while earlier held repeats drifted by -7.6% to +11.4% (:92). A duel record's `final` holds money, loan, value, net and vehicle counts only (research/results/duel-20261120T062525-seed4242.json), so profit and cargo cannot be compared. No record separates AlgoGlyph from the planner around it: mcp-duel has no solver option, and some duels ran on the builtin fallback (research/results/duel-20261118T095556-seed31337.md:29). No experiment has a Prismatic arm. No comparison was declared before its run (`git grep -i preregist` finds only research/prismatic-mcp/02-threat-model.md:67), and rule project.a-tuning-claim-needs-held-start-pairs is 'Enforced by review, not by a tool' (its line 6). AAAHogEx won 41 of 41 scored matches (research/ai-battle/README.md:56), and no paired, uncertainty-bearing comparison against it exists. The determinism A/B ran one seed for 16 days with 0 command lines in either arm (research/prismatic-mcp/determinism-ab.md:3, :29-30)."
+outcome: "A protocol under research/experiments/ is committed before the first run of any comparison. It fixes the arms, the frozen revisions, the paired and held-out seeds, the horizon, the repeats, the metrics and the exclusion rule, and a checker refuses records and reports that depart from it. One paired report gives, for each metric (company value, money minus loan, operating profit, cargo delivered), the effect with an interval and the within-seed spread, and lists every failed or excluded run. Under that design the fork answers four questions: planner against autopilot with repeats and a 120-month horizon; AlgoGlyph on against off on the same candidates; unplanned against planned against planned plus Prismatic's live decision; and PrismaticAI against AAAHogEx with the start slots swapped. One gap-report change is measured against AAAHogEx. The determinism A/B covers three seeds, a real command stream and panel and browser load."
+acceptance_criteria:
+- "tools/research/preregistration check passes on research/experiments/, and its tests refuse a protocol committed after its first record, a record whose frozen inputs differ from its protocol, and a report that leaves out a run"
+- "The planner-against-autopilot protocol has three held-start runs per seed on 4242, 31337 and 20208 plus a held-out seed at 36 months and one run per paired seed at 120 months, with its paired report committed"
+- "An AlgoGlyph-on against AlgoGlyph-off protocol ran on identical candidate sets, its report excludes and lists every run that fell back, and research/mechanisms/planner-and-algoglyph.md states the measured contribution or 'inconclusive'"
+- "A three-arm protocol (unplanned, planned, planned plus a live Prismatic decision) ran, and every arm-3 run that did not reach a live prismatic_api is labelled SIMULATED and excluded"
+- "A PrismaticAI-against-AAAHogEx protocol ran every seed in both start-slot orders, and its record gives the value ratio's geometric mean with a bootstrap interval"
+- "A change from the AAAHogEx gap report was measured on that design, and the README states the ratio before and after it"
+- "tools/research/determinism-ab passed on three seeds over a game year with two AIs issuing commands and a stressed arm that adds the panel's page polls and its WebSocket feed, with the control arm identical"
+validation:
+- "tools/research/preregistration check research/experiments"
+- "python3 -m unittest tools/research/test_preregistration.py tools/research/test_mcp_duel.py tools/research/test_ai_battle.py"
+- "SEEDS='53744 4242 31337' DAYS=365 tools/research/determinism-ab"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
