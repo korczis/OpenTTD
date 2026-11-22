@@ -1,0 +1,35 @@
+id: I0162
+milestone: evaluations-are-fair-pre-registered-and-paired
+title: "The frozen planner A/B against the autopilot is repeated under one protocol: three held-start runs per seed on 4242, 31337, 20208 and a held-out seed, plus 120-month runs"
+slug: frozen-planner-ab-repeats
+priority: p1
+profile: deep-work
+parallel_safe: false
+objective: "Register one protocol (I0161) for one question: does the bot given the planner's portfolio end ahead of the same bot on autopilot? The game binary, the bot tree, the panel and the planner checkout are frozen for every run. Both companies run PrismaticAI and differ only in the portfolio. Every run starts held. The protocol fixes three runs per seed at 36 months on 4242, 31337, 20208 and on one held-out seed it names before the first run, plus one 120-month run per paired seed. Run it, keep every record under research/results/, write the paired report, and replace the audit's 'Not run' line with the result."
+why: "External review 2026-11-22 (digest C-15, A-14). research/duel-evidence-audit.md:45-47: the frozen set ran once per seed, and its printed rival spread is invalid. :103: 'Not run: repeats per seed of this set and 120-month runs.' :92: earlier held repeats drifted by -7.6% to +11.4% over 120 months, the same order as some claimed gains. The only repeated set (two runs per seed, :107-136) ran against the former bus-only rival, whose company value sat at the floor of 1 on seed 20208, so it measures nothing on that seed."
+scope:
+  - "research/results/**"
+  - "research/experiments/**"
+  - "research/duel-evidence-audit.md"
+  - ".ai/repo/knowledge/curated/**"
+non_scope:
+  - "Changing a bot or planner default; rule project.a-tuning-claim-needs-held-start-pairs governs that as a separate change"
+  - "Running more than two duels at a time, or while the owner's live game needs the machine"
+depends_on:
+  - I0161
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#evaluations-are-pre-registered-and-paired"
+acceptance_criteria:
+  - "The protocol's commit precedes its first record (preregistration check passes)"
+  - "12 records at 36 months (4 seeds, 3 runs each) and 3 at 120 months are under research/results/, and the report lists any that failed"
+  - "The paired report gives the effect per metric with an interval and the within-seed spread; the held-out seed is reported on its own, and no generalisation is claimed unless it agrees"
+  - "research/duel-evidence-audit.md and a curated knowledge record state the result, whichever way it falls"
+validation:
+  - "tools/research/preregistration check research/experiments"
+  - "PRISMATIC_START_PAUSED=2 tools/research/mcp-duel --protocol research/experiments/<id>.yaml --months 36 --seed 4242"
+  - "tools/research/paired-report research/experiments/<id>.yaml"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

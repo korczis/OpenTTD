@@ -1,0 +1,31 @@
+id: I0200
+milestone: the-live-agent-workbench
+title: "The bot page changes a running company AI's settings under one approval through openttd.ai.set_settings, and a browser journey rereads the same company's values"
+slug: bot-settings-one-approval-journey
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Switch the bot page's Apply from one openttd.ai.set_setting approval per differing key to one openttd.ai.set_settings plan for all of them (all or nothing, with an expiry), keep the page telling a company AI (Squirrel) from the Rust GUI player, and add a journey to mcp-journey-check: change one supported setting of a running AI, approve the one plan, and reread the same company's value from openttd://ai."
+why: "External review 2026-11-22 (digest A-26). PR #57 (a4043ef2fb, cd63f1ca1d) added openttd.ai.set_settings (src/prismatic_mcp/prismatic_mcp_ai.cpp:207), but the page still asks one approval per key (tools/research/mcp-panel/static/bots.js:9-10), which ADR 0038 rejects ('Approve per setting. Partial approval mixes plans'). The verdict is read back with AIConfig::GetSetting (research/agent-loop.md, Verify row), yet no browser check drives Apply."
+scope:
+  - "tools/research/mcp-panel/static/bots.js"
+  - "tools/research/mcp-panel/test/bots-page.test.mjs"
+  - "tools/research/mcp-rhai/src/panel_bot.rs"
+  - "tools/research/mcp-journey-check"
+non_scope:
+  - "The server-side tool, which is on master"
+  - "Settings without the in_game flag; the page shows them disabled while the AI runs"
+depends_on:
+  - I0199
+serves:
+  - "openttd-validates-agent-driven-engineering#the-workbench-drives-the-game-end-to-end"
+acceptance_criteria:
+  - "Apply submits one openttd.ai.set_settings with every differing key and says it asks one approval; bots-page.test.mjs covers it"
+  - "The journey changes one setting, approves, and the reread of the same company equals the new value; a value out of range is refused with nothing applied"
+validation:
+  - "node --test tools/research/mcp-panel/test/"
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
