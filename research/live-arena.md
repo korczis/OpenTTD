@@ -34,7 +34,7 @@ curl -s -X POST 127.0.0.1:8800/api/services/start -H 'content-type: application/
   -d '{"name":"arena"}'                    # or Start on http://127.0.0.1:8800/scripts/arena
 ```
 
-To play in the arena yourself, together with PrismaticAI in its own company, add `--arm-input --coplay` to
+To play in the arena yourself, together with PrismaticAI in its own company, add `--coplay` to
 `mcp-e2e` ([coplay.md](coplay.md)). The lineup then fills eight companies, and you are in the first one.
 Without the battle's `fetch` cache, the panel's `POST /api/content/download {ids}` fetches the four
 BaNaNaS AIs and their libraries (ids from `GET /api/content?q=<name>`). The console's `rescan_ai` makes
