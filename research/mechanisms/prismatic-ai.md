@@ -2,7 +2,7 @@
 
 **RESEARCH-ONLY.** PrismaticAI is the owner's company AI: a Squirrel script that OpenTTD loads like
 any AI from BaNaNaS and that plays one company. It builds bus routes, intercity roads, airports,
-freight rail and passenger rail. What it builds first comes from its settings, which the control
+freight rail and passenger rail, and, behind the setting `ships_max` (off by default), ship routes. What it builds first comes from its settings, which the control
 panel fills from the planner's portfolio. Its rail lines are kept as desired state that an outside
 steward sets and the bot reconciles. It is content, not engine code: no CMake option builds or
 ships it, and it stays out of the `bin/ai/` folder upstream ships.
@@ -25,6 +25,7 @@ flowchart TB
   HB --> AIR["Planner's air pair, air.nut"]
   HB --> FR["Planner's freight and passenger rail, rail.nut"]
   HB --> OWN["Own lines and buses<br/>roadstop.nut, intercity.nut"]
+  HB --> SHIP["Own ship routes, ships.nut<br/>off unless ships_max > 0"]
   HB --> FL["Fleet follows demand, fleet.nut"]
   HB --> REC["ReconcileLines, lines.nut"]
   HB --> LOAN["Repay surplus loan"]
@@ -49,6 +50,21 @@ flowchart TB
   closes a line to match, removing only what the line owns: its track (a level crossing keeps its
   road), its own platforms (`AIRail.RemoveRailStationTileRectangle`, never a whole joined station)
   and its throats and depot. The bot never decides there; it reconciles.
+- **Ships, off by default** (`ships.nut`, setting `ships_max`). The planner has no water mode, so
+  the bot plans its ship routes itself, the way it plans its own freight lines: oil rigs (which
+  hand their oil only to their own station and have no land for rail) and coastal producers to an
+  acceptor by the sea, and pairs of coastal towns, ranked by estimated yearly profit. The best few
+  are checked on the map before anything is built: a dock site at each end, tested with
+  `AITestMode`, and an A* over water (`AIMarine.AreWaterTilesConnected`) between the docks. Then
+  come the docks, a ship depot and the ships. From there `fleet.nut` runs them like road and air
+  routes (adds, sells, invests, finds their depot). A shore tile that is not yet the one inclined
+  slope a dock needs is levelled towards the water first (after AAAHogEx). Rivers are not used:
+  they are one tile wide, and AAAHogEx digs canals there. First headless runs (2026-11-22, 10
+  years, `battle.py ablate`, against AAAHogEx and AdmiralAI): on OpenTTD seed 930967890 the bot
+  built 3 ferry routes and ran 4 ships that earned 8,680 in 1968 and 5,576 in 1969 together, far
+  below its estimate. On seed 178496673, where AAAHogEx ran 18 ships, every candidate stood by a
+  river and none was built. The value difference between the two variants on the same seed
+  (+38%) came from different timing of everything else, not from the ships.
 - **Events are read, and vehicles that cannot earn are dealt with** (`events.nut`). Each heartbeat
   drains the game's events. A lost vehicle's line is checked with the builders' own checks
   (`VerifyRailLine` lays a missing piece again, `RailWalk` follows the track from one station to
@@ -73,7 +89,8 @@ reasoning is in [`../rail-steward.md`](../rail-steward.md).
 | [`PrismaticAI/rail.nut`](../../tools/research/prismatic-ai/PrismaticAI/rail.nut) | termini, the A* line search, laying, the walk check, depots, trains |
 | [`PrismaticAI/lines.nut`](../../tools/research/prismatic-ai/PrismaticAI/lines.nut) | line slots, the record, `ReconcileLines` |
 | [`PrismaticAI/events.nut`](../../tools/research/prismatic-ai/PrismaticAI/events.nut) | the game's events: lost and unprofitable vehicles, line repair, vehicles with no orders |
-| [`PrismaticAI/fleet.nut`](../../tools/research/prismatic-ai/PrismaticAI/fleet.nut) | road and air capacity from waiting cargo and the link graph |
+| [`PrismaticAI/fleet.nut`](../../tools/research/prismatic-ai/PrismaticAI/fleet.nut) | road, air and ship capacity from waiting cargo and the link graph |
+| [`PrismaticAI/ships.nut`](../../tools/research/prismatic-ai/PrismaticAI/ships.nut) | ship routes behind `ships_max`: candidates, dock sites, the water path check, docks, depot, ships |
 | [`PrismaticAI/roadstop.nut`](../../tools/research/prismatic-ai/PrismaticAI/roadstop.nut), [`intercity.nut`](../../tools/research/prismatic-ai/PrismaticAI/intercity.nut), [`air.nut`](../../tools/research/prismatic-ai/PrismaticAI/air.nut) | bus stops and depots, intercity roads, airports |
 | [`install`](../../tools/research/prismatic-ai/install) | links the bot into the personal `ai/` folder; `--check` verifies it |
 | [`tools/research/mcp-rhai/src/panel_bot.rs`](../../tools/research/mcp-rhai/src/panel_bot.rs) | the panel side: planned start, settings, running bots |
