@@ -30,6 +30,7 @@
 
 #include "prismatic_mcp_panel.h"
 #include "prismatic_mcp.h"
+#include "prismatic_mcp_detail.h"
 #include "prismatic_mcp_menu.h"
 #include "prismatic_mcp_ui.h"
 
@@ -37,6 +38,8 @@
 #include "../console_gui.h"
 #include "../gfx_func.h"
 #include "../network/network.h"
+#include "../network/network_base.h"
+#include "../network/network_func.h"
 #include "../openttd.h"
 #include "../palette_func.h"
 #include "../strings_func.h"
@@ -50,6 +53,7 @@
 #include "../zoom_func.h"
 
 #include <algorithm>
+#include <chrono>
 #include <vector>
 
 #include "../safeguards.h"
@@ -61,11 +65,73 @@ namespace PrismaticMCP::Panel {
 /** How many of the latest decisions and requests the window lists. */
 static constexpr int RECENT = 8;
 
+/* ---- the server's queue on a network client (ADR 0038) ------------------------------------ *
+ * A network client's own MCP server holds none of the server's approvals, so on a client the window
+ * shows the server's queue as the server answers '!approvals' (detail::ServerApprovalsReader). The
+ * client asks quietly every ASK_EVERY while it is in a game, and the answers to its own asks are
+ * read, not printed in the chat. When an approval the client has not seen yet arrives, the window
+ * opens: a decision that waits is shown as a decision (Approve, Deny), not as news. Approve and Deny
+ * still run the console's command, which sends '!approve <id>' or '!deny <id>' to the server, where
+ * only a registered approver's key approves (prismatic_mcp approvers, research/coplay.md). */
+
+/** The server's queue as this client last heard it. */
+static detail::ServerApprovalsReader _server_queue;
+/** Replies to this client's own quiet asks still to arrive: those are read, not printed. */
+static uint64_t _quiet_asks = 0;
+/** The highest approval id seen in a reply: a higher one opens the window. */
+static uint64_t _highest_seen = 0;
+/** When '!approvals' was last sent, so that the server is asked at most every ASK_EVERY. */
+static std::chrono::steady_clock::time_point _last_ask{};
+static constexpr auto ASK_EVERY = std::chrono::seconds(5);
+
+/** A network client that has joined a game: the queue it can decide is the server's. */
+static bool OnJoinedNetworkClient()
+{
+	return _networking && !_network_server && NetworkClientInfo::GetByClientID(_network_own_client_id) != nullptr;
+}
+
+/** Ask the server for this company's queue, at most every ASK_EVERY; its reply is read quietly. */
+static void AskServerQuietly()
+{
+	if (!OnJoinedNetworkClient()) return;
+	auto now = std::chrono::steady_clock::now();
+	if (_last_ask != std::chrono::steady_clock::time_point{} && now - _last_ask < ASK_EVERY) return;
+	_last_ask = now;
+	_quiet_asks++;
+	NetworkClientSendChat(NetworkAction::ChatClient, NetworkChatDestinationType::Client, to_underlying(ClientID::Server), "!approvals");
+}
+
+bool OnServerChat(std::string_view msg)
+{
+	uint64_t replies = _server_queue.replies;
+	if (!_server_queue.Feed(msg)) return false;
+	const bool quiet = _quiet_asks > 0;
+	if (_server_queue.replies == replies) return quiet; // a row; the reply goes on
+	if (quiet) _quiet_asks--;
+	uint64_t highest = _highest_seen;
+	for (const json &r : _server_queue.rows) highest = std::max<uint64_t>(highest, r.value("id", uint64_t{0}));
+	if (highest > _highest_seen) {
+		_highest_seen = highest;
+		Show();
+	}
+	return quiet;
+}
+
+/** The quiet ask runs whether or not the window is open, so that a new decision opens it. */
+static const IntervalTimer<TimerWindow> _server_queue_poll(ASK_EVERY, [](auto) { AskServerQuietly(); });
+
 json Snapshot()
 {
 	json approvals = json::array();
-	for (const PendingApprovalInfo &a : PendingApprovals()) {
-		approvals.push_back({{"id", a.id}, {"tool", a.tool}, {"args", a.canonical_args}, {"expired", a.expired}});
+	if (OnJoinedNetworkClient()) {
+		for (const json &r : _server_queue.rows) {
+			approvals.push_back({{"id", r.value("id", uint64_t{0})}, {"tool", r.value("tool", "")}, {"args", r.value("args", "")},
+				{"expired", false}, {"on_server", true}, {"chat_decidable", r.value("chat_decidable", false)}});
+		}
+	} else {
+		for (const PendingApprovalInfo &a : PendingApprovals()) {
+			approvals.push_back({{"id", a.id}, {"tool", a.tool}, {"args", a.canonical_args}, {"expired", a.expired}});
+		}
 	}
 	json decisions = json::array();
 	const std::string trace = DecisionTrace(RECENT);
@@ -151,8 +217,10 @@ std::vector<Row> Rows(const json &s)
 	heading(fmt::format("Waiting for your approval ({})", approvals.size()));
 	if (approvals.empty()) text("nothing waits: a change an agent asks for appears here");
 	for (const json &a : approvals) {
-		rows.push_back({Row::Kind::Approval, fmt::format("#{}  {}  {}", IdAt(a, "id"), StringAt(a, "tool"), StringAt(a, "args")),
-			IdAt(a, "id"), FlagAt(a, "expired")});
+		/* A server's approval that a chat approver may not decide stays with the server's operator. */
+		const bool operators = FlagAt(a, "on_server") && !FlagAt(a, "chat_decidable");
+		rows.push_back({Row::Kind::Approval, fmt::format("#{}  {}  {}{}", IdAt(a, "id"), StringAt(a, "tool"), StringAt(a, "args"),
+			operators ? "  (the server's operator decides)" : ""), IdAt(a, "id"), FlagAt(a, "expired")});
 	}
 	heading("Latest decisions: what ran, and what the game showed afterwards");
 	if (decisions.empty()) text("no decision has run yet");
