@@ -333,8 +333,20 @@ Running it found two defects, both fixed:
   reported a present OpenGFX tar as missing, so the regression cases were skipped. It was fixed in
   a2721e5f9c.
 - `load-check` put the GameScript and base set only where macOS looks. With `-c` the config file's
-  directory is the personal directory on every platform, so both now go there as well. That fix was
-  not re-run on macOS.
+  directory is the personal directory on every platform, so both now go there as well.
+
+**Re-run on macOS (2026-11-22) once the disk allowed.** It ran on master 3b0c7d192a, which holds
+both fixes, in build slot 1 with 76 GiB free. The build was a research build
+(RelWithDebInfo, `OPTION_RESEARCH_INSTRUMENTATION=ON`, `OPTION_PRISMATIC_MCP_SERVER=ON`) and
+nothing was skipped:
+
+- ctest passed 128/128, including "PrismaticMCP: game text reaches MCP clients as plain text".
+- `openttd_test '[prismatic_mcp]'` passed 796 assertions in 27 test cases.
+- The Brno `compile` and `replay` both exited 0.
+- `load-check --seed 31337 --baseset ~/Documents/OpenTTD/baseset` exited 0:
+  - towns 14/14, industries 17/17 and signs 24/24 were placed, and 31/31 carry their note;
+  - the reload was unchanged and the GameScript resumed;
+  - the base set was linked through the fixed path, so the fix holds on macOS as well as Linux.
 
 **External schema validation: PASS (2026-11-22).** Ajv 8.20.0 checked the files against
 `tools/research/schema/real-world-scenario.v1.schema.json` (draft 2020-12, `strict: false`, all
