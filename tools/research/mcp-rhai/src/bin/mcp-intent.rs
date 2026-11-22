@@ -9,6 +9,7 @@ mod graph;
 #[path = "../plan.rs"]
 mod plan;
 #[path = "../cargo.rs"]
+#[allow(dead_code)] // the planner's line pricing and investment parts of it are not called here
 mod cargo;
 #[allow(dead_code)]
 #[path = "../battlebrain_contract.rs"]
@@ -107,7 +108,9 @@ fn main() {
         let mut candidates: Vec<serde_json::Value> = freight.clone();
         for (_, ps) in p["by_mode"].as_object().cloned().unwrap_or_default() { candidates.extend(ps.as_array().cloned().unwrap_or_default()); }
         candidates.sort_by(|a, b| b["score"].as_f64().unwrap_or(0.0).total_cmp(&a["score"].as_f64().unwrap_or(0.0)));
-        p["portfolio"] = cargo::portfolio(&candidates, p["params"]["budget"].as_f64());
+        let kernels = cargo::Kernels::runner();
+        p["portfolio"] = cargo::portfolio(&candidates, p["params"]["budget"].as_f64(), &kernels);
+        p["kernels"] = kernels.record();
         p["freight"] = serde_json::Value::Array(freight);
         // The bot's declared settings with their live values: which route slots exist, which are
         // free, and which modes it has. Without it the answer falls back to slot 1 and says so.
