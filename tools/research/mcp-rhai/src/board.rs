@@ -11,8 +11,21 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+#[path = "daemon.rs"]
+#[allow(dead_code)]
+pub mod daemon;
+use daemon::Backoff;
+
 /// How often a quiet session is pinged: the server forgets a session silent for 90 s.
 pub const PING: Duration = Duration::from_secs(30);
+/// The first wait after a server stopped answering, and the longest one.
+pub const RETRY_BASE: Duration = Duration::from_secs(1);
+pub const RETRY_CAP: Duration = Duration::from_secs(60);
+
+/// The ping interval: PING, or `$MCP_BOARD_PING_MS` (tests shorten it).
+fn ping_every() -> Duration {
+    std::env::var("MCP_BOARD_PING_MS").ok().and_then(|v| v.parse().ok()).map_or(PING, Duration::from_millis)
+}
 
 /// Cut a line to `max` characters, marking the cut.
 pub fn clip(s: &str, max: usize) -> String {
@@ -46,9 +59,15 @@ pub fn majordomus_url(explicit: Option<&str>, repo: Option<&str>) -> Result<Stri
     v["url"].as_str().map(str::to_string).ok_or(format!("majordomus serve ensure ({repo}): no url ({})", v["standing"]))
 }
 
-/// An MCP session on a Majordomus server's board.
+/// An MCP session on a Majordomus server's board. One HTTP agent for the life of the session (its
+/// connections are reused, never one client per call), and a server that stops answering is tried
+/// again with a growing wait, never in a tight loop: `down_for` says how long, so the caller can
+/// look for the server elsewhere (`retarget`) or give up.
 pub struct Board {
     url: String,
+    agent: ureq::Agent,
+    backoff: Backoff,
+    ping: Duration,
     session: Option<String>,
     dry: bool,
     /// The MCP clientInfo this session names itself with: (name, title).
@@ -62,15 +81,47 @@ pub struct Board {
 impl Board {
     /// A session to the board at `url`, opened on the first announcement. `dry` prints instead.
     pub fn new(url: &str, dry: bool, name: &str, title: &str) -> Self {
-        Board { url: url.trim_end_matches('/').to_string(), session: None, dry, client: (name.to_string(), title.to_string()),
-                claims: BTreeMap::new(), next_id: 1, last_rpc: Instant::now() }
+        Board { url: url.trim_end_matches('/').to_string(), agent: ureq::AgentBuilder::new().timeout(Duration::from_secs(10)).build(),
+                backoff: Backoff::new(RETRY_BASE, RETRY_CAP), ping: ping_every(), session: None, dry,
+                client: (name.to_string(), title.to_string()), claims: BTreeMap::new(), next_id: 1, last_rpc: Instant::now() }
+    }
+
+    /// The server this session talks to.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// Talk to another server from now on (the old one exited and `majordomus serve ensure` named a
+    /// new one): the session is opened there on the next call and every claim said again.
+    pub fn retarget(&mut self, url: &str) {
+        self.url = url.trim_end_matches('/').to_string();
+        self.session = None;
+        self.backoff.succeeded();
+    }
+
+    /// How long the server has not answered (None: it answered last time).
+    pub fn down_for(&self) -> Option<Duration> {
+        self.backoff.down_for(Instant::now())
     }
 
     fn post(&mut self, body: &Value) -> Result<Option<Value>, ureq::Error> {
-        let mut req = ureq::post(&format!("{}/mcp", self.url)).timeout(Duration::from_secs(10))
+        let mut req = self.agent.post(&format!("{}/mcp", self.url))
             .set("Content-Type", "application/json").set("Accept", "application/json, text/event-stream");
         if let Some(s) = &self.session { req = req.set("Mcp-Session-Id", s); }
-        let resp = req.send_json(body.clone())?;
+        let resp = match req.send_json(body.clone()) {
+            Ok(r) => r,
+            Err(e) => {
+                // a server that does not answer at all takes the session with it; one that refuses
+                // (409, 5xx; not a forgotten session's 404) keeps it. Either way the waits grow.
+                match &e {
+                    ureq::Error::Transport(_) => { self.session = None; self.backoff.failed(Instant::now()); }
+                    ureq::Error::Status(code, _) if *code != 404 => self.backoff.failed(Instant::now()),
+                    ureq::Error::Status(..) => {}
+                }
+                return Err(e);
+            }
+        };
+        self.backoff.succeeded();
         self.last_rpc = Instant::now();
         if let Some(s) = resp.header("Mcp-Session-Id") { self.session = Some(s.to_string()); }
         if resp.status() == 202 || resp.status() == 204 { return Ok(None); }
@@ -89,8 +140,12 @@ impl Board {
     }
 
     /// One JSON-RPC call; a forgotten session (404) is opened again, its claims said again, and the
-    /// call retried once.
+    /// call retried once. While the server is backing off, nothing is sent.
     fn rpc(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        if !self.backoff.ready(Instant::now()) {
+            return Err(format!("{}/mcp {method}: not answering for {} s ({} attempts), next try later", self.url,
+                               self.down_for().unwrap_or_default().as_secs(), self.backoff.failures()));
+        }
         for attempt in 0..2 {
             if self.session.is_none() {
                 self.initialize()?;
@@ -140,9 +195,13 @@ impl Board {
         }
     }
 
-    /// Ping a session quiet for PING, so the server does not forget it between posts.
+    /// Ping a session quiet for PING, so the server does not forget it between posts; a session
+    /// that was lost (its server stopped answering) is opened again once the backoff lets it, so a
+    /// server that comes back gets the claims again without waiting for the next post.
     pub fn keep_alive(&mut self) {
-        if !self.dry && self.session.is_some() && self.last_rpc.elapsed() >= PING {
+        if self.dry || self.claims.is_empty() { return; }
+        let lost = self.session.is_none() && self.backoff.ready(Instant::now());
+        if lost || (self.session.is_some() && self.last_rpc.elapsed() >= self.ping) {
             if let Err(e) = self.rpc("ping", json!({})) { eprintln!("{}: {e}", self.client.0); }
         }
     }
@@ -150,10 +209,14 @@ impl Board {
     /// End the session (the board keeps its named claims).
     pub fn close(&mut self) {
         if let (false, Some(s)) = (self.dry, self.session.take()) {
-            let _ = ureq::delete(&format!("{}/mcp", self.url)).timeout(Duration::from_secs(5)).set("Mcp-Session-Id", &s).call();
+            let _ = self.agent.delete(&format!("{}/mcp", self.url)).timeout(Duration::from_secs(5)).set("Mcp-Session-Id", &s).call();
         }
     }
 }
+
+#[cfg(test)]
+#[path = "fake_mcp.rs"]
+mod fake_mcp;
 
 #[cfg(test)]
 mod tests {
@@ -168,6 +231,56 @@ mod tests {
     #[test]
     fn an_explicit_url_wins() {
         assert_eq!(majordomus_url(Some("http://127.0.0.1:1"), None).unwrap(), "http://127.0.0.1:1");
+    }
+
+    #[test]
+    fn a_dead_server_is_backed_off_and_a_new_one_gets_every_claim() {
+        assert_eq!(ping_every(), PING);
+        let dead = { let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); format!("http://{}", l.local_addr().unwrap()) };
+        let mut b = Board::new(&dead, false, "test", "Test");
+        let e = b.announce("openttd:x:month", "m1").unwrap_err();
+        assert!(e.contains("initialize"), "{e}");
+        assert!(b.down_for().is_some());
+        let e = b.announce("openttd:x:events", "e1").unwrap_err();
+        assert!(e.contains("next try later"), "while backing off nothing is sent: {e}");
+        b.keep_alive();
+        assert_eq!(b.backoff.failures(), 1, "keep_alive waits out the backoff too");
+
+        let fake = fake_mcp::FakeMcp::start();
+        b.retarget(&format!("{}/", fake.url));
+        assert_eq!(b.url(), fake.url);
+        assert!(b.down_for().is_none());
+        b.announce("", "self").unwrap();
+        let bodies = fake.bodies();
+        assert!(bodies[0].contains("\"initialize\""), "{bodies:?}");
+        for said in ["\"m1\"", "\"e1\"", "\"self\""] {
+            assert!(bodies.iter().any(|x| x.contains(said)), "every claim is said again on the new server: {said} in {bodies:?}");
+        }
+        b.announce("openttd:x:month", "m2").unwrap();
+        assert!(fake.bodies().last().unwrap().contains("\"m2\""));
+
+        b.ping = Duration::ZERO;
+        b.keep_alive();
+        assert!(fake.bodies().last().unwrap().contains("\"ping\""), "a quiet session is pinged");
+
+        fake.set_status(404);
+        assert!(b.announce("openttd:x:month", "m3").is_err(), "a session forgotten on a server that forgets every one");
+        assert!(b.session.is_none() || b.down_for().is_none(), "a forgotten session is no failure of the server");
+        fake.set_status(200);
+        b.announce("openttd:x:month", "m3").unwrap();
+        fake.set_status(409);
+        assert!(b.announce("openttd:x:month", "m3").is_err());
+        assert!(b.session.is_some() && b.down_for().is_some(), "a refusal keeps the session and backs off");
+
+        fake.set_status(200);
+        b.backoff.succeeded();
+        fake.stop();
+        assert!(b.announce("openttd:x:month", "m4").is_err());
+        assert!(b.session.is_none(), "a server that does not answer takes the session with it");
+        b.backoff = Backoff::new(Duration::ZERO, Duration::ZERO);
+        b.keep_alive();
+        assert!(b.backoff.failures() >= 1, "a lost session is opened again once the wait is over");
+        b.close();
     }
 
     #[test]
