@@ -7,10 +7,10 @@ Run: python3 -B tools/research/test_mcp_duel.py
 
 The duel's Python is loaded from the heredoc of tools/research/mcp-duel, so what is tested is what
 runs. A fake panel on 127.0.0.1 answers the routes the duel calls. Its /api/db/query runs each
-statement with the DuckDB CLI on a file made from the store's own schema (`TABLES` read from
-tools/research/mcp-rhai/src/bus_sinks.rs, the sinks the panel's tap and the hub share since I0084)
-and answers it as bus_sinks.rs does: {columns, rows, count, capped}, at most QUERY_CAP rows (read
-from the same source) and `capped` beyond. Its
+statement with the DuckDB CLI on a file made from the store's own schema (`TABLES`, read from
+tools/research/mcp-rhai/sql/tables/*.sql: the sinks the panel's tap and the hub share since I0084)
+and answers it as tools/research/mcp-rhai/src/bus_sinks.rs does: {columns, rows, count, capped}, at
+most QUERY_CAP rows (read from bus_sinks.rs) and `capped` beyond. Its
 POST /api/bus/publish accepts only the kinds panel_events.rs declares external, with the four fields
 refuse_external asks for. The store tests are skipped without a `duckdb` on PATH; the fallback and
 the verdict's pure parts run without it.
@@ -53,7 +53,9 @@ def load_duel():
 
 duel = load_duel()
 QUERY_CAP = int(re.search(r"pub const QUERY_CAP: usize = (\d+);", STORE_RS.read_text())[1])
-TABLES = re.search(r'pub const TABLES: &str = "(.*?)";', STORE_RS.read_text(), re.S)[1]
+# The store's tables, one file each since 6ec3577d7b (build.rs embeds sql/tables/*.sql and the
+# store runs them in name order at every open; bus_sinks.rs holds no TABLES string any more).
+TABLES = "\n".join(p.read_text() for p in sorted((HERE / "mcp-rhai" / "sql" / "tables").glob("*.sql")))
 EXTERNAL = set(re.findall(r'k\("([a-z._]+)", By::External', EVENTS_RS.read_text()))
 READ_ONLY = ("SELECT", "WITH", "DESCRIBE", "SUMMARIZE", "SHOW")
 

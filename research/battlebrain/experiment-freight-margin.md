@@ -15,7 +15,8 @@ here may be read as a result of a game.
   `tools/research/mcp-rhai/src/battlebrain_regression.rs` (included by one `#[cfg(test)]` line in
   `src/bin/battlebrain.rs`), the pair flags of `tools/research/mcp-duel` and their tests in
   `tools/research/test_mcp_duel.py`, and `battle.py power` with its tests in
-  `tools/research/test_ai_battle_power.py`.
+  `tools/research/test_ai_battle_power.py`. The re-recorded result
+  `research/results/battlebrain-shadow-20261122T084607Z-coplay-8800-freight-margin-2.{json,md}`.
 - **Build/debug configuration:** none of the game's. The checks that ran are offline: a
   `cargo test --release` of the `battlebrain` binary and the Python unit tests. No game was built
   or started.
@@ -262,7 +263,7 @@ Each check has its own pass/fail. One check never stands in for another.
 
 | Check | What it measures | Pass | Fail | Status |
 |---|---|---|---|---|
-| **C1 correctness, offline** | the recorded shadow results of freight-margin@2, reproduced by `battlebrain shadow` on their captures (comparison block equal), and H1 on them (`battlebrain_regression.rs`) | every current-policy result reproduces and its selected line is priced and affordable | any difference, or a priced/affordable violation | see [Validation performed](#validation-performed) |
+| **C1 correctness, offline** | the recorded shadow results of freight-margin@2, reproduced by `battlebrain shadow` on their captures (comparison block equal), and H1 on them (`battlebrain_regression.rs`) | every current-policy result reproduces and its selected line is priced and affordable | any difference, or a priced/affordable violation | **PASS**, 3 of 3 (after re-recording one; see [Result](#result)) |
 | **C2 correctness, per pair (H1)** | each BB arm's decision and the settings its bot started with | 0 violations over all pairs | ≥ 1 violation (and the experiment stops) | NOT RUN (owner's one-game order) |
 | **C3 performance** | `battlebrain live` wall time per decision; capture wall time and its tick window; track-planning answers other than `found`/`unreachable` (kernel errors, including the 120 s `KERNEL_TIMEOUT` of `hub_algoglyph.rs`) | every decision ≤ 10 s; every capture at one tick inside the 1800 s hold; ≤ 5% of priced candidates pooled end in a kernel error or timeout | otherwise | NOT RUN (owner's one-game order) |
 | **C4 strategy (H2)** | mean D over n = 93 valid pairs; last-place rate per arm | L > −δ (see the refutation rule) | U < 0 | NOT RUN (owner's one-game order) |
@@ -272,17 +273,27 @@ Each check has its own pass/fail. One check never stands in for another.
 
 | Command | Exit status | Notes |
 |---|---|---|
-| `cargo test --offline --release --bin battlebrain` (`tools/research/mcp-rhai`) | see C1 below | the regression gate C1 and the binary's own tests |
-| `python3 -B -m unittest tools/research/test_mcp_duel.py` | 0 | 36 tests, 1 skipped (DuckDB absent); 9 new pair tests, none starts a stack |
+| `cargo test --offline --release --bin battlebrain` (`tools/research/mcp-rhai`), after merging origin/master `194552a5fa` | 0 | 56 passed, including the three C1 tests of `battlebrain_regression.rs` and the authority boundaries of Phase 07. The first run, before the re-recording, failed C1 on the 1953-02-09 result (see C1 below) |
+| `python3 -B -m unittest tools/research/test_mcp_duel.py` | 0 | 36 tests, 1 skipped (DuckDB absent); 9 new pair tests, none starts a stack. On origin/master the file did not load: since `6ec3577d7b` `bus_sinks.rs` has no `TABLES` string. It now reads `sql/tables/*.sql` |
 | `python3 -B -m unittest tools/research/test_ai_battle.py tools/research/test_ai_battle_power.py` | 0 | 64 + 5 tests |
+| `tools/surfaces/surfaces sync` and `check` | 0 | 0 findings |
 | `python3 tools/research/ai-battle/battle.py power` | 0 | the numbers in [Sample size](#sample-size-derived-not-guessed) |
 | any duel, capture or `battlebrain live` on a game | NOT RUN | the owner's one-game order of 2026-11-22 |
 
 ## Result
 
-NOT RUN for every strategy, performance, per-pair correctness and safety check (C2 to C5). The
-owner ordered on 2026-11-22 that only one game runs, and that game belongs to another session.
-C1 is offline. It is reported in [`README.md`](README.md#phase-06-evidence-duels-and-regression-gates).
+**C1: PASS** (offline), after one finding. Its first run failed on
+`battlebrain-shadow-20261122T084607Z-coplay-8800-freight-margin-2`: the recorded `reason` named
+`freight-margin@1`, a label written before `fcac673236` made the reason name the running policy.
+The same shadow command on the same capture re-recorded the result. Its lines, budget, divergence
+and selection are unchanged; only the reason text and, through it, the decision record's id
+changed (`provenance.rerecorded` says so). After that, all three freight-margin@2 results
+reproduce, and each selected line is priced and affordable. The freight-margin@1 result is skipped
+by name, because this code cannot reproduce it.
+
+**C2 to C5: NOT RUN.** That covers every strategy, performance, per-pair correctness and safety
+check. The owner ordered on 2026-11-22 that only one game runs, and that game belongs to another
+session.
 
 ## Known limitations
 
@@ -293,5 +304,5 @@ C1 is offline. It is reported in [`README.md`](README.md#phase-06-evidence-duels
 
 ## Status
 
-`NOT RUN`, for the strategy comparison. The pre-registration and the harness are complete, and the
-offline regression gate is reported separately.
+`NOT RUN`, for the strategy comparison (C2 to C5). The pre-registration and the harness are
+complete. The offline regression gate C1 is `PASS`.
