@@ -307,6 +307,14 @@ The first editions showed two failures. The battle now catches both by itself.
   A new anomaly goes to the event log as an `ALERT` and onto the dashboard's alert panel. Records
   keep each standing's anomalies, and the leaderboard counts each contestant's anomalous matches.
   The same check flagged CivilAI crashing (thousands of Squirrel errors in one match).
+- **Two PrismaticAI companies on one map (2026-11-22).** The fitness check's fifth lineup plays
+  `PrismaticAI sibling A` and `PrismaticAI sibling B` against AAAHogEx and LuDiAI AfterFix. The
+  referee prints a `REF S date=<y>-<m> ind=<id> owners=<cid>,... name=<industry>` line for every
+  producer whose output rail stations of two or more companies pick up. `battle.py fitness` prints
+  each such producer and fails with `shared_producer:<industry> (industry <id>, from <quarter>):
+  <key> + <key>` when two of the owners are PrismaticAI. Four PrismaticAI companies of the owner's
+  live game had stalled on exactly this
+  ([incident 2026-11-22](../incident-2026-11-22-sibling-industries.md)).
 
 **A planned bot that hoards (2026-11-22).** In the owner's live co-play game, company 0 was a
 planned PrismaticAI (`b.planned` in `main.nut`: the panel had set its rail pair). It kept 35-37

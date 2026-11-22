@@ -20,6 +20,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -61,6 +62,80 @@ class ParseLog(unittest.TestCase):
         self.assertEqual(series[0][-1]["value"], 11)
         self.assertEqual(series[1][0]["name"], "Two Words Co")
         self.assertEqual(errors, {1: 1})
+
+
+def shared(y, mo, ind, owners, name="Coal Mine"):
+    return (f"[2026-11-22 20:00:00] dbg: [script:1] [18] [E] REF S date={y}-{mo} ind={ind} "
+            f"owners={owners} name={name}")
+
+
+class SharedProducers(unittest.TestCase):
+    """The referee's REF S lines and the fitness failure of two PrismaticAI companies at one
+    producer (research/incident-2026-11-22-sibling-industries.md)."""
+
+    def test_parse_unions_owners_and_keeps_the_first_quarter(self):
+        text = "\n".join([ref(1960, 4, 0, 1), shared(1960, 4, 7, "0,2", "Gundhead Coal Mine"),
+                          shared(1960, 7, 7, "0,1,2", "Gundhead Coal Mine"), shared(1961, 1, 9, "1,3"),
+                          "dbg: REF S date=1961-1 ind=x owners= name=broken"])
+        got = battle.parse_shared(text)
+        self.assertEqual(sorted(got), [7, 9])
+        self.assertEqual(got[7], {"name": "Gundhead Coal Mine", "owners": {0, 1, 2}, "first": "1960-04"})
+        self.assertEqual(got[9]["owners"], {1, 3})
+        self.assertEqual(battle.parse_shared("no referee here"), {})
+
+    def lineup(self):
+        return [{"ai": "PrismaticAI", "key": "P a"}, {"ai": "PrismaticAI", "key": "P b"},
+                {"ai": "AAAHogEx", "key": "AAAHogEx"}]
+
+    def test_two_prismatic_companies_at_one_producer_fail_a_rival_does_not(self):
+        m = {"lineup": self.lineup(), "shared": {7: {"name": "Coal Mine", "owners": {0, 1, 2}, "first": "1960-04"},
+                                                9: {"name": "Forest", "owners": {0, 2}, "first": "1961-01"}}}
+        self.assertEqual(battle.sibling_producers(m),
+                         ["shared_producer:Coal Mine (industry 7, from 1960-04): P a + P b"])
+        self.assertEqual(battle.sibling_producers({"lineup": self.lineup()}), [])
+        fit = {"rules": {}, "must_be_healthy": []}
+        m.update(status="done", errors={}, series={"P a": [], "P b": [], "AAAHogEx": []})
+        self.assertIn("shared_producer:Coal Mine (industry 7, from 1960-04): P a + P b",
+                      battle.fitness_verdict(m, fit))
+
+
+class FitnessRun(unittest.TestCase):
+    """cmd_fitness end to end against a fake game binary that prints referee lines: the shared
+    producer is printed and fails the check."""
+
+    def test_fake_match_with_two_prismatic_companies_on_one_mine_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            repo = tmp / "repo"
+            (repo / "build").mkdir(parents=True)
+            (repo / "ai" / "PrismaticAI").mkdir(parents=True)
+            (repo / "referee" / "BattleReferee").mkdir(parents=True)
+            lines = [ref(1960, 1, c, 10, veh=1) for c in range(3)] + \
+                    [ref(1961, 1, c, 20 + c, veh=2) for c in range(3)] + [shared(1960, 4, 7, "0,1")]
+            fake = repo / "build" / "openttd"
+            fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\n")
+            fake.chmod(0o755)
+            arena = tmp / "cache" / "arena"
+            (arena / "baseset").mkdir(parents=True)
+            (arena / "ai" / "library").mkdir(parents=True)
+            (arena / "ai" / "AAAHogEx.tar").write_bytes(b"")
+            cfg = {"cache": tmp / "cache", "prismatic": {"path": "ai/PrismaticAI"},
+                   "referee": {"path": "referee/BattleReferee"},
+                   "match": {"years": 1, "start_year": 1960, "landscape": "temperate", "map_x": 8, "map_y": 8},
+                   "fitness": {"years": 1, "seed": 1, "rules": {}, "must_be_healthy": [],
+                               "lineups": [[{"ai": "PrismaticAI", "label": "P a"},
+                                            {"ai": "PrismaticAI", "label": "P b"}, {"ai": "AAAHogEx"}]]}}
+            old = battle.REPO
+            battle.REPO = repo
+            out, err = io.StringIO(), io.StringIO()
+            try:
+                with redirect_stdout(out), redirect_stderr(err):
+                    code = battle.cmd_fitness(cfg)
+            finally:
+                battle.REPO = old
+        self.assertEqual(code, 10, out.getvalue() + err.getvalue())
+        self.assertIn("shared producer Coal Mine (industry 7) from 1960-04: P a, P b", out.getvalue())
+        self.assertIn("shared_producer:Coal Mine (industry 7, from 1960-04): P a + P b", err.getvalue())
 
 
 class MatchContract(unittest.TestCase):

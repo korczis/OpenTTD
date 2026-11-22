@@ -1203,4 +1203,32 @@ mod tests {
         assert_eq!(v, vec!["plant 9 tree tiles near the town", "serve or remove the idle stations",
                            "src/tree_cmd.cpp CmdPlantTree", "true", "true", "build freely"]);
     }
+
+    fn strategy(script: &str) -> Vec<String> {
+        let out: rhai::Array = lib_engine().eval(&format!("import \"strategy_lib\" as sl;\n{script}")).unwrap();
+        out.iter().map(|x| x.to_string()).collect()
+    }
+
+    /// strategy_lib's pure helpers over the board's values (src/panel_strategy.rs shapes them):
+    /// the chosen lines, the town warnings of one company or all, the headline, reserved keys.
+    #[test]
+    fn strategy_lib_reads_the_strategists_board_values() {
+        let v = strategy(r#"
+            let plan = #{ portfolio: #{ chosen: [
+                #{ cargo: "Coal", mode: "freight_rail", from: "Mine", to: "Plant", score: 4000 },
+                #{ cargo: (), mode: "bus", from: "Aville", to: "Btown", score: 900 } ] } };
+            let towns = #{ companies: [
+                #{ company: 0, warnings: [#{ town: "Aville", rating: -260, advice: [#{ what: "plant 9 tree tiles near the town" }] }] },
+                #{ company: 1, warnings: [#{ town: "Ctown", rating: (), advice: [] }] } ] };
+            let all = sl::warnings(towns, ());
+            let summary = #{ cycle: 3, game_date: "1951-02-01", lines: 2, total_score: 4900, solver: "builtin knapsack", town_warnings: 2 };
+            [sl::lines(plan)[0], sl::lines(plan)[1], sl::lines(#{ error: "x" }).len(), all.len(), sl::warnings(towns, 1)[0], all[0],
+             sl::headline(summary), sl::headline(()), sl::is_reserved("strategy.plan"), sl::is_reserved("mesh.peers"), sl::is_reserved("rail.hint")]
+        "#);
+        assert_eq!(v, vec!["Coal freight_rail Mine -> Plant score 4000", "bus Aville -> Btown score 900", "0", "2",
+                           "company 1: Ctown (rating unknown): no advice", "company 0: Aville (rating -260): plant 9 tree tiles near the town",
+                           "cycle 3 at 1951-02-01: 2 lines, score 4900, by builtin knapsack; 2 town warning(s)", "no strategy yet",
+                           "true", "true", "false"]);
+    }
+
 }
