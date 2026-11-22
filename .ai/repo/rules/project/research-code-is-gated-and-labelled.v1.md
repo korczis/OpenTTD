@@ -42,8 +42,9 @@ baseline-release binary), and a runtime flag cannot.
     which the step checks.
   - `default_build_free_of_research`: `strings` on the default binary it built finds no string
     naming `prismatic` or `research`, in any case: no symbol, debug-info name, script-API
-    constant, console command or label. Only the checkout and build paths and the version
-    string, which carry the branch name, are left out. NOT RUN, so PARTIAL, when `build/` is
+    constant, console command or label. Left out: the checkout and build paths and the version
+    string, which carry the branch name, and a string that is only a StringID's name
+    (`^STR_...$`; see below). NOT RUN, so PARTIAL, when `build/` is
     configured with a research option ON.
   - `cargo test --bin battlebrain` checks that both options default OFF in
     `cmake/Options.cmake` (rule `project.decision-authority-boundaries`, B8).
@@ -60,7 +61,10 @@ keeps it so.
   `src/settings_gui.cpp`). So
   the two strings are in the default build's `lang/english.lng` and its generated
   `table/strings.h`, appended last so no upstream StringID moves. Only guarded code names them,
-  so the binary references neither.
+  so the binary references neither. A RelWithDebInfo binary built by GCC still carries both
+  names, in debug info that names every constant of `table/strings.h` whether it is used or not
+  (4811 `STR_` names on lundra, 2026-11-22), so the strings step leaves out a string that is only
+  a StringID's name; the source step is what proves the two are never referenced.
 - `add_subdirectory(prismatic_mcp)` in `src/CMakeLists.txt` and `test_prismatic_mcp.cpp`,
   `test_network_research_compat.cpp` in `src/tests/CMakeLists.txt`. The first adds no file to a
   default build (`CONDITION OPTION_PRISMATIC_MCP_SERVER`); the tests compile to empty units,

@@ -392,9 +392,12 @@ research_code_is_guarded() {
 # B8 of that rule on the binary itself: a default build carries no research code. Checked on the
 # build this tier just made when its cache says both research options are OFF; otherwise NOT RUN,
 # so PARTIAL, never PASS. Every string of the binary naming research (RESEARCH_WORDS) fails it: a
-# symbol, a debug-info name, a script-API constant, a console command or a label. Only the paths of
-# this checkout and of the build directory and the version string, which carry the branch name,
-# are left out (a worktree or branch may be called research/...).
+# symbol, a debug-info name, a script-API constant, a console command or a label. Left out: the
+# paths of this checkout and of the build directory and the version string, which carry the branch
+# name (a worktree or branch may be called research/...), and a string that is only a StringID's
+# name (^STR_...$): GCC's debug info names every constant of the generated table/strings.h, used
+# or not (seen on lundra, 2026-11-22), and strgen cannot leave a string of english.txt out of a
+# build. That a STR_PRISMATIC_* is referenced only under a guard is research_code_is_guarded's job.
 default_build_free_of_research() {
   local dir="$1" bin="$1/openttd" cache="$1/CMakeCache.txt" hits rev
   local -a known
@@ -417,7 +420,8 @@ default_build_free_of_research() {
   [[ -z "$rev" ]] || known+=(-e "$rev")
   echo "==> strings $bin: a default build must carry no string naming research (rule project.decision-authority-boundaries, B8)"
   # Each grep reads all of its input: grep -q would stop early and strings would die of SIGPIPE.
-  hits="$(strings "$bin" | grep -iE "$RESEARCH_WORDS" | grep -vF "${known[@]}" | sort | uniq -c || true)"
+  hits="$(strings "$bin" | grep -iE "$RESEARCH_WORDS" | grep -vF "${known[@]}" \
+    | grep -vE '^STR_[A-Z0-9_]+$' | sort | uniq -c || true)"
   if [[ -n "$hits" ]]; then
     echo "error: $bin is a default build and carries research string(s):" >&2
     printf '%s\n' "$hits" | head -n 40 >&2
