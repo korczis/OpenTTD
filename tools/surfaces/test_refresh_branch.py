@@ -102,6 +102,8 @@ class RefreshBranch(unittest.TestCase):
         self.assertIn("refreshed locally", r.stdout)
         self.assertEqual(self.facts("HEAD"), "2")
         self.assertEqual(git(self.work, "log", "-1", "--format=%s").stdout.strip(), TITLE)
+        self.assertEqual(git(self.work, "log", "-1", "--format=%s", "HEAD^").stdout.strip(),
+                         "Merge origin/master into t")
         self.assertEqual(self.facts("origin/t"), "1", "without --push nothing reaches origin")
 
     def test_push_then_rerun_is_idempotent(self):

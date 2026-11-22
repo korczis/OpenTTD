@@ -1,0 +1,34 @@
+id: I0136
+milestone: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "A committed recovery scenario proves PrismaticAI survives a save and load mid-run and a forced build failure: no line built twice, the failed build cleaned up and replanned"
+slug: prismatic-ai-recovery-scenario
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Add a headless `battle.py recover` scenario: one local match plays a few years and saves, a second process loads the save with the working tree's bot and plays on; a research-only setting forces the next own-line build to fail once. The scenario checks the logs and the final map and fails on a duplicate line, a lost line record, an uncleaned failure or a missing replan."
+why: "External review 2026-11-22 (digest A-16): no recorded recovery suite exists (failed construction then replan, restart mid-run). PR #46 (4c1dc9c355) added Save, Load and Restore (tools/research/prismatic-ai/PrismaticAI/restore.nut:38,83,101) and verified them once by hand (old bot plays 4 years, the new bot loads the save and logs `restored after a restart`), but no command or test repeats that check, and its fitness gate runs one uninterrupted match (tools/research/ai-battle/battle.py:2543). The forced failure exercises I0130's cleanup."
+scope:
+  - "tools/research/ai-battle/battle.py"
+  - "tools/research/test_ai_battle.py"
+  - "tools/research/prismatic-ai/PrismaticAI/restore.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/info.nut"
+  - "research/ai-battle/README.md"
+non_scope:
+  - "Human takeover and return of the company (co-play), which belongs to the governed-channels work"
+  - "Restoring track lists of lines found on the map (restore.nut keeps them empty by design)"
+depends_on:
+  - I0130
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#prismatic-ai-grows-and-recovers"
+acceptance_criteria:
+  - "`battle.py recover` runs save, load and the forced failure on a fixed seed and exits non-zero on any failed check; it prints NOT RUN without a build or arena, never PASS"
+  - "Checks: the restore line names as many rail lines as were saved; no two of the bot's rail lines serve the same industry pair after the load; FAILED_PAIRS and the tried set survive; the forced failure leaves no orphan station and a different line is planned afterwards"
+  - "The check logic has unit tests on fixture logs; research/ai-battle/README.md documents the command"
+validation:
+  - "python3 -m unittest tools/research/test_ai_battle.py"
+  - "python3 tools/research/ai-battle/battle.py recover"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

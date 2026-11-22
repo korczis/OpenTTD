@@ -1,0 +1,29 @@
+id: I0148
+milestone: the-planner-reads-one-coherent-priced-world
+title: "transport-investment and knapsack-dp read stored history: kernel_feed.rs defines their feeds, and their plan.* events cite the store query instead of a live-only fallback"
+slug: kernel-feeds-from-history
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Add FEEDS rows in kernel_feed.rs for transport-investment and knapsack-dp that fill their inputs from the DuckDB store (measured line profit, payback and failure rates of earlier lines of this company or of recorded duels), bounded and with the row count. plan.investment and the portfolio event then carry `inputs.stored: {query, rows}`; with the store off they keep the named fallback."
+why: "External review 2026-11-22 (digest C-03, C-04). tools/research/mcp-rhai/src/kernel_feed.rs:142 declares `FEEDS = [(\"action-plan\", books)]` only, and :175 answers 'no stored input is defined for <kernel> yet'. tools/research/mcp-rhai/src/panel.rs:2123 publishes plan.investment with `live_only(\"I0086\")` (panel_events.rs:213), although I0086 is completed. I0082, I0085 and I0087 already feed calibration, the Prismatic fit and bot settings from the store."
+scope:
+  - "tools/research/mcp-rhai/src/kernel_feed.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-kernel-feed.rs"
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "research/mechanisms/event-bus-and-store.md"
+non_scope:
+  - "The intent resolver's ranking (live only, panel.rs:1984)"
+  - "New store tables (open PR #56 moves the store's SQL into files; build on it once merged)"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "kernel_feed tests feed both kernels from a fixture store and refuse an empty one with a named fallback"
+  - "plan.investment's inputs.stored is a query with rows when the store is on (panel test)"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-kernel-feed --bin mcp-panel"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

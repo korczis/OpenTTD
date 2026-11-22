@@ -15,7 +15,7 @@ scope:
   - "research/mcp-control.md"
 depends_on: []
 serves:
-  - "an-agent-plays-the-game-through-governed-channels#an-agent-reaches-the-game-over-mcp"
+  - "an-agent-plays-the-game-through-governed-channels#a-bot-plays-for-the-owner"
 acceptance_criteria:
   - "a panel started with the option serves static/ from that directory, and one started without it serves the same files as today"
   - "cargo test of mcp-panel and mcp-hub pass; mcp-hub-check against a panel started with the option passes"
