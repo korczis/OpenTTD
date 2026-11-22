@@ -85,17 +85,19 @@ pub struct Args {
     pub ai: String,
     pub auto_approve: bool,
     pub plan_bot: bool,
+    /// A savegame to start from instead of a new world (`-g FILE`); its AI companies come with it.
+    pub load: Option<String>,
 }
 
 pub const USAGE: &str = "usage: mcp-panel --bin <openttd> [--panel-port 8800] [--mcp-port 8731] [--game-port 3979]\n\
-                         \x20                [--seed 1] [--ai PrismaticAI] [--auto-approve] [--no-plan-bot]\n\
+                         \x20                [--seed 1] [--ai PrismaticAI] [--auto-approve] [--no-plan-bot] [--load FILE]\n\
                          \x20      mcp-panel --write-event-kinds   (the knowledge note's table of event kinds, from src/panel_events.rs)\n\
                          \x20      mcp-panel --import-calibration FILE [NAME]   (a retired calibration file's readings, once, into the store)";
 
 /// server.py's command line: `--name value` or `--name=value`.
 pub fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut a = Args { bin: String::new(), panel_port: 8800, mcp_port: 8731, game_port: 3979, seed: 1,
-                       ai: "PrismaticAI".into(), auto_approve: false, plan_bot: true };
+                       ai: "PrismaticAI".into(), auto_approve: false, plan_bot: true, load: None };
     let mut bin = None;
     let mut i = 0;
     while i < argv.len() {
@@ -123,6 +125,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--ai" => a.ai = value(&mut i)?,
             "--auto-approve" => a.auto_approve = true,
             "--no-plan-bot" => a.plan_bot = false,
+            "--load" => a.load = Some(value(&mut i)?),
             other => return Err(format!("unrecognized arguments: {other}")),
         }
         i += 1;
@@ -730,9 +733,14 @@ impl Game {
              server_port = {}\nmax_companies = 15\n[difficulty]\nmax_no_competitors = 1\n\
              [script]\nscript_max_opcode_till_suspend = {}\n", self.args.game_port, SCRIPT_OPCODES))
             .map_err(|e| format!("{}: {e}", cfg.display()))?;
-        let argv: Vec<String> = vec![self.args.bin.clone(), "-D".into(), format!("127.0.0.1:{}", self.args.game_port), "-x".into(),
-                                     "-g".into(), "-G".into(), self.args.seed.to_string(), "-c".into(), cfg.display().to_string(),
-                                     "-d".into(), "net=1,script=4".into()];
+        // A savegame (--load) is the world to start from; otherwise a new one from the seed.
+        let world: Vec<String> = match &self.args.load {
+            Some(file) => vec!["-g".into(), file.clone()],
+            None => vec!["-g".into(), "-G".into(), self.args.seed.to_string()],
+        };
+        let mut argv: Vec<String> = vec![self.args.bin.clone(), "-D".into(), format!("127.0.0.1:{}", self.args.game_port), "-x".into()];
+        argv.extend(world);
+        argv.extend(["-c".into(), cfg.display().to_string(), "-d".into(), "net=1,script=4".into()]);
         self.event("server", &format!("starting {}", argv.join(" ")));
         // stdout and stderr in one pipe, in the order the game writes them (exec keeps the pid).
         let mut child = Command::new("/bin/sh").arg("-c").arg("exec \"$0\" \"$@\" 2>&1").args(&argv)
@@ -960,7 +968,10 @@ impl Game {
                 g.event("ai", &format!("planner: game unpaused at tick {tick} with {} AI company(ies) after {} s", ai_companies(&g), started.elapsed().as_secs()));
             });
         }
-        if !self.args.ai.is_empty() {
+        if let Some(file) = &self.args.load {
+            // A loaded game brings its AI companies, each restarted by the game from its saved data.
+            self.event("ai", &format!("loaded {file}: its AI companies play on; no new bot is started"));
+        } else if !self.args.ai.is_empty() {
             // The bot starts with what the planner's portfolio chose (freight rail, passenger rail, air),
             // so its routes come from the one profitability model; without a plan it plays as before.
             let settings = panel_bot::planned_air(&self);
@@ -3589,6 +3600,9 @@ mod tests {
             .map(String::from)).unwrap();
         assert_eq!((a.bin.as_str(), a.panel_port, a.mcp_port, a.game_port, a.seed, a.ai.as_str(), a.auto_approve, a.plan_bot),
                    ("/x/openttd", 18800, 8731, 3979, -3, "", true, false));
+        assert_eq!(a.load, None, "a new world unless --load names a savegame");
+        let l = parse_args(&["--bin", "x", "--load", "/s/game.sav"].map(String::from)).unwrap();
+        assert_eq!(l.load.as_deref(), Some("/s/game.sav"));
         assert!(parse_args(&["--panel-port".into(), "1".into()]).is_err(), "--bin is required");
         assert!(parse_args(&["--bin".into(), "x".into(), "--nope".into()]).is_err());
     }
