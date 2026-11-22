@@ -40,6 +40,9 @@ mod web_access;
 #[path = "../panel_events.rs"]
 #[allow(dead_code)]
 mod panel_events;
+#[path = "../store_sql.rs"]
+#[allow(dead_code)]
+mod store_sql;
 
 fn arg(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())

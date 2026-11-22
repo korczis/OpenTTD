@@ -85,6 +85,7 @@
     ],
     "must_not_hoard": [
       "PrismaticAI",
+      "PrismaticAI self-steward",
       "PrismaticAI planned"
     ],
     "never_last": [
