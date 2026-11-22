@@ -12,7 +12,7 @@
 //!   solver, the kernel, its input and its work, so it is visible which one decided.
 use serde_json::{json, Value};
 
-use crate::plan::time_factor_for;
+use crate::plan::{calibration, carried_per_vehicle, income_per_unit, net_profit, payback_score, transit_periods};
 
 /// One long-lived AlgoGlyph `flow serve` per process, behind MCP_ALGOGLYPH_SERVE (I0086).
 #[path = "flow_serve.rs"]
@@ -73,12 +73,11 @@ pub fn freight_pairs(world: &Value, engines: &Value, p: &Value, limit: usize) ->
                 for (mode, rail) in [("truck", false), ("freight_rail", true)] {
                     if !enabled.iter().any(|m| m == mode) { continue; }
                     let Some((vname, cap, speed, price, running)) = freight_vehicle(engines, cname, rail, wagons) else { continue };
-                    let periods = d / (speed.max(1.0) * 0.0903) + overhead;
-                    // `calibration.<mode>`, read back from the running game (src/calibrate.rs); 1 unmeasured.
-                    // A ratio of net profit, so it scales income minus running cost (plan.rs says why).
-                    let cal = p.pointer(&format!("/calibration/{mode}")).or_else(|| p.pointer("/calibration/default")).and_then(Value::as_f64).unwrap_or(1.0);
-                    let per_unit = d * time_factor_for(periods, td1, td2) * payment / 2097152.0;
-                    let per_vehicle = cap * load * 12.0 / (2.0 * periods); // loaded one way, empty back
+                    let periods = transit_periods(d, speed.max(1.0), overhead);
+                    // A ratio of net profit (plan.rs net_profit says why).
+                    let cal = calibration(p, mode);
+                    let per_unit = income_per_unit(d, periods, payment, (td1, td2));
+                    let per_vehicle = carried_per_vehicle(cap, load, periods, false); // loaded one way, empty back
                     let build = if rail { d * rail_tile + rail_stations } else { d * road_tile * 0.5 + truck_stops };
                     if budget.is_some_and(|b| build > b) { continue; }
                     let top = (monthly / per_vehicle.max(0.1)).ceil().clamp(1.0, if rail { 4.0 } else { 12.0 });
@@ -87,8 +86,8 @@ pub fn freight_pairs(world: &Value, engines: &Value, p: &Value, limit: usize) ->
                     while n <= top {
                         if budget.is_some_and(|b| build + n * price > b) { break; }
                         let carried = monthly.min(n * per_vehicle);
-                        let profit = (carried * per_unit - n * running / 12.0) * cal;
-                        let score = profit * payback - build - n * price;
+                        let profit = net_profit(carried, per_unit, n * running / 12.0, cal);
+                        let score = payback_score(profit, payback, build, n * price);
                         if score > chosen.0 { chosen = (score, n, carried, profit); }
                         n += 1.0;
                     }
@@ -250,6 +249,29 @@ mod tests {
         assert!(plain > 0.0);
         assert!((half - plain / 2.0).abs() <= 1.0, "{half} is not half of {plain}");
     }
+
+    #[test]
+    fn freight_output_is_pinned() {
+        // Captured from the inline formulas before they moved into the shared economics functions
+        // (refactor/planner-shared-economics): the freight answer must stay byte-identical.
+        let world = serde_json::json!({"nodes": [
+            {"kind": "industry", "id": 1, "x": 10, "y": 10, "produces": [{"name": "Coal", "cargo": 1, "last_month": 180}]},
+            {"kind": "industry", "id": 2, "x": 95, "y": 40, "accepts": [{"name": "Coal"}]},
+            {"kind": "industry", "id": 3, "x": 30, "y": 20, "accepts": [{"name": "Coal"}]}]});
+        let engines = serde_json::json!({
+            "cargos": [{"name": "Coal", "payment": 5916, "transit_periods": [7, 255]}],
+            "engines": [
+                {"type": "road", "name": "Truck", "cargo": "Coal", "capacity": 20, "effective_speed_kmh": 48, "price": 4000, "running_cost_per_year": 2400},
+                {"type": "rail", "name": "Loco", "capacity": 0, "effective_speed_kmh": 101, "price": 11000, "running_cost_per_year": 1300},
+                {"type": "rail", "name": "Hopper", "cargo": "Coal", "capacity": 30, "effective_speed_kmh": 0, "price": 1500, "running_cost_per_year": 120}]});
+        let plain = serde_json::json!({"modes": ["truck", "freight_rail"]});
+        let calibrated = serde_json::json!({"modes": ["truck", "freight_rail"], "calibration": {"truck": 0.8, "default": 1.2}, "budget": 30000});
+        for (p, want) in [(plain, PINNED_FREIGHT), (calibrated, PINNED_FREIGHT_CALIBRATED)] {
+            assert_eq!(serde_json::Value::Array(super::freight_pairs(&world, &engines, &p, 5)).to_string(), want);
+        }
+    }
+    const PINNED_FREIGHT: &str = r#"[{"acceptor":{"id":2,"name":null,"x":95,"y":40},"cargo":"Coal","cargo_id":1,"distance":115.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":11325.0,"carried_per_month":3.0,"income_per_unit":75.74,"investment":15325.0,"mode":"truck","monthly_profit":55.0,"score":-14009.0,"transit_periods":28.5,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":12980.0,"carried_per_month":118.0,"income_per_unit":80.26,"investment":63980.0,"mode":"freight_rail","monthly_profit":9048.0,"score":153168.0,"transit_periods":14.6,"vehicles":{"capacity":120.0,"count":3.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":153168.0,"supply_per_month":126.0},{"acceptor":{"id":3,"name":null,"x":30,"y":20},"cargo":"Coal","cargo_id":1,"distance":30.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":3250.0,"carried_per_month":11.0,"income_per_unit":21.42,"investment":7250.0,"mode":"truck","monthly_profit":30.0,"score":-6519.0,"transit_periods":8.9,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":4480.0,"carried_per_month":109.0,"income_per_unit":21.58,"investment":21480.0,"mode":"freight_rail","monthly_profit":2202.0,"score":31361.0,"transit_periods":5.3,"vehicles":{"capacity":120.0,"count":1.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":31361.0,"supply_per_month":126.0}]"#;
+    const PINNED_FREIGHT_CALIBRATED: &str = r#"[{"acceptor":{"id":2,"name":null,"x":95,"y":40},"cargo":"Coal","cargo_id":1,"distance":115.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":11325.0,"carried_per_month":3.0,"income_per_unit":75.74,"investment":15325.0,"mode":"truck","monthly_profit":44.0,"score":-14272.0,"transit_periods":28.5,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":12980.0,"carried_per_month":39.0,"income_per_unit":80.26,"investment":29980.0,"mode":"freight_rail","monthly_profit":3619.0,"score":56879.0,"transit_periods":14.6,"vehicles":{"capacity":120.0,"count":1.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":56879.0,"supply_per_month":126.0},{"acceptor":{"id":3,"name":null,"x":30,"y":20},"cargo":"Coal","cargo_id":1,"distance":30.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":3250.0,"carried_per_month":11.0,"income_per_unit":21.42,"investment":7250.0,"mode":"truck","monthly_profit":24.0,"score":-6665.0,"transit_periods":8.9,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":4480.0,"carried_per_month":109.0,"income_per_unit":21.58,"investment":21480.0,"mode":"freight_rail","monthly_profit":2642.0,"score":41930.0,"transit_periods":5.3,"vehicles":{"capacity":120.0,"count":1.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":41930.0,"supply_per_month":126.0}]"#;
 
     #[test]
     fn knapsack_matches_the_algoglyph_case() {
