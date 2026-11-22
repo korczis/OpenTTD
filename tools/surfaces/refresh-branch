@@ -47,7 +47,8 @@ git fetch -q origin master "$branch"
 git checkout -q --detach "origin/$branch"
 start="$(git rev-parse HEAD)"
 
-if ! git merge -q --no-edit origin/master >/dev/null 2>&1; then
+# Detached, git would title the merge "into HEAD"; name the branch it lands on.
+if ! git merge -q --no-edit -m "Merge origin/master into $branch" origin/master >/dev/null 2>&1; then
   # Resolve the conflicts that sit inside generated regions; anything else stays the owner's.
   if ! python3 - "$(git diff --name-only --diff-filter=U)" <<'EOF'
 import re, sys

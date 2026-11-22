@@ -933,6 +933,7 @@ mod tests {
         snap["id"] = json!(bb::record_id(&snap));
         let mut fresh = fx("shadow/companies.json");
         fresh["game_tick"] = json!(74100);
+        // A live run measures the snapshot's age against the fresh read's game date.
         fresh["game_date"] = json!("1961-01-02");
         (snap, fresh)
     }
@@ -970,8 +971,9 @@ mod tests {
         let live = || run(&snap, &plan, &fresh, 1, &p, Some(&gate)).unwrap();
         let mut ok = live();
         attach_capabilities(&mut ok, &plan, &real_catalogue()).unwrap();
-        // The line, and every other freight slot cleared (I0117).
-        assert!(ok["directive"]["settings"].as_str().unwrap().starts_with("planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1,fr2_from=-1,"));
+        // A live directive sets its one line and clears every other freight slot.
+        let settings = ok["directive"]["settings"].as_str().unwrap();
+        assert!(settings.starts_with("planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1,fr2_from=-1,"), "{settings}");
         // The runner no longer lists track-planning: nothing may price the line.
         let (k, commit) = {
             let v: Value = serde_json::from_str(&std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain/catalogue.json")).unwrap()).unwrap();
@@ -981,17 +983,18 @@ mod tests {
         let e = attach_capabilities(&mut live(), &plan, &expired).unwrap_err();
         assert_eq!((e[0].code, e[0].path.as_str()), ("capability_unmatched", "rail-line-price"));
         assert!(e[0].message.starts_with("kernel_expired"));
-        // The planner fell back to its built-in knapsack: the live gate refuses it before any match.
+        // The planner fell back to its built-in knapsack: a live run refuses it before any match.
         let mut builtin = plan.clone();
         builtin["portfolio"]["kernel"] = Value::Null;
-        assert!(run(&snap, &builtin, &fresh, 1, &p, Some(&gate)).unwrap_err().iter().any(|r| r.code == "missing_kernel"));
-        // The planner names another kernel than the catalogue's match: the match refuses it.
+        let e = run(&snap, &builtin, &fresh, 1, &p, Some(&gate)).unwrap_err();
+        assert!(e.iter().any(|r| r.code == "missing_kernel"), "{e:?}");
+        // The planner named another kernel than the catalogue's match.
         let mut other = plan.clone();
-        other["portfolio"]["kernel"]["id"] = json!("greedy-knapsack");
+        other["portfolio"]["kernel"]["id"] = json!("simplex-method");
         let out = run(&snap, &other, &fresh, 1, &p, Some(&gate)).unwrap();
         let e = attach_capabilities(&mut out.clone(), &other, &real_catalogue()).unwrap_err();
         assert_eq!(e[0].code, "capability_mismatch");
-        assert!(e[0].message.contains("\"greedy-knapsack\""), "{}", e[0].message);
+        assert!(e[0].message.contains("\"simplex-method\""), "{}", e[0].message);
         // In shadow the same disagreement is recorded, not refused.
         let mut sh = shadow_on(&builtin).unwrap();
         attach_capabilities(&mut sh, &builtin, &real_catalogue()).unwrap();
