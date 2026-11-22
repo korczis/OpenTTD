@@ -568,7 +568,7 @@ snapshot offline and deterministically into a heightmap and a GameScript.
 - **A second place needed no code.** Olomouc was resolved, acquired live, compiled and
   load-checked headless on a Linux build host with no core code or rule changed; its towns,
   industries and signs were all placed, each with its note
-  ([evidence](research/real-world-scenario.md#decision-closed-with-three-items-not-run-two-of-them-run-since)).
+  ([evidence](research/real-world-scenario.md#decision-closed-with-three-items-not-run-all-three-run-since)).
 
 ```bash
 tools/research/real-world/rw-scenario compile --snapshot tools/research/real-world/fixtures/brno/snapshot.json --out build-real-world/brno
