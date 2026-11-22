@@ -396,6 +396,7 @@ class Parsing(unittest.TestCase):
             root = Path(tmp) / "repo"
             (root / "t").mkdir(parents=True)
             (root / "t" / "a.py").write_text("x = 1\n")
+            (root / "t" / "b.py").write_text("y = 1\n")
             sha = cl.sha256(root / "t" / "a.py")
             data = Path(tmp) / "data"
             data.mkdir()
@@ -403,11 +404,13 @@ class Parsing(unittest.TestCase):
             (data / "1.json").write_text(json.dumps({"files": {
                 f"{real}/t/a.py": {"sha256": sha, "lines": [1]},
                 f"{real}/t/other.py": {"sha256": "x", "lines": [4]},
+                f"{real}/t/b.py": {"sha256": "edited since", "lines": [1]},
                 "/scratch/t/a.py": {"sha256": sha, "lines": [2]},
                 "/scratch2/t/a.py": {"sha256": "changed", "lines": [3]}}}))
             (data / "2.json").write_text("{trunc")
-            ran = cl.load_readings(root, data, {"t/a.py"})
+            ran, stale = cl.load_readings(root, data, {"t/a.py", "t/b.py"})
             self.assertEqual(ran, {"t/a.py": {1, 2}, "t/other.py": {4}})
+            self.assertEqual(stale, {"t/b.py"})
 
 
 class Tracer(unittest.TestCase):
@@ -521,7 +524,8 @@ class OwnRepository(unittest.TestCase):
             data = root / "data"
             data.mkdir()
             (data / "r.json").write_text(json.dumps({"files": {
-                f"{os.path.realpath(root)}/a.py": {"sha256": "", "lines": [1]}}}))
+                f"{os.path.realpath(root)}/a.py": {"sha256": cl.sha256(root / "a.py"),
+                                                   "lines": [1]}}}))
             with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
                 self.assertEqual(cl.main(["--repo", str(root), "--no-run", "--data", str(data)]), 0)
                 self.assertEqual(cl.main(["--repo", str(root), "--base", "nope"]), 2)
@@ -529,6 +533,10 @@ class OwnRepository(unittest.TestCase):
                 (root / "test_a.py").write_text("import unittest\n\n\nclass T(unittest.TestCase):\n"
                                                 "    def test_t(self):\n        pass\n")
                 self.assertEqual(cl.main(["--repo", str(root), "--data", str(data)]), 0)
+                (data / "s.json").write_text(json.dumps({"files": {
+                    f"{os.path.realpath(root)}/a.py": {"sha256": "older bytes", "lines": [1]}}}))
+                self.assertEqual(cl.main(["--repo", str(root), "--no-run", "--data", str(data)]), 1)
+                (data / "s.json").unlink()
                 with mock.patch.object(cl, "test_dirs", return_value=[]):
                     # A temporary readings directory and no test: a.py:1 ran nowhere.
                     self.assertEqual(cl.main(["--repo", str(root)]), 1)

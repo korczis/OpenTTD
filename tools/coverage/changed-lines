@@ -232,14 +232,17 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_readings(root: Path, data: Path, judged: set[str]) -> dict[str, set[int]]:
-    """Repository file -> the lines any traced process ran in it.
+def load_readings(root: Path, data: Path,
+                  judged: set[str]) -> tuple[dict[str, set[int]], set[str]]:
+    """Repository file -> the lines any traced process ran in it, and the judged files whose
+    reading is of other bytes than the working file's (edited while the tests ran).
 
     A file inside the repository counts by its path. A file outside it (a test's scratch copy)
     counts for the judged file whose path it ends with, when their bytes are identical."""
     real_root = os.path.realpath(root) + os.sep
     shas = {rel: sha256(root / rel) for rel in judged}
     ran: dict[str, set[int]] = {}
+    stale: set[str] = set()
     for reading in sorted(data.glob("*.json")):
         try:
             files = json.loads(reading.read_text(encoding="utf-8"))["files"]
@@ -248,12 +251,15 @@ def load_readings(root: Path, data: Path, judged: set[str]) -> dict[str, set[int
         for path, entry in files.items():
             if path.startswith(real_root):
                 rel = path[len(real_root):]
+                if rel in shas and entry.get("sha256") != shas[rel]:
+                    stale.add(rel)  # its line numbers belong to other bytes
+                    continue
                 ran.setdefault(rel, set()).update(entry["lines"])
                 continue
             for rel, sha in shas.items():
                 if path.endswith("/" + rel) and entry.get("sha256") == sha:
                     ran.setdefault(rel, set()).update(entry["lines"])
-    return ran
+    return ran, stale
 
 
 class Exemption:
@@ -374,7 +380,9 @@ def judge(root: Path, base: str, data: Path, run: bool, exemptions_file: Path) -
         print(f"changed-lines: running {len(dirs)} test suite(s) under line tracing "
               f"(every directory holding a test_*.py)", flush=True)
         problems += run_tests(root, data, dirs)
-    ran = load_readings(root, data, set(judged))
+    ran, stale = load_readings(root, data, set(judged))
+    problems += [f"{rel}: changed while the tests ran, so a reading is of other bytes: run again"
+                 for rel in sorted(stale)]
 
     unrun: list[str] = []
     counted = 0
