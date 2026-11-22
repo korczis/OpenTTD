@@ -22,10 +22,12 @@
 //!   world_plan(limit)                  -> map   town pairs ranked, each with its mode (bus, rail, air)
 //!   world_plan_with(limit, params)     -> map   the same with any parameter overridden (see mcp-plan --defaults)
 //!   world_graph()                      -> map   the road network as nodes, edges and components
-//!   kernel(id, input)                  -> map   one AlgoGlyph kernel on that input (its `result`), through
-//!                                               the flow CLI of $MCP_ALGOGLYPH_DIR (hub_algoglyph.rs); throws
-//!                                               when there is no AlgoGlyph or the kernel refused
-//!   kernels()                          -> array every AlgoGlyph kernel with the input it reads
+//!   kernel(id, input)                  -> map   one AlgoGlyph kernel on that input (its `result`): a
+//!                                               native-rust one in this process, any other through the flow
+//!                                               CLI of the pinned checkout (hub_algoglyph.rs); throws when
+//!                                               there is no AlgoGlyph or the kernel refused
+//!   kernels()                          -> array every AlgoGlyph kernel with the input it reads (the runner's,
+//!                                               then the native-rust ones)
 //!   board_post(claim, text)            -> bool  announce a named claim on the Majordomus board (board.rs):
 //!                                               the server of this checkout, $MAJORDOMUS_URL, or printed
 //!                                               only with $MCP_BOARD_DRY set
@@ -293,12 +295,13 @@ fn engine(panel: Panel) -> Engine {
         let params = plan::with_prices(&from_dyn(Dynamic::from_map(params))?, &get("/api/resources/economy/prices").unwrap_or(Value::Null));
         to_dyn(plan::plan(&towns, &g, limit.max(1) as usize, &params, &engines)?)
     });
-    // AlgoGlyph's kernels, e.g. kernel("human-pointing", #{from: [0, 0], to: [640, 320], width: 64.0, seed: 7}).
+    // AlgoGlyph's kernels, e.g. kernel("human-pointing", #{from: [0, 0], to: [640, 320], width: 64.0, seed: 7});
+    // a native-rust one of kernels() runs in this process (src/algoglyph_native.rs).
     e.register_fn("kernel", |id: &str, input: Map| -> R<Dynamic> {
-        let v = algoglyph::flow(&["kernel", id, "-"], Some(&from_dyn(Dynamic::from_map(input))?))?;
+        let v = algoglyph::kernel(id, &from_dyn(Dynamic::from_map(input))?)?;
         to_dyn(kernel_result(id, v)?)
     });
-    e.register_fn("kernels", || -> R<Dynamic> { to_dyn(algoglyph::flow(&["kernels"], None)?) });
+    e.register_fn("kernels", || -> R<Dynamic> { to_dyn(algoglyph::kernels()?) });
     // The Majordomus board (board.rs): one session for the whole script, opened on the first post on
     // the server `majordomus serve ensure` names for this checkout ($MAJORDOMUS_URL overrides), or
     // printed only when $MCP_BOARD_DRY is set.
@@ -997,8 +1000,11 @@ mod tests {
     /// for AlgoGlyph parity; runs only where an AlgoGlyph checkout with that kernel is found.
     #[test]
     fn a_script_gets_the_human_pointing_kernel_bit_for_bit() {
-        if !algoglyph::dir().join("src/plates/human-pointing").is_dir() {
-            eprintln!("skip: no AlgoGlyph checkout with human-pointing at {}", algoglyph::dir().display());
+        // The pinned submodule is checked out wherever mcp-rhai builds, but its flow CLI runs only
+        // once its node_modules are installed (algoglyph-pin install): a checkout that cannot run is
+        // a skip, as one without the kernel is.
+        if !algoglyph::runnable(&algoglyph::dir()) || !algoglyph::dir().join("src/plates/human-pointing").is_dir() {
+            eprintln!("skip: no installed AlgoGlyph checkout with human-pointing at {}", algoglyph::dir().display());
             return;
         }
         let golden: Value = serde_json::from_str(&std::fs::read_to_string(
@@ -1009,6 +1015,22 @@ mod tests {
                 c["from"], c["to"], c["width"].as_f64().unwrap(), c["seed"], c["drag"]);
             let got = from_dyn(e.eval::<Dynamic>(&script).unwrap()).unwrap();
             assert_eq!(got["samples"], c["samples"], "case {c}");
+        }
+    }
+
+    /// A script's kernel() on a native-rust kernel of kernels() runs in this process (I0227): no
+    /// runner is needed. kernels() needs the runner; it is called only where none is installed
+    /// (the refusal names the install), so the test never boots npm.
+    #[test]
+    fn a_script_runs_a_native_algoglyph_kernel_in_process() {
+        let e = engine(Panel { base: "http://127.0.0.1:9".into() });
+        let id = algoglyph::native::entries(&serde_json::json!([]))[0]["id"].as_str().unwrap().to_string();
+        let got = from_dyn(e.eval::<Dynamic>(&format!("kernel(\"{id}\", #{{keys: [3, 1, 2]}})")).unwrap()).unwrap();
+        assert_eq!(got["outcome"], "sorted", "{got}");
+        assert_eq!(got["keys"], serde_json::json!([1, 2, 3]));
+        assert!(e.eval::<Dynamic>(&format!("kernel(\"{id}\", #{{keys: \"x\"}})")).unwrap_err().to_string().contains("refused"));
+        if !algoglyph::runnable(&algoglyph::dir()) {
+            assert!(e.eval::<Dynamic>("kernels()").unwrap_err().to_string().contains("algoglyph-pin install"));
         }
     }
 

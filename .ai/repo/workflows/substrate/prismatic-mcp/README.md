@@ -77,7 +77,7 @@ over MCP (Streamable HTTP, JSON-RPC) on loopback. Decided in ADR 0008 (server, a
   diffs `openttd://game/state`, `openttd://companies` and `openttd://decisions` once a second into `game.*`, `company.*`,
   `vehicles.count` and `decision.*` on its bus (kinds and payloads: knowledge `the-panel-bus-carries-these-event-kinds`).
   ADR 0033 (I0080) forwards that bus to a loopback ZeroMQ PUB socket and a DuckDB store per instance, read through
-  `GET /api/bus`, `GET /api/db/tables` and read-only `/api/db/query`; ADR 0034 (proposed) has planning decisions read
+  `GET /api/bus`, `GET /api/db/tables` and read-only `/api/db/query`; ADR 0034 (accepted) has planning decisions read
   that store and publish `plan.*` events. A field added to a resource here reaches the store only through such an event or
   `game.sample`, so name it there when a decision needs its history.
 
@@ -106,7 +106,7 @@ over MCP (Streamable HTTP, JSON-RPC) on loopback. Decided in ADR 0008 (server, a
 - Neighbouring maps: [game-windows](../game-windows/README.md), [rail-road-and-infrastructure](../rail-road-and-infrastructure/README.md).
 - ADR 0004, ADR 0008, ADR 0013, ADR 0014 (all proposed); rules `project.research-code-is-gated-and-labelled`, `project.game-state-mutates-only-through-commands`, `project.mcp-surfaces-are-derived`, `project.public-api-is-exposed`.
 - Knowledge `auto-approve-is-the-owners-switch`, `fixed-loopback-ports-collide`, `gated-code-is-invisible-to-a-default-build`, `dedicated-server-stdin-startup-race`.
-- Bus and store: ADR 0033 (accepted), ADR 0034 (proposed), feature `event-bus-and-store`, workflow `a-decision-reads-the-store`, rule `project.a-tuning-claim-needs-held-start-pairs` (advisory).
+- Bus and store: ADR 0033 (accepted), ADR 0034 (accepted), feature `event-bus-and-store`, workflow `a-decision-reads-the-store`, rule `project.a-tuning-claim-needs-held-start-pairs` (advisory).
 - Research trail: `research/prismatic-mcp/README.md`, `research/prismatic-mcp/02-threat-model.md`, `research/prismatic-mcp/16-decision-contract.md`, `research/mcp-control.md`, `research/mcp-human.md`.
 
 ## Typical tasks

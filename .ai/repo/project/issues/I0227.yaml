@@ -1,0 +1,60 @@
+id: I0227
+milestone: algoglyph-is-accountable
+title: "AlgoGlyph is a git submodule pinned at one commit, the hub's default checkout, and its Rust kernels run in-process as native-rust entries of the discovered catalogue"
+slug: algoglyph-submodule
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Add github.com/korczis/algoglyph as a git submodule at tools/research/vendor/algoglyph, pinned to a commit whose flow CLI lists every kernel the stack uses (knapsack-dp, track-planning, transport-investment, action-plan), and record that commit's runner catalogue next to it (tools/research/vendor/algoglyph.pin.json). The hub (hub_algoglyph.rs) and mcp-e2e take the submodule as the default checkout: $MCP_ALGOGLYPH_DIR still overrides; a checkout under ~/dev is used only when its HEAD is the pinned commit. mcp-rhai depends on the submodule's crates/algoglyph-kernels by path, and every kernel of its registry that the runner does not already list becomes a catalogue entry with engine native-rust, listed by algoglyph.kernels and Rhai kernels(), and answered in-process by algoglyph.kernel and Rhai kernel() instead of through npm. One script (tools/research/algoglyph-pin) installs, checks and bumps the pin; the Research Rust workflow checks the submodule out, checks the pin and runs the native tests; tools/gate.sh checks the pin."
+why: "Owner order 2026-11-22: \"algoglyph by mel byt ze git submodule a jeho rust interface integrovano do openttd rust\". Until now AlgoGlyph was whichever checkout happened to be under ~/dev (hub_algoglyph.rs default_dir, mcp-e2e's list of seven candidate directories), so the version a planner answer came from was a property of the machine, not of the repository; and AlgoGlyph's Rust crate was not reachable from the fork's Rust at all."
+scope:
+  - ".gitmodules"
+  - "tools/research/vendor/**"
+  - "tools/research/algoglyph-pin"
+  - "tools/research/test_algoglyph_pin.py"
+  - "tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-rhai/Cargo.lock"
+  - "tools/research/mcp-rhai/src/algoglyph_native.rs"
+  - "tools/research/mcp-rhai/src/hub_algoglyph.rs"
+  - "tools/research/mcp-rhai/src/hub.rs"
+  - "tools/research/mcp-rhai/src/main.rs"
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-kernel-feed.rs"
+  - "tools/research/mcp-e2e"
+  - "tools/gate.sh"
+  - ".github/workflows/research-rust.yml"
+  - "research/mechanisms/planner-and-algoglyph.md"
+  - "research/mcp-hub.md"
+  - "research/mcp-control.md"
+  - ".ai/repo/adrs/0039-algoglyph-is-a-git-submodule-pinned-at-one-commit-and-its-ru.md"
+  - ".ai/repo/adrs/README.md"
+  - ".ai/repo/project/issues/I0227.yaml"
+  - ".ai/repo/project/README.md"
+  - "README.md"
+non_scope:
+  - "Any commit in algoglyph or prismatic-platform: the submodule is pinned at an upstream commit and never modified"
+  - "Routing the planner's own kernel calls (cargo.rs, linecost.rs, invest.rs, bin/mcp-plan.rs) through the matcher (feature/planner-kernels-by-capability)"
+  - "battlebrain.rs, panel_decision.rs, authority_boundaries.rs (fix/battlebrain-executor-round2)"
+  - "mcp-human's own AlgoGlyph client, which reads MCP_ALGOGLYPH_DIR as mcp-e2e sets it"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#algoglyph-plans-are-accountable"
+acceptance_criteria:
+  - "git submodule status names tools/research/vendor/algoglyph at the pinned commit, and the commit of tools/research/vendor/algoglyph.pin.json is that gitlink (algoglyph-pin check; a unit test of mcp-rhai)"
+  - "the pinned runner catalogue lists knapsack-dp, track-planning, transport-investment and action-plan (algoglyph-pin check)"
+  - "without MCP_ALGOGLYPH_DIR the hub takes the submodule when it is installed, else a ~/dev checkout only at the pinned commit (unit tests)"
+  - "algoglyph.kernels lists the runner's kernels unchanged followed by every native kernel the runner does not list, each with engine native-rust; a native id the runner also lists stays the runner's (unit tests)"
+  - "a native kernel answers {ok, kernel, result, counts} in-process, refuses a malformed input with the field named, and the answer equals the crate's own run (unit tests)"
+  - "a catalogue entry with engine native-rust is accepted by Catalogue::from_runner and never chosen by the matcher without an adapter (unit test)"
+  - "the bump script's install, check, bump and status paths are each run by its unit tests against a scratch repository"
+validation:
+  - "tools/research/algoglyph-pin check"
+  - "cargo test --release --offline --no-default-features --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-rhai --bin mcp-hub --bin battlebrain --bin mcp-kernel-feed"
+  - "python3 -B -m unittest tools/research/test_algoglyph_pin.py"
+  - "tools/surfaces/surfaces check"
+  - "tools/knowledge/refs check"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
