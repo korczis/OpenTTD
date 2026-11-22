@@ -35,8 +35,8 @@ import "fr_author" as fa;
 // The shared-store key whose value overrides the default chain each round.
 const CHAIN_KEY = "policy.chain";
 // This tuner's name for the planner key planner.<company> (fr_author.rhai): while the key names
-// another writer (Battlebrain during a cutover), it asks for no freight-line slot of that company,
-// whatever setting a stage or the GA's /api/tuning names.
+// another writer (Battlebrain during a cutover), it asks for nothing for that company, so no
+// freight-line slot either, whatever setting a stage or the GA's /api/tuning names.
 const WRITER = "prismatic_tune";
 
 fn dry() { env("TUNE_DRY") == "1" }
@@ -172,12 +172,12 @@ fn plan(c, ctx) {
     requests(ctx, m.chosen, m.notes)
 }
 
-// A round's #{changes, notes} without the freight-line slots a refusal (fa::refusal, () when
-// none) withholds; each one dropped is named in notes with why.
+// A round's #{changes, notes} as this tuner may ask for them: with a refusal (fa::refusal, ()
+// when none) nothing, each change dropped named in notes with why.
 fn own_changes(p, held) {
     let keep = [];
     for x in p.changes {
-        if fa::withholds(held, x.name) { p.notes.push(`${x.name} -> ${x.to} (${x.stage}): not asked, ${held.why}`); continue; }
+        if fa::holds(held) { p.notes.push(`${x.name} -> ${x.to} (${x.stage}): not asked, ${held.why}`); continue; }
         keep.push(x);
     }
     p.changes = keep;

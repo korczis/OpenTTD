@@ -329,17 +329,11 @@ mod tests {
         (rhai::serde::from_dynamic(&out).unwrap(), sent.take())
     }
 
-    /// fr_author.rhai and src/fr_author.rs are one rule: the same slots, the same key, the same
-    /// refusal and its words, for an unset key, its own name, another name and a null value.
+    /// fr_author.rhai and src/fr_author.rs are one rule: the same key and the same refusal in the
+    /// same words, for an unset key, its own name, another name and a null value.
     #[test]
     fn the_rhai_guard_and_the_rust_guard_agree() {
-        let names = ["fr_from", "fr_to", "fr_cargo", "fr2_from", "fr9_to", "fr16_cargo", "fr", "frost", "freight",
-                     "rail_a", "line1_trains", "own_lines", "planned_freight_only"];
         let store = Rc::new(Shared::default());
-        let script = format!("import \"fr_author\" as fa; let out = []; for n in {names:?} {{ out.push(fa::is_freight_slot(n)); }} out");
-        let (rhai_says, _) = eval_with(&store, &script);
-        let rust_says: Vec<bool> = names.iter().map(|n| crate::panel_decision::is_freight_slot_setting(n)).collect();
-        assert_eq!(rhai_says, json!(rust_says));
         for holder in [None, Some(json!("replan")), Some(json!("battlebrain")), Some(Value::Null)] {
             if let Some(h) = &holder { store.set("planner.4", h.clone(), "runbook", None).unwrap(); }
             let (r, _) = eval_with(&store, "import \"fr_author\" as fa; fa::refusal(4, \"replan\")");
@@ -349,8 +343,9 @@ mod tests {
     }
 
     /// build_plan::apply_as is the write path of ask_relay, replan and build_plan itself: with the
-    /// company's key unset every proposed setting is sent as before; with another writer's name no
-    /// freight-line slot reaches api_botSetting and the first line says why; with its own name all.
+    /// company's key unset every proposed setting is sent as before; with another writer's name
+    /// nothing reaches api_botSetting (no fr_* slot either) and the first line says why; with its
+    /// own name all.
     #[test]
     fn build_plan_sends_no_freight_slot_another_planner_holds() {
         let store = Rc::new(Shared::default());
@@ -363,8 +358,8 @@ mod tests {
 
         store.set("planner.0", json!("battlebrain"), "runbook", Some(0)).unwrap();
         let (r, sent) = eval_with(&store, script);
-        assert_eq!(sent, ["rail_a"], "no fr_* slot is sent");
-        assert_eq!(r["withheld"], json!(["fr_cargo", "fr_from", "fr_to"]));
+        assert!(sent.is_empty(), "nothing is sent, no fr_* slot either: {sent:?}");
+        assert_eq!(r["withheld"], json!(["fr_cargo", "fr_from", "fr_to", "rail_a"]));
         assert_eq!(r["held"]["holder"], "battlebrain");
         assert!(r["first"].as_str().unwrap().contains("planned by battlebrain (shared key planner.0), not by ask_relay"), "{}", r["first"]);
 
@@ -382,8 +377,8 @@ mod tests {
         text.split(main_starts).next().unwrap().to_string()
     }
 
-    /// prismatic_tune asks for no freight-line slot of a held company, whatever gene /api/tuning
-    /// names, and notes each one; unset, every change stays.
+    /// prismatic_tune asks for nothing for a held company, so no freight-line slot whatever gene
+    /// /api/tuning names, and notes each change; unset, every change stays.
     #[test]
     fn the_live_tuner_asks_for_no_freight_slot_another_planner_holds() {
         let store = Rc::new(Shared::default());
@@ -394,7 +389,8 @@ mod tests {
         assert_eq!((r["names"].clone(), r["notes"].clone()), (json!(["fr_from", "invest_ppv_div"]), json!([])));
         store.set("planner.0", json!("battlebrain"), "runbook", Some(0)).unwrap();
         let (r, _) = eval_with(&store, &script);
-        assert_eq!(r["names"], json!(["invest_ppv_div"]));
+        assert_eq!(r["names"], json!([]));
+        assert_eq!(r["notes"].as_array().unwrap().len(), 2);
         assert!(r["notes"][0].as_str().unwrap().contains("fr_from -> 3 (ga): not asked, company 0's freight-line slots are planned by battlebrain"), "{}", r["notes"]);
     }
 

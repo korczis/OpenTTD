@@ -14,8 +14,8 @@
 // openttd.ai.set_setting, and the answer shown in the game names the approvals now waiting. It
 // approves nothing -- the gate is the owner's setting, and the bot builds after the owner approves.
 // A find sentence is answered and nothing is applied. While the company's planner key names another
-// planner (fr_author.rhai, e.g. Battlebrain during a cutover), no freight-line slot is sent and the
-// answer shown in the game says who plans them.
+// planner (fr_author.rhai, e.g. Battlebrain during a cutover), nothing is sent for that company
+// and the answer shown in the game says who plans its freight-line slots.
 
 import "build_plan" as build_plan;
 

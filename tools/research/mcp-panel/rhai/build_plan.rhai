@@ -36,11 +36,11 @@ fn running_bot() {
 
 /// Apply the settings an answer proposes to the running bot, and report what came back.
 /// Returns #{pending: [approval ids], refused: [setting names the bot does not declare],
-///            withheld: [freight-line slots another planner holds], held: () or why (fr_author),
+///            withheld: [settings held back for another planner], held: () or why (fr_author),
 ///            lines: [one human line per call], bot: name}. Applies nothing else and approves
 /// nothing: every call is openttd.ai.set_setting, which is gated. `writer` is the caller's name
-/// for the planner key (fr_author.rhai): while planner.<company> names another writer, no
-/// freight-line slot is sent and the first line says why.
+/// for the planner key (fr_author.rhai): while planner.<company> names another writer, nothing
+/// is sent (its freight-line slots among it) and the first line says why.
 fn apply_as(a, writer) {
     let settings = (a.build ?? #{}).settings ?? #{};
     let out = #{ pending: [], refused: [], withheld: [], held: (), lines: [], bot: "" };
@@ -56,7 +56,7 @@ fn apply_as(a, writer) {
     out.withheld = w.withheld;
     out.held = w.refusal;
     if !w.withheld.is_empty() {
-        out.lines.push(`${w.withheld.len()} freight-line setting(s) not sent (${w.withheld}): ${w.refusal.why}`);
+        out.lines.push(`${w.withheld.len()} setting(s) not sent (${w.withheld}): ${w.refusal.why}`);
     }
     let declared = [];
     for s in (bot.settings ?? []) { declared.push(s.name); }
