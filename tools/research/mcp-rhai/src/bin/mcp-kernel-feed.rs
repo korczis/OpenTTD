@@ -10,8 +10,9 @@
 //! `plan.kernel` event per request, {kind, data: {decision, version, kernel, inputs: {live, stored
 //! | fallback, kernel_input}, runner, choice}}, where `choice` is the kernel's answer. The process
 //! ends when standard input closes. --no-store feeds nothing from history (the A/B arm "as today");
-//! --no-bus keeps the seed only. AlgoGlyph is $MCP_ALGOGLYPH_DIR, else ~/dev/algoglyph-wt/main,
-//! else ~/dev/algoglyph. Reads only (GET /api/bus, POST /api/db/named, the bus), unless --publish:
+//! --no-bus keeps the seed only. AlgoGlyph is $MCP_ALGOGLYPH_DIR, else the installed checkout at
+//! the pinned submodule commit (hub_algoglyph::dir, ADR 0039). Reads only (GET /api/bus, POST
+//! /api/db/named, the bus), unless --publish:
 //! then each event also goes to the panel's POST /api/bus/publish (plan.kernel is a kind the panel
 //! declares as external, src/panel_events.rs), so it reaches the bus, ZeroMQ and the store; the
 //! panel's answer is the printed event's `published`.

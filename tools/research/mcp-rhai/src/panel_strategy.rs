@@ -514,11 +514,12 @@ pub fn cycle(g: &Arc<Game>, trigger: &str) -> Value {
     let topts = crate::plan_pipeline::Options { invest: false, ..topts };
     // The pool: three workers, each a part; the planner's investment runs after its plan, in its worker.
     let ((plan_r, plan_ms), (track_r, track_ms), (towns_r, towns_ms)) = std::thread::scope(|sc| {
-        let plan = sc.spawn(|| timed(|| crate::plan_pipeline::run(&read, &opts)));
+        // Kernels match per thread: a matcher records its choices and is not shared across workers.
+        let plan = sc.spawn(|| timed(|| crate::plan_pipeline::run(&read, &opts, &crate::cargo::Kernels::runner())));
         let track = sc.spawn(|| timed(|| {
             if !available { return Ok(json!({"skipped": "no AlgoGlyph checkout: track-planning needs one"})); }
             if cfg.track == 0 { return Ok(json!({"skipped": "PRISMATIC_STRATEGY_TRACK is 0"})); }
-            crate::plan_pipeline::run(&read, &topts)
+            crate::plan_pipeline::run(&read, &topts, &crate::cargo::Kernels::runner())
         }));
         let towns = sc.spawn(|| timed(|| towns_part(g, &reads)));
         let join = |h: std::thread::ScopedJoinHandle<'_, (Result<Value, String>, u128)>| h.join().unwrap_or((Err("the worker panicked".into()), 0));

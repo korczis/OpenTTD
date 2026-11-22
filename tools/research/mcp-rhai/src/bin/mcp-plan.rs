@@ -13,6 +13,13 @@
 //!                                      game tick when the server offers openttd.resources.read_many
 //!        mcp-plan --snapshot DIR ...  (replay: read every resource from a capture instead of a game,
 //!                                      refusing a file whose sha256 differs from the capture's)
+//!        mcp-plan --catalogue FILE ... (choose the kernels from this recorded AlgoGlyph catalogue,
+//!                                      {kernels, commit} as battlebrain reads one, instead of the
+//!                                      runner's own `flow -- kernels`)
+//!
+//! Every AlgoGlyph kernel the plan calls is chosen by capability from the catalogue (src/cargo.rs
+//! `Kernels`, the matcher of battlebrain_contract.rs); the answer's `kernels` holds the catalogue
+//! and the capability-match/v1 decision of every capability the plan resolved.
 use std::time::Duration;
 
 #[path = "../graph.rs"]
@@ -45,6 +52,9 @@ mod battlebrain_contract;
 mod reads;
 #[path = "../plan_pipeline.rs"]
 mod plan_pipeline;
+// The line-pricing record and its solver label live with the pipeline that writes them.
+#[cfg(test)]
+use plan_pipeline::{line_costs, solver_of};
 
 /// Where resources come from: a panel's derived routes, an MCP server read directly through the
 /// token file `prismatic_mcp start` writes ({"agent_token","endpoint"}), for a stack without a panel,
@@ -339,9 +349,11 @@ fn main() {
     let mut yards_n = 0usize;
     let mut calibrate_too = false;
     let (mut capture_dir, mut snapshot_dir): (Option<String>, Option<String>) = (None, None);
+    let mut catalogue: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--capture" => capture_dir = args.next(),
+            "--catalogue" => catalogue = args.next(),
             "--snapshot" => snapshot_dir = args.next(),
             "--panel" => panel = args.next().unwrap_or_default(),
             "--token" => token = args.next(),
@@ -356,7 +368,7 @@ fn main() {
             }
             "--limit" => limit = args.next().and_then(|v| v.parse().ok()).unwrap_or(20),
             "-h" | "--help" => {
-                println!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--capture DIR | --snapshot DIR] [--defaults]");
+                println!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
                 return;
             }
             "--defaults" => {
@@ -371,7 +383,7 @@ fn main() {
                 }
             },
             _ => {
-                eprintln!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--capture DIR | --snapshot DIR] [--defaults]");
+                eprintln!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
                 std::process::exit(2);
             }
         }
@@ -388,6 +400,8 @@ fn main() {
         }
     }
     let source_kind = if snapshot_dir.is_some() { "capture" } else if token.is_some() { "mcp" } else { "panel" };
+    // The kernels of every run of the planner below: one catalogue, each capability matched once.
+    let kernels = catalogue.as_deref().map_or_else(cargo::Kernels::runner, cargo::Kernels::from_file);
     // One run of the planner on `src`; --capture's coherent path runs it more than once (`coherent`).
     let run = |src: &Source| -> Result<serde_json::Value, String> {
         reads::clear();
@@ -399,12 +413,13 @@ fn main() {
         let read = |name: &str| src.resource(name);
         let opts = plan_pipeline::Options { limit, params: params.clone(), track, yards: yards_n,
                                             calibrate: calibrate_too, invest: invest_too, invest_inputs };
-        let mut out = plan_pipeline::run(&read, &opts)?;
+        let mut out = plan_pipeline::run(&read, &opts, &kernels)?;
         if invest_inputs { return Ok(out); }
         // Which runner answered the kernel calls, only when the one-serve switch is on (I0086), so
         // the default answer stays as it was.
         if cargo::flow_serve::wanted() { out["algoglyph"] = cargo::flow_serve::summary(); }
         out["reads"] = reads::json();
+        out["kernels"] = kernels.record();
         Ok(out)
     };
     // How a capture's reads were taken: at one tick through read_many, or why not.
@@ -447,6 +462,24 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_line_costs_name_the_kernel_the_catalogue_matched_or_that_none_did() {
+        let k = cargo::testing::kernels(|_, _| Err(cargo::KernelFailure::Unset));
+        let _ = linecost::route(&k, &serde_json::json!({}), &serde_json::json!({}), &serde_json::json!({}), &[]);
+        let lc = line_costs(&k, vec![serde_json::json!({"candidate": 0})]);
+        assert_eq!(lc["capability"], "rail-line-price");
+        assert_eq!(lc["kernel"], "track-planning");
+        assert_eq!(lc["solver"], "algoglyph track-planning on map, map/ways, map/terrain, economy/prices, bridges");
+        assert_eq!(lc["priced"].as_array().unwrap().len(), 1);
+        let expired = cargo::testing::catalogue(|l| l.retain(|k| k["id"] != "track-planning"));
+        let k = cargo::testing::on(expired, |_, _| panic!("no kernel"));
+        let _ = linecost::route(&k, &serde_json::json!({}), &serde_json::json!({}), &serde_json::json!({}), &[]);
+        let lc = line_costs(&k, vec![]);
+        assert_eq!(lc["kernel"], serde_json::Value::Null);
+        assert_eq!(solver_of(&k, linecost::RAIL_LINE_PRICE), "no kernel (rail-line-price unmatched, see kernels)");
+        assert_eq!(k.record()["matches"][0]["refusal"]["code"], "kernel_expired");
+    }
 
     fn temp(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("mcp-plan-capture-test-{tag}-{}", std::process::id()));

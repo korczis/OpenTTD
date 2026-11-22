@@ -37,7 +37,7 @@ unknown attribute, a follow-up that names no issue, or a closing marker with no 
 pie showData title Open findings by kind
     %% links: open-findings.md?col=Kind&filter=blocked#findings | open-findings.md?col=Kind&filter=out-of-scope#findings | open-findings.md?col=Kind&filter=not-run#findings | open-findings.md?col=Kind&filter=partial#findings | open-findings.md?col=Kind&filter=unreviewed#findings | open-findings.md?col=Kind&filter=staged#findings | open-findings.md?col=Kind&filter=failed#findings | open-findings.md?col=Kind&filter=handoff#findings
     "blocked" : 71
-    "out-of-scope" : 37
+    "out-of-scope" : 40
     "not-run" : 18
     "partial" : 9
     "unreviewed" : 9
@@ -53,7 +53,7 @@ pie showData title Open findings by kind
 | Kind | Count | Meaning |
 |---|---|---|
 | blocked | 71 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
-| out-of-scope | 37 | A finished issue left this out (its non_scope) and no open issue names it |
+| out-of-scope | 40 | A finished issue left this out (its non_scope) and no open issue names it |
 | failed | 1 | A run or check the records say failed |
 | not-run | 18 | A validation the records say did not run |
 | partial | 9 | A capability or run the records say is only partly there |
@@ -64,7 +64,7 @@ pie showData title Open findings by kind
 
 | Kind | Finding | Evidence | Follow-up | Label |
 |---|---|---|---|---|
-| blocked | No tracked text claims a shipped MCP capability is absent or planned: the server header and research/mcp-control.md describe today's code — waits on I0110 (open) | [I0111](../.ai/repo/project/issues/I0111.yaml):17 | [I0110](../.ai/repo/project/issues/I0110.yaml) | DERIVED |
+| blocked | No tracked text claims a shipped MCP capability is absent or planned: the server header and research/mcp-control.md describe today's code — waits on I0110 (active) | [I0111](../.ai/repo/project/issues/I0111.yaml):17 | [I0110](../.ai/repo/project/issues/I0110.yaml) | DERIVED |
 | blocked | One capability matrix states, per capability, its owner, code path, live input, fallback, tests and end-to-end status, labelled OBSERVED/DERIVED/INFERRED, and a check keeps it honest — waits on I0111 (open) | [I0114](../.ai/repo/project/issues/I0114.yaml):20 | [I0111](../.ai/repo/project/issues/I0111.yaml) | DERIVED |
 | blocked | The research/prismatic-mcp contributor catalogue takes each document's title and kind from the document itself; nothing is written by hand — waits on I0111 (open) | [I0115](../.ai/repo/project/issues/I0115.yaml):18 | [I0111](../.ai/repo/project/issues/I0111.yaml) | DERIVED |
 | blocked | The battle referee's REF Q sample carries every company's loan and maximum loan, and the battle record and charts use them — waits on I0118 (open) | [I0119](../.ai/repo/project/issues/I0119.yaml):19 | [I0118](../.ai/repo/project/issues/I0118.yaml) | DERIVED |
@@ -172,7 +172,10 @@ pie showData title Open findings by kind
 | out-of-scope | Any change in prismatic-platform or algoglyph | [I0097](../.ai/repo/project/issues/I0097.yaml):18 | none — needs an issue | DERIVED |
 | out-of-scope | Any change in algoglyph or prismatic-platform (the AlgoGlyph-side gap is a written proposal only) | [I0098](../.ai/repo/project/issues/I0098.yaml):16 | none — needs an issue | DERIVED |
 | out-of-scope | Routing the planner's own kernel calls (cargo.rs, linecost.rs, mcp-plan.rs) through the matcher | [I0098](../.ai/repo/project/issues/I0098.yaml):17 | none — needs an issue | DERIVED |
-| failed | In that round track-planning found a route on the map for none of the 21 rail lines, so no line went to the bot unpriced and the round held. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):107 | none — needs an issue | OBSERVED |
+| out-of-scope | Any change in algoglyph or prismatic-platform | [I0221](../.ai/repo/project/issues/I0221.yaml):24 | none — needs an issue | DERIVED |
+| out-of-scope | How the AlgoGlyph checkout is located, the flow serve and the catalogue discovery of the hub (feature/algoglyph-submodule) | [I0221](../.ai/repo/project/issues/I0221.yaml):25 | none — needs an issue | DERIVED |
+| out-of-scope | Kernel calls outside the planner: the hub's algoglyph. methods, the Rhai rail steward, mcp-human, the action plan and the kernel feed | [I0221](../.ai/repo/project/issues/I0221.yaml):26 | none — needs an issue | DERIVED |
+| failed | In that round track-planning found a route on the map for none of the 21 rail lines, so no line went to the bot unpriced and the round held. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):130 | none — needs an issue | OBSERVED |
 | not-run | without a base set: ctest 94/94 PASS with -E '^regression', regression reported NOT RUN with a pointer to research/baseset-prerequisite-macos.md, change: PARTIAL (exit 3), no 120 s timeouts; | [I0028](../.ai/repo/project/issues/I0028.yaml):35 | none — needs an issue | OBSERVED |
 | not-run | The economy loop (mcp-human game: reinforce, borrow) is implemented but NOT RUN yet. | [I0045](../.ai/repo/project/issues/I0045.yaml):48 | none — needs an issue | OBSERVED |
 | not-run | NOT RUN: the page in a browser (WebGL terrain, clicks, maximize) - the browser extension was disconnected. | [I0048](../.ai/repo/project/issues/I0048.yaml):34 | none — needs an issue | OBSERVED |
@@ -188,14 +191,14 @@ pie showData title Open findings by kind
 | not-run | C4 strategy (H2): NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):269 | none — needs an issue | OBSERVED |
 | not-run | C5 operator safety: NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):270 | none — needs an issue | OBSERVED |
 | not-run | A client restart after a crash (the supervisor fix): NOT RUN: no crash happened in this run | [research/coplay.md](coplay.md):59 | none — needs an issue | OBSERVED |
-| not-run | Mesh records: NOT RUN, because the panel had no $MAJORDOMUS_URL. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):108 | none — needs an issue | OBSERVED |
+| not-run | Mesh records: NOT RUN, because the panel had no $MAJORDOMUS_URL. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):131 | none — needs an issue | OBSERVED |
 | not-run | A remote human joining over the internet: NOT RUN: needs a second machine and a person | [research/real-game.md](real-game.md):105 | none — needs an issue | OBSERVED |
 | not-run | An invite-only game through the coordinator: NOT RUN | [research/real-game.md](real-game.md):106 | none — needs an issue | OBSERVED |
 | partial | without a base set: ctest 94/94 PASS with -E '^regression', regression reported NOT RUN with a pointer to research/baseset-prerequisite-macos.md, change: PARTIAL (exit 3), no 120 s timeouts; | [I0028](../.ai/repo/project/issues/I0028.yaml):35 | none — needs an issue | OBSERVED |
-| partial | Retrieve: PARTIAL | [research/agent-loop.md](agent-loop.md):50 | none — needs an issue | OBSERVED |
-| partial | Coordinate: PARTIAL | [research/agent-loop.md](agent-loop.md):51 | none — needs an issue | OBSERVED |
-| partial | Decide: PARTIAL | [research/agent-loop.md](agent-loop.md):53 | none — needs an issue | OBSERVED |
-| partial | Authorize: PARTIAL | [research/agent-loop.md](agent-loop.md):55 | none — needs an issue | OBSERVED |
+| partial | Retrieve: PARTIAL | [research/agent-loop.md](agent-loop.md):54 | none — needs an issue | OBSERVED |
+| partial | Coordinate: PARTIAL | [research/agent-loop.md](agent-loop.md):55 | none — needs an issue | OBSERVED |
+| partial | Decide: PARTIAL | [research/agent-loop.md](agent-loop.md):57 | none — needs an issue | OBSERVED |
+| partial | Authorize: PARTIAL | [research/agent-loop.md](agent-loop.md):59 | none — needs an issue | OBSERVED |
 | partial | Dedicated build, feature ON: PARTIAL | [research/prismatic-mcp/11-continuation-baseline.md](prismatic-mcp/11-continuation-baseline.md):21 | none — needs an issue | OBSERVED |
 | partial | Native status visible: PARTIAL | [research/prismatic-mcp/11-continuation-baseline.md](prismatic-mcp/11-continuation-baseline.md):26 | none — needs an issue | OBSERVED |
 | partial | Streamable HTTP: DELETE (session end): PARTIAL | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):14 | none — needs an issue | OBSERVED |

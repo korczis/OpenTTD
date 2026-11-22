@@ -82,6 +82,7 @@ be the panel's and the hub's both (`game.month`), as two rows with their own pro
 | `panel.operator` | panel | `panel.rs:Game::event` | `{text}` | the operator approves, switches auto-approve, downloads content, is refused a console line |
 | `panel.console` | panel | `panel.rs:Game::event` | `{text}` | a console line sent through `POST /api/console` |
 | `panel.rhai` | panel | `panel.rs:Game::event` | `{text}` | a Rhai script ran |
+| `service.supervised` | panel | `panel_scripts.rs:watch` | `{service, state: ended\|restarted\|restart_failed\|stalled\|gave_up, exit, restarts, quick_exits, quiet_s, stall_s, retry_in_s}` | the supervisor gave a service that ended with an error a restart time, started it again, could not, stopped a stalled one or gave one up |
 | `panel.view` | panel | `panel.rs:Game::event` | `{text}` | a GUI client attached |
 | `panel.ai` | panel | `panel.rs:Game::event` | `{text}` | the bot's `planner:` lines, its start, the held start, calibration, Prismatic's directive |
 | `panel.mesh` | panel | `panel.rs:Game::event` | `{text}` | a plan.directive or plan.directive_outcome was mirrored to the Majordomus mesh as a typed record, or not (src/panel_mesh.rs; only with $MAJORDOMUS_URL and $MAJORDOMUS_SESSION) |

@@ -5,7 +5,21 @@
 //! (cargo.rs, AlgoGlyph knapsack-dp or the built-in DP) and optionally AlgoGlyph's
 //! transport-investment (invest.rs). Moved here unchanged from src/bin/mcp-plan.rs so both callers
 //! run one implementation; only where resources come from differs (`read`).
+use crate::cargo::Kernels;
 use serde_json::{json, Value};
+
+/// The solver label of a capability: the kernel the matcher chose for it, or that none was.
+pub fn solver_of(kernels: &Kernels, cap: &str) -> String {
+    kernels.chosen(cap).map_or_else(|| format!("no kernel ({cap} unmatched, see kernels)"), |k| format!("algoglyph {k}"))
+}
+
+/// The record of the line pricing (track): which capability and kernel priced the lines, on
+/// which resources, and each line's entry.
+pub fn line_costs(kernels: &Kernels, priced: Vec<Value>) -> Value {
+    json!({"capability": crate::linecost::RAIL_LINE_PRICE, "kernel": kernels.chosen(crate::linecost::RAIL_LINE_PRICE),
+           "solver": format!("{} on map, map/ways, map/terrain, economy/prices, bridges", solver_of(kernels, crate::linecost::RAIL_LINE_PRICE)),
+           "priced": priced})
+}
 
 /// What one run computes beyond the plan and its portfolio.
 #[derive(Clone, Debug, Default)]
@@ -30,8 +44,9 @@ fn linecost_input(read: &dyn Fn(&str) -> Result<Option<Value>, String>) -> Resul
     crate::hub_algoglyph::track_input(&ends, read)
 }
 
-/// One planner run. `read(name)` answers the data of resource `openttd://<name>`.
-pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options) -> Result<Value, String> {
+/// One planner run. `read(name)` answers the data of resource `openttd://<name>`; every AlgoGlyph
+/// call goes to the kernel `kernels` matches for its capability (cargo.rs `Kernels`).
+pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &Kernels) -> Result<Value, String> {
     let limit = o.limit;
     let towns = read("towns")?;
     let g = crate::graph::derive_with_ways(&read("map")?, &towns, &read("stations")?, &read("map/ways").unwrap_or(Value::Null))?;
@@ -79,17 +94,17 @@ pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options) -> Result<
         let mut log = Vec::new();
         for list in ["freight", "rail"] {
             let arr = if list == "freight" { out["freight"].as_array_mut() } else { out["by_mode"]["rail"].as_array_mut() };
-            if let Some(arr) = arr { log.extend(crate::linecost::price(arr, &base, stations, rail_tile, o.track)); }
+            if let Some(arr) = arr { log.extend(crate::linecost::price(arr, &base, stations, rail_tile, o.track, kernels)); }
         }
-        out["line_costs"] = json!({"solver": "algoglyph track-planning on map, map/ways, map/terrain, economy/prices, bridges",
-                                   "priced": log});
+        out["line_costs"] = line_costs(kernels, log);
         // yards N: prove up to N transfer yards offline (src/yards.rs): the better line's route
         // blocked, can the other still leave from a platform beside it?
         if o.yards > 0 {
             let mut lines: Vec<Value> = out["freight"].as_array().cloned().unwrap_or_default();
             lines.extend(out["by_mode"]["rail"].as_array().cloned().unwrap_or_default());
-            out["yards"] = json!({"solver": "algoglyph track-planning, the better line's tiles blocked (src/yards.rs)",
-                                  "pairs": crate::yards::prove(&lines, &base, o.yards)});
+            let pairs = crate::yards::prove(&lines, &base, o.yards, kernels);
+            out["yards"] = json!({"solver": format!("{}, the better line's tiles blocked (src/yards.rs)", solver_of(kernels, crate::linecost::RAIL_LINE_PRICE)),
+                                  "pairs": pairs});
         }
     }
     let mut candidates: Vec<Value> = Vec::new();
@@ -98,9 +113,9 @@ pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options) -> Result<
     }
     candidates.extend(out["freight"].as_array().cloned().unwrap_or_default());
     candidates.sort_by(|a, b| b["score"].as_f64().unwrap_or(0.0).total_cmp(&a["score"].as_f64().unwrap_or(0.0)));
-    out["portfolio"] = crate::cargo::portfolio(&candidates, out["params"]["budget"].as_f64());
+    out["portfolio"] = crate::cargo::portfolio(&candidates, out["params"]["budget"].as_f64(), kernels);
     if o.invest_inputs { return Ok(crate::invest::input(&out, &engines, &towns).unwrap_or(Value::Null)); }
-    if o.invest { out["investment"] = crate::invest::decide(&out, &engines, &towns); }
+    if o.invest { out["investment"] = crate::invest::decide(&out, &engines, &towns, kernels); }
     out["model"] = json!("v4: v3 for passengers, freight pairs from the world graph's industries priced with each cargo's own payment rate and transit periods, and a portfolio chosen by knapsack within the budget");
     Ok(out)
 }

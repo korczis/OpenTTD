@@ -46,6 +46,9 @@ flowchart LR
 
 ## Authority matrix
 
+Every investment selector with its code path and fallback, and the end-to-end status of
+Battlebrain's shadow and live modes, are in the [capability matrix](../capability-matrix.md).
+
 Current state from the read-only audit of 2026-11-22. The target owner is the one component
 allowed to turn a candidate into an executable choice.
 
@@ -91,8 +94,8 @@ fixture under `tools/research/schema/fixtures/battlebrain/`:
 
 **Discovery.** The catalogue is whatever the runner answers at that checkout. The fixture
 `catalogue.json` is the real answer of algoglyph `1b8e009` (53 kernels). There is no built-in
-kernel list. Per-kernel domain checks exist only for `knapsack-dp` and `track-planning`. They
-belong to the adapters of the capability registry ([below](#capabilities-i0098)), which sit at a
+kernel list. Per-kernel domain checks exist only for `knapsack-dp`, `track-planning` and
+`transport-investment`. They belong to the adapters of the capability registry ([below](#capabilities-i0098)), which sit at a
 protocol boundary because the runner's outputs carry no schema.
 
 ## Capabilities (I0098)
@@ -173,6 +176,29 @@ Shadow records the same disagreement without refusing. Nothing here executes a k
 matcher only chooses, and a test checks that the contract, the policy and the binary spawn no
 process.
 
+**The planner uses the same matcher (I0221).** Every kernel the planner calls is chosen by
+capability, never by name: `Kernels` in `cargo.rs` reads the catalogue once (the runner's own
+`flow -- kernels` at the checkout's commit, or `mcp-plan --catalogue <file>`), matches each
+capability once with `match_capability` over `ADAPTERS`, builds the input under the adapter's
+keys and reads the answer by the adapter's paths. It is used by:
+
+- the portfolio (`portfolio-within-budget`);
+- the line price and the transfer yards (`rail-line-price`; `linecost.rs`, `yards.rs`);
+- the investment run (`routes-by-return`; `invest.rs`).
+
+The matcher may refuse, the runner may fail, or the answer may fail its domain check. In each
+case the kernel's answer is not used and the reason is recorded:
+
+- the portfolio's built-in DP decides, and `fallback` holds the reason, for example
+  `capability_unmatched` with the matcher's refusal;
+- a line is left unpriced, with `track.refused`;
+- the investment run is refused, with `runs[].refused`.
+
+Each answer a kernel gave names it as `kernel: {id, capability, catalogue: {digest, commit}}`. The
+plan's `kernels` holds the catalogue and the capability-match/v1 decision of every capability
+the plan resolved. A test (`b4_the_planner_calls_kernels_by_capability_only`) refuses a planner
+code line that names a kernel id of the catalogue.
+
 `battlebrain capabilities --catalogue tools/research/schema/fixtures/battlebrain/catalogue.json`
 prints the table below, and a test refuses a README that differs from it:
 
@@ -180,7 +206,8 @@ prints the table below, and a test refuses a README that differs from it:
 | capability | goal | inputs | outputs |
 |---|---|---|---|
 | `portfolio-within-budget` | the set of items with the highest total value whose total cost fits a budget | `costs`: amount[] (money), `values`: number[], `budget`: amount (money) | `chosen`: index[], `total_value`: number |
-| `rail-line-price` | what a rail line between two station tiles costs to build on this map, or that it has no route | `from`: tile, `to`: tile, `map`: resource, `prices`: resource | `status`: status, `price`: amount (money), `pieces`: list |
+| `rail-line-price` | what a rail line between two station tiles costs to build on this map, or that it has no route | `from`: tile, `to`: tile, `map`: resource, `prices`: resource, `blocked`: list | `status`: status, `price`: amount (money), `pieces`: list |
+| `routes-by-return` | for each demand between two places, its routes of one or two legs over the modes on offer, ranked by return on investment | `places`: list, `demands`: list, `modes`: list, `prebuilt`: list | `routes`: list, `chosen`: list, `why`: list |
 
 Catalogue `sha256:97e08572418b44db62dd546959a396dceddb555aa5a49d12ad54a9bd7a455c8d` at AlgoGlyph `1b8e009059`: 53 kernels (`npm run --silent flow -- kernels`).
 
@@ -188,8 +215,9 @@ Catalogue `sha256:97e08572418b44db62dd546959a396dceddb555aa5a49d12ad54a9bd7a455c
 |---|---|---|---|---|---|
 | `portfolio-within-budget` | `knapsack-dp` | grid | verified | yes | **chosen**: the only compatible kernel |
 | `rail-line-price` | `track-planning` | custom | verified | yes | **chosen**: the only compatible kernel |
+| `routes-by-return` | `transport-investment` | custom | verified | no | **chosen**: the only compatible kernel |
 
-Every other kernel of the catalogue was considered and has no adapter for that capability (`portfolio-within-budget`: 52, `rail-line-price`: 52).
+Every other kernel of the catalogue was considered and has no adapter for that capability (`portfolio-within-budget`: 52, `rail-line-price`: 52, `routes-by-return`: 52).
 <!-- battlebrain capabilities:end -->
 
 ## Derived kernel contracts (I0228)
@@ -460,8 +488,10 @@ and `intent.rs`, are named gaps there. They stay until the cutover.
 - AlgoGlyph still has no kernel version, output schema or units. The invocation envelope pins
   the catalogue digest and checkout instead, and the adapters assert the mapping and the units
   ([proposal](algoglyph-contract-proposal.md)).
-- The planner (`cargo.rs`, `linecost.rs`) still calls `knapsack-dp` and `track-planning` by name.
-  Battlebrain checks that the planner's portfolio kernel agrees with the match. The planner's
-  track answers name no kernel, so that check does not cover them.
+- Battlebrain checks only the planner's portfolio kernel against its match (`PLAN_KERNELS`).
+  The line prices now name their kernel at `/freight/*/options/*/track/kernel/id` and
+  `/line_costs/kernel`, but the live refusal does not read them yet.
+- `routes-by-return` is a capability the planner computes and Battlebrain does not consume. A live
+  run with `--catalogue` is still refused when it resolves to no kernel.
 - The portfolio refuses a `knapsack-dp` answer that fails `domain_check` and records `fallback`
   and `truncation`, but its candidate cap (40) is not yet read from the plan's params.

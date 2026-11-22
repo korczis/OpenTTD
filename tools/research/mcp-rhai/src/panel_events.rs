@@ -91,6 +91,8 @@ pub const KINDS: &[Kind] = &[
     k("panel.operator", By::Panel, "panel.rs:Game::event", "`{text}`", "the operator approves, switches auto-approve, downloads content, is refused a console line"),
     k("panel.console", By::Panel, "panel.rs:Game::event", "`{text}`", "a console line sent through `POST /api/console`"),
     k("panel.rhai", By::Panel, "panel.rs:Game::event", "`{text}`", "a Rhai script ran"),
+    // The panel's supervisor of its Rhai services (panel_scripts.rs supervise): process liveness only.
+    k("service.supervised", By::Panel, "panel_scripts.rs:watch", "`{service, state: ended|restarted|restart_failed|stalled|gave_up, exit, restarts, quick_exits, quiet_s, stall_s, retry_in_s}`", "the supervisor gave a service that ended with an error a restart time, started it again, could not, stopped a stalled one or gave one up"),
     k("panel.view", By::Panel, "panel.rs:Game::event", "`{text}`", "a GUI client attached"),
     k("panel.ai", By::Panel, "panel.rs:Game::event", "`{text}`", "the bot's `planner:` lines, its start, the held start, calibration, Prismatic's directive"),
     k("panel.mesh", By::Panel, "panel.rs:Game::event", "`{text}`", "a plan.directive or plan.directive_outcome was mirrored to the Majordomus mesh as a typed record, or not (src/panel_mesh.rs; only with $MAJORDOMUS_URL and $MAJORDOMUS_SESSION)"),
@@ -258,6 +260,7 @@ mod tests {
         ("panel_bot.rs", include_str!("panel_bot.rs")),
         ("panel_decision.rs", include_str!("panel_decision.rs")),
         ("panel_results.rs", include_str!("panel_results.rs")),
+        ("panel_scripts.rs", include_str!("panel_scripts.rs")),
         ("panel_store.rs", include_str!("panel_store.rs")),
         ("rhai_shared.rs", include_str!("rhai_shared.rs")),
         ("panel_strategy.rs", include_str!("panel_strategy.rs")),
