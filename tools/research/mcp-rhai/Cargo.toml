@@ -12,6 +12,8 @@ rhai = { version = "1.19", features = ["serde", "metadata", "debugging"] }
 ureq = { version = "2.10", features = ["json"] }
 serde_json = "1"
 serde = "1"
+# battlebrain (I0095): SHA-256 digests of records, inputs and catalogues; already in the lock through rw-scenario.
+sha2 = "0.10"
 tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 # mcp-panel: signals (SIGINT/SIGTERM stop the game with the panel), kill(pid, 0), local time.
 libc = "0.2"
