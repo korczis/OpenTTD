@@ -34,11 +34,11 @@ value.
 <!-- surfaces:begin docs-index dir=.ai/repo/knowledge as=pie by=status -->
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by status
-    %% links: README.md?col=Status&filter=verified#records-generated | README.md?col=Status&filter=superseded#records-generated | README.md?col=Status&filter=active#records-generated | README.md?col=Status&filter=candidate#records-generated
+    %% links: README.md?col=Status&filter=verified#records-generated | README.md?col=Status&filter=candidate#records-generated | README.md?col=Status&filter=superseded#records-generated | README.md?col=Status&filter=active#records-generated
     "verified" : 84
+    "candidate" : 9
     "superseded" : 3
     "active" : 2
-    "candidate" : 1
 ```
 <!-- surfaces:end docs-index -->
 
@@ -46,8 +46,8 @@ pie showData title Documents under .ai/repo/knowledge/ by status
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by route
     %% links: README.md?col=Route&filter=platform#records-generated | README.md?col=Route&filter=project#records-generated | README.md?col=Route&filter=#records-generated | README.md?col=Route&filter=enforcement#records-generated | README.md?col=Route&filter=documentation#records-generated | README.md?col=Route&filter=generator#records-generated
-    "platform" : 61
-    "project" : 17
+    "platform" : 64
+    "project" : 22
     "unknown" : 4
     "enforcement" : 3
     "documentation" : 3
@@ -58,11 +58,11 @@ pie showData title Documents under .ai/repo/knowledge/ by route
 <!-- surfaces:begin docs-index dir=.ai/repo/knowledge as=pie by=epistemics -->
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by epistemics
-    %% links: README.md?col=Epistemics&filter=observed#records-generated | README.md?col=Epistemics&filter=decided#records-generated | README.md?col=Epistemics&filter=#records-generated | README.md?col=Epistemics&filter=inferred#records-generated
-    "observed" : 83
+    %% links: README.md?col=Epistemics&filter=observed#records-generated | README.md?col=Epistemics&filter=inferred#records-generated | README.md?col=Epistemics&filter=decided#records-generated | README.md?col=Epistemics&filter=#records-generated
+    "observed" : 90
+    "inferred" : 3
     "decided" : 3
     "unknown" : 2
-    "inferred" : 2
 ```
 <!-- surfaces:end docs-index -->
 
@@ -72,9 +72,17 @@ pie showData title Documents under .ai/repo/knowledge/ by epistemics
 | Document | Status | Route | Epistemics | What it is |
 |---|---|---|---|---|
 | [Candidate records](candidates/README.md) | active |  |  | What the tool derived from the ledger and git at an episode boundary and nobody has reviewed yet, discovered as a knowledge source class. |
+| [Resource reads of a running game span ticks; a planner capture is at one tick only through openttd.resources.read_many](candidates/a-planner-capture-is-coherent-only-through-read-many.md) | candidate | project | observed | Before treating a planner capture or a snapshot of a running game as one state, or deciding live from one. |
+| [AlgoGlyph's track-planning kernel answers found, unreachable or budget, never ok; only found prices a line](candidates/algoglyph-track-planning-answers-found-unreachable-or-budget.md) | candidate | project | observed | Before reading a track-planning answer, or writing a check, fixture or policy that tests its status. |
+| [One openttd.ai.set_settings approval covers several AI settings and expires at its expires_tick; any other approval lives 100000 ticks (~3.7 game years)](candidates/an-ai-set-settings-approval-expires-at-the-actions-own-stale-date.md) | candidate | platform | observed | Before applying several AI settings through the MCP server, or relying on an approval's lifetime to keep a decision from going stale. |
+| [Majordomus refuses an accepted ADR whose origin is extracted; the person adopting it makes it origin authored with an acceptance note](candidates/an-extracted-adr-is-accepted-by-the-person-who-adopts-it.md) | candidate | platform | observed | Before marking an ADR that Majordomus extracted as accepted. |
 | [Held-start duel pairs on three seeds did not confirm air_add_waiting=10 with catchment_stops=8, which won the paired battle](candidates/held-start-duel-pairs-did-not-confirm-the-air-and-catchment-defaults.md) | superseded | project | observed | Before claiming a bot default from duels, or reading the battle's paired win of air_add_waiting/catchment_stops; ten-year held-start pairs were inconclusive while 36 paired battle seeds favoured the change. |
+| [majordomus start finds an issue only once its file is staged, and refuses one whose YAML has a multi-line plain scalar with '- ' lines](candidates/majordomus-start-binds-an-issue-only-from-the-git-index.md) | candidate | platform | observed | Before running majordomus start --issue for an issue file just written. |
 | [MCP approvals outlive a server stop, a token rotation and a new world; only their tick TTL and use retire them](candidates/mcp-approvals-survive-stop-rotation-and-a-new-world.md) | superseded | platform | observed | Before treating a token rotation or a restart of the MCP server as revoking what was approved. |
+| [Planner v4 chooses its portfolio against difficulty.max_loan, not what the company can spend now; on the co-play game its pick was over budget or unpriced in two of three shadow runs](candidates/planner-v4-budgets-against-max-loan-not-money-now.md) | candidate | project | observed | Before taking planner v4's chosen line as affordable or priced, or using it as the Battlebrain baseline. |
+| [Planner v4 names industries by world-graph id ("industry:41"), not by number; battlebrain_contract::graph_number is the one normalisation](candidates/planner-v4-ids-are-world-graph-ids-read-through-graph-number.md) | candidate | project | observed | Before comparing, storing or passing on a producer or acceptor id taken from mcp-plan, the world graph or a Battlebrain record. |
 | [PrismaticAI trails AAAHogEx on network breadth; raising its caps or growing its stations does not close the gap](candidates/prismatic-ai-falls-behind-aaahogex-on-breadth-not-caps.md) | candidate | project | observed | Before tuning PrismaticAI caps, station growth or feeders to catch AAAHogEx; replayed A/Bs on 2026-11-22 show which levers move value and which do not. |
+| [Rhai's default expression and call depth limits are half as deep in a debug build, so a deep script can parse in release and fail in debug](candidates/rhai-expression-depth-is-halved-in-a-debug-build.md) | candidate | project | inferred | Before running the mcp-rhai tests in a debug build, or reading an ExprTooDeep / 'Expression exceeds maximum complexity' failure of a script that passes in release. |
 | [openttd://vehicles reports the front vehicle's cargo capacity only, so a train led by an engine shows 0](candidates/vehicles-resource-gives-the-front-vehicles-capacity-only.md) | superseded | platform | observed | Before computing a fleet's or a route's capacity from openttd://vehicles. |
 | [Curated notes](curated/README.md) | active |  |  | What this repository chose to write about itself, discovered as a knowledge source class. |
 | [A PrismaticAI change that moves a few units of money in every game sends exact replays down other paths](curated/a-bot-change-that-moves-money-in-every-game-replays-as-chaos.md) | verified | project | observed | Before reading an ablate --match A/B of a PrismaticAI change: replays are exact, so any game-state difference, even a few units of interest, diverges the whole game, and a few replays then measure chaos, not the change. |
