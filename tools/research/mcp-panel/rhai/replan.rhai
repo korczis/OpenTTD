@@ -197,6 +197,16 @@ fn model(rec, portfolio, monthly) {
     out
 }
 
+// How many setting changes for this company wait for the owner's approval now (the panel's
+// pending decisions). While any wait, a round proposes nothing new.
+fn waiting_for_owner(company) {
+    let n = 0;
+    for d in status().pending ?? [] {
+        if d.tool == "openttd.ai.set_setting" && (d.args ?? #{}).company == company { n += 1; }
+    }
+    n
+}
+
 // "a=1,b=2" -> #{a: 1, b: 2}
 fn settings_of(s) {
     let m = #{};
@@ -289,7 +299,15 @@ fn plan_round(b) {
 
     let diff = changes(settings_of(p.settings), b.settings ?? []);
     let applied = #{ pending: [], refused: [], lines: [] };
-    if m.adopt && !diff.is_empty() {
+    let waiting = waiting_for_owner(b.id);
+    let owner_of = shared_get(`planner.${b.id}`) ?? "replan";
+    if owner_of != "replan" {
+        // Another planner holds the company (e.g. Battlebrain's directive): one writer per company.
+        print(`   holding: company ${b.id + 1} is planned by ${owner_of} (shared key planner.${b.id})`);
+    } else if waiting > 0 {
+        // The owner has not answered the last proposal yet; a new one would only pile up beside it.
+        print(`   holding: ${waiting} earlier change(s) for company ${b.id + 1} still wait for the owner's approval`);
+    } else if m.adopt && !diff.is_empty() {
         applied = bp::apply(#{ build: #{ settings: diff } });
         for l in applied.lines { print(`   ${l}`); }
         say(`new plan for ${b.name}: ${diff.len()} setting(s) wait for your approval (${applied.pending}); ${m.why}`);
