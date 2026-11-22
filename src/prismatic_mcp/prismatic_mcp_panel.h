@@ -75,6 +75,14 @@ std::string ConsentCommand(bool approve, uint64_t id);
  */
 bool Show();
 
+/**
+ * A private chat line from the game server, on a network client. True when it is part of the
+ * server's answer to '!approvals' that this client asked for itself (the window's quiet refresh):
+ * the line then updates the server's queue the window shows and is not printed. Any other
+ * "[approvals]" line updates the queue as well and is printed as usual (false).
+ */
+bool OnServerChat(std::string_view msg);
+
 /** openttd.ui.control: the descriptor of the read-only tool that answers Snapshot(). */
 nlohmann::json Tool();
 
