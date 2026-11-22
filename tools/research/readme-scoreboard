@@ -67,7 +67,8 @@ def load():
             "b": int(final["2"]["value"]),
             "won": str(data.get("winner", "")).startswith("A"),
             "held": bool(data.get("held_start")),
-            "b_rail": int(final["2"].get("trains") or 0) > 0,
+            # None when the record holds no fleet split for B: unknown, never counted as "no train"
+            "b_rail": None if final["2"].get("trains") is None else int(final["2"]["trains"]) > 0,
         })
     return runs
 
@@ -78,7 +79,8 @@ def mix(runs):
     months = sorted({r["months"] for r in runs if isinstance(r["months"], int)})
     return {"months_min": months[0] if months else None, "months_max": months[-1] if months else None,
             "held_start": sum(r["held"] for r in runs),
-            "rival_without_rail": sum(not r["b_rail"] for r in runs)}
+            "rival_without_rail": sum(r["b_rail"] is False for r in runs),
+            "fleet_recorded": sum(r["b_rail"] is not None for r in runs)}
 
 
 def render(runs):
@@ -102,7 +104,8 @@ def render(runs):
         f"> That tally counts separate experiments, not one: the records run {m['months_min']} to "
         f"{m['months_max']} months, {m['held_start']} of them from a held start, with bot revisions "
         f"and settings that changed between runs (each row's label names its change). In "
-        f"{m['rival_without_rail']} of {len(runs)} the rival ran no train. Which rival each record ran "
+        f"{m['rival_without_rail']} of the {m['fleet_recorded']} that record the rival's fleet, the rival "
+        "ran no train. Which rival each record ran "
         "against, and what company value counts and leaves out, is in the "
         "[duel evidence audit](research/duel-evidence-audit.md).",
         "",
