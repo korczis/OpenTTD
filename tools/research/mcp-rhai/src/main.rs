@@ -929,8 +929,11 @@ mod tests {
     /// for AlgoGlyph parity; runs only where an AlgoGlyph checkout with that kernel is found.
     #[test]
     fn a_script_gets_the_human_pointing_kernel_bit_for_bit() {
-        if !algoglyph::dir().join("src/plates/human-pointing").is_dir() {
-            eprintln!("skip: no AlgoGlyph checkout with human-pointing at {}", algoglyph::dir().display());
+        // The pinned submodule is checked out wherever mcp-rhai builds, but its flow CLI runs only
+        // once its node_modules are installed (algoglyph-pin install): a checkout that cannot run is
+        // a skip, as one without the kernel is.
+        if !algoglyph::runnable(&algoglyph::dir()) || !algoglyph::dir().join("src/plates/human-pointing").is_dir() {
+            eprintln!("skip: no installed AlgoGlyph checkout with human-pointing at {}", algoglyph::dir().display());
             return;
         }
         let golden: Value = serde_json::from_str(&std::fs::read_to_string(
