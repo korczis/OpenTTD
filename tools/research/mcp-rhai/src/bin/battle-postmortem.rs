@@ -13,6 +13,9 @@
 //!   battle-postmortem [--edition E | --newest] [--db PATH] [--config battle.json] [--out DIR]
 //!                     [--duckdb PATH | --no-duckdb] [--matches DIR] [--json]
 //!   battle-postmortem check [--out DIR]     every postmortem-*.md is what its .json derives (exit 11 if not)
+//!   battle-postmortem render [--out DIR]    rewrite every postmortem-*.md from its .json (tables and
+//!                     charts; no store, no match record, no game): how a renderer change reaches
+//!                     every committed page
 //!   battle-postmortem editions [--db PATH]  the editions in the store, newest first
 //!   battle-postmortem watch [--every 60] ... the post-round loop: whenever the newest edition has
 //!                     more finished matches than at the last look, analyse it again into
@@ -23,7 +26,8 @@
 //!                     Majordomus board (named claims battle.postmortem.*), so every session on the
 //!                     mesh reads where PrismaticAI stands without asking; --no-board turns it off,
 //!                     $MCP_BOARD_DRY prints instead.
-//! Exit codes: 0 ok, 2 usage, 11 a derived file is stale, 12 no data for the edition.
+//! Exit codes: 0 ok, 2 usage, 11 a derived file is stale (check) or a record is not v1 (render),
+//! 12 no data for the edition, 13 a file could not be written.
 #[path = "../postmortem.rs"]
 mod postmortem;
 // watch never ends, so it never closes its board session (the board keeps the last posts).
@@ -63,7 +67,7 @@ struct Args {
 }
 
 fn usage(msg: &str) -> ! {
-    eprintln!("battle-postmortem: {msg}\nusage: battle-postmortem [check|editions] [--edition E|--newest] [--db PATH] \
+    eprintln!("battle-postmortem: {msg}\nusage: battle-postmortem [check|render|editions] [--edition E|--newest] [--db PATH] \
                [--config battle.json] [--out DIR] [--duckdb PATH|--no-duckdb] [--matches DIR] [--json]");
     std::process::exit(2)
 }
@@ -86,7 +90,7 @@ fn args() -> Args {
     while let Some(x) = it.next() {
         let mut val = |name: &str| it.next().unwrap_or_else(|| usage(&format!("{name} needs a value")));
         match x.as_str() {
-            "check" | "editions" | "run" | "watch" => a.cmd = x,
+            "check" | "editions" | "render" | "run" | "watch" => a.cmd = x,
             "--every" => a.every = val("--every").parse().unwrap_or_else(|_| usage("--every needs seconds")),
             "--edition" => a.edition = Some(val("--edition")),
             "--newest" => a.edition = None,
@@ -254,15 +258,47 @@ fn write_duckdb(_: &Path, _: &Value) -> Result<(), String> {
     Err("built without the store feature: no DuckDB output".into())
 }
 
+/// The post-mortem records under `out`: every postmortem-*.json, sorted.
+fn records(out: &Path) -> Vec<PathBuf> {
+    let Ok(dir) = std::fs::read_dir(out) else { return vec![] };
+    let mut files: Vec<PathBuf> = dir.filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.file_name().and_then(|f| f.to_str()).is_some_and(|f| f.starts_with("postmortem-") && f.ends_with(".json"))).collect();
+    files.sort();
+    files
+}
+
+/// `render`: every postmortem-*.md under `out` rewritten from its .json (the page, its charts
+/// included, is derived from the JSON only). A record that is not a battle-postmortem/v1 JSON is
+/// left alone and counted.
+fn render(out: &Path) -> i32 {
+    let (mut n, mut written, mut bad) = (0, 0, 0);
+    for j in records(out) {
+        n += 1;
+        let pm: Option<Value> = std::fs::read_to_string(&j).ok().and_then(|t| serde_json::from_str(&t).ok());
+        let Some(pm) = pm.filter(|pm| pm["schema"] == "battle-postmortem/v1") else {
+            eprintln!("SKIP {}: not a battle-postmortem/v1 record", j.display());
+            bad += 1;
+            continue;
+        };
+        let md = j.with_extension("md");
+        let text = postmortem::markdown(&pm);
+        if std::fs::read_to_string(&md).ok().as_deref() != Some(text.as_str()) {
+            if let Err(err) = std::fs::write(&md, text) {
+                eprintln!("battle-postmortem render: {}: {err}", md.display());
+                return 13;
+            }
+            written += 1;
+        }
+    }
+    println!("battle-postmortem render: {written} of {n} page(s) rewritten, {bad} skipped");
+    if bad > 0 { 11 } else { 0 }
+}
+
 /// Every postmortem-*.md under `out` equals what its .json derives.
 fn check(out: &Path) -> i32 {
     let mut stale = 0;
     let mut n = 0;
-    let Ok(dir) = std::fs::read_dir(out) else { return 0 };
-    let mut files: Vec<PathBuf> = dir.filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.file_name().and_then(|f| f.to_str()).is_some_and(|f| f.starts_with("postmortem-") && f.ends_with(".json"))).collect();
-    files.sort();
-    for j in files {
+    for j in records(out) {
         n += 1;
         let md = j.with_extension("md");
         let pm: Value = match std::fs::read_to_string(&j).ok().and_then(|t| serde_json::from_str(&t).ok()) {
@@ -275,8 +311,7 @@ fn check(out: &Path) -> i32 {
             continue;
         }
         if std::fs::read_to_string(&md).ok().as_deref() != Some(postmortem::markdown(&pm).as_str()) {
-            eprintln!("STALE {}: not what {} derives (run battle-postmortem --edition {})", md.display(), j.display(),
-                pm["edition"].as_str().unwrap_or("?"));
+            eprintln!("STALE {}: not what {} derives (run battle-postmortem render)", md.display(), j.display());
             stale += 1;
         }
     }
@@ -359,6 +394,7 @@ fn main() {
     }
     match a.cmd.as_str() {
         "check" => std::process::exit(check(&a.out)),
+        "render" => std::process::exit(render(&a.out)),
         "editions" => {
             match editions(&a.db) {
                 Ok(es) => es.iter().for_each(|e| println!("{e}")),
