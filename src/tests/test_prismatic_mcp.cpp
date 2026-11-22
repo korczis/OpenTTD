@@ -13,6 +13,8 @@
 #include "../core/format.hpp"
 #include "../prismatic_mcp/prismatic_mcp_detail.h"
 #include "../prismatic_mcp/prismatic_mcp_menu.h"
+#include "../prismatic_mcp/prismatic_mcp.h"
+#include "../prismatic_mcp/prismatic_mcp_panel.h"
 #include "../prismatic_mcp/prismatic_mcp_ui.h"
 #include "../prismatic_mcp/prismatic_mcp_console.h"
 #include "../prismatic_mcp/prismatic_mcp_view.h"
@@ -276,6 +278,63 @@ TEST_CASE("The toolbar menu is one table, described item for item", "[prismatic_
 	CHECK(d["hub"].get<std::string>().rfind("http", 0) == 0);
 }
 
+TEST_CASE("The control window is a snapshot of what the console and the menu already read", "[prismatic_mcp]")
+{
+	namespace M = PrismaticMCP::Menu;
+	namespace P = PrismaticMCP::Panel;
+	/* The window opens from the menu's first row; a process without an interface opens nothing. */
+	REQUIRE(M::Items()[0].action == M::Action::Window);
+	CHECK(M::Describe()["items"][0]["action"] == "window");
+	CHECK(M::Call("openttd.ui.menu.run", {{"index", 0}})->value("ok", true) == false);
+	CHECK_FALSE(P::Show());
+
+	json s = P::Snapshot();
+	for (const char *key : {"status", "approvals", "decisions", "requests", "switches", "links"}) CHECK(s.contains(key));
+	CHECK(s["status"].is_string());
+	CHECK(s["approvals"].size() == PrismaticMCP::PendingApprovals().size());
+	/* Switches and links come from the menu's own table, never from a list of the window's. */
+	size_t toggles = 0, browses = 0;
+	for (const auto &item : M::Items()) {
+		toggles += item.action == M::Action::Toggle;
+		browses += item.action == M::Action::Browse;
+	}
+	CHECK(s["switches"].size() == toggles);
+	CHECK(s["links"].size() == browses);
+	/* A request typed in the game is in the snapshot at once. */
+	uint64_t id = M::Queue("watch", "");
+	CHECK(P::Snapshot()["requests"].back()["id"] == id);
+
+	/* openttd.ui.control answers the same snapshot, read-only. */
+	auto tool = M::Call("openttd.ui.control", json::object());
+	REQUIRE(tool.has_value());
+	CHECK(tool->value("ok", false));
+	CHECK((*tool)["approvals"] == P::Snapshot()["approvals"]);
+	CHECK(P::Tool()["annotations"]["readOnlyHint"] == true);
+}
+
+TEST_CASE("Only the owner's own click consents in the control window", "[prismatic_mcp]")
+{
+	namespace P = PrismaticMCP::Panel;
+	namespace U = PrismaticMCP::UI;
+	CHECK_FALSE(U::InjectingInput());
+	CHECK_FALSE(P::ConsentRefusal(true).has_value());
+	CHECK_FALSE(P::ConsentRefusal(false).has_value());
+	{
+		U::InjectionScope script; // as an openttd.input.* tool does around the input it feeds
+		CHECK(U::InjectingInput());
+		CHECK(P::ConsentRefusal(true).has_value());   // a script never approves
+		CHECK_FALSE(P::ConsentRefusal(false).has_value()); // withdrawing a request is anyone's
+		{
+			U::InjectionScope nested(false);
+			CHECK(U::InjectingInput()); // an inner scope never clears an outer one
+		}
+	}
+	CHECK_FALSE(U::InjectingInput());
+	/* Consent goes through the console's own command, the path the owner types. */
+	CHECK(P::ConsentCommand(true, 7) == "prismatic_mcp approve 7");
+	CHECK(P::ConsentCommand(false, 12) == "prismatic_mcp deny 12");
+}
+
 TEST_CASE("A request is queued, listed with its kind and answered once", "[prismatic_mcp]")
 {
 	namespace M = PrismaticMCP::Menu;
@@ -306,7 +365,8 @@ TEST_CASE("A request is queued, listed with its kind and answered once", "[prism
 	CHECK(M::Ask("") == 0); // nothing to ask: no request is queued
 	CHECK(M::Requests()["requests"].size() == before_ask + 1);
 
-	for (const auto &t : M::Tools()) CHECK(t["annotations"]["readOnlyHint"] == false); // a coverage probe must not run them
+	/* A coverage probe must not run the menu's tools, which act; only the control snapshot reads. */
+	for (const auto &t : M::Tools()) CHECK(t["annotations"]["readOnlyHint"] == (t["name"] == "openttd.ui.control"));
 }
 
 /* ---- the catalogue as console commands (prismatic_mcp_console.cpp) ---------------------------- */
@@ -476,12 +536,15 @@ TEST_CASE("Console completion is derived from the catalogue, with or without a l
 	CHECK(complete({}, "mc").empty());
 }
 
-TEST_CASE("A dedicated server has no toolbar, so nothing of the menu", "[prismatic_mcp]")
+TEST_CASE("A dedicated server has no toolbar: of the menu only the control snapshot", "[prismatic_mcp]")
 {
 	namespace M = PrismaticMCP::Menu;
 	const bool was = _network_dedicated;
 	_network_dedicated = true;
-	CHECK(M::Tools().empty());
+	/* What the control window shows stays readable: the approvals live on a dedicated server. */
+	REQUIRE(M::Tools().size() == 1);
+	CHECK(M::Tools()[0]["name"] == "openttd.ui.control");
+	CHECK(M::Call("openttd.ui.control", json::object())->value("ok", false));
 	CHECK(M::Call("openttd.ui.menu.run", {{"index", 0}})->value("ok", true) == false);
 	CHECK(M::Call("openttd.ui.requests.answer", {{"id", 1}, {"answer", "x"}})->value("ok", true) == false);
 	CHECK(M::Describe()["items"].empty());

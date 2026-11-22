@@ -2,13 +2,14 @@
 
 The catalogue is what a running server answers to `tools/list`; nothing here is a second copy of
 it. Each instance lists only what it can do (a dedicated server has no window: no `openttd.view.*`,
-`openttd.ui.*` or toolbar-menu tool). The tool families, by module:
+`openttd.ui.*` or toolbar-menu tool, except the read-only `openttd.ui.control` snapshot). The tool families, by module:
 
 | Family | Module | What it does | Approval |
 |---|---|---|---|
 | `openttd.view.*` | `prismatic_mcp_view.cpp` | the local viewport, news, questions to the player | none, local to the client |
 | `openttd.ui.*`, `openttd.input.*` | `prismatic_mcp_ui.cpp` | the interface as data, armed input through the driver | none; input only when armed in the console |
-| `openttd.ui.menu.run`, `openttd.ui.requests.answer` | `prismatic_mcp_menu.cpp` | the fork's toolbar menu and the requests asked through it | none, local to the client |
+| `openttd.ui.menu.run`, `openttd.ui.requests.answer` | `prismatic_mcp_menu.cpp` | the fork's toolbar menu and the requests asked through it; the menu's first row opens the Prismatic control window | none, local to the client |
+| `openttd.ui.control` | `prismatic_mcp_panel.cpp` | what the Prismatic control window shows, as data: the server's status, every approval still waiting (id, tool, exact arguments, expired), the latest decisions with their verdicts, the questions asked in the game, the menu's switches and hub links; in every process, a dedicated server included, since that is where approvals wait | none, read-only |
 | `openttd.decision.validate`, `openttd.decision.list_action_types` | `prismatic_mcp_server.cpp` | check a typed action, list the action types | none, read-only |
 | `openttd.decision.submit`, `openttd.game.set_pause` | `prismatic_mcp_server.cpp` | a typed action through the command system | the operator approves or denies in the console (`prismatic_mcp approve|deny <id>`), digest-bound, one use |
 | `openttd.cmd.<Name>` | `prismatic_mcp_commands.cpp`, `prismatic_mcp_params.hpp` | one tool per game command (`Commands` enum) whose parameters convert from JSON, derived from the command table; validated by a side-effect-free test run, posted through the network-safe command path, the verdict read with `openttd.decision.get` | the same approval as `submit` |

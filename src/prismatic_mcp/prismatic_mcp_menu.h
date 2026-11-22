@@ -32,6 +32,7 @@ enum class Action : uint8_t {
 	Ask,     ///< Ask a question in plain language (queued as a request of kind "ask" for any MCP client to answer).
 	Request, ///< Queue a request of a fixed kind (arg) for the tile under the main view's centre, no text typed.
 	Toggle,  ///< Call an MCP tool (arg) with {key: on|off}, flipping a switch the item shows as checked.
+	Window,  ///< Open one of the fork's own windows (arg names it: "control").
 };
 
 /** One item of the menu. The table of these is the only place the menu is written down. */
@@ -73,7 +74,7 @@ nlohmann::json Describe();
 /** openttd://ui/requests: every request typed in the game, answered or not. */
 nlohmann::json Requests();
 
-/** The tools of this module: openttd.ui.menu.run and openttd.ui.requests.answer. */
+/** The tools of this module: openttd.ui.control (in every process), openttd.ui.menu.run and openttd.ui.requests.answer (where there is a toolbar). */
 nlohmann::json Tools();
 
 /**

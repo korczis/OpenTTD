@@ -100,8 +100,11 @@ changes the world only through the game's own command system: every game command
 (`openttd.cmd.<Command>`) and every Script API function (`openttd.api.<Class>.<Function>`) is a
 tool, and so are the company AIs (`openttd.ai.*`) and the owner's window (`openttd.view.*`). A call
 that changes the game waits until the operator approves those exact arguments, in the console
-(`prismatic_mcp approve <id>`) or in the panel. The bot's yes/no questions appear in the game
-itself, and the owner can let them confirm themselves after a countdown.
+(`prismatic_mcp approve <id>`), in the panel, or in the game's own *Prismatic control* window
+(first row of the fork's toolbar menu), which lists every approval waiting, the latest decisions and
+their verdicts, and accepts an approval only from the owner's own click
+([details](research/mcp-control.md#the-prismatic-control-window-in-the-game)). The bot's yes/no
+questions appear in the game itself, and the owner can let them confirm themselves after a countdown.
 
 ```bash
 tools/gate.sh research    # once: the MCP-enabled build and its tests
@@ -648,7 +651,7 @@ from the code. The right-hand column says what was counted.
 |---|---|---|
 | **146** | [game commands, each an MCP tool an agent can call (`openttd.cmd.*`)](research/mcp-api.md) | `DEF_CMD_TRAIT\(Commands::` in `src/*_cmd.h` |
 | **22** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
-| **29** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
+| **31** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
 | **44** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **12** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |

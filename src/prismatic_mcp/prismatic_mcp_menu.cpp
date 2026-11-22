@@ -23,6 +23,7 @@
 #ifdef OTTD_PRISMATIC_MCP_SERVER
 
 #include "prismatic_mcp_menu.h"
+#include "prismatic_mcp_panel.h"
 #include "prismatic_mcp_view.h"
 
 #include "../console_func.h"
@@ -48,7 +49,8 @@ using json = nlohmann::json;
 
 namespace PrismaticMCP::Menu {
 
-static constexpr std::array<Item, 13> ITEMS = {{
+static constexpr std::array<Item, 14> ITEMS = {{
+	{"Prismatic control...", Action::Window, "control"},
 	{"MCP server: status", Action::Console, "prismatic_mcp status"},
 	{"MCP server: start", Action::Console, "prismatic_mcp start"},
 	{"MCP approvals waiting", Action::Console, "prismatic_mcp approvals"},
@@ -87,6 +89,12 @@ DropDownList DropDown()
 	for (size_t i = 0; i < ITEMS.size(); i++) {
 		if (ITEMS[i].action == Action::Toggle) {
 			list.push_back(std::make_unique<DropDownListCheckedItem>(0, _toggled[i], std::string{ITEMS[i].label}, static_cast<int>(i)));
+		} else if (ITEMS[i].action == Action::Window) {
+			/* The window's row says, when the menu opens, how many approvals wait for the owner. */
+			size_t waiting = Panel::Snapshot()["approvals"].size();
+			std::string label{ITEMS[i].label};
+			if (waiting > 0) label = fmt::format("{} ({} waiting)", label.substr(0, label.find("...")), waiting);
+			list.push_back(MakeDropDownListStringItem(std::move(label), static_cast<int>(i)));
 		} else {
 			list.push_back(MakeDropDownListStringItem(std::string{ITEMS[i].label}, static_cast<int>(i)));
 		}
@@ -113,6 +121,7 @@ static std::string_view ActionName(Action a)
 		case Action::Ask: return "ask";
 		case Action::Request: return "request";
 		case Action::Toggle: return "toggle";
+		case Action::Window: return "window";
 	}
 	return "unknown";
 }
@@ -136,6 +145,9 @@ bool Run(int index)
 			return false;
 		case Action::Toggle:
 			Flip(index);
+			return false;
+		case Action::Window:
+			Panel::Show();
 			return false;
 	}
 	return false;
@@ -212,10 +224,12 @@ json Requests()
 json Tools()
 {
 	json arr = json::array();
+	/* What the control window shows is data in every process: a dedicated server holds the approvals. */
+	arr.push_back(Panel::Tool());
 	/* Each instance's catalogue is what it can do: a dedicated server has no toolbar to run. */
 	if (_network_dedicated) return arr;
 	arr.push_back({{"name", "openttd.ui.menu.run"},
-		{"description", "Run an item of the fork's toolbar menu (openttd://ui/menu) as a click on it does: a console command, a hub page in the browser, or with text for the Ask item, a request. Local to this process"},
+		{"description", "Run an item of the fork's toolbar menu (openttd://ui/menu) as a click on it does: a console command, a hub page in the browser, a fork window (the Prismatic control window), or with text for the Ask item, a request. Local to this process"},
 		{"inputSchema", {{"type", "object"}, {"required", json::array({"index"})},
 			{"properties", {{"index", {{"type", "integer"}}}, {"text", {{"type", "string"}}}}}}},
 		/* Not read-only: a row runs a console command, opens a browser, queues a request or flips a switch. */
@@ -230,6 +244,11 @@ json Tools()
 
 std::optional<json> Call(std::string_view name, const json &args)
 {
+	if (name == "openttd.ui.control") {
+		json out = Panel::Snapshot();
+		out["ok"] = true;
+		return out;
+	}
 	if (_network_dedicated && (name == "openttd.ui.menu.run" || name == "openttd.ui.requests.answer")) {
 		return json{{"ok", false}, {"error", "no toolbar on a dedicated server"}};
 	}
@@ -246,6 +265,9 @@ std::optional<json> Call(std::string_view name, const json &args)
 				return json{{"ok", true}, {"request", Queue(ITEMS[index].arg, args.value("text", ""))}};
 			case Action::Toggle:
 				return Flip(index);
+			case Action::Window:
+				if (!Panel::Show()) return json{{"ok", false}, {"error", "no interface in this process to open a window in"}};
+				return json{{"ok", true}, {"opened", ITEMS[index].arg}};
 			default:
 				break;
 		}

@@ -577,11 +577,32 @@ json Tools()
 	return arr;
 }
 
+/** True while an openttd.input.* tool feeds the window system (InjectionScope). */
+static bool _injecting = false;
+
+bool InjectingInput()
+{
+	return _injecting;
+}
+
+InjectionScope::InjectionScope(bool on) : previous(_injecting)
+{
+	if (on) _injecting = true;
+}
+
+InjectionScope::~InjectionScope()
+{
+	_injecting = this->previous;
+}
+
 std::optional<json> Call(const std::string &name, const json &args)
 {
 	bool ui = name.rfind("openttd.ui.", 0) == 0;
 	bool input = name.rfind("openttd.input.", 0) == 0;
 	if (!ui && !input) return std::nullopt;
+	/* Everything an input tool makes the window system do is marked as injected, so a window that
+	 * consents on the owner's behalf can tell a script's click from the owner's own. */
+	InjectionScope injected(input);
 
 	Window *main = MainWindow();
 	if (main == nullptr || main->viewport == nullptr) return Error("no interface in this process (a dedicated server has none)");
