@@ -55,6 +55,8 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 | `H_TILE=9` / `H_TILE=11` vs 7, on `5cc9cdbf8d` | 24 / 12 | +8.8% / +8.7% | 15 / 4 |
 | master `6333347512` (#232 second track, sibling claims, air yield log) vs `5cc9cdbf8d` | 24 | -1.0% | 12 |
 | `H_TILE=8` vs 7, on `6333347512` | 24 | +0.9% | 12 |
+| master `fdc13851cf` (a failed own line no longer uses up `own_lines`) vs `6333347512` | 24 | -0.6% | 0 (0.87 to 1.00: mostly unchanged) |
+| own freight planner production floor 25 instead of 40, on `fdc13851cf` | 12 | +0.7% | 8 (249 trains against 232) |
 
 # How to apply it
 
