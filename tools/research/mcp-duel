@@ -25,12 +25,21 @@
 # into the store. Without a store the duel reads as before (the newest 200 panel sentences of
 # /api/status, at most 5000 bus events, the console's months) and the record says why (`fallback`).
 #
+# Every record's page carries charts (company value and fleet per month, A against B) between
+# `<!-- duel-charts:begin -->` and `<!-- duel-charts:end -->`, derived from its JSON alone. `--render`
+# rewrites that region in every tracked research/results/duel-*.md (inserting it above the month table
+# of a page written before the charts) and starts no game; `--render --check` writes nothing and exits
+# 11 while a page is stale. `tools/surfaces/surfaces sync` runs the first, `surfaces check` the second
+# (surfaces.toml, generator duel-charts), so a change of the charts reaches every page in one commit.
+#
 # Usage: tools/research/mcp-duel [--months 24] [--seed N] [--label text] [--opponent AI]
 #                               [--bot-settings k=v,...]
-# Exit: 0 the duel completed (whoever won), 1 the stack did not come up, 2 bad arguments.
+#        tools/research/mcp-duel --render [--check]
+# Exit: 0 the duel completed (whoever won) or the pages are current, 1 the stack did not come up,
+# 2 bad arguments, 11 (--render --check) a page's charts are stale.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MONTHS=24 SEED="$RANDOM" LABEL="" OPPONENT="PrismaticAI" BOT_SETTINGS=""
+MONTHS=24 SEED="$RANDOM" LABEL="" OPPONENT="PrismaticAI" BOT_SETTINGS="" RENDER="" CHECK=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --months) MONTHS="${2:?}"; shift 2 ;;
@@ -38,10 +47,31 @@ while [[ $# -gt 0 ]]; do
     --label) LABEL="${2:?}"; shift 2 ;;
     --opponent) OPPONENT="${2:?}"; shift 2 ;;
     --bot-settings) BOT_SETTINGS="${2:?}"; shift 2 ;;
+    --render) RENDER=1; shift ;;
+    --check) CHECK=1; shift ;;
     -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
-    *) echo "usage: mcp-duel [--months N] [--seed N] [--label text] [--opponent AI] [--bot-settings k=v,...]" >&2; exit 2 ;;
+    *) echo "usage: mcp-duel [--months N] [--seed N] [--label text] [--opponent AI] [--bot-settings k=v,...] | --render [--check]" >&2; exit 2 ;;
   esac
 done
+if [[ -n "$CHECK" && -z "$RENDER" ]]; then
+  echo "mcp-duel: --check goes with --render" >&2; exit 2
+fi
+if [[ -n "$RENDER" ]]; then
+  # The duel's own Python (the heredoc below, as test_mcp_duel.py loads it), run for its pages only:
+  # no stack, no game, nothing but research/results read and (without --check) its pages written.
+  exec python3 -I - "$ROOT_DIR" "$CHECK" <<'RENDER'
+import re
+import sys
+import types
+from pathlib import Path
+
+root = Path(sys.argv[1])
+script = root / "tools" / "research" / "mcp-duel"
+mod = types.ModuleType("mcp_duel")
+exec(compile(re.search(r"<<'PY'\n(.*?)\nPY\n", script.read_text(), re.S)[1], f"{script} (heredoc)", "exec"), mod.__dict__)
+sys.exit(mod.render_pages(root, check=bool(sys.argv[2])))
+RENDER
+fi
 free() { python3 -I -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
 PANEL="$(free)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/mcp-duel.XXXXXX")"
@@ -78,6 +108,7 @@ fi
 # offline against a fake panel: everything is a function, and the duel runs under __main__ only.
 python3 -I - "$PANEL" "$MONTHS" "$SEED" "$LABEL" "$ROOT_DIR" "$OPPONENT" "$BOT_SETTINGS" <<'PY'
 import json
+import math
 import os
 import re
 import subprocess
@@ -592,8 +623,145 @@ def duel(panel, cfg, poll=POLL, sleep=time.sleep):
         "series": series, "bot_log": reads["bot_log"]}}
 
 
-def markdown(rec, b_name):
-    """The record's reading."""
+# ---------------------------------------------------------------------- the charts
+
+# The charts of a page sit between these markers: tools/surfaces/surfaces check refuses a chart
+# outside a generated region, and --render rewrites exactly this region of every page.
+CHARTS_BEGIN, CHARTS_END = "<!-- duel-charts:begin -->", "<!-- duel-charts:end -->"
+# The NoirGFX palette (tools/research/noirgfx/style.toml) the README scoreboard draws in too.
+STYLE = Path("tools") / "research" / "noirgfx" / "style.toml"
+
+
+def b_name_of(rec):
+    """Who B is, as duel() names it: the same bot unplanned, or the opponent AI (records before
+    --opponent ran the same bot)."""
+    opponent = rec.get("opponent") or "PrismaticAI"
+    return "unplanned" if opponent == "PrismaticAI" else opponent
+
+
+def mermaid_num(v):
+    """Plain digits, never an exponent (Mermaid cannot parse 1.0e+08); as tools/surfaces/surfaces.py."""
+    if float(v).is_integer():
+        return str(int(v))
+    return f"{v:.6f}".rstrip("0").rstrip(".")
+
+
+def mermaid_xy(title, labels, series, y_title, palette, links=None):
+    """A Mermaid xychart-beta: a bar for the first series, a line for each further one. GitHub draws
+    it; the site reads it back and draws it with ECharts, naming the series from `%% series:` and
+    opening each mark's `%% links:` target (tools/surfaces/README.md "Charts")."""
+    label = lambda t: str(t).replace('"', "'")
+    values = [v for _, vals in series for v in vals]
+    whole = all(float(v).is_integer() for v in values)  # a count's axis ends on a whole number
+
+    def span(v):
+        edge = float(f"{v * 1.1:.3g}")
+        return mermaid_num((math.ceil(edge) if edge > 0 else math.floor(edge)) if whole else edge) if v else "0"
+    lines = ["```mermaid", "---", "config:", "  xyChart:", "    width: 900", "    height: 360",
+             "  themeVariables:", "    xyChart:", f'      plotColorPalette: "{palette}"', "---",
+             "xychart-beta", f'    title "{label(title)}"', "    x-axis [" + ", ".join(f'"{label(x)}"' for x in labels) + "]",
+             f"    %% series: {' | '.join(label(n) for n, _ in series)}"]
+    if links:
+        lines.append(f"    %% links: {' | '.join(links)}")
+    lines.append(f'    y-axis "{label(y_title)}" {span(min(values + [0]))} --> {span(max(values + [1]))}')
+    lines += [f"    {'bar' if i == 0 else 'line'} [{', '.join(mermaid_num(v) for v in vals)}]" for i, (_, vals) in enumerate(series)]
+    return "\n".join(lines + ["```"])
+
+
+def fleet(c):
+    """A company's vehicles in one month: the store's total of that day, else the console's
+    trains + road + planes; None when neither was read."""
+    if c.get("vehicles") is not None:
+        return int(c["vehicles"])
+    parts = [c.get(k) for k in ("trains", "road", "planes")]
+    return sum(int(x) for x in parts) if all(x is not None for x in parts) else None
+
+
+def charts(rec, page=None, root=Path(".")):
+    """The record's charts, every number from its series: company value per month, A against B, and
+    the fleet per month when every month has it. With `page` (the page's file name) each month's mark
+    opens that month's row of the page's table (?col=Month&filter=N, which the site filters)."""
+    import tomllib
+    pal = tomllib.loads((Path(root) / STYLE).read_text())["palette"]
+    palette = f"{pal['signal']}, #8a8a8a, {pal['ink']}, {pal['paper']}"
+    series, b_name = rec.get("series") or [], b_name_of(rec)
+    out = [CHARTS_BEGIN, "<!-- generated by tools/research/mcp-duel from this record's JSON; "
+           "`mcp-duel --render` rewrites it, `mcp-duel --render --check` fails while it is stale -->", ""]
+    if not series:
+        return "\n".join(out + ["No month was recorded: nothing to chart.", "", CHARTS_END])
+    labels = [str(s.get("date") or "")[:7] or str(s["month"]) for s in series]
+    links = [f"{page}?col=Month&filter={s['month']}" for s in series] if page else None
+    company = lambda s, k: s["companies"].get(k) or {}
+    names = ("A (planned)", f"B ({b_name})")
+    values = [[int(company(s, k).get("value") or 0) for s in series] for k in ("1", "2")]
+    out += [mermaid_xy(f"Company value per game month, seed {rec['seed']}: A (planned) vs B ({b_name})", labels,
+                       list(zip(names, values)), "Company value", palette, links), ""]
+    fleets = [[fleet(company(s, k)) for s in series] for k in ("1", "2")]
+    if all(v is not None for f in fleets for v in f):
+        out += [mermaid_xy(f"Vehicles per game month, seed {rec['seed']}: A (planned) vs B ({b_name})", labels,
+                           list(zip(names, fleets)), "Vehicles", palette, links), ""]
+    return "\n".join(out + [CHARTS_END])
+
+
+def with_charts(text, region):
+    """A page with its charts region replaced, or, on a page written before the charts, inserted
+    above its month table (at the end when it has none)."""
+    if CHARTS_BEGIN in text and CHARTS_END in text:
+        a, b = text.index(CHARTS_BEGIN), text.index(CHARTS_END) + len(CHARTS_END)
+        return text[:a] + region + text[b:]
+    m = re.search(r"^\| Month \|", text, re.M)
+    if m:
+        return text[:m.start()] + region + "\n\n" + text[m.start():]
+    return text.rstrip("\n") + "\n\n" + region + "\n"
+
+
+def tracked_records(root):
+    """The duel records the next commit can hold, as tools/research/readme-scoreboard records(): what
+    git tracks plus new files it would not ignore; inside a git hook (GIT_INDEX_FILE) only the index;
+    outside a git checkout of root every record on disk."""
+    results = Path(root) / "research" / "results"
+    env = dict(os.environ)
+    if env.get("GIT_INDEX_FILE"):
+        env["GIT_INDEX_FILE"] = os.path.abspath(env["GIT_INDEX_FILE"])
+    sources = ["--cached"] + ([] if env.get("GIT_INDEX_FILE") else ["--others", "--exclude-standard"])
+    git = lambda *a: subprocess.run(["git", *a], cwd=results, env=env, check=True, capture_output=True, text=True).stdout
+    try:
+        if Path(git("rev-parse", "--show-toplevel").strip()).resolve() != Path(root).resolve():
+            raise ValueError("not a checkout of root")
+        listed = git("ls-files", "-z", *sources, "--", ".").split("\0")
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return sorted(results.glob("duel-*.json")) if results.is_dir() else []
+    return sorted(results / f for f in listed if f and "/" not in f and Path(f).match("duel-*.json") and (results / f).exists())
+
+
+def render_pages(root, check=False):
+    """--render: every tracked record's page with its charts derived from its JSON (the rest of the
+    page, its reading of that run, is kept as written). With check, write nothing and return 11 while
+    a page would change (Majordomus exit codes)."""
+    stale = []
+    records = tracked_records(root)
+    for path in records:
+        md = path.with_suffix(".md")
+        if not md.is_file():
+            continue
+        text = md.read_text()
+        new = with_charts(text, charts(json.loads(path.read_text()), md.name, root))
+        if new != text:
+            stale.append(md)
+            if not check:
+                md.write_text(new)
+    rel = lambda p: p.relative_to(root).as_posix()
+    if check:
+        for md in stale:
+            print(f"{rel(md)}: its charts are not derived from {md.with_suffix('.json').name} "
+                  "(run tools/research/mcp-duel --render)", file=sys.stderr)
+        return 11 if stale else 0
+    print(f"mcp-duel --render: {len(stale)} of {len(records)} page(s) rewritten")
+    return 0
+
+
+def markdown(rec, b_name, page=None, root=Path(".")):
+    """The record's reading. Its charts are charts(rec): what --render rewrites later."""
     a, b = rec["final"].get("1", {}), rec["final"].get("2", {})
     label, bot_settings, opponent = rec["label"], rec["bot_settings"], rec["opponent"]
     rows = "\n".join(f"| {s['month']} | {s['date']} | {s['companies'].get('1', {}).get('value', '')} | {s['companies'].get('2', {}).get('value', '')} |"
@@ -639,6 +807,8 @@ Both compete for the same towns and industries. {values}
 
 **Winner: {rec['winner']}.** Final company value: A {a.get('value')} vs B {b.get('value')}. {spread}
 
+{charts(rec, page, root)}
+
 | Month | Date | A (planned) value | B ({b_name}) value |
 |---|---|---|---|
 {rows}
@@ -655,7 +825,7 @@ def main(argv):
     with open(f"{base}.json", "w") as f:
         json.dump(rec, f, indent=2)
     with open(f"{base}.md", "w") as f:
-        f.write(markdown(rec, out["b_name"]))
+        f.write(markdown(rec, out["b_name"], f"{out['name']}.md", cfg["root"]))
     a, b = rec["final"].get("1", {}), rec["final"].get("2", {})
     print(f"\nmcp-duel: winner {rec['winner']}: A {a.get('value')} vs B {b.get('value')}; {base}.md")
 

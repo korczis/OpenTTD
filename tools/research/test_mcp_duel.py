@@ -340,6 +340,9 @@ class StoreReads(Served):
         self.assertIn(f"{AI_LOG_ROWS} AI log line(s)", md)
         self.assertIn("plan.duel seq 90001, on the bus and in the store", md)
         self.assertIn("| 6 | 1950-07-01 |", md)
+        # A new page carries its charts already, exactly as --render derives them later.
+        self.assertLess(md.index(duel.CHARTS_BEGIN), md.index("| Month |"))
+        self.assertEqual(duel.with_charts(md, duel.charts(self.rec)), md)
 
 
 @unittest.skipUnless(DUCKDB, "the store tests run each query with the duckdb CLI")
@@ -509,6 +512,87 @@ class Verdict(unittest.TestCase):
             (Path(d) / "duel-20261118T120000-seed31337.json").write_text(json.dumps(new))
             runs = board.load()
             self.assertEqual([(r["a"], r["b"], r["won"]) for r in runs], [(950946, 9852, True)])
+
+
+SPEC_PROBE = """
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("surfaces", sys.argv[1])
+s = importlib.util.module_from_spec(spec); sys.modules["surfaces"] = s; spec.loader.exec_module(s)
+print(json.dumps(s.mermaid_chart_spec(sys.stdin.read())))
+"""
+
+
+class Charts(unittest.TestCase):
+    """The page's charts: derived from the record's series, read back by the site, and rewritten in
+    place by --render on every page, old ones included."""
+    SERIES = [{"month": 1, "date": "1950-02-01", "companies": {"1": {"value": 10, "vehicles": 1},
+                                                                "2": {"value": 5, "trains": 0, "road": 2, "planes": 0}}},
+              {"month": 2, "date": "1950-03-01", "companies": {"1": {"value": 20, "vehicles": 2}, "2": {"value": 6, "vehicles": 3}}},
+              {"month": 3, "date": None, "companies": {"1": {"value": 300000000, "vehicles": 3}, "2": {"value": 7, "vehicles": 3}}}]
+
+    def rec(self, **over):
+        return dict({"seed": 4242, "months": 3, "series": self.SERIES}, **over)
+
+    def test_value_and_fleet_per_month_link_each_month_to_its_row(self):
+        region = duel.charts(self.rec(), "duel-x.md", ROOT)
+        self.assertTrue(region.startswith(duel.CHARTS_BEGIN) and region.endswith(duel.CHARTS_END))
+        self.assertEqual(region.count("```mermaid"), 2)
+        self.assertIn('x-axis ["1950-02", "1950-03", "3"]', region)  # a month without a date keeps its number
+        self.assertIn("    bar [10, 20, 300000000]\n    line [5, 6, 7]", region)
+        self.assertIn("    bar [1, 2, 3]\n    line [2, 3, 3]", region)  # the console's split where no total
+        self.assertIn("%% series: A (planned) | B (unplanned)", region)  # a record before --opponent
+        self.assertIn("%% links: duel-x.md?col=Month&filter=1 | duel-x.md?col=Month&filter=2 | "
+                      "duel-x.md?col=Month&filter=3", region)
+        self.assertNotIn("e+", region)
+        self.assertIn("B (AdmiralAI)", duel.charts(self.rec(opponent="AdmiralAI"), "duel-x.md", ROOT))
+
+    def test_a_month_without_a_fleet_drops_only_the_fleet_chart(self):
+        series = [dict(s, companies=dict(s["companies"], **{"2": {"value": 1}})) for s in self.SERIES]
+        self.assertEqual(duel.charts(self.rec(series=series), "duel-x.md", ROOT).count("```mermaid"), 1)
+        self.assertIn("nothing to chart", duel.charts(self.rec(series=[]), "duel-x.md", ROOT))
+
+    @unittest.skipUnless((ROOT / "tools" / "surfaces" / ".venv" / "bin" / "python").exists(),
+                         "no tools/surfaces/.venv: run tools/surfaces/surfaces check once")
+    def test_the_site_reads_each_chart_back_with_its_series_and_links(self):
+        region = duel.charts(self.rec(), "duel-x.md", ROOT)
+        first = region.split("```mermaid\n", 1)[1].split("```", 1)[0]
+        out = subprocess.run([str(ROOT / "tools" / "surfaces" / ".venv" / "bin" / "python"), "-B", "-c", SPEC_PROBE,
+                              str(ROOT / "tools" / "surfaces" / "surfaces.py")], input=first, capture_output=True,
+                             text=True, check=True)
+        spec = json.loads(out.stdout)
+        self.assertEqual([(x["type"], x["name"]) for x in spec["series"]], [("bar", "A (planned)"), ("line", "B (unplanned)")])
+        self.assertEqual(len(spec["links"]), len(spec["labels"]))
+
+    def test_render_inserts_the_charts_above_the_month_table_and_then_checks_current(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / duel.STYLE).parent.mkdir(parents=True)
+            shutil.copy(ROOT / duel.STYLE, root / duel.STYLE)
+            results = root / "research" / "results"
+            results.mkdir(parents=True)
+            (results / "duel-1-seed4242.json").write_text(json.dumps(self.rec()))
+            old = "# Duel\n\nThe reading, as written then.\n\n| Month | Date |\n|---|---|\n| 1 | 1950-02-01 |\n"
+            page = results / "duel-1-seed4242.md"
+            page.write_text(old)
+            (results / "duel-20261116-long-seed4242.md").write_text("no record, left alone\n")
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(duel.render_pages(root, check=True), 11)
+            self.assertIn("duel-1-seed4242.md", err.getvalue())
+            self.assertEqual(page.read_text(), old)  # --check writes nothing
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(duel.render_pages(root), 0)
+            new = page.read_text()
+            self.assertTrue(new.startswith("# Duel\n\nThe reading, as written then.\n\n" + duel.CHARTS_BEGIN))
+            self.assertIn(duel.CHARTS_END + "\n\n| Month | Date |", new)
+            self.assertIn("duel-1-seed4242.md?col=Month&filter=1", new)
+            self.assertEqual(duel.render_pages(root, check=True), 0)
+            self.assertEqual((results / "duel-20261116-long-seed4242.md").read_text(), "no record, left alone\n")
+
+    def test_the_render_flag_starts_no_game_and_refuses_check_alone(self):
+        r = subprocess.run([str(SCRIPT), "--check"], capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stderr.strip()), (2, "mcp-duel: --check goes with --render"))
+        r = subprocess.run([str(SCRIPT), "--help"], capture_output=True, text=True)
+        self.assertIn("tools/research/mcp-duel --render [--check]", r.stdout)
 
 
 if __name__ == "__main__":

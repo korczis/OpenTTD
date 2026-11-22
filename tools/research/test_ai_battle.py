@@ -656,6 +656,54 @@ class Records(unittest.TestCase):
         self.assertEqual(battle.replace_region(out, region), out)
         self.assertIn("| m-0001 | h1 | 1 | A |", battle.render_md(rec))
 
+    def test_the_page_charts_its_record_and_the_readme_keeps_the_tables(self):
+        rec = record()
+        rec["provenance"]["prismatic_path"] = "tools/research/prismatic-ai/B C"  # the home AI: "B C"
+        md = battle.render_md(rec)
+        a, b = md.index(battle.CHARTS_BEGIN), md.index(battle.CHARTS_END)
+        charts = md[a:b]
+        self.assertLess(md.index("| # | Contestant |"), a)
+        self.assertLess(b, md.index("| Match |"))
+        self.assertEqual(charts.count("```mermaid"), 5)
+        page = f"{rec['id']}.md"
+        # Every bar and slice opens the row it summarises: a contestant, a match, a winner, an arena.
+        self.assertIn(f"%% links: {page}?col=Contestant&filter=A | {page}?col=Contestant&filter=B+C", charts)
+        self.assertIn(f"%% links: {page}?col=Match&filter=m-0001", charts)
+        self.assertIn(f"%% links: {page}?col=Winner&filter=A", charts)
+        self.assertIn(f"%% links: {page}?col=Arena&filter=h1", charts)
+        self.assertIn("%% series: Winner | Best B C", charts)
+        self.assertIn("    bar [30]\n    line [20]", charts)
+        self.assertNotIn("e+", charts)                # Mermaid parses plain digits only
+        self.assertNotIn(battle.CHARTS_BEGIN, battle.render_region(rec))
+        region = md[a:b + len(battle.CHARTS_END)]
+        self.assertEqual(battle.render_md(rec, charts=False), md.replace(region + "\n\n", ""))
+
+    def test_render_rewrites_every_stale_page_from_its_json(self):
+        import os
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp).resolve()
+            rec = record()
+            (d / f"{rec['id']}.json").write_text(json.dumps(rec))
+            (d / f"{rec['id']}.md").write_text("hand-edited\n")
+            readme = d / "README.md"
+            readme.write_text(f"x\n{battle.BEGIN}\nold\n{battle.END}\n")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(battle, "RESULTS_DIR", d), mock.patch.object(battle, "README", readme), \
+                    mock.patch.object(battle, "REPO", d), redirect():
+                self.assertEqual(battle.cmd_render(), 0)
+                self.assertEqual((d / f"{rec['id']}.md").read_text(), battle.render_md(rec))
+                self.assertIn(battle.render_region(rec), readme.read_text())
+                before = (d / f"{rec['id']}.md").stat().st_mtime_ns
+                self.assertEqual(battle.cmd_render(), 0)   # current: nothing is written again
+                self.assertEqual((d / f"{rec['id']}.md").stat().st_mtime_ns, before)
+
+
+def redirect():
+    import contextlib
+    return contextlib.redirect_stdout(io.StringIO())
+
 
 class Export(unittest.TestCase):
     def test_export_strips_parent_directories(self):
