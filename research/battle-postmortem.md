@@ -22,6 +22,7 @@ $B                                  # newest edition in ~/ttd-battle/results/bat
 $B --edition 155d18ea50071e72       # one edition; from its JSON match records if the store lacks it
 $B editions                         # the editions in the store, newest first
 $B check                            # every postmortem-*.md is what its .json derives (exit 11 if not)
+$B render                           # rewrite every postmortem-*.md from its .json (tables and charts)
 $B watch --every 60                 # the post-round loop (below)
 ```
 
@@ -55,7 +56,7 @@ If your `~/.cargo/config.toml` sets `-C lto` in a target's `rustflags`, prefix c
 | Output | Content |
 |---|---|
 | `research/results/postmortem-<edition>.json` | schema `battle-postmortem/v1`: thresholds, per-contestant aggregates, every per-match analysis, `prismatic_last`, proposals |
-| `research/results/postmortem-<edition>.md` | derived from the JSON only; `check` regenerates and compares it |
+| `research/results/postmortem-<edition>.md` | derived from the JSON only, its [charts](#charts) too; `check` regenerates and compares it, `render` rewrites it |
 | `~/ttd-battle/results/analytics.duckdb` | tables `analyses`, `contestants`, `proposals`, all editions; an edition's rows are replaced when it is analysed again |
 
 The DuckDB file can be joined with the battle's own store:
@@ -66,6 +67,47 @@ SELECT a.contestant, avg(a.idle_cash_share), avg(s.vehicles)
 FROM analyses a JOIN battle.samples s ON s.match_id = a.match_id AND s.contestant = a.contestant
 GROUP BY 1;
 ```
+
+## Charts
+
+Every post-mortem page opens with Mermaid charts, between `<!-- postmortem-charts:begin -->` and
+`<!-- postmortem-charts:end -->` (function `charts` in `src/postmortem.rs`). Every number comes from
+the page's own JSON, so a chart says what the tables under it say:
+
+| Chart | Data | Each mark links to |
+|---|---|---|
+| Company value per year | `trajectories`: the best contestant's median January value as bars, each PrismaticAI contestant's as a line | its year's row of the trajectory table |
+| Fleet per year | the same for `vehicles` | its year's row of the trajectory table |
+| Last places per contestant | `contestants[].last_place`, in the order of the Contestants table | that contestant's row of the Contestants table |
+| PrismaticAI losses by cause (pie) | every PrismaticAI contestant's `causes`, summed per cause | that cause's row of the "Why PrismaticAI loses" table |
+
+GitHub draws the charts as Mermaid. The site draws the same blocks with ECharts
+([tools/surfaces/README.md](../tools/surfaces/README.md#charts)). There, `%% series:` names the bar
+and the lines, and `%% links:` makes each mark open
+`postmortem-<edition>.md?col=<column>&filter=<value>#<heading>`, which shows only that row.
+Numbers are written as plain digits, never with an exponent, because Mermaid cannot parse one.
+The trajectory table has a row for every year, so that every year of the charts has a row to link
+to. The colours are the NoirGFX palette (`tools/research/noirgfx/style.toml`), and a unit test checks
+them against that file.
+
+The charts stay current in three ways:
+
+- **New post-mortems carry them.** `battle-postmortem --edition <E>` and `watch` write the page
+  with `markdown()`, which includes the charts.
+- **`render` reaches the committed pages.** After a change to the charts or the tables, run
+  `battle-postmortem render` (`cargo run --release --no-default-features --manifest-path
+  tools/research/mcp-rhai/Cargo.toml --bin battle-postmortem -- render`). It rewrites every
+  `research/results/postmortem-*.md` from its `.json`. It needs no store, no match record and no
+  game. Commit the pages together with the change.
+- **`check` fails while a page is stale.** `tools/gate.sh change` runs it, and `tools/surfaces/surfaces
+  check` refuses a chart outside the markers.
+
+`render` and `check` are not `[[generators.items]]` in `surfaces.toml`. Both need cargo, and the
+Surfaces workflow (`.github/workflows/surfaces.yml`, the required check) sets up Python and Node
+but no Rust toolchain. Declared there, they would fail that check on every push. The pages are
+therefore kept current by `tools/gate.sh change` and the manual `render`, not by `surfaces sync`.
+`--no-default-features` leaves out the DuckDB store, which neither command reads, so they also
+build on a host without libduckdb.
 
 ## Sources
 
@@ -117,8 +159,8 @@ in 6 of 37 matches, against 35 to 37 of 37 for every PrismaticAI contestant (edi
 
 For each contestant and each year, the record keeps the median over finished matches of the January
 sample's `value`, `vehicles`, `air`, `rail`, `pair`, `prail` and `proad` (`trajectories`). The
-Markdown shows the best contestant next to every PrismaticAI one, for the first three years, every
-fifth year after that, and the last year. That table answers when and in what the gap opens.
+Markdown shows the best contestant next to every PrismaticAI one for every year, and the value and
+fleet charts draw the same medians. That table answers when and in what the gap opens.
 
 ## From causes to proposals
 
@@ -175,13 +217,15 @@ prints both timings on every run. DuckDB writes go in one transaction.
 
 | File | What it holds |
 |---|---|
-| [`tools/research/mcp-rhai/src/postmortem.rs`](../tools/research/mcp-rhai/src/postmortem.rs) | the analysis, thresholds, remedies and Markdown; pure, with unit tests |
-| [`tools/research/mcp-rhai/src/bin/battle-postmortem.rs`](../tools/research/mcp-rhai/src/bin/battle-postmortem.rs) | reading the store or JSON, rayon, DuckDB output, `check` |
+| [`tools/research/mcp-rhai/src/postmortem.rs`](../tools/research/mcp-rhai/src/postmortem.rs) | the analysis, thresholds, remedies, Markdown and charts; pure, with unit tests |
+| [`tools/research/mcp-rhai/src/bin/battle-postmortem.rs`](../tools/research/mcp-rhai/src/bin/battle-postmortem.rs) | reading the store or JSON, rayon, DuckDB output, `check`, `render` |
 | [`research/results/postmortem-*.json`](results/) / `.md` | the records |
 
-Tested by `cargo test --bin battle-postmortem`: a stalled bot, a hoarding bot, a winner with cash
-but no cause, an unfinished match, a replay, and an edition that is deterministic in any input
-order. `tools/gate.sh change` runs `battle-postmortem check`.
+Tested by `cargo test --no-default-features --bin battle-postmortem`: a stalled bot, a hoarding
+bot, a winner with cash but no cause, an unfinished match, a replay, and an edition that is
+deterministic in any input order. The chart tests check four things. The charts sit inside their markers and are derived
+from the JSON alone. Every number is plain digits. Every mark links a row that exists in the table
+it summarises, one link per mark. The palette is NoirGFX's. `tools/gate.sh change` runs `battle-postmortem check`.
 
 ## Related
 
