@@ -46,6 +46,9 @@ flowchart LR
 
 ## Authority matrix
 
+Every investment selector with its code path and fallback, and the end-to-end status of
+Battlebrain's shadow and live modes, are in the [capability matrix](../capability-matrix.md).
+
 Current state from the read-only audit of 2026-11-22. The target owner is the one component
 allowed to turn a candidate into an executable choice.
 
