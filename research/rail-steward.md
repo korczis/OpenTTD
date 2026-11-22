@@ -207,7 +207,9 @@ the panel's one shell.
   - The saved script runs in the background (`POST /api/services/start`, `/stop`), and its log
     streams into the page (`GET /api/services/log`).
   - **Hot reload:** a watcher looks every second, and a running service whose file, or any library
-    it imports, changed is restarted on the new text. This works for a Save on the page and for an
+    it imports, changed is restarted on the new text. A library in a subdirectory
+    (`import "policy/lib"`) counts, and a template import (`` import `policy/${name}` ``) counts
+    every script under its directory. This works for a Save on the page and for an
     edit in any editor. A change that does not parse leaves the old run going and says why in the
     log.
   - A file changed on disk is loaded into the page when the page holds no unsaved edit, and

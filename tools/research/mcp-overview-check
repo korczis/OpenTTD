@@ -6,12 +6,14 @@
 // (ov_focus), a phone-width page does not scroll sideways, the World page's charts still come
 // through the one door, a tool page builds its form from the schema, and the console stays free
 // of errors, and /data runs the query in its address and charts a numeric column of it (skipped,
-// and said so, on a panel without the event store). Drives the installed Chrome through
+// and said so, on a panel without the event store), and My bot draws every setting with the control the game
+// derived for it (openttd://ai `control`, the fixture src/tests/prismatic_mcp_ai_controls.json). Drives the installed Chrome through
 // playwright-core (npm ci in tools/research/mcp-panel).
 //
 // e2e-covers: panel /, panel /world, panel /data, panel /results, panel /result/<name>, panel /tool/<name>
 //
 // Usage: tools/research/mcp-overview-check http://127.0.0.1:<panel-port>   (exit 0 PASS, 1 FAIL)
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -185,6 +187,40 @@ try {
   const pending = await botPage.evaluate(() => document.querySelector('#bot-running [data-pending]')?.textContent);
   check('an edit is counted with the approvals Apply will ask, and sends nothing', pending === '1 change, 1 approval' && posts.length === 0, `"${pending}", ${posts.length} post(s)`);
   await botPage.close();
+
+  // Every setting is drawn with the control the game derived for it (openttd://ai `control`): the
+  // fixture the C++ and the panel's tests pin, one running bot per case, its kind and its place (a
+  // table line or a group). One control disagrees with what the panel would derive itself, so the
+  // page is seen drawing the game's, not its own.
+  const shared = JSON.parse(fs.readFileSync(path.join(here, '..', '..', 'src', 'tests', 'prismatic_mcp_ai_controls.json'), 'utf8'));
+  const picks = { town: [], cargo: [{ id: 1, name: 'Ore' }], industry: [{ id: 1, name: 'Mine', produces: ['Ore'] }] };
+  const served = shared.cases.map((c, k) => ({ id: 20 + k, name: `Fictional ${k}`, ai: 'FictionalAI', money: 1,
+    settings: c.settings.map((s, i) => ({ ...s, ingame: true, control: s.name === 'routes' ? { kind: 'number', group: 'general' } : c.controls[i] })) }));
+  const ctlPage = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  watch(ctlPage);
+  await ctlPage.route('**/api/bots', (r) => r.fulfill({ contentType: 'application/json',
+    body: JSON.stringify({ source: 'fixture', live: { list: true, set_setting: true }, ais: [{ ai: 'FictionalAI', settings: [] }], running: served }) }));
+  await ctlPage.route('**/api/bots/choices', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify(picks) }));
+  await ctlPage.goto(`${base}/#bot`);
+  await ctlPage.waitForSelector('#bot-running [data-bot="21"] select[data-picker]', { timeout: 8000 }).catch(() => {});
+  const drawn = await ctlPage.evaluate((bots) => bots.flatMap((b) => [...new Set(b.settings.map((s) => s.name))].map((name) => {
+    const els = document.querySelectorAll(`#bot-running [data-bot="${b.id}"] [data-setting="${name}"]`);
+    const el = els[0];
+    return { bot: b.id, name, count: els.length, kind: el?.dataset.kind, lines: el?.closest('[data-lines]')?.dataset.lines,
+      line: el?.closest('[data-line]')?.dataset.line, group: el?.closest('[data-group]')?.dataset.group,
+      options: el?.tagName === 'SELECT' && !el.dataset.picker ? [...el.options].map((o) => Number(o.value)) : null };
+  })), served);
+  const wrong = drawn.filter((d) => {
+    const c = served.find((b) => b.id === d.bot).settings.find((s) => s.name === d.name).control;
+    const kind = c.picker && picks[c.picker].length ? 'picker' : c.kind;
+    const place = c.table ? d.lines === c.table.base && d.line === String(c.table.line) : d.group === c.group && !d.lines;
+    const options = !c.options || JSON.stringify(d.options) === JSON.stringify(c.options.map((o) => o.value));
+    return d.count !== 1 || d.kind !== kind || !place || !options;
+  });
+  check('every setting is drawn once, with the kind, options and place the game derived', drawn.length > 30 && !wrong.length,
+    wrong.length ? JSON.stringify(wrong.slice(0, 3)) : `${drawn.length} settings`);
+  check('the game\'s control wins over the panel\'s own', drawn.some((d) => d.name === 'routes' && d.kind === 'number'));
+  await ctlPage.close();
 
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
   watch(phone);
