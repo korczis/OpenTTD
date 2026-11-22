@@ -615,7 +615,8 @@ absent.
   a set saved by an earlier run, such as NoirGFX, cannot take over); `--gfx NAME` picks another.
 - `rhai/rail_monitor.rhai` watches the bot's railway (lost, crashed, broken-down and stopped
   trains, lines without a train, the bot's rail warnings) and posts it to the Majordomus board as
-  `openttd:<instance>:rail`; `rhai/rail_steward.rhai` closes lines that lose money, lengthens and adds
+  `openttd:<instance>:rail`, and reacts to the game's advice news ("News in the owner's window,
+  both ways" below); `rhai/rail_steward.rhai` closes lines that lose money, lengthens and adds
   trains where cargo waits (AlgoGlyph knapsack-dp over the spare money) and hands faster locomotives
   to autoreplace. Both run from the Scripts page as services: [`research/rail-steward.md`](rail-steward.md).
 - `rhai/narrator.rhai` follows the event feed and reports in the running game, as chat from the
@@ -746,12 +747,13 @@ Prismatic or another AI.
 
 | Surface | What it does |
 |---|---|
-| `openttd.view.news.list`, `GET /api/news?limit=N`, Rhai `api_news(#{limit: 5})` | the news this client has shown, newest first: text, type (`company_info`, `arrival_company`, `subsidies`, ...), style, date; for an advice item `advice` (`vehicle_lost`, `train_stuck`, `vehicle_unprofitable`, `vehicle_old`, `order`, ...); and `refs`, the objects the item names as the news window resolves them (`{vehicle, unit, owner}`, `{station}`, `{tile, x, y}`, `{industry}`, `{town}`, `{engine}`). The panel publishes each item as `news.shown`, so these fields reach the bus, the store's `news` and `advice` views and Rhai `events()` |
+| `openttd.view.news.list`, `GET /api/news?limit=N`, Rhai `api_news(#{limit: 5})` | the news this client has shown, newest first: text, type (`company_info`, `arrival_company`, `subsidies`, ...), style, date; for an advice item `advice` (`vehicle_lost`, `train_stuck`, `vehicle_unprofitable`, `vehicle_old`, `order`, ...); and `refs`, the objects the item names as the news window resolves them (`{vehicle, unit, owner}`, `{station}`, `{tile, x, y}`, `{industry}`, `{town}`, `{engine}`). The panel publishes each item as `news.shown`, so these fields reach the bus, the store's `news` and `advice` views and Rhai `events()`, where `rail_monitor.rhai` reacts to every advice item |
 | `openttd.view.news.show`, `POST /api/news {text, style?, tile / x,y / town / vehicle}` | a news message in the owner's window. With a target it gets a viewport there (style `thin`); `normal` is a newspaper and `small` an information window. It is local to that client: GUI state, not game state, never sent to the server |
 | `openttd.view.news.close`, `POST /api/news/close` | close the news window |
 | event `news.shown` (`/api/events?kinds=news`, SSE) | every new item, from the game or from a caller |
 | main page, News card | the list, plus a form to send a message with an optional town viewport |
 | `narrator.rhai` | every route the bot opens appears as a newspaper with a viewport on its town |
+| `rail_monitor.rhai` with `advice_lib.rhai` | every advice item, within `ADVICE_EVERY_S` (2 s): grouped by advice and vehicle and joined with the vehicle's line (`openttd://vehicles`: orders, profit, owner, `lost`); a tally per company on the shared blackboard (`advice.<company>`, a `rhai.shared` event), a Majordomus mesh `observation` when the panel has a mesh session, and one chat line for the owner's company when the advice is new and still holds ("train 8 lost on line COAL A - B: track broken near tile 1234 (18, 19)?"). It observes only: no game command, no approval |
 
 ### Every window and widget, generically: the GUI client as a derived surface
 

@@ -874,6 +874,77 @@ mod tests {
                            "OpenTTD panel-1 d rail: no problems"]);
     }
 
+    /// The advice the monitor reacts to (advice_lib.rhai), on the rail fixture: news.shown events
+    /// with an advice and refs as the panel publishes them, a lost train on the COAL line, an
+    /// unprofitable train, an order advice for a vehicle that is gone, and another company's lost
+    /// road vehicle.
+    const ADVICE_FIXTURE: &str = r#"
+        import "advice_lib" as al;
+        let news = [
+            #{ kind: "news.shown", seq: 10, data: #{ type: "advice", text: "Train 8 is lost", date: "1950-02-01", advice: "vehicle_lost", refs: [#{ vehicle: 5, unit: 8, owner: 0 }] } },
+            #{ kind: "news.shown", seq: 11, data: #{ type: "industry_other", text: "Grain production up", date: "1950-02-01" } },
+            #{ kind: "ai.log", seq: 12, data: #{ company: 0, text: "PrismaticAI heartbeat" } },
+            #{ kind: "news.shown", seq: 13, data: #{ type: "advice", text: "Train 8 is lost", date: "1950-02-03", advice: "vehicle_lost", refs: [#{ vehicle: 5, unit: 8, owner: 0 }] } },
+            #{ kind: "news.shown", seq: 14, data: #{ type: "advice", text: "Train 9 is unprofitable", date: "1950-02-03", advice: "vehicle_unprofitable", refs: [#{ vehicle: 6, unit: 9, owner: 0 }] } },
+            #{ kind: "news.shown", seq: 15, data: #{ type: "advice", text: "Train 4 has too few orders", date: "1950-02-04", advice: "order", refs: [#{ vehicle: 7, unit: 4, owner: 0 }] } },
+            #{ kind: "news.shown", seq: 16, data: #{ type: "advice", text: "Road Vehicle 3 is lost", date: "1950-02-04", advice: "vehicle_lost", refs: [#{ vehicle: 20, unit: 3, owner: 1 }] } },
+        ];
+        let lost = train(5, 10, 0, 0, 4, 90, 0); lost.unit = 8; lost.x = 2; lost.y = 7; lost.lost = true;
+        let poor = train(6, 500, -3000, -100, 4, 90, 0); poor.unit = 9; poor.orders = [];
+        let rv = train(20, 10, 0, 0, 1, 30, 0); rv.type = "road"; rv.owner = 1; rv.unit = 3; rv.x = 1; rv.y = 1; rv.lost = true;
+        let vehicles = [lost, poor, rv];
+        stations[0].name = "Mine";
+        let lines = rl::lines_of(0, rl::records_from_events(ev), vehicles, stations, 64);
+        let groups = al::group(al::items(news));
+        let en = []; for g in groups { en.push(al::enrich(g, vehicles, stations, lines)); }
+        fn group_keys(gs) { let k = []; for g in gs { k.push(g.key); } `${k}` }
+    "#;
+
+    fn advice(script: &str) -> Vec<String> {
+        rail(&format!("{ADVICE_FIXTURE}\n{script}"))
+    }
+
+    /// Only advice items count, one advice about one vehicle is one group however often it
+    /// repeats, and each is joined with its vehicle now: the bot's line label for a train on a
+    /// line, the stops' names for another vehicle, where it is, and whether it still holds.
+    #[test]
+    fn advice_is_grouped_by_vehicle_and_joined_with_its_line() {
+        let v = advice(r#"
+            [al::items(news).len(), group_keys(groups), en[0].count, en[0].line, en[0].actionable,
+             al::chat_line(en[0]), al::chat_line(en[1]), en[2].exists, en[2].actionable,
+             al::chat_line(en[3]), `${al::companies(en)}`, al::what("some_new_advice")]
+        "#);
+        assert_eq!(v, vec!["5", r#"["vehicle_lost:5", "vehicle_unprofitable:6", "order:7", "vehicle_lost:20"]"#, "2",
+                           "COAL A - B", "true",
+                           "train 8 lost on line COAL A - B: track broken near tile 500 (2, 7)? (2 times)",
+                           "train 9 unprofitable: lost 3000 last year, -100 this year",
+                           "false", "false",
+                           "road vehicle 3 lost on line Mine - station 2: road broken near tile 500 (1, 1)?",
+                           "[0, 1]", "some new advice"]);
+    }
+
+    /// The owner hears what still holds, of their company only, once within the repeat window; the
+    /// tally counts every item and keeps one entry per group; the mesh record names the company.
+    #[test]
+    fn advice_is_tallied_per_company_and_said_once_to_the_owner() {
+        let v = advice(r#"
+            let t = al::tally((), 0, en, "1950-02-04", 20);
+            let t2 = al::tally(t, 0, en, "1950-02-05", 20);
+            let small = al::tally((), 0, en, "1950-02-04", 2);
+            let obs = al::observation("panel-1", 0, en, "1950-02-04");
+            [group_keys(al::to_say(en, 0, #{}, 100, 600)), group_keys(al::to_say(en, 0, #{ "vehicle_lost:5": 90 }, 100, 600)),
+             group_keys(al::to_say(en, 0, #{ "vehicle_lost:5": 90 }, 700, 600)), al::to_say(en, (), #{}, 100, 600).len(),
+             t.total, `${t.by_advice.vehicle_lost} ${t.by_advice.vehicle_unprofitable} ${t.by_advice.order}`, t.recent.len(),
+             t2.total, t2.recent.len(), small.recent.len(), small.recent[1].key, obs.kind, obs.task, obs.title,
+             al::chat_lines(en, 3).len(), al::chat_lines(en, 3)[3]]
+        "#);
+        assert_eq!(v, vec![r#"["vehicle_lost:5", "vehicle_unprofitable:6"]"#, r#"["vehicle_unprofitable:6"]"#,
+                           r#"["vehicle_lost:5", "vehicle_unprofitable:6"]"#, "3",
+                           "4", "2 1 1", "3", "8", "3", "2", "order:7", "observation", "openttd:panel-1:advice:0",
+                           "OpenTTD panel-1 1950-02-04: company 1 advice: 2 vehicle_lost, 1 vehicle_unprofitable, 1 order",
+                           "4", "and 1 more advice: see the panel's advice view"]);
+    }
+
     #[test]
     fn every_hub_method_but_streams_is_a_rhai_function() {
         assert_eq!(hub_ident("hub.audit"), "hub_audit");

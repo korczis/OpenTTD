@@ -148,6 +148,39 @@ Every agent session sees the post in `majordomus_blackboard` and `majordomus_pee
 `board_post(claim, text)` is the Rhai side of `tools/research/mcp-rhai/src/board.rs`, the client
 `mcp-bus-blackboard` also uses. `MCP_BOARD_DRY=1` prints the post instead of sending it.
 
+### The game's advice
+
+The game tells the player what goes wrong with their vehicles in advice news: a vehicle is lost, a
+train is stuck, a vehicle lost money last year or is old, an order is wrong, autorenew or a refit
+failed, a vehicle waits in a depot, an aircraft's next airport is too far. The panel publishes
+every item as `news.shown` with its `advice` and `refs`
+([News in the owner's window](mcp-control.md#news-in-the-owners-window-both-ways)). The monitor
+reads them every `ADVICE_EVERY_S` (2 s), so the bus's 5000-event window never drops one
+unread, with the pure functions of
+[`advice_lib.rhai`](../tools/research/mcp-panel/rhai/advice_lib.rhai):
+
+1. **Group.** One advice about one vehicle is one group, however often the game repeats it.
+2. **Join.** Each group is joined with its vehicle now (`openttd://vehicles`): type, unit, owner,
+   tile, profits, `lost`, and its line: the bot's rail line label when the train runs one, else
+   the names of the stations its orders visit.
+3. **Judge.** An advice still holds while its condition does: a lost vehicle while `lost` is set,
+   an unprofitable one while last year's profit is below zero, an old one while it is past its
+   maximum age. A vehicle that is gone needs nothing.
+4. **Report.** Per company: the tally `advice.<company>` on the shared blackboard (counts by
+   advice and the newest groups; every write is a `rhai.shared` event, so it reaches the bus and
+   the store), and an `observation` record on the Majordomus mesh (task
+   `openttd:<instance>:advice:<company>`) when the panel has a mesh session. A mesh failure is
+   printed once per reason and never stops the monitor.
+5. **Tell the owner.** One chat line for each advice that is new and still holds, for the owner's
+   company only, at most `ADVICE_SAY_MAX` (3) a look, and the same vehicle again only after
+   `MONITOR_REPEAT_S`: "train 8 lost on line COAL A - B: track broken near tile 1234 (18, 19)?".
+   The owner's company is `$MONITOR_OWNER_COMPANY` when set, else the company the window shows
+   advice for: the game raises advice only for the window's own company. `MONITOR_CHAT=0` prints
+   the lines instead.
+
+The monitor observes and reports. It issues no game command and approves nothing; repairing a
+broken line is the bot's own work.
+
 ## The Scripts page: an editor, services and hot reload
 
 The panel serves `/scripts` and `/scripts/<name>`
