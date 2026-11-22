@@ -11,9 +11,9 @@ on:
   push:
     branches: [master]
   pull_request:
-  # The Surfaces `refresh` job dispatches this workflow on a branch after it pushes a merge of
-  # master, because a push made with GITHUB_TOKEN starts no workflow; the dispatched run reports
-  # the check on the new head.
+  # Manual runs. The Surfaces `refresh` job stopped dispatching this workflow after it pushes a
+  # merge of master, because this check is not required; restore its commented line in
+  # surfaces.yml when it becomes required, since a push made with GITHUB_TOKEN starts no workflow.
   workflow_dispatch:
 
 permissions:

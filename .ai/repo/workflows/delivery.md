@@ -33,8 +33,10 @@ keeps it safe to require without blocking unrelated pull requests. It links the 
 of the `store` feature (`tools/research/mcp-rhai/build.rs`) from DuckDB's pinned release
 archive, verified by SHA-256, and refuses to run when the locked `libduckdb-sys` encodes another
 DuckDB version. Every action is pinned by commit SHA. After the Surfaces `refresh` job pushes a
-merge of master onto a branch, it dispatches both workflows, because a push made with
-`GITHUB_TOKEN` starts none.
+merge of master onto a branch, it dispatches Surfaces only, because a push made with
+`GITHUB_TOKEN` starts no workflow and "Check and build" is the one check auto-merge waits for.
+Such a head shows no Research Rust run until its owner pushes; when Research Rust becomes required,
+restore the commented dispatch line in `.github/workflows/surfaces.yml`.
 
 Only "Check and build" is required until the owner adds the second check:
 
@@ -51,11 +53,13 @@ session. When master moves first and the branch conflicts, the pull request stay
 master into the branch again, re-run the gate and push; auto-merge stays enabled.
 
 CI keeps the generated regions of an open pull request current: when master moves, the Surfaces
-`refresh` job merges master into every same-repository branch with auto-merge, regenerates the
-derived regions (counts, indexes, charts) and pushes a "Doc: [Surfaces] Regenerate derived
-regions after merging master" commit, so a stale count no longer blocks the merge
-(`tools/surfaces/README.md`, "Parallel merges"). Pull before pushing again: such a commit may
-have landed on the branch. A conflict outside the derived regions is still the owner's.
+`refresh` job merges master into the next same-repository branch in line with auto-merge (the
+lowest-numbered one that needs it, `tools/surfaces/refresh-next`), regenerates the derived regions
+(counts, indexes, charts) and pushes a "Doc: [Surfaces] Regenerate derived regions after merging
+master" commit, so a stale count no longer blocks the merge (`tools/surfaces/README.md`,
+"Parallel merges"). One branch per push to master: refreshing all of them at once sent every pull
+request back to blocked and the next merge reset them again. Pull before pushing again: such a
+commit may have landed on the branch. A conflict outside the derived regions is still the owner's.
 
 - The title follows the fork's commit-message form (`Add: [Component] ...`, CODINGSTYLE.md); the
   merge commit is a plain merge, so every commit of the branch is kept.

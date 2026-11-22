@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# refresh-next: after master moved, refresh the next pull request in line, and only that one.
+#
+# Usage: gh pr list --state open --limit 100 \
+#          --json number,headRefName,isCrossRepository,autoMergeRequest \
+#          | tools/surfaces/refresh-next [--push]
+#        tools/surfaces/refresh-next --list < prs.json
+#        tools/surfaces/refresh-next -h | --help
+#
+# A push to master used to refresh every open pull request with auto-merge at once. Each branch
+# got a bot merge commit without "Check and build", so every pull request went back to blocked,
+# the dispatched runs filled the runner queue, and the next merge reset them all again. This
+# refreshes one branch per push to master.
+#
+#   - The candidates, read from `gh pr list` JSON on stdin, are the same-repository pull requests
+#     with auto-merge, lowest number first (--list prints them and refreshes nothing).
+#   - tools/surfaces/refresh-branch runs on each in turn until one is refreshed (its exit 3). A
+#     branch already current with master (0), one that conflicts outside the derived regions
+#     (10, its owner's), or one that moved meanwhile (1) is passed over, so one stuck pull request
+#     does not hold up the rest. refresh-branch's own line goes to stderr.
+#   - --push is handed to refresh-branch.
+#
+# Exit: 3 a branch was refreshed and its name is the only line on stdout, 0 no candidate needed a
+# refresh, 1 stdin is not `gh pr list` JSON, 2 usage.
+set -euo pipefail
+
+push=()
+list=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --push) push=(--push) ;;
+    --list) list=1 ;;
+    *) echo "refresh-next: unknown argument $1 (usage: refresh-next -h)" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+FILTER='[.[] | select(.autoMergeRequest != null and (.isCrossRepository | not))]'
+FILTER+=' | sort_by(.number) | .[].headRefName'
+if ! candidates="$(jq -r "$FILTER")"; then
+  echo "refresh-next: stdin is not gh pr list JSON (usage: refresh-next -h)" >&2
+  exit 1
+fi
+
+if [[ $list == 1 ]]; then
+  [[ -z "$candidates" ]] || printf '%s\n' "$candidates"
+  exit 0
+fi
+
+here="$(cd "$(dirname "$0")" && pwd)"
+while IFS= read -r b; do
+  [[ -n "$b" ]] || continue
+  set +e
+  "$here/refresh-branch" ${push[@]+"${push[@]}"} "$b" >&2
+  rc=$?
+  set -e
+  if [[ $rc == 3 ]]; then
+    printf '%s\n' "$b"
+    exit 3
+  fi
+done <<< "$candidates"
+echo "refresh-next: no pull request in line needed a refresh" >&2
+exit 0

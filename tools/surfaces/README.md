@@ -173,12 +173,18 @@ that each add a document both write the same new number, both pass on their own,
 to merge leaves `README.md` one short. Waiting for every owner to re-sync turns auto-merge into a
 race, so the workflow keeps the branches current itself:
 
-- **On every same-repository pull request, and on every push to the default branch for each open
-  pull request with auto-merge**, the `refresh` job runs `tools/surfaces/refresh-branch --push
-  <branch>`. It merges `origin/master` into the branch, resolves a conflict inside a generated
-  region by taking master's side, runs `surfaces sync`, and commits "Doc: [Surfaces] Regenerate
-  derived regions after merging master" only when the sync changed something. A conflict
-  anywhere else aborts the merge and leaves the branch to its owner (exit 10).
+- **On every same-repository pull request, and on every push to the default branch for the next
+  open pull request in line with auto-merge**, the `refresh` job runs
+  `tools/surfaces/refresh-branch --push <branch>`. It merges `origin/master` into the branch,
+  resolves a conflict inside a generated region by taking master's side, runs `surfaces sync`,
+  and commits "Doc: [Surfaces] Regenerate derived regions after merging master" only when the
+  sync changed something. A conflict anywhere else aborts the merge and leaves the branch to its
+  owner (exit 10).
+- **One branch per push to the default branch.** `tools/surfaces/refresh-next` reads `gh pr list`
+  JSON and tries the same-repository pull requests with auto-merge lowest number first, stopping
+  at the first one refreshed; a branch already current, conflicting or moved is passed over.
+  Refreshing every branch at once gave each a head without "Check and build", so all of them went
+  back to blocked, the dispatched runs filled the runner queue, and the next merge reset them all.
 - **The push is a fast-forward of what was fetched, never a force.** When the owner pushed in the
   meantime it is refused, and the next push to master retries.
 - **A push made with `GITHUB_TOKEN` starts no workflow**, so the job dispatches Surfaces on the
@@ -189,8 +195,9 @@ race, so the workflow keeps the branches current itself:
   step.
 
 Locally, `tools/surfaces/refresh-branch <branch>` does the same without pushing.
-`tools/surfaces/test_refresh_branch.py` runs every path of it against scratch repositories, in
-the Surfaces workflow.
+`tools/surfaces/test_refresh_branch.py` runs every path of it against scratch repositories, and
+`tools/surfaces/test_refresh_next.py` every path of `refresh-next` against fixture `gh pr list`
+JSON, both in the Surfaces workflow.
 
 ## Generators
 
