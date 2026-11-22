@@ -1,0 +1,38 @@
+id: I0205
+milestone: the-panel-has-integrity
+title: "The generic crawl is green on every panel and hub page, walks Back, Forward and deep-link reloads, and accepts a disabled control only with its stated reason"
+slug: crawl-green-with-history-and-deep-links
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Finish the census PR #47 started. Fix the open findings its last run left (the bot editor's fields in a disabled fieldset, debugger, Apply/Reset and chart-axis controls the crawl never set up, /play without the WebAssembly build, the hub catalogue's link pattern, GET /api/calibration timing out) until mcp-ui-crawl-check exits 0. Extend the crawl so a same-server link is followed in the browser (not only fetched), Back and Forward return the previous page with its address state, and every page reloads from a deep link carrying each address-state parameter it declares. A disabled control passes only when it says why. Commit each run's JSON report as a record."
+why: "External review 2026-11-22 (digest A-51). PR #47 (239a5c5d00) added tools/research/mcp-ui-crawl-check, but its run was not green: 625 PASS, 7 FAIL, 5 SILENT, 611 UNREACHED, written only in the PR description, with no record under research/. A link is fetched, never followed (mcp-ui-crawl-check:15, :155-165), so no Back/Forward or deep-link reload is walked; a disabled control is UNREACHED with no check of a reason (:206). CI runs only the declaration check and the node tests (.github/workflows/surfaces.yml:56, :65), never the crawl."
+scope:
+  - "tools/research/mcp-ui-crawl-check"
+  - "tools/research/e2e-coverage"
+  - "tools/research/mcp-panel/static/**"
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "tools/research/mcp-panel/test/e2e-coverage.test.mjs"
+  - ".ai/repo/rules/project/web-ui-is-covered-end-to-end.v2.md"
+  - "research/results/**"
+non_scope:
+  - "Running the crawl against the owner's game (the crawl presses everything; disposable stacks only)"
+  - "Building /play's WebAssembly target if it cannot be built here; then /play is reported NOT RUN with its reason, never PASS"
+depends_on:
+  - I0204
+serves:
+  - "openttd-validates-agent-driven-engineering#every-panel-control-works"
+acceptance_criteria:
+  - "mcp-ui-crawl-check against a disposable mcp-e2e stack and an isolated hub exits 0: 0 DEAD, 0 SILENT, 0 FAIL, 0 UNREACHED; each SKIP names why"
+  - "Every same-server link is followed in the browser; Back and Forward restore the previous page and its address; every page and each address-state parameter it declares survives a reload"
+  - "A disabled control without a stated reason fails the crawl; the panel states one for each disabled control it has"
+  - "The run's JSON report is committed under research/results/ with the build and stack it ran against, and the rule's 'Checks today' section links it"
+validation:
+  - "node --test tools/research/mcp-panel/test/*.test.mjs"
+  - "tools/research/e2e-coverage"
+  - "tools/research/e2e-coverage --run --panel http://127.0.0.1:8841 --hub http://127.0.0.1:8842"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

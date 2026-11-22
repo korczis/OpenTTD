@@ -2,13 +2,14 @@
 
 The catalogue is what a running server answers to `tools/list`; nothing here is a second copy of
 it. Each instance lists only what it can do (a dedicated server has no window: no `openttd.view.*`,
-`openttd.ui.*` or toolbar-menu tool). The tool families, by module:
+`openttd.ui.*` or toolbar-menu tool, except the read-only `openttd.ui.control` snapshot). The tool families, by module:
 
 | Family | Module | What it does | Approval |
 |---|---|---|---|
 | `openttd.view.*` | `prismatic_mcp_view.cpp` | the local viewport, news, questions to the player | none, local to the client |
 | `openttd.ui.*`, `openttd.input.*` | `prismatic_mcp_ui.cpp` | the interface as data, armed input through the driver | none; input only when armed in the console |
-| `openttd.ui.menu.run`, `openttd.ui.requests.answer` | `prismatic_mcp_menu.cpp` | the fork's toolbar menu and the requests asked through it | none, local to the client |
+| `openttd.ui.menu.run`, `openttd.ui.requests.answer` | `prismatic_mcp_menu.cpp` | the fork's toolbar menu and the requests asked through it; the menu's first row opens the Prismatic control window | none, local to the client |
+| `openttd.ui.control` | `prismatic_mcp_panel.cpp` | what the Prismatic control window shows, as data: the server's status, every approval still waiting (id, tool, exact arguments, expired), the latest decisions with their verdicts, the questions asked in the game, the menu's switches and hub links; in every process, a dedicated server included, since that is where approvals wait | none, read-only |
 | `openttd.decision.validate`, `openttd.decision.list_action_types` | `prismatic_mcp_server.cpp` | check a typed action, list the action types | none, read-only |
 | `openttd.decision.submit`, `openttd.game.set_pause` | `prismatic_mcp_server.cpp` | a typed action through the command system | the operator approves or denies in the console (`prismatic_mcp approve|deny <id>`), digest-bound, one use |
 | `openttd.cmd.<Name>` | `prismatic_mcp_commands.cpp`, `prismatic_mcp_params.hpp` | one tool per game command (`Commands` enum) whose parameters convert from JSON, derived from the command table; validated by a side-effect-free test run, posted through the network-safe command path, the verdict read with `openttd.decision.get` | the same approval as `submit` |
@@ -16,6 +17,16 @@ it. Each instance lists only what it can do (a dedicated server has no window: n
 | `openttd.decision.get` | `prismatic_mcp_server.cpp` | one decision's provenance: the command result and the verdict taken after it ran | none, read-only |
 | `openttd.resources.read_many` | `prismatic_mcp_server.cpp`, `prismatic_mcp_detail.h` | several resources at one game tick, without pausing: `{uris: [...]}` (at most `detail::READ_MANY_MAX_URIS`, 32, `openttd://` only) answers `{ok, game_tick, game_date, resources: [{uri, ok, data | error}]}`; every entry is built by its own resource builder in the same main-thread call, so each `data` (what `resources/read` answers for that uri) carries the same `game_tick`. A uri that is not a string, has another scheme, is not in `resources/list` or repeats one earlier in the call fails its own entry, not the call | none, read-only |
 | `openttd.api.Script<Class>.<Function>` | `prismatic_mcp_api.cpp` | one tool per static function the build publishes to scripts, read back from a private Game Script engine (and an AI engine for what only AIs get); a call goes through the game's own script binding (`../mcp-api.md`) | none without `execute` (runs in `GSTestMode`, changes nothing); with `execute: true` the same approval as `submit`, as action `api.Script<Class>.<Function>` |
+
+The game does not know who plans a company's freight-line slots (`fr_*`, `fr2_*` .. `fr16_*`).
+That is the panel's shared key `planner.<company>`
+([`research/battlebrain/README.md`](../battlebrain/README.md#executor-binding-after-the-red-team-review-i0117)).
+Through the panel, `openttd.ai.set_setting` and `openttd.ai.set_settings` change a slot only from
+`POST /api/bots/setting` with a `writer` that the key allows, or from a live Battlebrain decision
+(`POST /api/decision/pull`). The raw routes (`POST /api/tools/<tool>`, `POST /api/rpc`
+`tools/call`) name no writer, so a call through them that changes a slot is refused
+(`fr_needs_writer`). A client that calls the game's own endpoint directly passes only the owner's
+approval.
 
 Every tool declares `annotations.readOnlyHint`: true for one that changes nothing, false otherwise
 (with `destructiveHint` and `idempotentHint` where they apply). A view tool that declares nothing

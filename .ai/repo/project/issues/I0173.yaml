@@ -1,0 +1,35 @@
+id: I0173
+milestone: prismatic-closes-one-real-loop
+title: "Retrieval gains a semantic ranker, made the default only if it beats BM25 on the held-out half of a new benchmark version"
+slug: semantic-retrieval
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Benchmark v2 of research/evidence-benchmark.json keeps v1's questions and adds new ones written before the first run. It splits them into a dev half and a held-out half that tuning never reads. A local embedding ranker runs beside BM25, and a hybrid combines the two. The ranker makes no network call, and every answer names its model and the model's digest. `mcp-evidence --benchmark` reports recall@5, MRR and insufficient-evidence accuracy for BM25, embedding and hybrid on v1, v2-dev and v2-held-out. The hybrid becomes the default only if it beats BM25 on the held-out half; otherwise BM25 stays, and the result is recorded. Provenance, freshness and 'insufficient evidence' keep working for every ranker. There is still no generation step, so the docs do not call it RAG."
+why: "External review 2026-11-22 (digest C-36). research/agent-loop.md:50: retrieval is 'lexical, not semantic (no embeddings)', with recall@5 0.69 and MRR 0.60 on benchmark v1. :115-117 names the misses: ADR 0033, two curated knowledge records and the real-world scenario doc, all paraphrase misses that lexical ranking cannot fix. v1 has 15 questions and guided the source-classing change of step 5, so it is no longer held out. The provenance part of the review's item is DONE (digest B-34: 24cafae3b2, 0e3e3667c4)."
+scope:
+  - "tools/research/mcp-rhai/src/evidence.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-evidence.rs"
+  - "tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-rhai/Cargo.lock"
+  - "research/evidence-benchmark.json"
+  - "research/agent-loop.md"
+non_scope:
+  - "A model that writes answers from the passages (generation)"
+  - "A network embedding service, or indexing uncommitted changes"
+  - "Editing v1's questions"
+depends_on:
+  - I0220
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
+acceptance_criteria:
+  - "v2 is committed before the first scored run of a new ranker, with its held-out half marked"
+  - "The benchmark output gives all three rankers on all three sets, and research/agent-loop.md quotes it"
+  - "The default ranker is the held-out winner; the freshness and exclusion tests pass for every ranker"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-evidence"
+  - "tools/research/mcp-rhai/target/release/mcp-evidence --benchmark research/evidence-benchmark.json"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

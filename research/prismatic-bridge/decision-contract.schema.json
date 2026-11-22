@@ -158,7 +158,7 @@
         },
         "samples": {
           "type": "object",
-          "description": "The recorded samples the fit read: a read-only statement ('query', as a panel's companyHistory.samples_query offers it, on 'query_url') or the bus ('bus', the kinds it folded), and how many rows or samples it used.",
+          "description": "The recorded samples the fit read: a read-only statement ('query', as a panel's companyHistory.samples_query offers it, with 'params' bound to its named parameters, on 'query_url') or the bus ('bus', the kinds it folded), and how many rows or samples it used.",
           "required": [
             "rows"
           ],
@@ -180,6 +180,10 @@
               "type": "string",
               "minLength": 1,
               "description": "One read-only statement (SELECT or WITH) on the store, as /api/db/query runs it."
+            },
+            "params": {
+              "type": "object",
+              "description": "The values bound to the statement's named parameters ($company), as companyHistory.samples_params offers them; never pasted into the text."
             },
             "query_url": {
               "type": "string",
@@ -253,7 +257,8 @@
         "bus",
         "store",
         "query_url",
-        "samples_query"
+        "samples_query",
+        "samples_params"
       ],
       "additionalProperties": true,
       "properties": {
@@ -295,12 +300,25 @@
         "query_url": {
           "type": "string",
           "format": "uri",
-          "description": "The panel's read-only GET|POST /api/db/query ('sql')."
+          "description": "The panel's read-only GET|POST /api/db/query ('sql', and in a POST 'params', the values of the statement's named parameters)."
         },
         "samples_query": {
           "type": "string",
           "minLength": 1,
-          "description": "One read-only statement: the company's samples, the first of each game month per run, each with the run's seed and the aggressiveness an applied plan.directive had set for the company by then (null: none recorded, the AI's own default)."
+          "description": "One read-only statement with named parameters (the panel's sql/queries/company_samples.sql): the company's samples, the first of each game month per run, each with the run's seed and the aggressiveness an applied plan.directive had set for the company by then (null: none recorded, the AI's own default). It runs on query_url with samples_params bound."
+        },
+        "samples_params": {
+          "type": "object",
+          "required": [
+            "company"
+          ],
+          "properties": {
+            "company": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "The values of samples_query's named parameters for this company, sent as 'params' with it: POST query_url {sql: samples_query, params: samples_params}."
         },
         "columns": {
           "type": "array",
@@ -367,7 +385,12 @@
           "type": "string"
         },
         "schema": {
-          "const": "battlebrain-decision/v1"
+          "const": "battlebrain-decision/v2"
+        },
+        "settings_digest": {
+          "description": "the digest (sha256 of the JSON string) of the directive's exact settings; the executor recomputes it",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
         },
         "snapshot_digest": {
           "pattern": "^sha256:[0-9a-f]{64}$",
@@ -386,6 +409,7 @@
         "idempotency_key",
         "policy",
         "valid_until",
+        "settings_digest",
         "mode"
       ],
       "type": "object"

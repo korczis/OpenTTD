@@ -1,0 +1,35 @@
+id: I0170
+milestone: prismatic-closes-one-real-loop
+title: "One kill switch stops every agent channel from mutating the game: pending approvals denied, new submissions refused, auto-approve off, and each step recorded"
+slug: agent-kill-switch
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "One operator action halts the game's MCP server: `prismatic_mcp halt`, lifted with `prismatic_mcp resume`. The panel, the hub and chat reach it through the console line, as ADR 0038 requires. Halting denies every pending approval, refuses every new mutating tool call with a reason, and turns auto-approve off. Reads keep working. The halt and its lift are events on the bus and in the store, with the principal that gave them. Unit tests and a live check prove that no mutation runs while the server is halted, through any channel."
+why: "External review 2026-11-22 (digest B-36): the control contract asks for a kill switch. On origin/master the console can 'deny all' pending approvals (src/prismatic_mcp/prismatic_mcp.h:75-79), but nothing refuses the next submission, so an agent that keeps submitting keeps the operator answering. `git grep -iE 'kill.?switch'` over src/prismatic_mcp and tools/research finds nothing."
+scope:
+  - "src/prismatic_mcp/prismatic_mcp_server.cpp"
+  - "src/prismatic_mcp/prismatic_mcp.h"
+  - "src/prismatic_mcp/prismatic_mcp_detail.h"
+  - "src/console_cmds.cpp"
+  - "src/tests/test_prismatic_mcp.cpp"
+  - "tools/research/mcp-console-check"
+  - "research/prismatic-mcp/10-in-game-runbook.md"
+non_scope:
+  - "The approval core itself (ADR 0038 slice 2, in flight on branch fix/approval-core). This issue starts after it lands and puts the halt in that one core"
+  - "Authenticating the approver (I0182)"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
+acceptance_criteria:
+  - "C++ unit tests: while halted, every mutating tool is refused, pending approvals are denied, auto-approve is off and reads succeed; after resume a new submission waits for approval as before"
+  - "mcp-console-check covers halt and resume live, and the bus carries both events with their principal"
+  - "The in-game runbook documents the switch"
+validation:
+  - "build-mcp/openttd_test '[prismatic_mcp]'"
+  - "tools/research/mcp-console-check"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

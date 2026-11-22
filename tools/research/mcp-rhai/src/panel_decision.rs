@@ -21,8 +21,9 @@
 //! by its own `schema`; the fit itself is Prismatic's code:
 //!
 //! - every CompanyOut of `GET /api/bridge/companies` carries `history` (prismatic-history/v1): the
-//!   panel's bus endpoint and the read-only store query of that company's samples (`samples_sql`), to
-//!   run on the panel's `/api/db/query`;
+//!   panel's bus endpoint and the read-only store query of that company's samples (`samples_query`,
+//!   `sql/queries/company_samples.sql`) with the values of its parameters (`samples_params`), to run
+//!   on the panel's `/api/db/query` as `{sql, params}`;
 //! - a directive's working may carry `fit` (prismatic-fit/v1): the model, its parameters, the samples
 //!   it was fitted from (that query, or the bus, with the row count) and its quality, or the fallback
 //!   Prismatic took. The panel checks it (`fit_stored`) and records it as plan.directive's
@@ -47,6 +48,7 @@ use crate::bus_sinks::{read_only_sql, SCHEMA as BUS_SCHEMA};
 use crate::panel::Game;
 use crate::panel_bot;
 use crate::panel_events;
+use crate::store_sql::Named;
 
 /// A directive the contract allows: at least one of `ai` and `company_id`, and the settings it carries.
 #[derive(Debug, PartialEq)]
@@ -262,7 +264,7 @@ pub const HISTORY_SCHEMA: &str = "prismatic-history/v1";
 pub const FIT_SCHEMA: &str = "prismatic-fit/v1";
 /// The bus kinds a fit reads: the daily sample and the settings an applied directive set.
 pub const HISTORY_KINDS: &[&str] = &["game.sample", "plan.directive"];
-/// The columns `samples_sql` answers, in order.
+/// The columns `samples_query` answers, in order.
 pub const SAMPLE_COLUMNS: &[&str] = &["instance", "seed", "run_ms", "game_tick", "game_date", "value", "money", "loan",
                                       "net", "vehicles", "aggressiveness", "directive_outcome"];
 /// The fewest rows the panel offers as enough to fit from (advisory: twelve game months of one run).
@@ -270,38 +272,26 @@ pub const MIN_ROWS: usize = 12;
 /// What Prismatic decided with before it fitted (prismatic_api OpenttdController, read at a8bc5a9d65).
 pub const HAND_MODEL: &str = "mean_growth = aggressiveness * 0.08, std_growth = 0.05 + aggressiveness * 0.35";
 
-/// The read-only statement of `company`'s recorded samples in every run of the store: the first
-/// sample of each game month (so a long store stays under /api/db/query's cap), each with its run
-/// (`run_ms`, the run's start, and `seed`) and the aggressiveness the latest plan.directive of that
-/// run had set for the company by then, with its outcome when it was published (`applied`, `pending`
-/// approval or verdict, `unverified`, or `sent`; plan.directive_outcome tells how a pending one ended); null
-/// before any, which is the AI's own default. A company id is reused across runs, so a fit reads
-/// the rows whose aggressiveness is known.
-pub fn samples_sql(company: i64) -> String {
-    format!("WITH r AS (SELECT instance, seed, started_ms, lead(started_ms) OVER (PARTITION BY instance ORDER BY started_ms) AS until_ms FROM runs), \
-s AS (SELECT x.instance, r.seed, r.started_ms AS run_ms, x.ts_ms, x.game_tick, x.game_date, x.value, x.money, x.loan, x.net, x.vehicles \
-FROM samples x JOIN r ON r.instance = x.instance AND x.ts_ms >= r.started_ms AND (r.until_ms IS NULL OR x.ts_ms < r.until_ms) \
-WHERE x.company = {company} \
-QUALIFY row_number() OVER (PARTITION BY x.instance, r.started_ms, substr(x.game_date, 1, 7) ORDER BY x.game_tick, x.ts_ms) = 1), \
-a AS (SELECT e.instance, r.started_ms AS run_ms, e.ts_ms, \
-TRY_CAST(json_extract_string(e.data, '$.choice.settings.aggressiveness') AS BIGINT) AS aggressiveness, \
-json_extract_string(e.data, '$.choice.outcome') AS directive_outcome \
-FROM events e JOIN r ON r.instance = e.instance AND e.ts_ms >= r.started_ms AND (r.until_ms IS NULL OR e.ts_ms < r.until_ms) \
-WHERE e.kind = 'plan.directive' AND json_extract_string(e.data, '$.choice.outcome') IN ('applied', 'pending', 'unverified', 'sent') \
-AND TRY_CAST(json_extract_string(e.data, '$.choice.company_id') AS BIGINT) = {company} \
-AND json_extract_string(e.data, '$.choice.settings.aggressiveness') IS NOT NULL) \
-SELECT s.instance, s.seed, s.run_ms, s.game_tick, s.game_date, s.value, s.money, s.loan, s.net, s.vehicles, a.aggressiveness, a.directive_outcome \
-FROM s ASOF LEFT JOIN a ON s.instance = a.instance AND s.run_ms = a.run_ms AND s.ts_ms >= a.ts_ms \
-ORDER BY s.instance, s.run_ms, s.game_tick")
+/// The named query of `company`'s recorded samples in every run of the store
+/// (`sql/queries/company_samples.sql`): the first sample of each game month (so a long store stays
+/// under /api/db/query's cap), each with its run (`run_ms`, the run's start, and `seed`) and the
+/// aggressiveness the latest plan.directive of that run had set for the company by then, with its
+/// outcome when it was published (`applied`, `pending` approval or verdict, `unverified`, or `sent`;
+/// plan.directive_outcome tells how a pending one ended); null before any, which is the AI's own
+/// default. A company id is reused across runs, so a fit reads the rows whose aggressiveness is known.
+pub fn samples_query(company: i64) -> Named {
+    Named::new("company_samples", json!({"company": company}))
 }
 
 /// The history the panel offers for `company` (companyHistory of the decision contract): the bus to
-/// subscribe to, the store (or "off": then `query_url` answers 503), and the samples query.
+/// subscribe to, the store (or "off": then `query_url` answers 503), and the samples query with the
+/// values its parameters take for this company.
 pub fn history(company: i64, bus: &Value, store: &Value, panel: &str) -> Value {
     json!({"schema": HISTORY_SCHEMA,
            "bus": {"endpoint": bus, "envelope": BUS_SCHEMA, "kinds": HISTORY_KINDS},
            "store": store.as_str().map(str::to_string).unwrap_or_else(|| store.to_string()),
-           "query_url": format!("{panel}/api/db/query"), "samples_query": samples_sql(company),
+           "query_url": format!("{panel}/api/db/query"), "samples_query": samples_query(company).sql(),
+           "samples_params": samples_query(company).params,
            "columns": SAMPLE_COLUMNS, "min_rows": MIN_ROWS})
 }
 
@@ -371,6 +361,9 @@ pub fn fit_of(raw: &Value) -> Result<Option<Value>, Vec<String>> {
                     None => errors.push("fit.samples.query must be a string".into()),
                 }
             }
+            if s.get("params").is_some_and(|p| !p.is_object()) {
+                errors.push("fit.samples.params must be an object of the query's parameter values".into());
+            }
             if let Some(b) = bus {
                 if !b.as_str().is_some_and(|b| b.starts_with("tcp://")) { errors.push(format!("fit.samples.bus must be a tcp:// endpoint, not {b}")); }
             }
@@ -395,7 +388,7 @@ pub fn fit_stored(raw: &Value) -> Value {
                                     "rows": s["rows"], "fit": fit}),
                 None => {
                     let mut out = json!({"query": s.get("query"), "rows": s["rows"], "fit": fit});
-                    for k in ["query_url", "bus", "kinds", "runs"] {
+                    for k in ["params", "query_url", "bus", "kinds", "runs"] {
                         if let Some(v) = s.get(k) { out[k] = v.clone(); }
                     }
                     out
@@ -656,13 +649,36 @@ pub fn keyed<F: FnOnce() -> Result<(u16, Value), String>>(key: Option<&str>, now
 /// always; a shadow decision never reaches the game. A live block is applied only through a keyed
 /// pull whose key is the block's idempotency key (so it runs once: `keyed`), and only on or before
 /// its stale date in game time (`today`, the game's date now). Pure: the caller records and answers.
+/// Whether a setting name is a PrismaticAI freight-line slot (fr_* or fr2_* .. fr16_*).
+pub fn is_freight_slot_setting(name: &str) -> bool {
+    (1..=crate::battlebrain_contract::FREIGHT_SLOTS).any(|i| name.starts_with(&crate::battlebrain_contract::freight_slot_prefix(i)))
+}
+
+/// The game tick at which a live decision's single approval expires: the end of its stale date.
+pub fn live_expiry(now_tick: i64, today: &str, valid_until: &str) -> Option<i64> {
+    let days = crate::battlebrain_contract::days_between(today, valid_until)?;
+    (days >= 0).then(|| now_tick + (days + 1) * DAY_TICKS)
+}
+
 pub fn decision_gate(raw: &Value, key: Option<&str>, today: Option<&str>) -> Result<(), (u16, &'static str, Vec<String>)> {
-    let Some(block) = raw.get("decision") else { return Ok(()) };
+    let Some(block) = raw.get("decision") else {
+        // A freight-line slot has one author (I0117): only a Battlebrain decision may set fr_*.
+        let fr: Vec<&str> = raw["settings"].as_str().unwrap_or_default().split(',').filter_map(|kv| kv.split('=').next())
+            .map(str::trim).filter(|k| is_freight_slot_setting(k)).collect();
+        if !fr.is_empty() {
+            return Err((422, "fr_needs_decision", vec![format!("{} set a freight-line slot, which only a Battlebrain decision block may do", fr.join(", "))]));
+        }
+        return Ok(());
+    };
     if let Err(rs) = crate::battlebrain_contract::validate_decision_block(block) {
         return Err((422, "invalid_decision_block", rs.iter().map(|r| format!("decision.{}: {} ({})", r.path, r.message, r.code)).collect()));
     }
     if block["mode"] != "live" {
         return Err((409, "shadow_refused", vec![format!("decision {} is a {} decision; only live decisions are applied", block["decision"], block["mode"])]));
+    }
+    let settings = raw["settings"].as_str().unwrap_or_default();
+    if block["settings_digest"].as_str() != Some(crate::battlebrain_contract::settings_digest(settings).as_str()) {
+        return Err((409, "payload_mismatch", vec!["the directive's settings are not the ones its decision block authorises (settings_digest)".into()]));
     }
     let want = block["idempotency_key"].as_str().unwrap_or_default();
     if key != Some(want) {
@@ -673,6 +689,46 @@ pub fn decision_gate(raw: &Value, key: Option<&str>, today: Option<&str>) -> Res
         (Some(t), Some(until)) => Err((409, "stale_decision", vec![format!("the decision was valid until {until}; the game is at {t}")])),
         _ => Err((409, "stale_decision", vec!["the game's date cannot be read, so the decision's freshness cannot be checked".into()])),
     }
+}
+
+/// Apply a live decision (I0117): its company must be an AI company now, the game must offer
+/// openttd.ai.set_settings, and every setting goes under one approval that expires with the
+/// decision. Recorded as plan.directive like every directive.
+fn apply_live(g: &Arc<Game>, url: &str, raw: &Value, d: &Directive, ignored: &[String], key: Option<&str>) -> Result<(u16, Value), String> {
+    let refuse = |status: u16, outcome: &str, why: String| -> Result<(u16, Value), String> {
+        g.event("ai", &format!("Battlebrain's live decision ({url}) is not applied: {why}"));
+        let errors = vec![why.clone()];
+        let mut data = directive_event(url, raw, Err(&errors), ignored, &[]);
+        data["choice"]["outcome"] = json!(outcome);
+        g.plan("plan.directive", data);
+        Ok((status, json!({"error": why, "called_url": url, "raw_response": raw})))
+    };
+    let Some(company) = d.company_id else { return refuse(422, "invalid_decision_block", "a live decision names its company_id".into()) };
+    let companies = g.resource("openttd://companies")?;
+    let list = companies.get("companies").or_else(|| companies.get("data")).cloned().unwrap_or(companies.clone());
+    let is_ai = list.as_array().into_iter().flatten().any(|c| c["id"].as_i64() == Some(company) && c["is_ai"] == true);
+    if !is_ai {
+        return refuse(409, "not_an_ai_company", format!("company {company} is not an AI company now"));
+    }
+    if !g.tool_names().contains("openttd.ai.set_settings") {
+        return refuse(409, "no_atomic_apply", "this game offers no openttd.ai.set_settings, so the decision cannot be applied under one approval".into());
+    }
+    let (now_tick, today) = game_time(g)?;
+    let Some(expires) = today.as_str().and_then(|t| live_expiry(now_tick, t, raw["decision"]["valid_until"].as_str().unwrap_or_default())) else {
+        return refuse(409, "stale_decision", "the decision's stale date has passed or the game's date cannot be read".into());
+    };
+    let settings: serde_json::Map<String, Value> = d.settings.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
+    let steps = vec![step(format!("company {company}: {} setting(s) under one approval, expiring at tick {expires}", settings.len()),
+        g.tool("openttd.ai.set_settings", json!({"company": company, "settings": settings, "expires_tick": expires})))];
+    g.event("ai", &format!("Battlebrain decided ({url}): {}", steps[0]["line"].as_str().unwrap_or_default()));
+    let mut data = directive_event(url, raw, Ok(d), ignored, &steps);
+    data["inputs"]["live"]["key"] = json!(key);
+    if let Some(seq) = g.plan("plan.directive", data) { track(seq, url, &steps); }
+    let errors: Vec<&str> = steps.iter().filter(|s| s["state"] == json!("error")).filter_map(|s| s["error"].as_str()).collect();
+    if !errors.is_empty() {
+        return Ok((502, json!({"error": format!("applying the decision failed: {}", errors.join("; ")), "called_url": url, "steps": steps})));
+    }
+    Ok((200, json!({"called_url": url, "applied": "openttd.ai.set_settings", "steps": steps, "expires_tick": expires})))
 }
 
 pub fn pull_with(g: &Arc<Game>, url: &str, key: Option<&str>) -> Result<(u16, Value), String> {
@@ -705,6 +761,11 @@ pub fn pull_with(g: &Arc<Game>, url: &str, key: Option<&str>) -> Result<(u16, Va
         g.plan("plan.directive", data);
         return Ok((status, json!({"error": "the directive's decision block may not be applied", "errors": errors,
                                   "called_url": url, "raw_response": raw})));
+    }
+    // A live Battlebrain decision (it passed decision_gate) is bound to its own snapshot, key and
+    // stale date, so it is applied as one approval through openttd.ai.set_settings, or not at all.
+    if raw.get("decision").is_some() {
+        return apply_live(g, url, &raw, &d, &ignored, key);
     }
     // Bound to what Prismatic observed during this pull, or not applied at all.
     let (_, obs) = last();
@@ -778,14 +839,37 @@ pub fn directive_event(url: &str, raw: &Value, d: Result<&Directive, &Vec<String
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_live_decision_is_bound_to_its_settings_and_slots_have_one_author() {
+        let s = "planned_freight_only=1,fr_from=41,fr_to=1,fr_cargo=1";
+        let block = json!({"schema": "battlebrain-decision/v2", "decision": format!("bb:{}", "1".repeat(64)),
+            "snapshot_digest": format!("sha256:{}", "2".repeat(64)), "idempotency_key": "k", "policy": "freight-margin@2",
+            "valid_until": "1963-03-24", "mode": "live", "settings_digest": crate::battlebrain_contract::settings_digest(s)});
+        assert!(decision_gate(&json!({"company_id": 0, "settings": s, "decision": block}), Some("k"), Some("1963-03-01")).is_ok());
+        let swapped = json!({"company_id": 0, "settings": "planned_freight_only=1,fr_from=29,fr_to=34,fr_cargo=1", "decision": block});
+        assert_eq!(decision_gate(&swapped, Some("k"), Some("1963-03-01")).unwrap_err().1, "payload_mismatch");
+        assert_eq!(decision_gate(&json!({"company_id": 0, "settings": "fr2_from=7,aggressiveness=50"}), None, None).unwrap_err().1, "fr_needs_decision");
+        assert!(decision_gate(&json!({"company_id": 0, "settings": "aggressiveness=50,planned_freight_only=0"}), None, None).is_ok(), "rollback and other settings need no block");
+        assert!(is_freight_slot_setting("fr16_cargo") && is_freight_slot_setting("fr_to") && !is_freight_slot_setting("freight") && !is_freight_slot_setting("frost"));
+    }
+
+    #[test]
+    fn a_live_approval_expires_at_the_end_of_the_decisions_stale_date() {
+        assert_eq!(live_expiry(1000, "1963-03-01", "1963-03-01"), Some(1000 + DAY_TICKS));
+        assert_eq!(live_expiry(1000, "1963-03-01", "1963-03-03"), Some(1000 + 3 * DAY_TICKS));
+        assert_eq!(live_expiry(1000, "1963-03-02", "1963-03-01"), None, "already stale");
+        assert_eq!(live_expiry(1000, "bad", "1963-03-01"), None);
+    }
+
+    #[test]
     fn a_shadow_or_broken_decision_block_never_passes_the_executor() {
         // I0096: the executor boundary. A directive without a block is unaffected.
         let (k, today) = (Some("i:3:1953-02-09:freight-line"), Some("1953-02-20"));
-        assert!(decision_gate(&json!({"company_id": 3, "settings": "fr_from=13"}), None, None).is_ok());
-        let block = |mode: &str| json!({"schema": "battlebrain-decision/v1", "decision": format!("bb:{}", "1".repeat(64)),
+        assert!(decision_gate(&json!({"company_id": 3, "settings": "aggressiveness=75"}), None, None).is_ok());
+        let block = |mode: &str| json!({"schema": "battlebrain-decision/v2", "decision": format!("bb:{}", "1".repeat(64)),
             "snapshot_digest": format!("sha256:{}", "2".repeat(64)), "idempotency_key": "i:3:1953-02-09:freight-line",
-            "policy": "freight-margin@1", "valid_until": "1953-03-12", "mode": mode});
-        let shadow = decision_gate(&json!({"company_id": 3, "settings": "fr_from=13", "decision": block("shadow")}), k, today).unwrap_err();
+            "policy": "freight-margin@2", "valid_until": "1953-03-12", "mode": mode,
+            "settings_digest": crate::battlebrain_contract::settings_digest("")});
+        let shadow = decision_gate(&json!({"company_id": 3, "decision": block("shadow")}), k, today).unwrap_err();
         assert_eq!((shadow.0, shadow.1), (409, "shadow_refused"));
         assert!(decision_gate(&json!({"company_id": 3, "decision": block("live")}), k, today).is_ok());
         // I0097: a live decision runs only through a pull keyed with its own key, and only while fresh.
@@ -797,7 +881,7 @@ mod tests {
         let unknown = decision_gate(&json!({"company_id": 3, "decision": block("auto")}), k, today).unwrap_err();
         assert_eq!((unknown.0, unknown.1), (422, "invalid_decision_block"));
         let mut v2 = block("live");
-        v2["schema"] = json!("battlebrain-decision/v2");
+        v2["schema"] = json!("battlebrain-decision/v3");
         assert_eq!(decision_gate(&json!({"company_id": 3, "decision": v2}), k, today).unwrap_err().0, 422);
         let mut nokey = block("live");
         nokey.as_object_mut().unwrap().remove("idempotency_key");
@@ -1047,7 +1131,8 @@ mod tests {
     fn a_fit() -> Value {
         json!({"schema": FIT_SCHEMA, "model": "growth_by_aggressiveness",
                "parameters": {"by_aggressiveness": [{"aggressiveness": 50, "mean_growth": 0.031, "std_growth": 0.12, "n": 40}]},
-               "samples": {"query": samples_sql(1), "query_url": "http://127.0.0.1:8800/api/db/query", "rows": 40, "runs": 2},
+               "samples": {"query": samples_query(1).sql(), "params": {"company": 1}, "query_url": "http://127.0.0.1:8800/api/db/query",
+                           "rows": 40, "runs": 2},
                "quality": {"residual_std": 0.11}})
     }
 
@@ -1101,10 +1186,10 @@ mod tests {
         assert_eq!(h["schema"], HISTORY_SCHEMA);
         assert_eq!(h["bus"], json!({"endpoint": null, "envelope": BUS_SCHEMA, "kinds": ["game.sample", "plan.directive"]}));
         assert_eq!((h["store"].clone(), h["query_url"].clone()), (json!("off"), json!("http://127.0.0.1:7/api/db/query")));
-        assert_eq!(h["samples_query"], samples_sql(1));
-        assert!(samples_sql(1).contains("x.company = 1") && samples_sql(1).contains("AS BIGINT) = 1"));
-        assert!(read_only_sql(&samples_sql(7)).is_ok());
-        assert_eq!(out[0]["history"]["samples_query"], samples_sql(0));
+        assert_eq!((h["samples_query"].clone(), h["samples_params"].clone()), (json!(samples_query(1).sql()), json!({"company": 1})));
+        assert!(samples_query(1).sql().contains("x.company = $company") && samples_query(1).sql().contains("AS BIGINT) = $company"));
+        assert!(read_only_sql(samples_query(7).sql()).is_ok());
+        assert_eq!(out[0]["history"]["samples_params"], json!({"company": 0}));
     }
 
     #[test]
@@ -1115,7 +1200,7 @@ mod tests {
         assert_eq!(ignored, vec!["engine"]);
         let steps = vec![step("company 1 aggressiveness=50".into(), Ok(json!({"status": "executed", "verdict": "VERIFIED_SUCCESS"})))];
         let e = directive_event("http://x/decision", &raw, Ok(&d), &ignored, &steps);
-        assert_eq!(e["inputs"]["stored"], json!({"query": samples_sql(1), "rows": 40, "fit": a_fit(),
+        assert_eq!(e["inputs"]["stored"], json!({"query": samples_query(1).sql(), "params": {"company": 1}, "rows": 40, "fit": a_fit(),
                                                   "query_url": "http://127.0.0.1:8800/api/db/query", "runs": 2}));
         assert_eq!(e["inputs"]["live"]["working"], json!({"engine": "PrismaticMonteCarlo.simulate/3"}), "the fit is not repeated as working");
         assert_eq!(e["version"]["params"]["fit_schema"], FIT_SCHEMA);
@@ -1150,6 +1235,9 @@ mod tests {
         let mut write = a_fit();
         write["samples"]["query"] = json!("DELETE FROM samples");
         assert!(bad(write)["fit_errors"][0].as_str().unwrap().starts_with("fit.samples.query is not one read-only statement"));
+        let mut listed = a_fit();
+        listed["samples"]["params"] = json!([1]);
+        assert_eq!(bad(listed)["fit_errors"], json!(["fit.samples.params must be an object of the query's parameter values"]));
         let e = bad(json!({"schema": FIT_SCHEMA, "model": "", "parameters": [], "samples": {"rows": -1}}));
         assert_eq!(e["fit_errors"].as_array().unwrap().len(), 4, "{e}");
         assert!(e["fallback"].as_str().unwrap().starts_with("Prismatic's fit breaks the decision contract and is not read: "));
@@ -1188,7 +1276,7 @@ mod tests {
         st.insert_events(&[event(1, 3000, json!({"company_id": 1, "settings": "aggressiveness=75", "fit": a_fit()}), true),
                            event(2, 4000, json!({"company_id": 0, "settings": "aggressiveness=25"}), true),
                            event(3, 100_050, json!({"company_id": 1, "settings": "aggressiveness=100"}), false)]).unwrap();
-        let out = st.query(&samples_sql(1)).unwrap();
+        let out = st.run(&samples_query(1)).unwrap();
         assert_eq!(out["columns"], json!(SAMPLE_COLUMNS));
         let got: Vec<(i64, String, f64, Value)> = out["rows"].as_array().unwrap().iter()
             .map(|r| (r[2].as_i64().unwrap(), r[4].as_str().unwrap().to_string(), r[5].as_f64().unwrap(), r[10].clone())).collect();
@@ -1200,7 +1288,12 @@ mod tests {
         assert_eq!(out["rows"][1][11], json!("applied"));
         // The directive's own event names what it was fitted from.
         let stored = st.query("SELECT json_extract_string(data, '$.inputs.stored.query') AS q, json_extract(data, '$.inputs.stored.rows') AS n FROM events WHERE seq = 1").unwrap();
-        assert_eq!(stored["rows"][0][0], json!(samples_sql(1)));
+        assert_eq!(stored["rows"][0][0], json!(samples_query(1).sql()));
+        // What a client of the history runs: the offered statement with the offered values, on
+        // /api/db/query (bus_sinks::query_bound is its code), answers the same rows.
+        let h = history(1, &Value::Null, &json!("x"), "http://p");
+        let sinks_answer = st.query_bound(h["samples_query"].as_str().unwrap(), h["samples_params"].as_object().unwrap()).unwrap();
+        assert_eq!(sinks_answer, out);
     }
 
     #[test]

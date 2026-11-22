@@ -1,0 +1,38 @@
+id: I0187
+milestone: governed-access-is-authenticated-and-every-capability-reaches-every-surface
+title: "One request id follows a request from any surface through plan, approval, execution and verified outcome, in versioned typed contracts and an append-only event stream"
+slug: one-request-lifecycle
+priority: p1
+profile: deep-work
+parallel_safe: false
+objective: "Define the lifecycle contracts once (IntentRequest, PlanArtifact, ExecutionEvent, each versioned, with a SnapshotRef, a content-addressed plan id, a digest of the canonical arguments and an idempotency key) by generalising what the Battlebrain decision contract and the panel's directive tracking already carry, and give every request a request_id at its first surface. Console, panel, Swagger/REST, MCP, the hub and Rhai attach that id; the approval core's plan, the plan.* and directive events and the verified outcome carry it; one read returns a request's whole append-only event stream."
+why: "External review 2026-11-22 (digest A-29). The pieces exist per surface: Battlebrain's typed decision with idempotency_key (tools/research/mcp-rhai/src/battlebrain_contract.rs:543), the panel's directive tracking with approved_by and per-step state (tools/research/mcp-rhai/src/panel_decision.rs:530-552, research/agent-loop.md:58), and ADR 0038's plan as the unit of approval with exact binding and idempotent pull (.ai/repo/adrs/0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md:69-80, :103-116). git grep for request_id and correlation_id under tools/research and src on origin/master finds nothing, so a request typed in the console cannot be followed to its outcome on another surface."
+scope:
+  - "tools/research/schema/request-lifecycle.v1.schema.json"
+  - "tools/research/mcp-rhai/src/lifecycle.rs"
+  - "tools/research/mcp-rhai/src/panel_decision.rs"
+  - "tools/research/mcp-rhai/src/panel_events.rs"
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "tools/research/mcp-rhai/src/hub.rs"
+  - "research/agent-loop.md"
+  - "research/prismatic-mcp/16-decision-contract.md"
+non_scope:
+  - "The approval core itself (ADR 0038 slice 2, peer worktree fix/approval-core): this issue starts after it lands and threads the id through it"
+  - "Replacing battlebrain-decision/v1; it is referenced from the PlanArtifact, not rewritten"
+depends_on:
+  - I0182
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#governed-access-is-authenticated-and-exercised"
+acceptance_criteria:
+  - "The three contracts validate against a committed schema with fixtures, and a breaking change needs a new version"
+  - "A request started from the console, the panel, REST, MCP and Rhai each carries one request_id through plan, approval (with its authenticated principal) and VERIFIED_SUCCESS or failure, tested end to end on a disposable stack"
+  - "GET /api/requests/<id> (and its derived MCP and Rhai forms) returns the request's ordered events; a replay under the same idempotency key creates no second plan"
+  - "tools/research/mcp-decision-check stays green"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-decision-check"
+  - "tools/gate.sh research"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -11,8 +11,10 @@
 //! One producer was added for it: the overview's daily sample is published as game.sample (src/panel.rs
 //! `record_sample`), because the history lived in its own ring and never reached the bus; every other
 //! producer is unchanged. The tap is the one place to add a further sink. The read
-//! surfaces (GET /api/bus, GET /api/db/tables, GET|POST /api/db/query) are rows of the panel's route
-//! table, so they reach OpenAPI, Swagger UI and Rhai (`api_dbQuery(#{sql: "..."})`) like every other.
+//! surfaces (GET /api/bus, GET /api/db/tables, GET|POST /api/db/query, GET|POST /api/db/named) are
+//! rows of the panel's route table, so they reach OpenAPI, Swagger UI and Rhai
+//! (`api_dbQuery(#{sql: "..."})`) like every other. What the panel reads from the stores itself is a
+//! named query of `sql/queries` (src/store_sql.rs), its values bound.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,6 +26,7 @@ use serde_json::{json, Value};
 
 use crate::bus_sinks::{self, envelope, now_ms, other_stores, read_only_sql, session_of, store_dir, Run, Sinks, COMMIT_TICK};
 use crate::panel::{Game, Input};
+use crate::store_sql::Named;
 
 /// The running tap: the panel's sinks (src/bus_sinks.rs) and the thread that follows the bus.
 pub struct Tap {
@@ -120,11 +123,11 @@ pub fn h_bus(_: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
 
 // ---------------------------------------------------------------------- every store (I0082)
 
-/// One read-only statement answered by every store of the store directory (ADR 0034 point 1: "or,
-/// across instances, of each instance's store"): this panel's own through `run_query` (the code of
-/// GET|POST /api/db/query), every other file opened read-only, and a file another running panel
-/// holds through that panel's /api/db/query (its registry record names its url). The rows of every
-/// store in one list, and per store where it was read and how many rows it gave, or why not.
+/// One named query answered by every store of the store directory (ADR 0034 point 1: "or, across
+/// instances, of each instance's store"): this panel's own through `run_named` (the code of POST
+/// /api/db/named), every other file opened read-only, and a file another running panel holds through
+/// that panel's /api/db/named (its registry record names its url). The rows of every store in one
+/// list, and per store where it was read and how many rows it gave, or why not.
 pub struct Across {
     pub columns: Value,
     pub rows: Vec<Value>,
@@ -133,14 +136,20 @@ pub struct Across {
 
 /// `Err` when this panel's store is off: then no history is read at all (each decision states its
 /// fallback).
-pub fn query_every_store(sql: &str) -> Result<Across, String> {
-    read_only_sql(sql)?;
-    let own = sinks().and_then(|s| s.store.clone());
+pub fn every_store(q: &Named) -> Result<Across, String> {
+    across_stores(sinks(), q, &crate::panel::registry())
+}
+
+/// `every_store` from the store of `sinks` and the files beside it, a locked one read through the
+/// running panel its record in `registry` names.
+fn across_stores(sinks: Option<&Sinks>, q: &Named, registry: &std::path::Path) -> Result<Across, String> {
+    read_only_sql(q.sql()).map_err(|err| format!("{}: {err}", q.name))?;
+    let own = sinks.and_then(|s| s.store.clone());
     let Some(own) = own else {
-        let why = sinks().and_then(|s| s.store_error.clone()).unwrap_or_else(|| "the store is not open".into());
+        let why = sinks.and_then(|s| s.store_error.clone()).unwrap_or_else(|| "the store is not open".into());
         return Err(format!("store off: {why}"));
     };
-    let (code, out) = run_query(sql);
+    let (code, out) = bus_sinks::named(sinks, q.name, &q.params);
     if code != 200 {
         return Err(format!("{}: {}", own.display(), py_err(&out)));
     }
@@ -148,7 +157,7 @@ pub fn query_every_store(sql: &str) -> Result<Across, String> {
     across.add(&own, "this panel", Ok(out));
     let dir = own.parent().map(PathBuf::from).unwrap_or_else(store_dir);
     for path in other_stores(&dir, &own) {
-        let answer = query_other(&path, sql);
+        let answer = query_other(&path, q, registry);
         let via = answer.as_ref().map(|(via, _)| via.clone()).unwrap_or_default();
         across.add(&path, &via, answer.map(|(_, a)| a));
     }
@@ -176,9 +185,9 @@ fn py_err(v: &Value) -> String {
 }
 
 /// One other store: opened read-only, else through the running panel that holds it.
-fn query_other(path: &std::path::Path, sql: &str) -> Result<(String, Value), String> {
+fn query_other(path: &std::path::Path, q: &Named, registry: &std::path::Path) -> Result<(String, Value), String> {
     #[cfg(feature = "store")]
-    let opened = bus_sinks::db::Store::open_read_only(path).and_then(|st| st.query(sql));
+    let opened = bus_sinks::db::Store::open_read_only(path).and_then(|st| st.run(q));
     #[cfg(not(feature = "store"))]
     let opened: Result<Value, String> = Err("built without the store feature".into());
     let locked = match opened {
@@ -186,13 +195,13 @@ fn query_other(path: &std::path::Path, sql: &str) -> Result<(String, Value), Str
         Err(err) => err,
     };
     let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let record: Option<Value> = std::fs::read_to_string(crate::panel::registry().join(format!("{name}.json"))).ok()
+    let record: Option<Value> = std::fs::read_to_string(registry.join(format!("{name}.json"))).ok()
         .and_then(|t| serde_json::from_str(&t).ok());
     let Some(url) = record.as_ref().and_then(|r| r["url"].as_str()).map(|u| u.trim_end_matches('/').to_string()) else {
         return Err(format!("not readable ({locked}) and no running panel {name} in the registry"));
     };
-    let via = format!("{url}/api/db/query");
-    let answer: Value = match ureq::post(&via).timeout(Duration::from_secs(10)).send_json(json!({"sql": sql})) {
+    let via = format!("{url}/api/db/named");
+    let answer: Value = match ureq::post(&via).timeout(Duration::from_secs(10)).send_json(q.to_json()) {
         Ok(r) => r.into_json().map_err(|err| format!("{via}: {err}"))?,
         Err(ureq::Error::Status(code, r)) => {
             let body: Value = r.into_json().unwrap_or(Value::Null);
@@ -247,7 +256,7 @@ pub fn import_calibration(dir: &std::path::Path, file: &Value, from: &str) -> Re
     let envs = import_events(file, from)?;
     let path = dir.join(format!("{IMPORT_INSTANCE}.duckdb"));
     let mut st = bus_sinks::db::Store::open(&path, IMPORT_INSTANCE)?;
-    let have = st.query("SELECT json_extract_string(data, '$.inputs.live.at') FROM events WHERE kind = 'plan.calibration'")?;
+    let have = st.run(&Named::new("event_field", json!({"kind": "plan.calibration", "path": "$.inputs.live.at"})))?;
     let seen: Vec<Value> = have["rows"].as_array().into_iter().flatten().map(|r| r[0].clone()).collect();
     let fresh: Vec<Value> = envs.into_iter().filter(|e| !seen.contains(&e["data"]["inputs"]["live"]["at"])).collect();
     if let Some(first) = fresh.first() {
@@ -257,18 +266,33 @@ pub fn import_calibration(dir: &std::path::Path, file: &Value, from: &str) -> Re
     Ok(json!({"store": path.display().to_string(), "imported": fresh.len(), "already": seen.len()}))
 }
 
-/// Run one read-only statement on the store: 400 for anything else, 503 without a store.
-pub fn run_query(sql: &str) -> (u16, Value) {
-    bus_sinks::query(sinks(), sql)
+/// Run one named query of `sql/queries` on the store, its values bound (POST /api/db/named).
+pub fn run_named(q: &Named) -> (u16, Value) {
+    bus_sinks::named(sinks(), q.name, &q.params)
 }
 
 pub fn h_db_tables(_: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
     Ok(bus_sinks::tables(sinks()))
 }
 
+/// GET|POST /api/db/query: `sql` (the body's or the address's, else the newest events) with the
+/// body's `params` bound to its named parameters.
 pub fn h_db_query(_: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
-    let sql = i.body.get("sql").and_then(Value::as_str).or_else(|| i.query.get("sql")).unwrap_or(bus_sinks::DEFAULT_QUERY);
-    Ok(run_query(sql))
+    let sql = i.body.get("sql").and_then(Value::as_str).or_else(|| i.query.get("sql")).unwrap_or(bus_sinks::default_query());
+    let params = i.body.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
+    Ok(bus_sinks::query_bound(sinks(), sql, &params))
+}
+
+/// GET /api/db/named: every named query of `sql/queries` with its description and parameters.
+pub fn h_db_named_list(_: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
+    Ok(bus_sinks::queries(sinks()))
+}
+
+/// POST /api/db/named {name, params}: one named query, its parameters bound by DuckDB.
+pub fn h_db_named_run(_: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
+    let name = i.body.get("name").and_then(Value::as_str).unwrap_or("");
+    let params = i.body.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
+    Ok(bus_sinks::named(sinks(), name, &params))
 }
 
 #[cfg(test)]
@@ -295,7 +319,7 @@ mod tests {
     #[cfg(feature = "store")]
     #[test]
     fn the_calibration_query_reads_the_readings_of_a_store_by_seed_and_map() {
-        use crate::calibrate::{factors, game_of, readings_of, readings_sql, Scope};
+        use crate::calibrate::{factors, game_of, readings_of, readings_query, Scope};
         let mut st = db::Store::open_in_memory("panel-t").unwrap();
         // Two runs of one instance: seed 3 from t=10, seed 9 from t=1000.
         st.insert_run(&json!("s1"), Some(3), 10, (Some(1), Some(2), Some(3))).unwrap();
@@ -307,11 +331,11 @@ mod tests {
             envelope(&json!({"seq": 4, "kind": "ai.log", "data": {"text": "not a reading"}}), "panel-t", &Value::Null, Some(9), 1200, None),
         ]).unwrap();
         let game = game_of(3, &json!({"map_width": 256, "map_height": 256}));
-        let same = st.query(&readings_sql(&Scope::Seed, &game).unwrap()).unwrap();
+        let same = st.run(&readings_query(&Scope::Seed, &game).unwrap()).unwrap();
         let r = readings_of(&same);
         assert_eq!(r.len(), 1, "seed 3 on 256x256 only: {same}");
         assert_eq!((r[0]["seq"].clone(), r[0]["seed"].clone(), r[0]["map"].clone()), (json!(1), json!(3), json!("256x256")));
-        let all = st.query(&readings_sql(&Scope::All, &game).unwrap()).unwrap();
+        let all = st.run(&readings_query(&Scope::All, &game).unwrap()).unwrap();
         let r = readings_of(&all);
         assert_eq!(r.iter().map(|x| x["seq"].as_i64().unwrap()).collect::<Vec<_>>(), vec![3, 2, 1], "newest first");
         assert_eq!(r[0]["seed"], 9, "the run an event belongs to is the newest started before it");
@@ -320,8 +344,49 @@ mod tests {
 
     #[cfg(feature = "store")]
     #[test]
+    fn a_named_query_is_answered_by_every_store_a_locked_one_through_its_panel() {
+        let dir = std::env::temp_dir().join(format!("across-{}-{}", std::process::id(), now_ms()));
+        let registry = dir.join("registry");
+        std::fs::create_dir_all(&registry).unwrap();
+        let sinks = Sinks::open("panel-a", Value::Null, 0, Some(dir.join("panel-a.duckdb")), Run { seed: None, ports: (None, None, None) });
+        sinks.send(envelope(&json!({"seq": 1, "kind": "x.k", "data": {"n": 1}}), "panel-a", &Value::Null, None, 1, None));
+        sinks.commit(true);
+        // A store no process holds is read as a file; one that cannot be opened through the panel its
+        // registry record names (the stand-in answers once and refuses once); one with no record is not read.
+        let mut b = db::Store::open(&dir.join("panel-b.duckdb"), "panel-b").unwrap();
+        b.insert_events(&[envelope(&json!({"seq": 1, "kind": "x.k", "data": {"n": 2}}), "panel-b", &Value::Null, None, 1, None)]).unwrap();
+        drop(b);
+        let (url, served) = crate::http_stub::serve(vec![(200, json!({"columns": ["value"], "rows": [["3"]], "count": 1, "capped": false})),
+                                                         (404, json!({"error": "no query event_field"}))]);
+        for name in ["panel-c", "panel-d", "panel-e"] {
+            std::fs::write(dir.join(format!("{name}.duckdb")), b"held by a running panel").unwrap();
+        }
+        for name in ["panel-c", "panel-d"] {
+            std::fs::write(registry.join(format!("{name}.json")), json!({"url": format!("{url}/")}).to_string()).unwrap();
+        }
+        let q = Named::new("event_field", json!({"kind": "x.k", "path": "$.n"}));
+        let a = across_stores(Some(&sinks), &q, &registry).unwrap();
+        assert_eq!(a.columns, json!(["value"]));
+        assert_eq!(a.rows, vec![json!(["1"]), json!(["2"]), json!(["3"])]);
+        let via: Vec<Value> = a.stores.iter().map(|s| json!([s["store"], s["via"], s.get("rows").or_else(|| s.get("error"))])).collect();
+        assert_eq!(via[..3], [json!(["panel-a.duckdb", "this panel", 1]), json!(["panel-b.duckdb", "file (read-only)", 1]),
+                              json!(["panel-c.duckdb", format!("{url}/api/db/named"), 1])]);
+        assert_eq!(via[3][2], json!(format!("{url}/api/db/named: HTTP 404: no query event_field")));
+        assert!(via[4][2].as_str().unwrap().contains("no running panel panel-e in the registry"), "{}", via[4]);
+        let sent = served.join().unwrap();
+        assert_eq!(sent.iter().map(|(line, body)| (line.as_str(), body.clone())).collect::<Vec<_>>(),
+                   vec![("POST /api/db/named HTTP/1.1", q.to_json()); 2], "the query by name with its values, never its text");
+        // Without a store nothing is read; a name no file has is no statement.
+        assert_eq!(across_stores(None, &q, &registry).err(), Some("store off: the store is not open".into()));
+        assert_eq!(across_stores(Some(&sinks), &Named::new("no_such", json!({})), &registry).err(),
+                   Some("no_such: empty statement".into()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(feature = "store")]
+    #[test]
     fn the_retired_file_is_imported_once_as_a_run_of_its_own_and_read_back_read_only() {
-        use crate::calibrate::{factors, game_of, readings_of, readings_sql, Scope};
+        use crate::calibrate::{factors, game_of, readings_of, readings_query, Scope};
         let dir = std::env::temp_dir().join(format!("i0082-store-{}-{}", std::process::id(), now_ms()));
         let file = json!({"schema": "openttd-research/calibration/v1", "rule": "r", "readings": [{"at": "2026-11-17T16:55Z", "source": "panel :8800",
             "modes": {}, "lines": [{"mode": "freight_rail", "ratio": 0.59}, {"mode": "bus", "ratio": 0.24}, {"mode": "freight_rail", "ratio": 0.78},
@@ -334,13 +399,13 @@ mod tests {
         let st = db::Store::open_read_only(&path).unwrap();
         let runs = st.query("SELECT instance, session, seed, started_ms, panel_port FROM runs").unwrap();
         assert_eq!(runs["rows"], json!([[IMPORT_INSTANCE, "import", null, 1_794_934_500_000i64, null]]), "a run of its own, no seed, no ports");
-        let all = st.query(&readings_sql(&Scope::All, &json!({"seed": 3, "map": null})).unwrap()).unwrap();
+        let all = st.run(&readings_query(&Scope::All, &json!({"seed": 3, "map": null})).unwrap()).unwrap();
         let r = readings_of(&all);
         assert_eq!(r.len(), 1);
         assert_eq!(r[0]["instance"], IMPORT_INSTANCE);
         assert_eq!(factors(&r)["params"]["calibration"], json!({"bus": 0.16, "default": 0.37, "freight_rail": 0.59, "rail": 0.15}),
                    "the factors the file held");
-        let seed = st.query(&readings_sql(&Scope::Seed, &game_of(3, &json!({"map_width": 256, "map_height": 256}))).unwrap()).unwrap();
+        let seed = st.run(&readings_query(&Scope::Seed, &game_of(3, &json!({"map_width": 256, "map_height": 256}))).unwrap()).unwrap();
         assert_eq!(seed["count"], 0, "no seed or map was attached to the file's reading");
         assert!(st.query("DELETE FROM events").is_err(), "read-only");
         drop(st);

@@ -63,6 +63,8 @@ function PrismaticAI::Save() {
 		rescued_at = this.rescued_at,
 		selling = this.selling,
 		resizing = this.resizing,
+		lost = this.lost,
+		orphans = this.orphans,
 		self_targets = this.self_targets,
 		auto_air = this.auto_air,
 		air_failed = this.air_failed,
@@ -143,6 +145,8 @@ function PrismaticAI::RestoreFromSave(data) {
 	this.rescued_at = PrismaticAI.RestoreField(data, "rescued_at", -1);
 	this.selling = PrismaticAI.RestoreField(data, "selling", {});
 	this.resizing = PrismaticAI.RestoreField(data, "resizing", {});
+	this.lost = PrismaticAI.RestoreField(data, "lost", {});
+	this.orphans = PrismaticAI.RestoreField(data, "orphans", {});
 	this.self_targets = PrismaticAI.RestoreField(data, "self_targets", {});
 	this.auto_air = PrismaticAI.RestoreField(data, "auto_air", 0);
 	this.air_failed = PrismaticAI.RestoreField(data, "air_failed", 0);
@@ -340,7 +344,10 @@ function PrismaticAI::RestoreFromMap(b) {
 	foreach (v, _ in AIVehicleList()) {
 		local rail = AIVehicle.GetVehicleType(v) == AIVehicle.VT_RAIL;
 		if (AIVehicle.IsStoppedInDepot(v)) {
-			if (rail) AIVehicle.StartStopVehicle(v);
+			/* A train with no orders (a save while BuildTrain bought its wagons) stays: events.nut
+			 * LookAfterVehicles gives it a line's orders or sells it. */
+			if (rail && AIOrder.GetOrderCount(v) > 0) AIVehicle.StartStopVehicle(v);
+			else if (rail) continue;
 			else this.selling[v] <- true;
 		} else if (AIOrder.IsGotoDepotOrder(v, AIOrder.ORDER_CURRENT) &&
 				(AIOrder.GetOrderFlags(v, AIOrder.ORDER_CURRENT) & AIOrder.OF_STOP_IN_DEPOT) != 0) {

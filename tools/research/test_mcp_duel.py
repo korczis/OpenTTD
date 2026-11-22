@@ -7,9 +7,9 @@ Run: python3 -B tools/research/test_mcp_duel.py
 
 The duel's Python is loaded from the heredoc of tools/research/mcp-duel, so what is tested is what
 runs. A fake panel on 127.0.0.1 answers the routes the duel calls. Its /api/db/query runs each
-statement with the DuckDB CLI on a file made from the store's own schema (`TABLES` read from
-tools/research/mcp-rhai/src/bus_sinks.rs, the sinks the panel's tap and the hub share since I0084)
-and answers it as bus_sinks.rs does: {columns, rows, count, capped}, at most QUERY_CAP rows (read
+statement with the DuckDB CLI on a file made from the store's own schema (`TABLES`: the files of tools/research/mcp-rhai/sql/tables,
+in name order, as the store runs them at every open, sql/README.md) and answers it as
+tools/research/mcp-rhai/src/bus_sinks.rs (the sinks the panel's tap and the hub share since I0084) does: {columns, rows, count, capped}, at most QUERY_CAP rows (read
 from the same source) and `capped` beyond. Its
 POST /api/bus/publish accepts only the kinds panel_events.rs declares external, with the four fields
 refuse_external asks for. The store tests are skipped without a `duckdb` on PATH; the fallback and
@@ -21,6 +21,7 @@ import importlib.machinery
 import importlib.util
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -36,7 +37,8 @@ sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 SCRIPT = HERE / "mcp-duel"
-STORE_RS = HERE / "mcp-rhai" / "src" / "bus_sinks.rs"  # the store's schema and query cap (I0084)
+STORE_RS = HERE / "mcp-rhai" / "src" / "bus_sinks.rs"  # the store's query cap (I0084)
+TABLES_DIR = HERE / "mcp-rhai" / "sql" / "tables"  # the store's schema, one file per table
 EVENTS_RS = HERE / "mcp-rhai" / "src" / "panel_events.rs"
 NOTE = ROOT / ".ai" / "repo" / "knowledge" / "curated" / "the-panel-bus-carries-these-event-kinds.md"
 DUCKDB = shutil.which("duckdb")
@@ -52,7 +54,7 @@ def load_duel():
 
 duel = load_duel()
 QUERY_CAP = int(re.search(r"pub const QUERY_CAP: usize = (\d+);", STORE_RS.read_text())[1])
-TABLES = re.search(r'pub const TABLES: &str = "(.*?)";', STORE_RS.read_text(), re.S)[1]
+TABLES = "\n".join(f.read_text() for f in sorted(TABLES_DIR.glob("*.sql")))
 EXTERNAL = set(re.findall(r'k\("([a-z._]+)", By::External', EVENTS_RS.read_text()))
 READ_ONLY = ("SELECT", "WITH", "DESCRIBE", "SUMMARIZE", "SHOW")
 
@@ -593,6 +595,167 @@ class Charts(unittest.TestCase):
         self.assertEqual((r.returncode, r.stderr.strip()), (2, "mcp-duel: --check goes with --render"))
         r = subprocess.run([str(SCRIPT), "--help"], capture_output=True, text=True)
         self.assertIn("tools/research/mcp-duel --render [--check]", r.stdout)
+
+
+INFO_NUT = HERE / "prismatic-ai" / "PrismaticAI" / "info.nut"
+
+
+def live_answer(settings="planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1", line=(13, 32, 1), mode="live"):
+    """A `battlebrain live` answer, as bin/battlebrain.rs `run` shapes it (the fields read here)."""
+    block = {"schema": "battlebrain-decision/v1", "decision": "sha256:d", "mode": mode, "idempotency_key": "duel:0:1950-01-01:freight-line"}
+    sel = None if line is None else {"producer": line[0], "acceptor": line[1], "cargo_id": line[2], "track": "found"}
+    return {"mode": mode, "directive": None if line is None or mode != "live" else {"company_id": 0, "settings": settings, "decision": block},
+            "directive_block": block, "comparison": {"battlebrain": sel, "divergence": "same"}}
+
+
+def one_line(slots, first="fr_from=13,fr_to=32,fr_cargo=1"):
+    return "planned_freight_only=1," + first + "".join(f",{s}=-1" for s in slots if s != "fr_from")
+
+
+class PortfolioPanel:
+    """The one read capture_at_start makes: the panel's plan.portfolio events."""
+
+    def __init__(self, events):
+        self.base, self.events, self.paths = "http://127.0.0.1:1", events, []
+
+    def get(self, path):
+        self.paths.append(path)
+        return {"events": self.events}
+
+
+def portfolio(args, seq=5):
+    return {"seq": seq, "kind": "plan.portfolio", "data": {"inputs": {"live": {"planner": {"exe": "mcp-plan", "args": args}}}}}
+
+
+class BattlebrainPair(unittest.TestCase):
+    """The held-start pair of research/battlebrain/experiment-freight-margin.md (Phase 06): offline,
+    with a fake panel and a fake mcp-plan; no game, no stack."""
+
+    ARGS = ["--limit", "40", "--params", '{"budget":300000}', "--track", "16"]
+
+    def test_the_planner_arguments_are_the_panels_newest_portfolio(self):
+        events = [portfolio(["--limit", "10"], 1), {"kind": "plan.bot_settings", "data": {}}, portfolio(self.ARGS, 7)]
+        self.assertEqual(duel.planner_args(events), self.ARGS)
+        self.assertIsNone(duel.planner_args([{"kind": "plan.portfolio", "data": {"inputs": {}}}]))
+        self.assertIsNone(duel.planner_args([]))
+
+    def fake_plan(self, code=0, companies=({"id": 0, "is_ai": True},), window=None):
+        calls = []
+
+        def run(argv, **kw):
+            calls.append(argv)
+            out = Path(argv[argv.index("--capture") + 1])
+            (out / "capture.json").write_text(json.dumps({"schema": "mcp-plan-capture/v1", "resources": [],
+                                                          "window": window or {"tick_from": 1400, "tick_to": 1400, "coherent": True}}))
+            (out / "companies.json").write_text(json.dumps({"game_tick": 1400, "data": {"companies": list(companies)}}))
+            return types.SimpleNamespace(returncode=code, stdout='{"freight": []}', stderr="boom" if code else "")
+        return run, calls
+
+    def test_the_held_start_is_captured_with_the_panels_own_planner_arguments(self):
+        run, calls = self.fake_plan()
+        panel = PortfolioPanel([portfolio(self.ARGS)])
+        with tempfile.TemporaryDirectory() as tmp:
+            held = duel.capture_at_start(panel, Path(tmp) / "cap", "/x/mcp-plan", run=run)
+            self.assertEqual(calls, [["/x/mcp-plan", "--panel", panel.base, *self.ARGS, "--capture", str(Path(tmp) / "cap")]])
+            self.assertEqual(panel.paths, ["/api/events?kinds=plan.portfolio&limit=500"])
+            self.assertEqual((Path(tmp) / "cap" / "plan.json").read_text(), '{"freight": []}')
+            self.assertEqual(held["company"], 0)
+            self.assertEqual(held["window"]["tick_from"], held["window"]["tick_to"])
+            self.assertEqual(json.loads((Path(tmp) / "cap" / "held-start.json").read_text()), held)
+
+    def test_a_capture_is_refused_without_the_panels_plan_or_when_the_planner_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run, calls = self.fake_plan()
+            with self.assertRaisesRegex(duel.PairRefused, "no plan.portfolio"):
+                duel.capture_at_start(PortfolioPanel([]), tmp, "mcp-plan", run=run)
+            self.assertEqual(calls, [], "no planner without the panel's arguments")
+            run, _ = self.fake_plan(code=3)
+            with self.assertRaisesRegex(duel.PairRefused, "exited 3: boom"):
+                duel.capture_at_start(PortfolioPanel([portfolio(self.ARGS)]), tmp, "mcp-plan", run=run)
+            with self.assertRaisesRegex(duel.PairRefused, "already name a capture"):
+                duel.capture_at_start(PortfolioPanel([portfolio([*self.ARGS, "--capture", "x"])]), tmp, "mcp-plan", run=run)
+            run, _ = self.fake_plan(companies=({"id": 0, "is_ai": True}, {"id": 1, "is_ai": True}))
+            self.assertIsNone(duel.capture_at_start(PortfolioPanel([portfolio(self.ARGS)]), tmp, "mcp-plan", run=run)["company"],
+                              "two AI companies: B was already founded, so the company is not named")
+
+    def test_the_slots_are_read_from_the_bots_info_nut(self):
+        slots = duel.fr_slots(INFO_NUT.read_text())
+        self.assertEqual(slots[:2], ["fr_from", "fr2_from"])
+        self.assertEqual(len(set(slots)), len(slots))
+
+    def test_arm_bb_takes_the_directive_verbatim_and_only_when_it_hands_one_line(self):
+        slots = duel.fr_slots(INFO_NUT.read_text())
+        good = one_line(slots)
+        self.assertEqual(duel.directive_settings(live_answer(good), slots), good)
+        # A directive that leaves the planner's other slots in place would not be battlebrain's arm alone.
+        with self.assertRaisesRegex(duel.PairRefused, "exactly one line"):
+            duel.directive_settings(live_answer(), slots)
+        with self.assertRaisesRegex(duel.PairRefused, "not a battlebrain live answer"):
+            duel.directive_settings(live_answer(good, mode="shadow"), slots)
+        with self.assertRaisesRegex(duel.PairRefused, "holds"):
+            duel.directive_settings(live_answer(good, line=None), slots)
+        with self.assertRaisesRegex(duel.PairRefused, "planned_freight_only=1"):
+            duel.directive_settings(live_answer(good.replace("planned_freight_only=1", "planned_freight_only=0")), slots)
+        two = good.replace(f"{slots[1]}=-1", f"{slots[1]}=7")
+        with self.assertRaisesRegex(duel.PairRefused, "exactly one line"):
+            duel.directive_settings(live_answer(two), slots)
+
+    def test_a_pair_is_valid_only_when_both_starts_give_the_same_decision(self):
+        self.assertTrue(duel.pair_check(live_answer(), live_answer())["valid"])
+        self.assertFalse(duel.pair_check(live_answer(), live_answer(line=(13, 40, 1)))["valid"])
+        self.assertTrue(duel.pair_check(live_answer(line=None), live_answer(line=None))["valid"], "HOLD on both")
+        refused = {"ok": False, "refusals": [{"code": "incoherent_snapshot"}]}
+        self.assertEqual(duel.pair_check(refused, live_answer())["why"], "a decision was refused")
+
+    def test_a_duel_record_names_its_capture_and_its_directive(self):
+        self.assertIsNone(duel.pair_record("", ""))
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "held-start.json").write_text('{"company": 0}')
+            (Path(tmp) / "live.json").write_text(json.dumps(live_answer("s")))
+            rec = duel.pair_record(tmp, str(Path(tmp) / "live.json"))
+            self.assertEqual(rec["capture"]["held_start"], {"company": 0})
+            self.assertEqual(rec["directive"]["settings"], "s")
+            self.assertEqual(rec["directive"]["decision"], "sha256:d")
+
+    def sandbox(self, tmp):
+        """A copy of mcp-duel in a tree with no mcp-e2e: a run that got past its checks could not
+        start a stack, so these tests can never start a game."""
+        root = Path(tmp)
+        (root / "tools" / "research" / "prismatic-ai" / "PrismaticAI").mkdir(parents=True)
+        shutil.copy(SCRIPT, root / "tools" / "research" / "mcp-duel")
+        shutil.copy(INFO_NUT, root / "tools" / "research" / "prismatic-ai" / "PrismaticAI" / "info.nut")
+        return root / "tools" / "research" / "mcp-duel"
+
+    def test_the_flags_refuse_before_any_stack_starts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = self.sandbox(tmp)
+            env = dict(os.environ, PRISMATIC_START_PAUSED="2")
+            (Path(tmp) / "shadow.json").write_text(json.dumps(live_answer(mode="shadow")))
+            r = subprocess.run([str(script), "--directive", str(Path(tmp) / "shadow.json"), "--bot-settings", "a=1"],
+                               capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("exclude each other", r.stderr)
+            r = subprocess.run([str(script), "--directive", str(Path(tmp) / "shadow.json")], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("not a battlebrain live answer", r.stderr)
+            r = subprocess.run([str(script), "--capture-at-start", tmp], capture_output=True, text=True,
+                               env=dict(env, PRISMATIC_START_PAUSED="1"))
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("needs the held start", r.stderr)
+
+    def test_pair_check_runs_without_a_game(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = self.sandbox(tmp)
+            a, b, c = (Path(tmp) / n for n in ("a.json", "b.json", "c.json"))
+            a.write_text(json.dumps(live_answer()))
+            b.write_text(json.dumps(live_answer()))
+            c.write_text(json.dumps(live_answer(line=(1, 2, 3))))
+            r = subprocess.run([str(script), "pair-check", str(a), str(b)], capture_output=True, text=True)
+            self.assertEqual((r.returncode, json.loads(r.stdout)["valid"]), (0, True))
+            r = subprocess.run([str(script), "pair-check", str(a), str(c)], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1)
+            r = subprocess.run([str(script), "pair-check", str(a)], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 2)
 
 
 if __name__ == "__main__":

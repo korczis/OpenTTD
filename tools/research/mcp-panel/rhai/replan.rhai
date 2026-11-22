@@ -37,9 +37,13 @@
 // ones the bot declares. Edit the constants while it runs; the service reloads within a second.
 import "ttd" as ttd;
 import "build_plan" as bp;
+import "fr_author" as fa;
 
 // The AI whose company is re-planned: the first running company of it (/api/bots).
 const AI = "PrismaticAI";
+// This service's name for the planner key planner.<company> (fr_author.rhai): while the key names
+// another writer (Battlebrain's directive during a cutover), a round proposes nothing.
+const WRITER = "replan";
 // Game months between two plans, and seconds between two looks at the date.
 const EVERY_MONTHS = 1;
 const ROUND_S = 20;
@@ -71,9 +75,12 @@ fn month_of(date) {
     parse_int(p[0]) * 12 + parse_int(p[1])
 }
 
-fn rows_of(sql) {
-    let r = api_dbQuery(#{ sql: sql });
+// One named query of the store (tools/research/mcp-rhai/sql/queries/<name>.sql) with its
+// parameters bound by DuckDB: no SQL is written or joined here. GET /api/db/named lists them.
+fn rows_of(name, params) {
+    let r = api_dbNamedRun(#{ name: name, params: params });
     if "error" in r { throw `store: ${r.error}`; }
+    if "http_error" in r { throw `store: ${r.http_error} ${r.body}`; }
     r.rows ?? []
 }
 
@@ -102,22 +109,18 @@ fn finances(company) {
     #{ quarters: qs, trend: trend }
 }
 
-// The company's rank by value in this run and its last months' value changes, from the store's
-// views company_latest and company_month (research/mechanisms/event-bus-and-store.md).
-const CURRENT_RUN = "(SELECT max(run_ms) FROM run_spans)";
+// The company's rank by value in this run and its last months' value changes, from the named
+// queries company_rank and company_trend over the store's views.
 const TREND_MONTHS = 6;
 
 fn rank(company) {
-    let of = rows_of(`SELECT count(*) FROM company_latest WHERE run_ms = ${global::CURRENT_RUN}`)[0][0];
-    let me = rows_of(`SELECT rank, value, game_date FROM company_latest
-        WHERE run_ms = ${global::CURRENT_RUN} AND company = ${company}`);
+    let me = rows_of("company_rank", #{ company: company });
     let months = [];
-    for m in rows_of(`SELECT month, value_change FROM company_month WHERE run_ms = ${global::CURRENT_RUN}
-        AND company = ${company} ORDER BY month DESC LIMIT ${global::TREND_MONTHS}`) {
-        months.push(#{ month: m[0], value_change: m[1] });
+    for m in rows_of("company_trend", #{ company: company, months: global::TREND_MONTHS }) {
+        months.push(#{ month: m[0], value: m[1], value_change: m[2], money: m[3], money_change: m[4], vehicles: m[5] });
     }
-    if me.is_empty() { return #{ rank: 0, of: of, value: 0, date: "", months: months }; }
-    #{ rank: me[0][0], of: of, value: me[0][1], date: me[0][2], months: months }
+    if me.is_empty() { return #{ rank: 0, of: 0, value: 0, date: "", months: months }; }
+    #{ rank: me[0][0], of: me[0][1], value: me[0][2], date: me[0][3], months: months }
 }
 
 fn vehicles() { read("openttd://vehicles").data.vehicles ?? [] }
@@ -301,15 +304,15 @@ fn plan_round(b) {
     let diff = changes(settings_of(p.settings), b.settings ?? []);
     let applied = #{ pending: [], refused: [], lines: [] };
     let waiting = waiting_for_owner(b.id);
-    let owner_of = shared_get(`planner.${b.id}`) ?? "replan";
-    if owner_of != "replan" {
+    let held = fa::refusal(b.id, global::WRITER);
+    if type_of(held) != "()" {
         // Another planner holds the company (e.g. Battlebrain's directive): one writer per company.
-        print(`   holding: company ${b.id + 1} is planned by ${owner_of} (shared key planner.${b.id})`);
+        print(`   holding: ${held.why}`);
     } else if waiting > 0 {
         // The owner has not answered the last proposal yet; a new one would only pile up beside it.
         print(`   holding: ${waiting} earlier change(s) for company ${b.id + 1} still wait for the owner's approval`);
     } else if m.adopt && !diff.is_empty() {
-        applied = bp::apply(#{ build: #{ settings: diff } });
+        applied = bp::apply_as(#{ build: #{ settings: diff } }, global::WRITER);
         for l in applied.lines { print(`   ${l}`); }
         say(`new plan for ${b.name}: ${diff.len()} setting(s) wait for your approval (${applied.pending}); ${m.why}`);
     } else if diff.is_empty() {
@@ -321,7 +324,8 @@ fn plan_round(b) {
     let summary = #{ date: r.date, company: b.id, bot: b.name, rank: r.rank, of: r.of, value: r.value, value_by_month: r.months,
                      finances: f, competitors: others, competition: comp, portfolio: chosen,
                      investment_k: portfolio.investment_k, predicted_monthly: monthly, record: rec,
-                     model: m, proposed: diff.keys(), pending: applied.pending, refused: applied.refused };
+                     model: m, proposed: if type_of(held) == "()" { diff.keys() } else { [] }, held: held,
+                     pending: applied.pending, refused: applied.refused };
     record(b.id, summary);
     summary
 }

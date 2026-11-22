@@ -1,0 +1,34 @@
+id: I0179
+milestone: prismatic-closes-one-real-loop
+title: "A role-separated multi-agent controller (researcher, planner, critic, executor) is compared with a solo controller on invalid recommendations and duplicate actions, with and without the critic and retrieval"
+slug: multi-agent-vs-solo
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Run this as its own pre-registered experiment (I0161). The roles coordinate only through mesh records, and one arbiter submits through the approval path. The arms are solo controller, multi-agent, multi-agent without the critic, and multi-agent without retrieval, each on the same seeds from the same held start. The metrics are: recommendations refused by validation (invalid), the same plan submitted twice (duplicate), game time and wall time to decision, and the game outcome. Records go under research/results/, with the role definitions committed beside the protocol."
+why: "External review 2026-11-22 (digest B-33). Over research/ and tools/research/ on origin/master, `git grep -iwE 'critic|arbiter'` and `git grep -iE 'multi-?agent'` find nothing. The only multi-agent substrate is the typed mesh records (research/agent-loop.md:51), so no claim that splitting roles helps or hurts can be tested today."
+scope:
+  - "tools/research/agent-roles/**"
+  - "research/agent-roles.md"
+  - "research/results/**"
+  - "research/experiments/**"
+non_scope:
+  - "A second blackboard or a second approval path; roles use the mesh journal and the one approval core"
+  - "Any role approving its own request"
+depends_on:
+  - I0178
+  - I0161
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
+acceptance_criteria:
+  - "The protocol, with arms, metrics and seeds, is committed before the first run"
+  - "Each arm's records give invalid and duplicate counts, read from the mesh and the store, not self-reported"
+  - "The paired report compares the arms, and the result is stated whichever way it falls"
+validation:
+  - "tools/research/preregistration check research/experiments"
+  - "tools/research/paired-report research/experiments/<id>.yaml"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

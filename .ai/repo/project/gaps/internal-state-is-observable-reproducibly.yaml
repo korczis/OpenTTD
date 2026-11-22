@@ -12,6 +12,9 @@ observations:
   - id: cli-suite-not-rerun
     statement: "tools/research/test/research_test.sh was not rerun this session; its 28/28 is from the commit messages"
     source: file:tools/research/test/research_test.sh
+  - id: battle-records-cannot-explain
+    statement: "Added 2026-11-22 from an external review re-checked at origin/master ac8bc71d06: battle.py:1182 and :2590 run matches with -d script=1, the referee's REF Q line (main.nut:44) has no loan, max_loan (battle.py:1094) and vehicle limits are not recorded, replays were 0 of 4 identical on another arena with different builds, mcp-ab returns rows[0] (I0118-I0124)"
+    source: file:tools/research/ai-battle/battle.py
 conditions:
   - criterion: instrumentation-is-contained
     state: unknown
@@ -21,5 +24,9 @@ conditions:
     state: satisfied
     because: "the experiment rebase-verify-2026-11-15b passed the research gate; the CLI suite itself was not rerun"
     observations: [research-debug-runs, cli-suite-not-rerun]
+  - criterion: a-battle-explains-itself
+    state: missing
+    because: "no decision log, no loan, no effective settings in a battle record, and replays do not reproduce; milestone every-battle-match-explains-itself owns the fix"
+    observations: [battle-records-cannot-explain]
 risks:
   - "The stdin start-up race can lose the research_status line under load"

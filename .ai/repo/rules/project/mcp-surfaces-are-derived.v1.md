@@ -27,6 +27,16 @@ time the C++ side adds a tool, and a stale surface claims capability the game do
   (`GET /api/ui/classes`), and the `/ui` page draws every window and widget from `openttd.ui.windows`.
   No window, widget or class is listed by hand.
 - Instances come from the discovery registry (`GET /api/instances`), never from a list of ports.
+- The in-game Prismatic menu is one table, `ITEMS` in `src/prismatic_mcp/prismatic_mcp_menu.cpp`. An item's
+  `group` puts it in a submenu; the dropdown's top level, each submenu (opened in place, with `< Back`),
+  `openttd://ui/menu` (items with their group, groups in order) and the menu table of
+  `research/prismatic-mcp/README.md` all derive from it, so a new item reaches every surface by one row.
+  Proof: `tools/research/prismatic-mcp-menu --check` (the docs region, through `surfaces check`: pre-commit,
+  `tools/gate.sh change`, CI) and Catch2 `[prismatic_mcp]` (`tools/gate.sh research`): every group has
+  items, every item's target exists (its tool in the catalogue, its console command registered, its window
+  known, its hub path absolute). CI builds no research C++, so the Catch2 half runs only locally or on a
+  build host; a report says which ran. Approving is never a menu row: approvals go through the one approval
+  core and the control window's owner-only click.
 - The hub is the surface over all of them (`tools/research/mcp-rhai/src/hub.rs`, I0058): its instances come
   from the registry and `--panel`, its operations from each panel's `/openapi.json` and each MCP server's
   `tools/list`/`resources/list`, its events from each panel's bus. The events the hub raises itself
@@ -51,6 +61,10 @@ time the C++ side adds a tool, and a stale surface claims capability the game do
   OpenAPI, GraphQL and Rhai like every hub method. `track_plan` feeds the kernel a game's
   `openttd://map`, `map/ways`, `map/terrain`, `economy/prices` and `bridges` verbatim; a planner prices a build
   from `openttd://economy/prices` (what the game charges now), never from base prices typed into it (I0073).
+- No source keeps its own copy of the kernel catalogue: a list literal naming two kernels of the
+  discovered catalogue, or three `openttd.<group>.<tool>` names, fails
+  `cargo test --bin battlebrain` (rule `project.decision-authority-boundaries`, B4). The one
+  per-kernel registry allowed is the domain checks in `battlebrain_contract.rs`.
 - Rhai reaches the hub the same way: `mcp-rhai --hub URL` registers one `hub_<method>` function per
   method of the hub's OpenAPI document; none is named in mcp-rhai.
 - No duplicate buildings: `hub.audit` judges every instance by the game's own catchment
