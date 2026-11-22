@@ -25,11 +25,11 @@ sequenceDiagram
   A->>S: tools/call, for example openttd.cmd.BuildRoad
   S->>S: validate, side-effect-free test run
   S-->>A: pending_approval, approval_id, argument_digest
-  O->>S: prismatic_mcp approve id
-  A->>S: the same call again
-  S->>C: Post as the given company
+  O->>S: prismatic_mcp approve id (console, panel or chat)
+  S->>C: Post as the given company, at once
   C-->>S: result callback
-  S-->>A: executed, command_result, verdict
+  A->>S: read openttd://approvals and openttd://decisions
+  S-->>A: approval consumed, decision with its approval_id, command_result, verdict
 ```
 
 - **Two phases.** A mutation never runs on its first submission. It answers `pending_approval`
@@ -37,7 +37,16 @@ sequenceDiagram
 - **Bound to the arguments.** The approval matches the exact canonical arguments, not only the
   64-bit digest (`detail::ClassifySubmit` in `prismatic_mcp_detail.h`). An approval for
   `pause: true` does not authorize `pause: false`.
-- **One use, with a lifetime.** Executing consumes the approval; a replay is pending again.
+- **Approving executes.** Since [ADR 0038](../../.ai/repo/adrs/0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md)
+  the approval is the execution: `ApproveById` carries the action out on the game server the
+  moment the operator approves it, whichever channel the approval came through (the console's
+  `prismatic_mcp approve <id>`, the panel's `POST /api/approve`, a client's chat `!approve <id>`).
+  Nothing resubmits. The caller reads the outcome back: the approval's `state` in
+  `openttd://approvals` (`pending`, `approved`, `denied`, `consumed`, with `expired`), and the
+  decision recorded with that `approval_id` in `openttd://decisions` (`decision_id`,
+  `command_result`, `verdict`, `error`).
+- **One use, with a lifetime.** Executing consumes the approval. Submitting the same call again
+  afterwards asks for a fresh approval, and approving that one runs the action a second time.
   Approvals expire after `APPROVAL_TTL_TICKS` and the store holds at most `MAX_APPROVALS`
   (`prismatic_mcp_server.cpp`).
 - **Named ids only.** The console takes `prismatic_mcp approve <id> [<id> ...]` and
@@ -53,10 +62,17 @@ sequenceDiagram
 
 ### In the control panel
 
-The panel tracks every tool answer that says `pending_approval` and shows it with an Approve
-button (`Game::tool` in `panel.rs`). `POST /api/approve {id}` types the approval into the game's
-console and resubmits the same call. `POST /api/auto-approve {on}` is the owner's full-auto
-switch: while it is on, a loop approves every pending id once a second. It starts off unless the
+The panel keeps no queue of its own: it reads the game server's (`openttd://approvals`) and shows
+each pending approval with an Approve button. `/api/status` `pending` (and `status().pending` in
+Rhai) lists them as `{id, tool, args, created_tick, expires_tick}`. `POST /api/approve {id}` types
+the approval into the game's console, where the server executes it, and answers with the decision
+the server recorded for it (ADR 0038); it resubmits nothing. `POST /api/approve` and
+`POST /api/auto-approve {on: true}` need the panel's owner secret, which mcp-panel prints once at
+start: the page holds it as the cookie `mcp_owner_<port>` after one visit to `/?owner=<secret>`,
+and curl sends `X-Panel-Owner` ([mcp-control.md](../mcp-control.md#approval-is-bound-to-the-owner)).
+An owner-only tool (`openttd.ai.set_settings`) is approved only at the game's console.
+`POST /api/auto-approve {on}` is the owner's full-auto switch: while it is on, a loop approves the
+panel's own pending requests once a second, never an owner-only one. It starts off unless the
 owner passes `--auto-approve`. `POST /api/console` refuses any line that would approve, so an agent
 that can type console lines still cannot approve through them (`is_approval_line`). The convention
 that only the owner turns auto-approve on, never an agent on an inference, is recorded in

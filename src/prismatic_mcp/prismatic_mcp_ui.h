@@ -26,7 +26,8 @@ nlohmann::json Tools();
 
 /**
  * Whether this process is armed for interface input: started with PRISMATIC_MCP_INPUT=1, the
- * owner's switch. Read once; openttd://mcp/status reports it.
+ * owner's switch. Read once; openttd://mcp/status reports it. Armed, a script can type into this
+ * process's chat and console, so an approval may not leave it that way (ADR 0038).
  * @return True when the openttd.input.* and acting openttd.ui.* tools may run.
  */
 bool InputArmed();

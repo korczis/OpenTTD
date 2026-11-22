@@ -50,6 +50,12 @@ sequenceDiagram
   autoreplace through the Script API.
 - **Monitor.** Every `MONITOR_EVERY_S` it ranks problems worst first and posts the named claim
   `openttd:<instance>:rail` when the report changes. `MCP_BOARD_DRY=1` prints instead.
+- **Advice** (`advice_lib.rhai`). Every `ADVICE_EVERY_S` the monitor also reads the game's advice
+  news (`news.shown` events with `advice`), groups them by advice and vehicle and joins each with
+  the vehicle's line. It keeps a tally per company on the shared blackboard (`advice.<company>`),
+  writes a mesh `observation`, and says one chat line for the owner's company when an advice is
+  new and still holds. It issues no game command and approves nothing
+  ([The game's advice](../rail-steward.md#the-games-advice)).
 
 ## Where it lives
 
@@ -57,7 +63,8 @@ sequenceDiagram
 |---|---|
 | [`tools/research/mcp-panel/rhai/rail_lib.rhai`](../../tools/research/mcp-panel/rhai/rail_lib.rhai) | pure functions: records, lines, targets, choices, renewals, problems |
 | [`tools/research/mcp-panel/rhai/rail_steward.rhai`](../../tools/research/mcp-panel/rhai/rail_steward.rhai) | the steward's round |
-| [`tools/research/mcp-panel/rhai/rail_monitor.rhai`](../../tools/research/mcp-panel/rhai/rail_monitor.rhai) | the monitor's round |
+| [`tools/research/mcp-panel/rhai/rail_monitor.rhai`](../../tools/research/mcp-panel/rhai/rail_monitor.rhai) | the monitor's round and its look at the advice |
+| [`tools/research/mcp-panel/rhai/advice_lib.rhai`](../../tools/research/mcp-panel/rhai/advice_lib.rhai) | pure functions: advice items, groups, the vehicle's line, the tally, the chat line |
 | [`tools/research/prismatic-ai/PrismaticAI/lines.nut`](../../tools/research/prismatic-ai/PrismaticAI/lines.nut) | the bot side: records and `ReconcileLines` |
 | [`tools/research/mcp-rhai/src/board.rs`](../../tools/research/mcp-rhai/src/board.rs) | the board client behind `board_post` |
 | [`tools/research/mcp-rhai/src/panel_scripts.rs`](../../tools/research/mcp-rhai/src/panel_scripts.rs) | services and hot reload |
@@ -65,7 +72,9 @@ sequenceDiagram
 ## How it is tested
 
 - `cargo test` in `tools/research/mcp-rhai`: the `rail_*` tests in `main.rs` run `rail_lib.rhai` on
-  fixtures (records, targets, choices within a budget, renewals, the monitor's ranking).
+  fixtures (records, targets, choices within a budget, renewals, the monitor's ranking); the
+  `advice_*` tests run `advice_lib.rhai` on advice events (grouping, the line, what still holds,
+  the tally, who hears it).
 - `tools/research/mcp-scripts-check` drives the Scripts page that runs them.
 - Duels on seed 4242 with the new geometry and with line targets are recorded in
   [`research/results/`](../results/) and read in [`../rail-steward.md`](../rail-steward.md)

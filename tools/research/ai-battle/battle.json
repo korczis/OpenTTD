@@ -255,7 +255,8 @@
       "pressure_low",
       "pressure_mid",
       "pressure_high",
-      "rich_invest_rounds"
+      "rich_invest_rounds",
+      "air_add_full"
     ],
     "narrow": {
       "aggressiveness": [
@@ -341,6 +342,11 @@
       "air_add_waiting": [
         0,
         100,
+        10
+      ],
+      "air_add_full": [
+        0,
+        90,
         10
       ],
       "rail_twin_max": [

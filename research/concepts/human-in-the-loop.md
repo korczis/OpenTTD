@@ -21,16 +21,20 @@ that would change the game goes through a two-phase approval
    and [`src/prismatic_mcp/prismatic_mcp.h`](../../src/prismatic_mcp/prismatic_mcp.h)). The pure
    classifier `ClassifySubmit` in
    [`src/prismatic_mcp/prismatic_mcp_detail.h`](../../src/prismatic_mcp/prismatic_mcp_detail.h)
-   executes a submission only when an approved, unexpired, unconsumed approval holds the same
-   arguments. An approval is used once (state `Consumed`), and it expires after a fixed number of
-   ticks (`APPROVAL_TTL_TICKS`).
+   decides whether a submission matches a pending approval for the same arguments. An approval
+   is used once (state `Consumed`), and it expires after a fixed number of ticks
+   (`APPROVAL_TTL_TICKS`).
 3. **The owner approves.** In the game's `~` console (`prismatic_mcp approve <id>` or
    `deny <id>`), or with the Approve button of the control panel
    ([mechanism: control panel](../mechanisms/control-panel.md)). The header states that there is
    deliberately no bulk approval in this build.
-4. **The same call is resubmitted.** The panel keeps each pending call with its arguments and,
-   after the approval, sends the identical call again
-   (`approve` in [`tools/research/mcp-rhai/src/panel.rs`](../../tools/research/mcp-rhai/src/panel.rs)).
+4. **The approval executes it.** The game server carries the approved call out at once, on its
+   main thread through the command system, whichever channel approved it (the console, the
+   panel's `POST /api/approve`, a client's chat `!approve <id>`). Nothing resubmits the call: a
+   second submission of it asks for a fresh approval
+   ([ADR 0038](../../.ai/repo/adrs/0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md)).
+   The outcome is read back from `openttd://approvals` (the approval `consumed`) and
+   `openttd://decisions` (the decision with that `approval_id`).
 5. **The effect is checked.** Each decision gets a provenance record: decision, approval,
    command, then a verdict. `VERIFIED_FAILURE` means a command failed. `VERIFIED_SUCCESS` means
    it succeeded and, where the tool defines a check, the intended effect was observed in the game
@@ -99,7 +103,7 @@ flowchart TD
 - Approvals cost nothing in the game. A person may approve more carefully when real money is at
   stake, or less carefully when approvals are frequent. The game does not measure either.
 - The gate binds to arguments, not to the game state the owner saw. If the state changes between
-  the approval and the resubmission, within the approval's lifetime, the same call still runs.
+  the request and the approval, within the approval's lifetime, the same call still runs.
 - When auto-approve is on, the gate still records every decision, but nobody looks at it before
   it runs.
 - There is a recorded exception. The Prismatic bridge's decision path sets settings through the
