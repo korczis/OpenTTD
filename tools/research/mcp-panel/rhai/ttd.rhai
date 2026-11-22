@@ -142,6 +142,11 @@ fn start_bot(ai, settings) { api_botStart(#{ ai: ai, settings: settings }) }
 /// like every other change. Needs openttd.ai.set_setting in the game's tools/list.
 fn set_bot(company, name, value) { api_botSetting(#{ company: company, name: name, value: value }) }
 
+/// set_bot on behalf of `writer`, the caller's name for the planner key planner.<company>
+/// (fr_author.rhai). A freight-line slot (fr_*) is sent only this way: the panel refuses one that
+/// names no writer (fr_needs_writer) or whose writer is not the company's planner (fr_planner_held).
+fn set_bot(company, name, value, writer) { api_botSetting(#{ company: company, name: name, value: value, writer: writer }) }
+
 /// The bot's own log lines (ai.log events), newest last.
 fn bot_log(limit) {
     let e = events(0, "ai.log").events;

@@ -39,8 +39,8 @@ into a table, so every file it covers shares one implementation.
   `tools/research/mcp-rhai/src/battlebrain_policy.rs` and
   `tools/research/mcp-rhai/src/bin/battlebrain.rs` (`all`); and in
   `tools/research/mcp-rhai/src/panel_decision.rs` the live-decision executor:
-  `is_freight_slot_setting`, `live_expiry`, `decision_gate`, `apply_live` and the `LiveGame`
-  adapter of the panel's game (`items`).
+  `is_freight_slot_setting`, `live_expiry`, `decision_gate`, `live_world`, `apply_live` and the
+  `LiveGame` adapter of the panel's game (`items`).
 - **A file joins the table when its code must stay covered.** New code in a file of the table is
   covered by construction. A new file that carries a decision, a contract or an executor gets
   a row in the change that adds it.

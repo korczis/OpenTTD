@@ -529,8 +529,7 @@ class Health(unittest.TestCase):
                          ["P planned: hoards:1955-01..1956-10:600000->1720000@37v"])
 
     def test_hoarding_fails_only_the_contestants_held_to_spend(self):
-        # must_not_hoard narrows the hoards check within must_be_healthy (the self-steward lineup
-        # hoarded on the fitness seed before this check existed: a recorded finding, not a pass).
+        # must_not_hoard narrows the hoards check within must_be_healthy.
         fit = {"rules": self.RULES, "must_be_healthy": ["P a", "P b"], "must_not_hoard": ["P a"]}
         lineup = [{"ai": "PrismaticAI", "key": "P a"}, {"ai": "PrismaticAI", "key": "P b"}]
         flat = self.books([37] * 20, self.INCIDENT_MONEY)
@@ -538,7 +537,24 @@ class Health(unittest.TestCase):
         self.assertEqual(battle.fitness_verdict(m, fit), ["P a: hoards:1955-01..1956-10:600000->1720000@37v"])
         cfg = json.loads(battle.DEFAULT_CONFIG.read_text())["fitness"]
         self.assertIn("PrismaticAI planned", cfg["must_not_hoard"])
+        self.assertIn("PrismaticAI self-steward", cfg["must_not_hoard"])
         self.assertTrue(set(cfg["must_not_hoard"]) <= set(cfg["must_be_healthy"]))
+
+    def test_the_merged_self_steward_bot_spends_on_the_fitness_seed(self):
+        # PrismaticAI self-steward on seed 930967890 at 2301e263c1, 1963-07..1966-01 (battle.py
+        # ablate, script=4): money 0.54M -> 1.03M, but every two-year window adds vehicles (+17% or
+        # more) and stations, so it is not a hoard and the lineup is held to must_not_hoard. The
+        # pre-merge tree of the rich growth held 27 vehicles and built nothing on 485k -> 1.1M.
+        vehicles = [24, 24, 24, 24, 28, 28, 28, 28, 33, 33, 33]
+        stations = [29, 31, 31, 31, 33, 35, 35, 35, 38, 38, 37]
+        money = [535702, 608888, 687405, 780684, 721156, 817834, 901771, 960151, 883135, 990155,
+                 1033888]
+        merged = [dict(s, stations=st) for s, st in zip(self.books(vehicles, money), stations)]
+        self.assertEqual(battle.anomalies(merged, 0, self.RULES), [])
+        idle = self.books([27] * 9, [485_000 + i * 80_000 for i in range(9)])
+        before = [dict(s, stations=30) for s in idle]
+        kinds = [a.split(":")[0] for a in battle.anomalies(before, 0, self.RULES)]
+        self.assertEqual(kinds, ["hoards"])
 
     def test_fitness_holds_a_planned_prismatic_ai_healthy(self):
         # The default, self-steward and solo-max lineups are all unplanned; the live game's bot was

@@ -11,13 +11,13 @@ is catalogued as designed-but-not-yet-adapted, not pretended-covered.
 | Companies (`openttd://companies`) | `EXPOSED_READ_ONLY` | id/name/is_ai/money/inaugurated. Server-visible; see privacy note. |
 | Vehicles / towns / industries / stations | `EXPOSED_READ_ONLY` | `openttd://vehicles`, `openttd://towns`, `openttd://stations`, `openttd://depots`, `openttd://engines`; industries only as nodes of `openttd://world/graph`. Unpaginated. |
 | Map tiles / regions | `EXPOSED_READ_ONLY` | `openttd://map`, `openttd://map/terrain`, `openttd://map/ways`: the whole map, one string per row, encoding included. No area cap. |
-| AI / GameScript state & logs | `EXPOSED_READ_ONLY` (state) / `NOT_YET_ADAPTED` (logs) | `openttd://ai`: every company's AI, its declared settings and live values. Script logs are not exposed. |
+| AI / GameScript state & logs | `EXPOSED_READ_ONLY` (state, heartbeat) / `NOT_YET_ADAPTED` (other log lines) | `openttd://ai`: every company's AI, its declared settings and live values. `openttd://ai/status`: each AI company's newest `<Name> heartbeat: key=value ...` line from its own script log, split into fields (read from the log buffer; the script is asked nothing). Other script log lines, and the Game Script's, are not exposed. |
 | Native UI windows / viewport | `EXPOSED_READ_ONLY` / local GUI tools | `openttd.ui.*`, `openttd.input.*`, `openttd.view.*` tools and `openttd://ui/menu`, `openttd://ui/requests`; they change only the local window and viewport, never game state. |
 | Debug / performance / pools | `NOT_YET_ADAPTED` | expensive diagnostics must be opt-in/bounded (Phase E). |
 | Settings schema | `NOT_YET_ADAPTED` | game settings are not exposed; AI settings are, through `openttd://ai`. Secrets omitted/redacted when added. |
 | Network clients (IP, keys, names) | `WITHHELD_PRIVACY` | redacted-by-default resource; not exposed in this build. |
 | Admin password / client_secret_key / X25519 keys | `WITHHELD_SECRET` | never serialized. |
-| Bearer token | `WITHHELD_SECRET` | only via explicit `prismatic_mcp token`; never in cfg/logs/snapshots. |
+| Bearer token | `WITHHELD_SECRET` | only in the 0600 token file `prismatic_mcp start` writes (`token` prints its path and fingerprint); never in a console, cfg, log or snapshot. |
 | Raw pointers / process memory / filesystem | `NOT_APPLICABLE` | never serialized by design (forbidden-shortcuts list). |
 | Game-state mutations (pause/AI/vehicle/commands) | `EXPOSED_APPROVAL_REQUIRED` | `openttd.game.set_pause`, `openttd.cmd.<Name>` (one per exposable game command), `openttd.ai.set_setting/set_settings/start/stop/reload`, and `openttd.api.*` with `execute: true`; all through the approval gate (`16-decision-contract.md`). |
 | Server-admin ops | `EXPOSED_SERVER_ONLY` (target) | staged; server-authority + audit required. |

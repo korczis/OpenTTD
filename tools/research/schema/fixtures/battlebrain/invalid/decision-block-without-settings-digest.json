@@ -8,6 +8,7 @@
   "policy": "freight-margin@1",
   "schema": "battlebrain-decision/v2",
   "snapshot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "snapshot_tick": 74000,
   "valid_until": "1961-02-01"
  }
 }

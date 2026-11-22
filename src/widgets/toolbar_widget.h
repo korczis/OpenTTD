@@ -45,7 +45,9 @@ enum ToolbarNormalWidgets : WidgetID {
 	WID_TN_MESSAGES,      ///< Messages menu.
 	WID_TN_HELP,          ///< Help menu.
 	WID_TN_SWITCH_BAR,    ///< Only available when toolbar has been split to switch between different subsets.
-	WID_TN_PRISMATIC,     ///< RESEARCH-ONLY: the fork's own menu (prismatic_mcp_menu.cpp); built only with OPTION_PRISMATIC_MCP_SERVER, appended last so no upstream value moves.
+#ifdef OTTD_PRISMATIC_MCP_SERVER
+	WID_TN_PRISMATIC,     ///< RESEARCH-ONLY: the fork's own menu (prismatic_mcp_menu.cpp); compiled only with OPTION_PRISMATIC_MCP_SERVER, appended last so no upstream value moves, and kept out of the script API by GenerateWidget.cmake.
+#endif /* OTTD_PRISMATIC_MCP_SERVER */
 	WID_TN_END,           ///< Helper for knowing the amount of widgets.
 };
 

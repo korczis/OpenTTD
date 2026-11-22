@@ -39,6 +39,28 @@ pub fn refusal(holder: Option<&Value>, company: i64, writer: &str) -> Option<Val
                 "why": format!("company {company}'s freight-line slots are planned by {name} (shared key {key}), not by {writer}")}))
 }
 
+/// The refusal code of a change of a freight-line slot that names no writer, so its planner key
+/// cannot be checked: a POST /api/bots/setting without `writer`, or a raw MCP call through the panel.
+pub const NO_WRITER: &str = "fr_needs_writer";
+/// The refusal code of a change of a freight-line slot whose writer is not the company's planner.
+pub const NOT_THE_PLANNER: &str = "fr_planner_held";
+
+/// Whether a request that changes one of `company`'s freight-line slots may be sent on behalf of
+/// `writer` (None, or blank, when it names none). None: it names a writer and `refusal` lets it.
+/// Otherwise the refusal as data, `code` NO_WRITER or NOT_THE_PLANNER: a request that names no
+/// writer is refused whatever the key holds, since the key could not be checked against it.
+pub fn change_refusal(holder: Option<&Value>, company: i64, writer: Option<&str>) -> Option<Value> {
+    let Some(writer) = writer.map(str::trim).filter(|w| !w.is_empty()) else {
+        let key = planner_key(company);
+        return Some(json!({"code": NO_WRITER, "key": key, "company": company, "holder": holder.cloned().unwrap_or(Value::Null),
+            "writer": Value::Null, "why": format!("a change of company {company}'s freight-line slots names its writer, \
+                so that the shared key {key} can be checked against it; this request names none")}));
+    };
+    let mut r = refusal(holder, company, writer)?;
+    r["code"] = json!(NOT_THE_PLANNER);
+    Some(r)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,5 +81,25 @@ mod tests {
         assert!(r["why"].as_str().unwrap().contains("battlebrain"));
         // A value that is not a name is still another holder, never silently "unset".
         assert!(refusal(Some(&json!({"by": "battlebrain"})), 2, "intent").is_some());
+    }
+
+    /// A change that names no writer is refused whatever the key holds, even unset; one that names
+    /// a writer is refused exactly when `refusal` refuses it, and the code says which.
+    #[test]
+    fn a_change_names_its_writer_and_that_writer_holds_the_key_or_no_one_does() {
+        for holder in [None, Some(Value::Null), Some(json!("battlebrain"))] {
+            for writer in [None, Some(""), Some("  ")] {
+                let r = change_refusal(holder.as_ref(), 3, writer).expect("no writer: refused");
+                assert_eq!((r["code"].as_str(), r["key"].as_str(), r["writer"].clone()), (Some(NO_WRITER), Some("planner.3"), Value::Null));
+                assert_eq!(r["holder"], holder.clone().unwrap_or(Value::Null));
+                assert!(r["why"].as_str().unwrap().contains("names none"), "{}", r["why"]);
+            }
+        }
+        assert!(change_refusal(None, 3, Some("owner")).is_none(), "unset: any named writer");
+        assert!(change_refusal(Some(&Value::Null), 3, Some("owner")).is_none(), "null: as unset");
+        assert!(change_refusal(Some(&json!("battlebrain")), 3, Some(" battlebrain ")).is_none(), "the holder itself");
+        let r = change_refusal(Some(&json!("battlebrain")), 3, Some("owner")).expect("another writer holds it");
+        assert_eq!((r["code"].as_str(), r["holder"].as_str(), r["writer"].as_str()), (Some(NOT_THE_PLANNER), Some("battlebrain"), Some("owner")));
+        assert_eq!(r["why"], refusal(Some(&json!("battlebrain")), 3, "owner").unwrap()["why"], "the same words as refusal");
     }
 }
