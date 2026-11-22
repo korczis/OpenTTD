@@ -704,8 +704,9 @@ client's MCP server posts commands only as that client's company and refuses a s
 before sending it: `ClientMayPost` in `prismatic_mcp_server.cpp`). `openttd://mcp/status` says which
 of them a running build has (`capabilities`,
 [`prismatic-mcp/07-resource-catalog.md`](prismatic-mcp/07-resource-catalog.md)). No MCP method
-approves: the operator approves in the console or the panel. Approving from every channel through
-one core on the game server is
+approves: the owner approves in the game's console, or in the panel with the owner secret
+([Approval is bound to the owner](#approval-is-bound-to-the-owner)). Approving from every channel
+through one core on the game server is
 [ADR 0038](../.ai/repo/adrs/0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md), its
 slices landing through their own PRs (slice 2 on branch `fix/approval-core`). A policy that approves
 on its own is auto-approve, and that is the owner's call (knowledge
