@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+// RESEARCH-ONLY. The approval flow end to end (ADR 0038), against a running, disposable stack:
+//
+// 1. The web channel, through the page's own controls in Chrome. Pause on the panel's home asks
+//    for an approval. It appears under the approvals with its Approve button, read from the game
+//    server's queue (openttd://approvals), not a copy. Pressing Approve executes it on the server:
+//    the toast says "executed" and the game is paused. Resume and Approve run it back.
+// 2. A full queue refuses. The check asks for more distinct approvals than the queue holds (its
+//    declared capacity): first one per editable integer setting of every running AI, at a value
+//    in the setting's declared min..max other than its current one (starting an AI through the
+//    panel when none runs), then distinct game-script goals (openttd.cmd.CreateGoal) for the rest,
+//    since the server lets a newer request for the same setting of the same company supersede the
+//    older one (ADR 0038). Every pending approval stays, and the request that does not fit answers
+//    status "refused" with its reason, never by pushing one out.
+// 3. Every approval the check left pending is denied again (`prismatic_mcp deny <id>` through POST
+//    /api/console), so the stack is left as it was found.
+//
+// Approving needs the panel's owner secret, which mcp-panel prints once when it starts
+// ("mcp-panel: owner secret <s> ...", in the stack's log). Give it with --owner <s> or
+// PANEL_OWNER_SECRET; it is sent as X-Panel-Owner on every POST, and the browser opens
+// <panel>/?owner=<s> first, which sets the page's cookie mcp_owner_<port>. Without it part 1 and
+// the full-queue part are NOT RUN.
+//
+// The chat channel ('!approve <id>' from a client, and the client console that sends it) needs
+// second client processes that join a company and send console lines after joining (on_client.scr
+// scheduling a script, since on_server_connect.scr runs on the server). It is not driven here; it
+// was verified live by hand on 2026-11-22 (ADR 0038, slice 2 PR).
+//
+// e2e-covers: panel /
+//
+// Usage: tools/research/mcp-approval-check <panel-url> [--owner <secret>]   (a disposable stack: it pauses the game
+//        and fills the approval queue; tools/research/mcp-e2e --no-gui on free ports; the owner's
+//        live panel, port 8800, is refused)
+// Exit 0 when every check passes, 1 otherwise, 2 on bad usage. Drives the installed Chrome through
+// playwright-core (npm ci in tools/research/mcp-panel); CHROME overrides its path.
+import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const here = path.dirname(new URL(import.meta.url).pathname);
+const { chromium } = createRequire(path.join(here, 'mcp-panel', 'package.json'))('playwright-core');
+const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const argv = process.argv.slice(2);
+const opt = (n) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] || '' : '');
+const base = (argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--owner') || '').replace(/\/$/, '');
+if (!base) { console.error('usage: mcp-approval-check <panel-url> [--owner <secret>]'); process.exit(2); }
+const url = new URL(base);
+const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+if (port === '8800') { console.error('mcp-approval-check: refusing :8800, the owner\'s live panel; run it against a disposable stack'); process.exit(2); }
+const secret = opt('--owner') || process.env.PANEL_OWNER_SECRET || '';
+const auth = secret ? { 'X-Panel-Owner': secret } : {};
+
+const results = [];
+const check = (name, ok, detail = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); };
+const post = (p, body) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...auth }, body: JSON.stringify(body) })
+  .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+const get = (p) => fetch(base + p).then((r) => r.json());
+const queue = async () => ((await get('/api/resources/approvals')).data || {}).approvals || [];
+const paused = async () => !!((await get('/api/resources/game/state')).data || {}).paused;
+const waitFor = async (pred, ms = 15000) => { for (let t = 0; t < ms; t += 250) { if (await pred()) return true; await new Promise((r) => setTimeout(r, 250)); } return false; };
+
+const browser = await chromium.launch({ executablePath: CHROME, headless: true });
+try {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  check('the server holds the one queue (openttd://approvals)', Array.isArray(await queue()));
+
+  // 1. Pause -> Approve -> paused, then Resume -> Approve -> running, through the page's controls.
+  if (!secret) {
+    console.log('NOT RUN the web channel\'s Approve: no owner secret (--owner or PANEL_OWNER_SECRET)');
+  } else {
+    await page.goto(`${base}/?owner=${encodeURIComponent(secret)}`, { waitUntil: 'load' });
+    const cookie = (await context.cookies(base)).some((c) => c.name === `mcp_owner_${port}`);
+    check(`opening /?owner= gives the page the owner cookie (mcp_owner_${port})`, cookie);
+    await page.goto(base + '/', { waitUntil: 'load' });
+    for (const [button, want] of [['#btn-pause', true], ['#btn-resume', false]]) {
+      const before = new Set((await queue()).map((a) => a.id));
+      await page.click(button);
+      const row = page.locator('#pending [data-approve]').first();
+      const shown = await row.waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
+      const id = Number(await row.getAttribute('data-approve').catch(() => NaN));
+      check(`${button}: its approval waits on the page, from the server's queue`, shown && !before.has(id) && (await queue()).some((a) => a.id === id && a.state === 'pending'), `#${id}`);
+      await row.click();
+      const toast = await page.locator('[data-toast="green"]').filter({ hasText: `#${id} approved` }).first()
+        .waitFor({ timeout: 15000 }).then(() => page.locator('[data-toast="green"]').last().textContent()).catch(() => '');
+      check(`${button}: Approve executes it on the server (no resubmit)`, /executed/.test(toast), toast.trim());
+      check(`${button}: the game is ${want ? 'paused' : 'running'}`, await waitFor(async () => (await paused()) === want));
+      check(`${button}: the approval is consumed, not pending`, (await queue()).some((a) => a.id === id && a.state === 'consumed'));
+      await page.evaluate(() => document.querySelectorAll('[data-toast]').forEach((t) => t.remove()));
+    }
+    check('the page threw no error', errors.length === 0, errors.join('; '));
+  }
+
+  // 2. A full queue refuses and keeps every pending approval.
+  const bots = async () => (((await get('/api/resources/ai')).data || {}).companies || []).filter((c) => c.running);
+  let running = await bots();
+  if (!running.length) {
+    const r = await post('/api/start-ai', {});
+    console.log(`no AI runs: POST /api/start-ai {} -> ${r.status}; waiting up to 60 s for one`);
+    await waitFor(async () => (running = await bots()).length > 0, 60000);
+  }
+  // One request per editable integer setting of each running AI, in its declared range and away
+  // from its current value: a second value for the same setting would supersede the first.
+  const asks = [];
+  for (const c of running) {
+    for (const st of c.settings || []) {
+      if (!st.editable || (st.flags || []).includes('boolean') || !Number.isInteger(st.min) || !Number.isInteger(st.max)) continue;
+      const step = Math.max(1, st.step || 1);
+      const value = st.value !== st.min ? st.min : st.min + step <= st.max ? st.min + step : null;
+      if (value !== null) asks.push(['openttd.ai.set_setting', { company: c.company, name: st.name, value }]);
+    }
+  }
+  if (!running.length) console.log('NOTE no AI runs after 60 s: the queue is filled with goal requests only');
+  const cap = ((await get('/api/resources/approvals')).data || {}).capacity || 64;
+  for (let n = 0; asks.length < cap + 2; n++) {
+    asks.push(['openttd.cmd.CreateGoal', { company: 'deity', params: [255, 0, 0, `mcp-approval-check filler ${Date.now()}-${n}`] }]);
+  }
+  const mine = [];
+  const kinds = new Set();
+  let refused = null;
+  for (const [tool, args] of asks) {
+    if (refused) break;
+    const r = await post(`/api/tools/${tool}`, args);
+    if (r.body.status === 'pending_approval') { mine.push(r.body.approval_id); kinds.add(tool); }
+    else if (r.body.status === 'refused') refused = r.body;
+  }
+  const pending = (await queue()).filter((a) => a.state === 'pending').map((a) => a.id);
+  check('a full queue refuses the request that does not fit', !!refused, refused ? refused.error : `${mine.length} asked, none refused`);
+  check('and keeps every pending approval', mine.length > 0 && mine.every((id) => pending.includes(id)), `${mine.length} kept, of ${[...kinds].join(', ') || 'none'}`);
+  // 3. Withdraw them again; a denial enacts nothing, so /api/console takes it without the secret.
+  for (const id of mine) await post('/api/console', { command: `prismatic_mcp deny ${id}` });
+  check('denied again, the queue holds none of them', await waitFor(async () => !(await queue()).some((a) => mine.includes(a.id) && a.state === 'pending')));
+} finally {
+  await browser.close();
+}
+const failed = results.filter((r) => !r).length;
+console.log(`${failed ? 'FAIL' : 'PASS'} mcp-approval-check: ${results.length - failed}/${results.length}`);
+process.exit(failed ? 1 : 0);

@@ -30,6 +30,16 @@ function PrismaticAI::OurAirportIn(town) {
 	return t;
 }
 
+/* How many of our air routes (distinct RouteKey, fleet.nut) call at station `st`. */
+function PrismaticAI::AirRoutesAt(st) {
+	if (!AIStation.IsValidStation(st)) return 0;
+	local keys = {};
+	foreach (v, _ in AIVehicleList_Station(st)) {
+		if (AIVehicle.GetVehicleType(v) == AIVehicle.VT_AIR) keys[PrismaticAI.RouteKey(v)] <- true;
+	}
+	return keys.len();
+}
+
 /* The most levelling one site may cost is the setting air_level_max (AIR_LEVEL_MAX, main.nut); the
  * autopilot's route budget reserves it for both airports (autopilot.nut). */
 

@@ -70,13 +70,29 @@ function PrismaticAI::NextAutopilotAirPair(b) {
 	return best;
 }
 
-/* The best untried pair of `list` ([town, population]) by min(population) x distance. */
+/* The best untried pair of `list` ([town, population]) by min(population) x distance. With
+ * `reuse` and air_add_full on (fleet.nut AirAddFull), a town with an airport of ours is a hub end
+ * only while the planes flying from that airport are that full: a new route from a hub otherwise
+ * adds a plane that shares the hub's passengers with every route already there (the co-play mesh
+ * of 35 routes between 9 airports, fleet.nut). */
 function PrismaticAI::BestAirPair(list, b, reuse) {
 	local best = null, best_score = 0;
+	local drained = {};
+	local full = reuse ? PrismaticAI.AirAddFull() : 0;
+	if (full > 0) {
+		foreach (e in list) {
+			local port = this.air_towns.rawin(e[0]) ? PrismaticAI.OurAirportIn(e[0]) : null;
+			if (port == null) continue;
+			local pct = PrismaticAI.AirLoadPercent(AIVehicleList_Station(AIStation.GetStationID(port)));
+			if (pct >= 0 && pct < full) drained[e[0]] <- true;
+		}
+	}
 	for (local i = 0; i < list.len(); i++) {
 		if (!reuse && this.air_towns.rawin(list[i][0])) continue;
+		if (drained.rawin(list[i][0])) continue;
 		for (local j = i + 1; j < list.len(); j++) {
 			if (!reuse && this.air_towns.rawin(list[j][0])) continue;
+			if (drained.rawin(list[j][0])) continue;
 			local key = list[i][0] + "-" + list[j][0];
 			if (this.air_tried.rawin(key)) continue;
 			local dist = AIMap.DistanceManhattan(AITown.GetLocation(list[i][0]), AITown.GetLocation(list[j][0]));

@@ -60,6 +60,7 @@ The scripts in the library today:
 | [`ttd.rhai`](../../tools/research/mcp-panel/rhai/ttd.rhai) | high-level commands: state, new game, start an AI, gated pause, report, watch |
 | [`demo.rhai`](../../tools/research/mcp-panel/rhai/demo.rhai), [`full_game.rhai`](../../tools/research/mcp-panel/rhai/full_game.rhai) | a game driven from a new world to a final report |
 | [`rail_lib.rhai`](../../tools/research/mcp-panel/rhai/rail_lib.rhai), [`rail_steward.rhai`](../../tools/research/mcp-panel/rhai/rail_steward.rhai), [`rail_monitor.rhai`](../../tools/research/mcp-panel/rhai/rail_monitor.rhai) | rail lines as data, the steward, the monitor ([Rail steward and monitor](rail-steward-and-monitor.md)) |
+| [`advice_lib.rhai`](../../tools/research/mcp-panel/rhai/advice_lib.rhai) | the game's advice news (`news.shown` with `advice`) as data: grouped by advice and vehicle, joined with the vehicle's line, tallied per company; `rail_monitor.rhai` reacts to them with `advice.<company>` on the shared blackboard, a mesh `observation` and a chat line for the owner, and issues no command ([The game's advice](../rail-steward.md#the-games-advice)) |
 | [`director_lib.rhai`](../../tools/research/mcp-panel/rhai/director_lib.rhai), [`director.rhai`](../../tools/research/mcp-panel/rhai/director.rhai) | moves the owner's camera to where the bot works |
 | [`narrator.rhai`](../../tools/research/mcp-panel/rhai/narrator.rhai) | reports the bot's actions as in-game chat |
 | [`prismatic_tune.rhai`](../../tools/research/mcp-panel/rhai/prismatic_tune.rhai) | keeps the live PrismaticAI on the battle GA's best measured settings, each change approval-gated ([Battle brain and live tuner](../battle-brain.md)) |
@@ -84,11 +85,12 @@ Scripts page in [`../rail-steward.md`](../rail-steward.md) ("The Scripts page").
 
 ## How it is tested
 
-- `cargo test` in `tools/research/mcp-rhai`: `main.rs` tests run `rail_lib.rhai` and
-  `director_lib.rhai` on fixtures (`rail_*`, the director), run `build_audit.rhai` against fakes of
-  the panel's reads, shared memory and chat (`build_audit_*`), check that every hub method but streams
-  is a Rhai function, and that a kernel refusal is an error; `panel_scripts.rs` tests cover names,
-  docs, imports, the parse check, and a service that hot-reloads on a library edit.
+- `cargo test` in `tools/research/mcp-rhai`: `main.rs` tests run `rail_lib.rhai`,
+  `advice_lib.rhai` and `director_lib.rhai` on fixtures (`rail_*`, `advice_*`, the director), run
+  `build_audit.rhai` against fakes of the panel's reads, shared memory and chat (`build_audit_*`),
+  check that every hub method but streams is a Rhai function, and that a kernel refusal is an
+  error; `panel_scripts.rs` tests cover names, docs, imports, the parse check, and a service that
+  hot-reloads on a library edit.
 - `node --test tools/research/mcp-panel/test/scripts.test.mjs`: tokens, the outline, stream frames.
 - `tools/research/mcp-scripts-check <panel-url>` drives the Scripts page in a real Chrome.
 

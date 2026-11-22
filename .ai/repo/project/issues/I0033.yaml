@@ -24,7 +24,7 @@ acceptance_criteria:
   - "POST /api/bots/start starts the bot with the owner's settings; POST /api/bots/setting goes through openttd.ai.set_setting once the game has it and says so until then"
   - "The panel's My bot card renders the derived settings form, starts the bot and shows the running bots"
   - "Rhai derives api_<operationId> from the panel's OpenAPI, and ttd::bots/start_bot/set_bot/bot_log wrap them"
-  - "Any tool answering pending_approval is tracked with an Approve button and resubmitted with the same arguments"
+  - "Any tool answering pending_approval is shown with an Approve button, read from the game server's queue (openttd://approvals); approving it executes it on the server, with no resubmit (ADR 0038; before it, the panel resubmitted the same arguments)"
 validation:
   - "tools/research/mcp-panel-check --panel http://127.0.0.1:8800"
   - "curl http://127.0.0.1:8800/api/bots"

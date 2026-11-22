@@ -953,7 +953,7 @@ pub fn swagger_page(title: &str) -> String {
 
 pub fn respond(mut stream: TcpStream, code: u16, ctype: &str, body: &[u8]) {
     let reason = match code {
-        200 => "OK", 204 => "No Content", 400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden",
+        200 => "OK", 204 => "No Content", 303 => "See Other", 400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden",
         404 => "Not Found", 501 => "Not Implemented", 503 => "Service Unavailable", _ => "Error",
     };
     // The headers the web access policy asked for on this connection (CORS, the token cookie).
