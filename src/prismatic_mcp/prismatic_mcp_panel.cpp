@@ -22,6 +22,8 @@
  * only withdraws a request, stays open to anyone, as it is in the panel.
  */
 
+/** @file prismatic_mcp_panel.cpp The Prismatic control window: the fork's state in the game, read from the same functions the console and MCP read. */
+
 #include "../stdafx.h"
 
 #ifdef OTTD_PRISMATIC_MCP_SERVER
