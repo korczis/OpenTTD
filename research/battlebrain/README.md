@@ -52,6 +52,7 @@ allowed to turn a candidate into an executable choice.
 | Decision | Chosen today by (audit) | Target owner |
 |---|---|---|
 | which freight lines the bot is handed (`fr_*`) | `cargo.rs` knapsack + `panel_bot.rs` slot order, once at `start_ai` | **battlebrain** (decision record) |
+| who may propose a company's `fr_*` slots | the writer the shared key `planner.<company>` names; unset, every writer as before | that writer only. The others say why and propose no `fr_*` slot for that company: the Rhai writers propose nothing for it at all, since their guard names no slot (B2): `replan.rhai` (holds the round), `build_plan.rhai` `apply_as` (the write path of `ask_relay.rhai` and `replan.rhai`), `prismatic_tune.rhai` (also genes from `/api/tuning`). The Rust writers withhold only the slots: `intent.rs` build answers (`build.held`), `panel_bot.rs` planned settings and planned start (`plan.bot_settings` `held`). One check per language: `src/fr_author.rs`, `rhai/fr_author.rhai` |
 | which freight line the bot builds by itself | PrismaticAI `rail.nut` own-lines score | PrismaticAI only when the governed company's own freight pick is off (a default-OFF setting, Phase 03) |
 | pricing a rail line | `linecost.rs` via AlgoGlyph track-planning | AlgoGlyph track-planning, output domain-checked; a candidate input, never a choice |
 | portfolio within a budget | `cargo.rs` knapsack-dp **or a built-in copy** | AlgoGlyph knapsack-dp as candidate evidence; the built-in copy is a separate, named solver |
@@ -274,11 +275,14 @@ are closed here:
 - **No stale, unbacked or repeated decision.** `battlebrain live` refuses a fallback solver, a
   missing kernel, and a snapshot older than its `max_age_days` at the fresh read.
   `battlebrain serve` refuses a key it has served before; its ledger is kept across runs.
-- **Before a live pull,** the shared key `planner.<company>` is set to `battlebrain`, so the
-  replan service stands down.
+- **Before a live pull,** the shared key `planner.<company>` is set to `battlebrain`, so every
+  other proposer of that company's `fr_*` slots stands down (the authority matrix lists them).
+  `rail_steward.rhai` and `rail_lib.rhai` set `line<n>_trains`/`line<n>_wagons` only, never `fr_*`.
 
 Still open: the panel's loopback `/api/approve`, `/api/auto-approve` and armed UI input are not
-bound to the owner. That is outside this slice and is the owner's operating rule.
+bound to the owner. That is outside this slice and is the owner's operating rule. A raw
+`POST /api/bots/setting` or `openttd.ai.set_setting` call names no writer, so the planner key
+cannot be checked there; the scripts above are the writers that use it.
 
 ## Cutover thresholds (the Phase 04 gate)
 
