@@ -1,0 +1,3 @@
+[submodule "algoglyph"]
+	path = tools/research/vendor/algoglyph
+	url = https://github.com/korczis/algoglyph.git

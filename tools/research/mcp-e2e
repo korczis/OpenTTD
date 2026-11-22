@@ -123,27 +123,19 @@ for var in PANEL_PORT MCP_PORT GAME_PORT; do
   fi
 done
 
-# AlgoGlyph's flow runner, when a checkout of it is here: the planner's portfolio then runs on its
-# knapsack-dp kernel (the answer names the solver). Override with MCP_ALGOGLYPH_DIR; unset: built-in.
+# AlgoGlyph's flow runner: the planner's portfolio then runs on its knapsack-dp kernel (the answer
+# names the solver). AlgoGlyph is the submodule tools/research/vendor/algoglyph, pinned at one commit
+# whose runner lists every kernel the stack uses (tools/research/vendor/algoglyph.pin.json, `needs`;
+# I0227, ADR 0039). `algoglyph-pin runner` names the installed checkout cleanly at that commit: the
+# submodule, else ~/dev/algoglyph-wt/main or ~/dev/algoglyph when one of them is at the pin. A
+# checkout at any other commit is passed over, never used silently: the pin is the only version the
+# fork trusts. MCP_ALGOGLYPH_DIR overrides (an experiment against another version); none: built-in.
 if [[ -z "${MCP_ALGOGLYPH_DIR:-}" ]]; then
-  # A checkout of origin/main first (~/dev/algoglyph-wt/main, detached), then the trunk:
-  # AlgoGlyph's main carries the whole planner stack since 1b8e009 (2026-11-17;
-  # its answers equal exact-prices' on every kernel the stack uses). The stacked branches stay as
-  # fallbacks while the primary checkout is behind origin/main: a checkout is taken only when its
-  # flow CLI lists every kernel the stack uses, so a stale one is passed over, never used silently.
-  NEED_KERNELS="knapsack-dp track-planning transport-investment action-plan"
-  for d in "$HOME/dev/algoglyph-wt/main" "$HOME/dev/algoglyph" "$HOME/dev/algoglyph-wt/feature/exact-prices" "$HOME/dev/algoglyph-wt/feature/transport-investment" \
-           "$HOME/dev/algoglyph-wt/feature/action-plan" "$HOME/dev/algoglyph-wt/feature/track-planning" "$HOME/dev/algoglyph-wt/feature/flow-cli"; do
-    [[ -f "$d/package.json" ]] && grep -q '"flow"' "$d/package.json" && [[ -d "$d/node_modules" ]] || continue
-    kernels="$(cd "$d" && npm run --silent flow -- kernels 2>/dev/null || true)"
-    missing=""
-    for k in $NEED_KERNELS; do grep -q "\"$k\"" <<<"$kernels" || missing="$missing $k"; done
-    if [[ -z "$missing" ]]; then
-      export MCP_ALGOGLYPH_DIR="$d"
-      break
-    fi
-    echo "    AlgoGlyph at $d lacks:$missing (a stale checkout?); trying the next" >&2
-  done
+  if d="$(cd "$ROOT_DIR" && tools/research/algoglyph-pin runner)"; then
+    export MCP_ALGOGLYPH_DIR="$d"
+  else
+    echo "    no AlgoGlyph runner at the pin (tools/research/algoglyph-pin install); the planner uses its built-in solver" >&2
+  fi
 fi
 [[ -n "${MCP_ALGOGLYPH_DIR:-}" ]] && echo "    AlgoGlyph runner: $MCP_ALGOGLYPH_DIR"
 

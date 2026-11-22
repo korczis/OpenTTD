@@ -47,6 +47,12 @@ Usage: $SELF <smoke|change|research|full> [options]
             file this change touches (tools/knowledge/refs impact HEAD)
             and how many src/ files no subsystem map tracks
             (tools/knowledge/refs coverage src/, informational).
+            Checks the AlgoGlyph submodule's pin first (tools/research/
+            algoglyph-pin check; the submodule is checked out at the pin,
+            without node_modules, when it is missing: mcp-rhai links its
+            Rust crate), and when the change touches the pin or the native
+            kernels, runs their tests (cargo test --bin mcp-rhai algoglyph,
+            --bin battlebrain native_rust; offline).
             Always proves the decision-authority boundaries (cargo test
             --bin battlebrain, offline; rule project.decision-authority-
             boundaries) and, after the build, that the default binary
@@ -306,6 +312,37 @@ real_world_tests() {
   "$dir/rw-scenario" replay --snapshot "$dir/fixtures/brno/snapshot.json" --expect "$dir/fixtures/brno/SHA256SUMS" >/dev/null
 }
 
+# The AlgoGlyph submodule (I0227, ADR 0039): mcp-rhai links its crate algoglyph-kernels by path, so
+# every cargo step below needs the submodule's work tree. A checkout without it gets it at the pin
+# (git submodule update --init, no node_modules; the network once per worktree), then the pin record
+# must be the gitlink's and list every kernel the stack needs.
+algoglyph_pin() {
+  local pin=tools/research/algoglyph-pin
+  if [[ ! -f tools/research/vendor/algoglyph/crates/algoglyph-kernels/Cargo.toml ]]; then
+    echo "==> $pin install --no-npm (the submodule is not checked out)"
+    "$pin" install --no-npm
+  fi
+  echo "==> $pin check (the pin record is the gitlink's and lists every kernel the stack needs)"
+  "$pin" check
+}
+
+# Whether this change, staged or not, touches the AlgoGlyph pin or the code that runs its kernels.
+algoglyph_changed() {
+  local files
+  files="$(changed_files)"
+  grep -qE '^\.gitmodules$|^tools/research/vendor/|^tools/research/algoglyph-pin$|^tools/research/mcp-rhai/(Cargo\.(toml|lock)|src/(algoglyph_native|hub_algoglyph|hub)\.rs)$' <<< "$files"
+}
+
+# The native kernels and the hub's routing (src/algoglyph_native.rs, src/hub_algoglyph.rs), and a
+# native-rust entry in Battlebrain's catalogue; built like the boundaries below (no store feature).
+algoglyph_tests() {
+  echo "==> cargo test --bin mcp-rhai --bin mcp-hub algoglyph, --bin battlebrain native_rust (I0227: the pinned crate in-process)"
+  RUSTFLAGS="${RUSTFLAGS:--C target-cpu=native}" cargo test --quiet --release --offline --no-default-features \
+    --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-rhai --bin mcp-hub algoglyph
+  RUSTFLAGS="${RUSTFLAGS:--C target-cpu=native}" cargo test --quiet --release --offline --no-default-features \
+    --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain native_rust
+}
+
 # The architecture boundaries around the one decision authority (rule
 # project.decision-authority-boundaries, ADR 0037): B1-B8 as source scans and contract tests,
 # compiled into battlebrain's tests (tools/research/mcp-rhai/src/authority_boundaries.rs). Offline,
@@ -387,6 +424,7 @@ cmd_change() {
   python3 -B tools/research/ai-battle/battle.py check
   echo "==> tools/research/town-model/derive.py --check (the town-authority model is what src/ derives)"
   python3 -B tools/research/town-model/derive.py --check
+  algoglyph_pin
   if compgen -G 'research/results/postmortem-*.json' > /dev/null; then
     echo "==> battle-postmortem check (research/battle-postmortem.md: every post-mortem .md is what its .json derives)"
     # RUSTFLAGS replaces a target's rustflags from a global cargo config; a `-C lto` there breaks
@@ -398,6 +436,7 @@ cmd_change() {
       --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battle-postmortem -- check
   fi
   authority_boundaries
+  if algoglyph_changed; then algoglyph_tests; fi
   echo "==> tools/knowledge/refs check"
   tools/knowledge/refs check
   echo "==> tools/research/e2e-coverage (rule project.web-ui-is-covered-end-to-end: every web UI page has a browser check)"
