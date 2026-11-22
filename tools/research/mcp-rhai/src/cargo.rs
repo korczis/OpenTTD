@@ -166,6 +166,28 @@ pub fn algoglyph(kernel: &str, input: &Value) -> Result<Value, String> {
 
 fn knapsack_algoglyph(input: &Value) -> Option<Value> { algoglyph("knapsack-dp", input).ok() }
 
+/// The label of a portfolio the AlgoGlyph kernel answered.
+const KERNEL_SOLVER: &str = "algoglyph knapsack-dp";
+/// The label of the built-in fallback: a separately named solver that never passes as the kernel
+/// (ADR 0037; rule project.decision-authority-boundaries, B7). battlebrain reports a solver whose
+/// label starts with "builtin" as `fallback_solver` (src/bin/battlebrain.rs).
+const BUILTIN_SOLVER: &str = "builtin knapsack (MCP_ALGOGLYPH_DIR not set or the runner refused)";
+
+/// Which solver answered the portfolio, and its answer: the kernel's when it answered, else the
+/// built-in copy, labelled as itself and with no kernel. (solver, best, chosen items, kernel)
+fn solve(kernel_answer: Option<Value>, weights: &[usize], values: &[f64], capacity: usize) -> (&'static str, f64, Vec<usize>, Value) {
+    match kernel_answer {
+        Some(v) => {
+            let idx: Vec<usize> = v["result"]["items"].as_array().into_iter().flatten().filter_map(Value::as_u64).map(|i| i as usize).collect();
+            (KERNEL_SOLVER, num(&v["result"], "best"), idx, json!({"id": v["kernel"]["id"], "plate": v["kernel"]["plate"], "work": v["work"]}))
+        }
+        None => {
+            let (b, idx) = knapsack_builtin(weights, values, capacity);
+            (BUILTIN_SOLVER, b, idx, Value::Null)
+        }
+    }
+}
+
 /// The portfolio: from the candidates (each with its best option's investment and score), the set
 /// with the highest total score within the budget. Money is counted in thousands for the solver.
 pub fn portfolio(candidates: &[Value], budget: Option<f64>) -> Value {
@@ -198,16 +220,7 @@ pub fn portfolio(candidates: &[Value], budget: Option<f64>) -> Value {
     let values: Vec<f64> = items.iter().map(|c| num(c, "score").round()).collect();
     let capacity = (budget / 1000.0).floor().max(0.0) as usize;
     let input = json!({"weights": weights, "values": values, "capacity": capacity});
-    let (solver, best, chosen, kernel) = match knapsack_algoglyph(&input) {
-        Some(v) => {
-            let idx: Vec<usize> = v["result"]["items"].as_array().into_iter().flatten().filter_map(Value::as_u64).map(|i| i as usize).collect();
-            ("algoglyph knapsack-dp", num(&v["result"], "best"), idx, json!({"id": v["kernel"]["id"], "plate": v["kernel"]["plate"], "work": v["work"]}))
-        }
-        None => {
-            let (b, idx) = knapsack_builtin(&weights, &values, capacity);
-            ("builtin knapsack (MCP_ALGOGLYPH_DIR not set or the runner refused)", b, idx, Value::Null)
-        }
-    };
+    let (solver, best, chosen, kernel) = solve(knapsack_algoglyph(&input), &weights, &values, capacity);
     json!({"solver": solver, "kernel": kernel, "input": input, "total_score": best, "shadowed": shadowed,
            "investment_k": chosen.iter().map(|&i| weights[i]).sum::<usize>(), "budget_k": capacity,
            "chosen": chosen.iter().map(|&i| items[i].clone()).collect::<Vec<_>>()})
@@ -272,6 +285,24 @@ mod tests {
     }
     const PINNED_FREIGHT: &str = r#"[{"acceptor":{"id":2,"name":null,"x":95,"y":40},"cargo":"Coal","cargo_id":1,"distance":115.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":11325.0,"carried_per_month":3.0,"income_per_unit":75.74,"investment":15325.0,"mode":"truck","monthly_profit":55.0,"score":-14009.0,"transit_periods":28.5,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":12980.0,"carried_per_month":118.0,"income_per_unit":80.26,"investment":63980.0,"mode":"freight_rail","monthly_profit":9048.0,"score":153168.0,"transit_periods":14.6,"vehicles":{"capacity":120.0,"count":3.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":153168.0,"supply_per_month":126.0},{"acceptor":{"id":3,"name":null,"x":30,"y":20},"cargo":"Coal","cargo_id":1,"distance":30.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":3250.0,"carried_per_month":11.0,"income_per_unit":21.42,"investment":7250.0,"mode":"truck","monthly_profit":30.0,"score":-6519.0,"transit_periods":8.9,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":4480.0,"carried_per_month":109.0,"income_per_unit":21.58,"investment":21480.0,"mode":"freight_rail","monthly_profit":2202.0,"score":31361.0,"transit_periods":5.3,"vehicles":{"capacity":120.0,"count":1.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":31361.0,"supply_per_month":126.0}]"#;
     const PINNED_FREIGHT_CALIBRATED: &str = r#"[{"acceptor":{"id":2,"name":null,"x":95,"y":40},"cargo":"Coal","cargo_id":1,"distance":115.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":11325.0,"carried_per_month":3.0,"income_per_unit":75.74,"investment":15325.0,"mode":"truck","monthly_profit":44.0,"score":-14272.0,"transit_periods":28.5,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":12980.0,"carried_per_month":39.0,"income_per_unit":80.26,"investment":29980.0,"mode":"freight_rail","monthly_profit":3619.0,"score":56879.0,"transit_periods":14.6,"vehicles":{"capacity":120.0,"count":1.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":56879.0,"supply_per_month":126.0},{"acceptor":{"id":3,"name":null,"x":30,"y":20},"cargo":"Coal","cargo_id":1,"distance":30.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":3250.0,"carried_per_month":11.0,"income_per_unit":21.42,"investment":7250.0,"mode":"truck","monthly_profit":24.0,"score":-6665.0,"transit_periods":8.9,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":4480.0,"carried_per_month":109.0,"income_per_unit":21.58,"investment":21480.0,"mode":"freight_rail","monthly_profit":2642.0,"score":41930.0,"transit_periods":5.3,"vehicles":{"capacity":120.0,"count":1.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":41930.0,"supply_per_month":126.0}]"#;
+
+    #[test]
+    fn the_builtin_fallback_is_never_labelled_as_the_kernel() {
+        // ADR 0037: the built-in knapsack is a separately named solver. Without a kernel answer the
+        // portfolio names the built-in copy and no kernel; battlebrain counts it as a fallback.
+        let (w, v) = ([135, 46, 20, 5], [196159.0, 64387.0, 16633.0, 1000.0]);
+        let (solver, best, items, kernel) = super::solve(None, &w, &v, 150);
+        assert_eq!((best, items), (197159.0, vec![0, 3]));
+        assert!(solver.starts_with("builtin"), "battlebrain's fallback_solver test reads this prefix: {solver}");
+        assert!(!solver.contains("algoglyph") && !solver.contains("knapsack-dp"), "{solver}");
+        assert!(kernel.is_null(), "a built-in answer names no kernel");
+        // The kernel's own answer is labelled as the kernel's, with its id.
+        let answer = serde_json::json!({"ok": true, "kernel": {"id": "knapsack-dp", "plate": "p"}, "work": {}, "result": {"best": 197159.0, "items": [0, 3]}});
+        let (solver, best, items, kernel) = super::solve(Some(answer), &w, &v, 150);
+        assert_eq!((solver, best, items), (super::KERNEL_SOLVER, 197159.0, vec![0, 3]));
+        assert_eq!(kernel["id"], "knapsack-dp");
+        assert!(!solver.starts_with("builtin"));
+    }
 
     #[test]
     fn knapsack_matches_the_algoglyph_case() {
