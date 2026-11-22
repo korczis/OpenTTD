@@ -26,6 +26,15 @@ elif what == "spec":
     print(json.dumps(s.mermaid_chart_spec(body)))
 elif what == "num":
     print(json.dumps(s.mermaid_num(float(body))))
+elif what == "docsindex":
+    spec = json.loads(body)
+    docs = {}
+    for path, (fm, text) in spec["docs"].items():
+        d = s.Doc(path=path, text=text, fm=fm, body=text, offset=0)
+        d.title, d.summary = path, ""
+        docs[path] = d
+    g = s.Regions(None, docs, None)
+    print(json.dumps(g.render("docs-index", spec["args"], docs[spec["in"]])))
 elif what == "toc":
     g = s.Regions(None, {"x.md": doc}, None)
     print(json.dumps(g.render("toc", {"depth": "3"}, doc, body.index("-->") + 4)))
@@ -79,6 +88,17 @@ class ChartsAreGenerated(unittest.TestCase):
     def test_large_numbers_are_plain_digits(self):
         self.assertEqual(run("num", "104400000.0"), "104400000")
         self.assertEqual(run("num", "2.857"), "2.857")
+
+    def test_docs_index_shows_fields_and_pies_link_to_the_filtered_table(self):
+        page = ("## Records\n\n<!-- surfaces:begin docs-index dir=k fields=status -->\n"
+                "<!-- surfaces:end docs-index -->\n")
+        docs = {"x.md": [None, page], "k/a.md": [{"status": "verified"}, ""],
+                "k/b.md": [{"status": "candidate"}, ""], "k/c.md": [{"status": "verified"}, ""]}
+        table = run("docsindex", json.dumps({"docs": docs, "in": "x.md", "args": {"dir": "k", "fields": "status"}}))
+        self.assertIn("| [k/a.md](k/a.md) | verified |  |", table)
+        pie = run("docsindex", json.dumps({"docs": docs, "in": "x.md", "args": {"dir": "k", "as": "pie", "by": "status"}}))
+        self.assertIn('"verified" : 2', pie)
+        self.assertIn("%% links: x.md?col=Status&filter=verified#records | x.md?col=Status&filter=candidate#records", pie)
 
     def test_the_toc_lists_the_headings_after_it(self):
         body = ("## Before\n\n<!-- surfaces:begin toc -->\n<!-- surfaces:end toc -->\n\n"

@@ -102,15 +102,22 @@ fn finances(company) {
     #{ quarters: qs, trend: trend }
 }
 
-// The company's rank by value among all companies, from this run's latest samples in the store.
+// The company's rank by value in this run and its last months' value changes, from the store's
+// views company_latest and company_month (research/mechanisms/event-bus-and-store.md).
+const CURRENT_RUN = "(SELECT max(run_ms) FROM run_spans)";
+const TREND_MONTHS = 6;
+
 fn rank(company) {
-    let run = "(SELECT max(started_ms) FROM runs)";
-    let latest = rows_of(`SELECT company, value, game_date FROM samples s WHERE ts_ms >= ${run}
-        AND ts_ms = (SELECT max(ts_ms) FROM samples t WHERE t.company = s.company AND t.ts_ms >= ${run})
-        ORDER BY value DESC`);
-    let i = 0;
-    for r in latest { i += 1; if r[0] == company { return #{ rank: i, of: latest.len(), value: r[1], date: r[2] }; } }
-    #{ rank: 0, of: latest.len(), value: 0, date: "" }
+    let of = rows_of(`SELECT count(*) FROM company_latest WHERE run_ms = ${global::CURRENT_RUN}`)[0][0];
+    let me = rows_of(`SELECT rank, value, game_date FROM company_latest
+        WHERE run_ms = ${global::CURRENT_RUN} AND company = ${company}`);
+    let months = [];
+    for m in rows_of(`SELECT month, value_change FROM company_month WHERE run_ms = ${global::CURRENT_RUN}
+        AND company = ${company} ORDER BY month DESC LIMIT ${global::TREND_MONTHS}`) {
+        months.push(#{ month: m[0], value_change: m[1] });
+    }
+    if me.is_empty() { return #{ rank: 0, of: of, value: 0, date: "", months: months }; }
+    #{ rank: me[0][0], of: of, value: me[0][1], date: me[0][2], months: months }
 }
 
 fn vehicles() { read("openttd://vehicles").data.vehicles ?? [] }
@@ -293,7 +300,7 @@ fn plan_round(b) {
         print(`   holding the current plan: ${diff.len()} setting(s) would change`);
     }
 
-    let summary = #{ date: r.date, company: b.id, bot: b.name, rank: r.rank, of: r.of, value: r.value,
+    let summary = #{ date: r.date, company: b.id, bot: b.name, rank: r.rank, of: r.of, value: r.value, value_by_month: r.months,
                      finances: f, competitors: others, competition: comp, portfolio: chosen,
                      investment_k: portfolio.investment_k, predicted_monthly: monthly, record: rec,
                      model: m, proposed: diff.keys(), pending: applied.pending, refused: applied.refused };
