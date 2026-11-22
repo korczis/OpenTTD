@@ -166,128 +166,29 @@ pub fn read_only_sql(sql: &str) -> Result<(), String> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------- the analytic views
+// ---------------------------------------------------------------------- the store's SQL
 
-/// One analytic view of the store: its name, what it answers (its `COMMENT ON VIEW`, listed by
-/// `GET /api/db/tables`) and its query. Every view is recreated whenever a store opens, so a
-/// changed definition reaches every file, old ones included. Each is generic over runs: a row
-/// carries its `instance` and `run_ms` (the run's start), and the current run is the largest
-/// `run_ms`. Rhai, the planner and AlgoGlyph feeds read these instead of repeating the SQL.
-pub struct View {
-    pub name: &'static str,
-    pub comment: &'static str,
-    pub select: &'static str,
+/// The store's SQL, one file each under `sql/` (`sql/README.md`), embedded by build.rs from the
+/// directory: `TABLE_FILES`, `VIEW_FILES` and `QUERY_FILES`, each `(name, text)` in file order. No
+/// code here builds SQL from pieces: tables and views run as written, a query binds its parameters.
+pub mod sql {
+    include!(concat!(env!("OUT_DIR"), "/sql_files.rs"));
+
+    /// A named query's text, or None.
+    pub fn query(name: &str) -> Option<&'static str> {
+        QUERY_FILES.iter().find(|(n, _)| *n == name).map(|(_, t)| *t)
+    }
+
+    /// A file's description: its leading `--` lines, joined into one.
+    pub fn description(text: &str) -> String {
+        text.lines().take_while(|l| l.trim_start().starts_with("--"))
+            .map(|l| l.trim_start().trim_start_matches("--").trim()).collect::<Vec<_>>().join(" ")
+    }
 }
 
-/// The views, in dependency order (a view only reads tables and the views before it).
-pub const VIEWS: &[View] = &[
-    View { name: "run_spans",
-           comment: "Every run of this store: instance, session, seed, run_ms (its start) and until_ms (the next run's start, or the end of time).",
-           select: "SELECT instance, session, seed, started_ms AS run_ms,
-                    coalesce(lead(started_ms) OVER (PARTITION BY instance ORDER BY started_ms), 9223372036854775807) AS until_ms
-                    FROM runs" },
-    View { name: "company_month",
-           comment: "Each company's last sample of each game month (YYYY-MM) of each run: value, money, loan, net, vehicles, with the change from the month before.",
-           select: "SELECT *, value - lag(value) OVER w AS value_change, money - lag(money) OVER w AS money_change,
-                    vehicles - lag(vehicles) OVER w AS vehicles_change
-                    FROM (SELECT r.instance, r.run_ms, r.seed, s.company, last(s.name ORDER BY s.ts_ms) AS name,
-                          substr(s.game_date, 1, 7) AS month, max(s.game_date) AS game_date,
-                          last(s.value ORDER BY s.ts_ms) AS value, last(s.money ORDER BY s.ts_ms) AS money,
-                          last(s.loan ORDER BY s.ts_ms) AS loan, last(s.net ORDER BY s.ts_ms) AS net,
-                          last(s.vehicles ORDER BY s.ts_ms) AS vehicles
-                          FROM samples s JOIN run_spans r ON s.instance = r.instance AND s.ts_ms >= r.run_ms AND s.ts_ms < r.until_ms
-                          GROUP BY ALL)
-                    WINDOW w AS (PARTITION BY instance, run_ms, company ORDER BY month)" },
-    View { name: "company_latest",
-           comment: "Each company's latest month of each run (company_month's columns) and its rank by value among that run's companies.",
-           select: "SELECT *, rank() OVER (PARTITION BY instance, run_ms ORDER BY value DESC) AS rank
-                    FROM (SELECT * FROM company_month
-                          QUALIFY row_number() OVER (PARTITION BY instance, run_ms, company ORDER BY month DESC) = 1)" },
-    View { name: "run_events",
-           comment: "Every event with the run it belongs to (run_ms, seed) beside its own columns.",
-           select: "SELECT r.run_ms, r.seed, e.* FROM events e
-                    JOIN run_spans r ON e.instance = r.instance AND e.ts_ms >= r.run_ms AND e.ts_ms < r.until_ms" },
-    View { name: "news",
-           comment: "The news the owner's window showed (news.shown), one column per field: type, style, text, and advice and refs when the game reports them.",
-           select: "SELECT instance, run_ms, seed, seq, game_date, data->>'type' AS type, data->>'style' AS style,
-                    data->>'text' AS text, data->>'advice' AS advice, data->'refs' AS refs
-                    FROM run_events WHERE kind = 'news.shown'" },
-    View { name: "advice",
-           comment: "The news of type advice: a lost or stuck vehicle, one that loses money, an old one, a failed order or renewal.",
-           select: "SELECT * FROM news WHERE type = 'advice'" },
-    View { name: "plan_decisions",
-           comment: "Every planning decision (plan.* events): its kind, decision, choice and version.",
-           select: "SELECT instance, run_ms, seed, seq, game_date, kind, data->>'decision' AS decision,
-                    data->'choice' AS choice, data->'version' AS version
-                    FROM run_events WHERE kind LIKE 'plan.%'" },
-    View { name: "kind_month",
-           comment: "How many events of each kind each game month of each run raised.",
-           select: "SELECT instance, run_ms, substr(game_date, 1, 7) AS month, kind, count(*) AS n
-                    FROM run_events WHERE game_date IS NOT NULL GROUP BY ALL" },
-    View { name: "schema_doc",
-           comment: "The store describing itself: every table, view and column with its comment. Start here: SELECT * FROM schema_doc.",
-           select: "SELECT 'table' AS kind, table_name AS name, NULL AS column_name, NULL AS type, comment
-                    FROM duckdb_tables() WHERE schema_name = 'main'
-                    UNION ALL SELECT 'view', view_name, NULL, NULL, comment
-                    FROM duckdb_views() WHERE schema_name = 'main' AND NOT internal
-                    UNION ALL SELECT 'column', table_name, column_name, data_type, comment
-                    FROM duckdb_columns() WHERE schema_name = 'main'" },
-];
-
-/// One base table's documentation: what a row is, and each column's meaning. The store writes it
-/// with COMMENT ON TABLE and COMMENT ON COLUMN at every open, so `schema_doc` answers from the file.
-pub struct TableDoc {
-    pub name: &'static str,
-    pub comment: &'static str,
-    pub columns: &'static [(&'static str, &'static str)],
-}
-
-/// The tables of ADR 0033, documented; a test fails when a column of `TABLES` has no entry.
-pub const TABLE_DOCS: &[TableDoc] = &[
-    TableDoc { name: "runs", comment: "One row per start of a publisher (a panel or the hub) on this file.",
-               columns: &[("instance", "the publisher, e.g. panel-8800 or hub-8790"),
-                          ("session", "the Claude or Majordomus session that started it, or null"),
-                          ("seed", "the game's map seed, or null for a publisher without a game"),
-                          ("started_ms", "when it started, Unix milliseconds; run_spans calls it run_ms"),
-                          ("panel_port", "the panel's HTTP port, or null"),
-                          ("mcp_port", "the game's MCP port, or null"),
-                          ("game_port", "the game's network port, or null")] },
-    TableDoc { name: "events", comment: "Every bus event in bus order (envelope prismatic-bus/v1); the kinds are the KINDS table of panel_events.rs, listed by GET /api/bus.",
-               columns: &[("instance", "the instance the event is about"),
-                          ("seq", "the publisher's sequence number, increasing within a run"),
-                          ("ts_ms", "when it was published, Unix milliseconds"),
-                          ("kind", "the event kind, e.g. game.month, news.shown, plan.portfolio"),
-                          ("game_tick", "the game's tick when it was published, or null"),
-                          ("game_date", "the game's date YYYY-MM-DD, or null"),
-                          ("data", "the payload as JSON; read fields with data->>'field'")] },
-    TableDoc { name: "samples", comment: "One row per company per game.sample: the company's money, loan, value and fleet at that moment.",
-               columns: &[("instance", "the instance sampled"),
-                          ("ts_ms", "when, Unix milliseconds"),
-                          ("game_tick", "the game's tick"),
-                          ("game_date", "the game's date YYYY-MM-DD"),
-                          ("company", "the company id, 0-based (company 1 in the game is 0)"),
-                          ("name", "the company's name then"),
-                          ("money", "cash, in the game's internal currency"),
-                          ("loan", "the loan"),
-                          ("value", "the company value as the game computes it"),
-                          ("net", "money minus loan"),
-                          ("vehicles", "the number of vehicles")] },
-];
-
-/// The comments of every base table and column.
-pub fn table_docs_sql() -> String {
-    let q = |s: &str| s.replace('\'', "''");
-    TABLE_DOCS.iter().map(|t| {
-        let mut sql = format!("COMMENT ON TABLE {} IS '{}';\n", t.name, q(t.comment));
-        for (c, doc) in t.columns { sql += &format!("COMMENT ON COLUMN {}.{} IS '{}';\n", t.name, c, q(doc)); }
-        sql
-    }).collect()
-}
-
-/// The statements that (re)create every view with its comment.
-pub fn views_sql() -> String {
-    VIEWS.iter().map(|v| format!("CREATE OR REPLACE VIEW {} AS {};\nCOMMENT ON VIEW {} IS '{}';\n",
-                                 v.name, v.select, v.name, v.comment.replace('\'', "''"))).collect()
+/// What a GET without `?sql=` answers: `sql/queries/newest_events.sql`.
+pub fn default_query() -> &'static str {
+    sql::query("newest_events").unwrap_or("SELECT 1")
 }
 
 // ---------------------------------------------------------------------- the DuckDB sink
@@ -300,15 +201,6 @@ pub mod db {
     use serde_json::{json, Value};
     use std::path::Path;
 
-    /// The tables of ADR 0033, created when missing: one file holds every run of its publisher.
-    pub const TABLES: &str = "
-        CREATE TABLE IF NOT EXISTS runs(instance VARCHAR, session VARCHAR, seed BIGINT, started_ms BIGINT,
-                                        panel_port INTEGER, mcp_port INTEGER, game_port INTEGER);
-        CREATE TABLE IF NOT EXISTS events(instance VARCHAR, seq BIGINT, ts_ms BIGINT, kind VARCHAR,
-                                          game_tick BIGINT, game_date VARCHAR, data JSON);
-        CREATE TABLE IF NOT EXISTS samples(instance VARCHAR, ts_ms BIGINT, game_tick BIGINT, game_date VARCHAR,
-                                           company BIGINT, name VARCHAR, money DOUBLE, loan DOUBLE, value DOUBLE,
-                                           net DOUBLE, vehicles BIGINT);";
 
     /// One connection to the publisher's database: the writer holds one, the query routes read
     /// through a clone of it (same database, its own transactions).
@@ -325,6 +217,28 @@ pub mod db {
     /// the configuration locked, so a statement that passes the guard still cannot leave the store.
     fn config() -> Result<Config, String> {
         Config::default().enable_external_access(false).map_err(e)?.with("lock_configuration", "true").map_err(e)
+    }
+
+    /// Rows as `{columns, count, rows, capped}`, each row a list in column order, at most QUERY_CAP.
+    fn collect(mut rows: duckdb::Rows<'_>) -> Result<Value, String> {
+        let mut columns: Vec<String> = Vec::new();
+        let mut out = Vec::new();
+        let mut capped = false;
+        while let Some(row) = rows.next().map_err(e)? {
+            if columns.is_empty() {
+                columns = row.as_ref().column_names();
+            }
+            if out.len() == QUERY_CAP {
+                capped = true;
+                break;
+            }
+            let cells: Vec<Value> = (0..columns.len()).map(|i| row.get::<_, Dv>(i).map(to_json).unwrap_or(Value::Null)).collect();
+            out.push(Value::Array(cells));
+        }
+        if columns.is_empty() {
+            columns = rows.as_ref().map(|s| s.column_names()).unwrap_or_default();
+        }
+        Ok(json!({"columns": columns, "count": out.len(), "rows": out, "capped": capped}))
     }
 
     impl Store {
@@ -352,9 +266,11 @@ pub mod db {
         }
 
         fn init(conn: Connection, instance: &str) -> Result<Store, String> {
-            conn.execute_batch(TABLES).map_err(e)?;
-            conn.execute_batch(&super::table_docs_sql()).map_err(|err| format!("table docs: {err}"))?;
-            conn.execute_batch(&super::views_sql()).map_err(|err| format!("views: {err}"))?;
+            // The tables of ADR 0033, created when missing, then every view recreated, so a changed
+            // definition reaches old files too; each file carries its own comments.
+            for (name, text) in super::sql::TABLE_FILES.iter().chain(super::sql::VIEW_FILES) {
+                conn.execute_batch(text).map_err(|err| format!("sql {name}: {err}"))?;
+            }
             Ok(Store { conn, instance: instance.to_string() })
         }
 
@@ -406,25 +322,35 @@ pub mod db {
         /// a list in column order, at most `QUERY_CAP` rows.
         pub fn query(&self, sql: &str) -> Result<Value, String> {
             let mut st = self.conn.prepare(sql).map_err(e)?;
-            let mut rows = st.query([]).map_err(e)?;
-            let mut columns: Vec<String> = Vec::new();
-            let mut out = Vec::new();
-            let mut capped = false;
-            while let Some(row) = rows.next().map_err(e)? {
-                if columns.is_empty() {
-                    columns = row.as_ref().column_names();
-                }
-                if out.len() == QUERY_CAP {
-                    capped = true;
-                    break;
-                }
-                let cells: Vec<Value> = (0..columns.len()).map(|i| row.get::<_, Dv>(i).map(to_json).unwrap_or(Value::Null)).collect();
-                out.push(Value::Array(cells));
+            let rows = st.query([]).map_err(e)?;
+            collect(rows)
+        }
+
+        /// The names of a statement's parameters (`$company` is `company`), from DuckDB itself.
+        pub fn parameters(&self, sql: &str) -> Result<Vec<String>, String> {
+            let st = self.conn.prepare(sql).map_err(e)?;
+            (1..=st.parameter_count()).map(|i| st.parameter_name(i).map_err(e)).collect()
+        }
+
+        /// A statement with its named parameters bound from `params` (numbers, strings, booleans,
+        /// null); a parameter `params` lacks is an error that names it.
+        pub fn query_bound(&self, sql: &str, params: &serde_json::Map<String, Value>) -> Result<Value, String> {
+            let mut st = self.conn.prepare(sql).map_err(e)?;
+            for i in 1..=st.parameter_count() {
+                let name = st.parameter_name(i).map_err(e)?;
+                let v = params.get(&name).ok_or_else(|| format!("missing parameter: {name}"))?;
+                let dv = match v {
+                    Value::Null => Dv::Null,
+                    Value::Bool(b) => Dv::Boolean(*b),
+                    Value::Number(n) => n.as_i64().map(Dv::BigInt).unwrap_or_else(|| Dv::Double(n.as_f64().unwrap_or(0.0))),
+                    Value::String(t) => Dv::Text(t.clone()),
+                    other => Dv::Text(other.to_string()),
+                };
+                st.raw_bind_parameter(i, dv).map_err(e)?;
             }
-            if columns.is_empty() {
-                columns = rows.as_ref().map(|s| s.column_names()).unwrap_or_default();
-            }
-            Ok(json!({"columns": columns, "count": out.len(), "rows": out, "capped": capped}))
+            // raw_query reads what raw_execute produced; it does not run the statement itself.
+            st.raw_execute().map_err(e)?;
+            collect(st.raw_query())
         }
     }
 
@@ -550,8 +476,6 @@ pub struct Sinks {
 /// bus, and the file itself is for after it stopped.
 pub const STORE_ACCESS: &str = "the process that writes the store holds the file's lock while it runs: read through GET|POST /api/db/query or the ZeroMQ bus; open the file directly only after it stopped";
 
-/// What a GET without `?sql=` answers: the newest events, so the bare address shows what is there.
-pub const DEFAULT_QUERY: &str = "SELECT seq, ts_ms, kind, game_tick, game_date, data FROM events ORDER BY ts_ms DESC, seq DESC LIMIT 20";
 
 impl Sinks {
     /// Bind the bus on `bus_port` (an ephemeral port when that one is taken, or when 0) and open the
@@ -687,34 +611,64 @@ pub fn query(sinks: Option<&Sinks>, sql: &str) -> (u16, Value) {
     (503, json!({"error": format!("store off: {why}")}))
 }
 
-/// The store's schema: `{store, tables: [{name, columns}], views: [{name, comment, columns}]}`,
-/// each column `{name, type}`; a view's comment is its row of `VIEWS`.
+/// Run one named query of `sql/queries` with its parameters bound from `params`: 404 for an unknown
+/// name, 400 for a missing parameter or a statement that is not read-only, 503 without a store.
+pub fn named(sinks: Option<&Sinks>, name: &str, params: &serde_json::Map<String, Value>) -> (u16, Value) {
+    let Some(text) = sql::query(name) else {
+        return (404, json!({"error": format!("no query {name}; GET /api/db/named lists them")}));
+    };
+    if let Err(err) = read_only_sql(text) {
+        return (400, json!({"error": format!("{name}: {err}")}));
+    }
+    #[cfg(feature = "store")]
+    if let Some(r) = sinks.and_then(|s| s.reader.as_ref()) {
+        return match r.lock().unwrap().query_bound(text, params) {
+            Ok(v) => (200, v),
+            Err(err) => (400, json!({"error": format!("{name}: {err}")})),
+        };
+    }
+    let _ = params;
+    let why = sinks.and_then(|s| s.store_error.clone()).unwrap_or_else(|| "the store is not open".into());
+    (503, json!({"error": format!("store off: {why}")}))
+}
+
+/// Every named query: `{queries: [{name, description, parameters, sql}]}`. The parameters come from
+/// the prepared statement when the store is open, else they are null.
+pub fn queries(sinks: Option<&Sinks>) -> (u16, Value) {
+    let list: Vec<Value> = sql::QUERY_FILES.iter().map(|(name, text)| {
+        #[allow(unused_mut)]
+        let mut parameters = Value::Null;
+        #[cfg(feature = "store")]
+        if let Some(r) = sinks.and_then(|s| s.reader.as_ref()) {
+            parameters = r.lock().unwrap().parameters(text).map_or(Value::Null, |p| json!(p));
+        }
+        json!({"name": name, "description": sql::description(text), "parameters": parameters, "sql": text})
+    }).collect();
+    let _ = sinks;
+    (200, json!({"queries": list}))
+}
+
+/// The store's schema: `{store, tables: [{name, comment, columns}], views: [{name, comment, columns}]}`,
+/// each column `{name, type, comment}`, all read from the store itself (`sql/queries/store_schema.sql`,
+/// the comments the files under `sql/` write).
 pub fn tables(sinks: Option<&Sinks>) -> (u16, Value) {
-    let (code, out) = query(sinks, "SELECT c.table_name, c.column_name, c.data_type, t.table_type \
-                                    FROM information_schema.columns c JOIN information_schema.tables t \
-                                    ON c.table_schema = t.table_schema AND c.table_name = t.table_name \
-                                    WHERE c.table_schema = 'main' ORDER BY c.table_name, c.ordinal_position");
+    let (code, out) = named(sinks, "store_schema", &serde_json::Map::new());
     if code != 200 {
         return (code, out);
     }
-    let mut tables: BTreeMap<String, Vec<Value>> = BTreeMap::new();
-    let mut views: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    // kind, name, comment, column_name, data_type, column_comment
+    let mut objects: BTreeMap<(String, String), (Value, Vec<Value>)> = BTreeMap::new();
     for row in out["rows"].as_array().into_iter().flatten() {
-        let name = row[0].as_str().unwrap_or("").to_string();
-        let into = if row[3].as_str() == Some("VIEW") { &mut views } else { &mut tables };
-        into.entry(name).or_default().push(json!({"name": row[1], "type": row[2]}));
+        let key = (row[0].as_str().unwrap_or("").to_string(), row[1].as_str().unwrap_or("").to_string());
+        let entry = objects.entry(key).or_insert_with(|| (row[2].clone(), Vec::new()));
+        entry.1.push(json!({"name": row[3], "type": row[4], "comment": row[5]}));
     }
-    let tables: Vec<Value> = tables.into_iter().map(|(name, columns)| {
-        let doc = TABLE_DOCS.iter().find(|t| t.name == name);
-        let columns: Vec<Value> = columns.into_iter().map(|mut c| {
-            let about = doc.and_then(|t| t.columns.iter().find(|(n, _)| c["name"].as_str() == Some(*n))).map(|(_, d)| *d);
-            c["comment"] = json!(about);
-            c
-        }).collect();
-        json!({"name": name, "comment": doc.map(|t| t.comment), "columns": columns})
-    }).collect();
-    let views: Vec<Value> = VIEWS.iter().map(|v| json!({"name": v.name, "comment": v.comment,
-                                                        "columns": views.remove(v.name).unwrap_or_default()})).collect();
+    let mut tables = Vec::new();
+    let mut views = Vec::new();
+    for ((kind, name), (comment, columns)) in objects {
+        let o = json!({"name": name, "comment": comment, "columns": columns});
+        if kind == "view" { views.push(o) } else { tables.push(o) }
+    }
     (200, json!({"store": sinks.map_or(json!("off"), Sinks::store_status), "tables": tables, "views": views}))
 }
 
@@ -825,7 +779,7 @@ mod tests {
         let undocumented = q("SELECT name, column_name FROM schema_doc WHERE (comment IS NULL OR comment = '')
                               AND (kind <> 'column' OR name IN ('runs', 'events', 'samples'))");
         assert_eq!(undocumented, json!([]), "schema_doc rows without a comment");
-        assert_eq!(q("SELECT count(*) FROM schema_doc WHERE kind = 'view'"), json!([[VIEWS.len()]]));
+        assert_eq!(q("SELECT count(*) FROM schema_doc WHERE kind = 'view'"), json!([[sql::VIEW_FILES.len()]]));
         assert_eq!(q("SELECT comment FROM schema_doc WHERE kind = 'column' AND name = 'samples' AND column_name = 'company'"),
                    json!([["the company id, 0-based (company 1 in the game is 0)"]]));
         // Reopening recreates them: a changed definition reaches old files.
@@ -834,23 +788,51 @@ mod tests {
     }
 
     #[test]
-    fn every_view_is_documented_where_the_store_is() {
+    fn every_sql_file_names_its_object_and_documents_it() {
         let doc = include_str!("../../../../research/mechanisms/event-bus-and-store.md");
-        for v in VIEWS {
-            assert!(doc.contains(&format!("`{}`", v.name)), "research/mechanisms/event-bus-and-store.md lacks the view `{}`", v.name);
+        for (name, text) in sql::VIEW_FILES {
+            assert!(text.contains(&format!("CREATE OR REPLACE VIEW {name} AS")), "views/*_{name}.sql must create the view {name}");
+            assert!(text.contains(&format!("COMMENT ON VIEW {name} IS '")), "views/*_{name}.sql must comment the view");
+            assert!(doc.contains(&format!("`{name}`")), "research/mechanisms/event-bus-and-store.md lacks the view `{name}`");
         }
-        let sql = views_sql();
-        assert_eq!(sql.matches("CREATE OR REPLACE VIEW").count(), VIEWS.len());
-        // Every column TABLES creates has its documentation, and nothing documents a column it lacks.
-        #[cfg(feature = "store")]
-        for t in TABLE_DOCS {
-            let ddl = db::TABLES.split("CREATE TABLE IF NOT EXISTS ").find(|s| s.starts_with(&format!("{}(", t.name)))
-                .unwrap_or_else(|| panic!("TABLES lacks {}", t.name));
-            let cols: Vec<&str> = ddl[t.name.len() + 1..ddl.find(");").unwrap()].split(',')
-                .map(|c| c.split_whitespace().next().unwrap()).collect();
-            let documented: Vec<&str> = t.columns.iter().map(|(c, _)| *c).collect();
-            assert_eq!(cols, documented, "TABLE_DOCS for {} must list its columns in order", t.name);
+        for (name, text) in sql::TABLE_FILES {
+            let head = format!("CREATE TABLE IF NOT EXISTS {name} (");
+            let at = text.find(&head).unwrap_or_else(|| panic!("tables/{name}.sql must create the table {name}"));
+            assert!(text.contains(&format!("COMMENT ON TABLE {name} IS '")), "tables/{name}.sql must comment the table");
+            let body = &text[at + head.len()..text[at..].find(");").map(|e| at + e).unwrap()];
+            for column in body.split(',').map(|c| c.split_whitespace().next().unwrap()) {
+                assert!(text.contains(&format!("COMMENT ON COLUMN {name}.{column} IS '")), "tables/{name}.sql must comment {column}");
+            }
         }
+        for (name, text) in sql::QUERY_FILES {
+            assert!(!sql::description(text).is_empty(), "queries/{name}.sql needs leading -- lines that say what it answers");
+            assert_eq!(read_only_sql(text), Ok(()), "queries/{name}.sql must be one read-only statement");
+        }
+        assert!(sql::query("store_schema").is_some() && default_query().contains("FROM events"));
+    }
+
+    #[cfg(feature = "store")]
+    #[test]
+    fn a_named_query_binds_its_parameters_and_names_a_missing_one() {
+        let mut st = db::Store::open_in_memory("panel-n").unwrap();
+        st.insert_run(&json!("s"), Some(1), 10, (None, None, None)).unwrap();
+        for (ts, date, a, b) in [(20, "1951-01-10", 100.0, 300.0), (30, "1951-02-03", 180.0, 250.0)] {
+            let s = json!({"t": ts, "date": date, "companies": [{"id": 0, "name": "A", "value": a, "money": a, "fleet": 2},
+                                                                 {"id": 1, "name": "B", "value": b, "money": b, "fleet": 3}]});
+            st.insert_samples(&sample_rows(&s, ts)).unwrap();
+        }
+        let r = st.reader().unwrap();
+        let rank = sql::query("company_rank").unwrap();
+        assert_eq!(r.parameters(rank).unwrap(), vec!["company"]);
+        let p = |v: Value| v.as_object().unwrap().clone();
+        assert_eq!(r.query_bound(rank, &p(json!({"company": 0}))).unwrap()["rows"], json!([[2, 2, 180.0, "1951-02-03"]]));
+        let trend = sql::query("company_trend").unwrap();
+        assert_eq!(r.query_bound(trend, &p(json!({"company": 1, "months": 1}))).unwrap()["rows"],
+                   json!([["1951-02", 250.0, -50.0, 250.0, -50.0, 3]]));
+        assert_eq!(r.query_bound(trend, &p(json!({"company": 1}))).unwrap_err(), "missing parameter: months");
+        // A value is bound, never pasted: a hostile string is just a company that does not exist.
+        let _ = r.query_bound(rank, &p(json!({"company": "0; DROP TABLE runs"})));
+        assert_eq!(r.query("SELECT count(*) FROM runs").unwrap()["rows"], json!([[1]]));
     }
 
     #[cfg(feature = "store")]
@@ -886,7 +868,7 @@ mod tests {
         assert_eq!((code, t["tables"].as_array().map(Vec::len)), (200, Some(3)));
         // Every view exists in the file, with columns, and the sample is in the monthly views.
         let views = t["views"].as_array().unwrap();
-        assert_eq!(views.len(), VIEWS.len());
+        assert_eq!(views.len(), sql::VIEW_FILES.len());
         assert!(views.iter().all(|v| v["columns"].as_array().is_some_and(|c| !c.is_empty())), "{views:?}");
         assert_eq!(query(None, "SELECT 1").0, 503);
         let _ = std::fs::remove_dir_all(dir);

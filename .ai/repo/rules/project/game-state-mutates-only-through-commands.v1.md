@@ -26,6 +26,9 @@ and would corrupt the substrate the experiments rely on.
   no uninitialised reads.
 - A tool reports dispatch (EXECUTED_UNVERIFIED) separately from an observed effect
   (VERIFIED_SUCCESS).
+- The blackboard is not a side channel: the mesh record client, the bus and their bridges
+  have no command path (rule `project.decision-authority-boundaries`, B3, proved by
+  `cargo test --bin battlebrain`).
 
 # Failure behaviour
 
