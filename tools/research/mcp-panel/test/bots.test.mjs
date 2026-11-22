@@ -3,7 +3,11 @@
 import './panel-ui.mjs'; // first: shell.js publishes PanelUI before any page script
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { layout, changes, kindOf, editorMarkup } from '../static/bots.js';
+import fs from 'node:fs';
+import { layout, changes, kindOf, editorMarkup, controlsOf } from '../static/bots.js';
+
+// The fixture src/tests/test_prismatic_mcp_ai_control.cpp reads too: openttd://ai's controls.
+const SHARED = JSON.parse(fs.readFileSync(new URL('../../../../src/tests/prismatic_mcp_ai_controls.json', import.meta.url), 'utf8'));
 
 const st = (name, value, description = 'a number', extra = {}) => ({ name, value, default: value, min: -1, max: 100, step: 1, flags: ['in_game'], ingame: true, editable: true, labels: {}, description, ...extra });
 const line = (p, f, t, c) => [st(`${p}_from`, f, 'Producing industry (industry id; -1: none)'), st(`${p}_to`, t, 'Accepting industry (industry id; -1: none)'), st(`${p}_cargo`, c, 'Cargo (cargo id; -1: none)')];
@@ -57,4 +61,31 @@ test('the editor draws every setting once, folds unused lines and never lists an
   assert.match(html, /1 unused line \(3\)/);
   assert.match(html, /#2 \(not in this world\)/, 'an industry id the world does not list says so');
   assert.doesNotMatch(html, /data-apply=/, 'no Apply per field');
+});
+
+test('a setting without a control is derived by the rules openttd://ai uses: the shared fixture', () => {
+  assert.ok(SHARED.cases.length >= 2);
+  for (const c of SHARED.cases) assert.deepEqual(controlsOf(c.settings), c.controls, c.name);
+});
+
+test('the game\'s control wins over the panel\'s own derivation: kind, options, picker and place', () => {
+  const names = ({ groups, tables }) => ({
+    groups: groups.map((g) => [g.title, g.settings.map((s) => s.name)]),
+    tables: tables.map((t) => [t.base, t.fields, t.rows.map((r) => [r.n, r.unset, Object.values(r.cells).map((s) => s.name)])]),
+  });
+  for (const c of SHARED.cases) {
+    const served = c.settings.map((s, i) => ({ ...s, control: c.controls[i] }));
+    assert.deepEqual(names(layout(served)), names(layout(c.settings)), `${c.name}: the same layout either way`);
+  }
+  const plain = st('rail_a', 3);
+  assert.equal(kindOf(plain), 'range');
+  assert.equal(kindOf({ ...plain, control: { kind: 'number', group: 'general' } }), 'number');
+  assert.equal(kindOf({ ...plain, control: { kind: 'number', picker: 'town', group: 'general' } }, { town: [{ id: 1, name: 'Fictional Town' }] }), 'picker');
+  const served = [{ ...plain, control: { kind: 'select', options: [{ value: 3, label: 'three' }, { value: 1, label: 'one' }], group: 'rails' } }];
+  const { groups, tables } = layout(served);
+  assert.deepEqual([groups.map((g) => g.title), tables.length], [['rails'], 0], 'the place comes from the control');
+  const html = editorMarkup(served, 'c1');
+  assert.match(html, /data-kind="select"/);
+  assert.deepEqual([...html.matchAll(/<option value="(\d+)"/g)].map((m) => m[1]), ['3', '1'], 'options as the game orders them');
+  assert.match(html, /<option value="3" selected>three<\/option>/);
 });
