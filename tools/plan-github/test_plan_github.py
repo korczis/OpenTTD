@@ -301,7 +301,10 @@ def main():
     sys.argv.remove("--coverage")
     target = str(Path(pg.__file__).resolve())
     hit = set()
-    tool = sys.monitoring.COVERAGE_ID
+    # The first free tool id, the coverage slot preferred: the changed-lines tracer
+    # (tools/coverage) may already hold it in this very process.
+    tool = next(t for t in (sys.monitoring.COVERAGE_ID, 0, 2, 3, 4, 5)
+                if sys.monitoring.get_tool(t) is None)
     sys.monitoring.use_tool_id(tool, "plan-github-tests")
 
     def on_line(code, line):
@@ -314,6 +317,7 @@ def main():
     importlib.reload(pg)
     result = unittest.main(exit=False).result
     sys.monitoring.set_events(tool, 0)
+    sys.monitoring.free_tool_id(tool)
     source = Path(target).read_text().splitlines()
     guard = {i + 1 for i, text in enumerate(source) if re.match(r"\s*(if __name__ ==|sys\.exit\(main\(\)\))", text)}
     missed = sorted(executable_lines(pg) - hit - guard - {0})  # line 0: the module's own entry
