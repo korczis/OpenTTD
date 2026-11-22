@@ -1,0 +1,33 @@
+id: I0139
+milestone: the-planner-reads-one-coherent-priced-world
+title: "A plan-derived setting change is re-checked against the game before it applies: a plan whose snapshot is stale, or whose line endpoints or money no longer hold, is refused"
+slug: plan-revalidated-before-apply
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Carry the snapshot identity of I0138 from the plan into every setting change derived from it (panel_bot.rs `settings_from_plan`, build_plan.rhai, the replan service), and re-check it just before the change is submitted and again when an approval is executed: the snapshot is no older than a stated game-time bound, the industries and towns each handed line names still exist, and the line still fits money plus loan headroom minus the reserve. A failed check refuses the change with a stable reason, publishes it on plan.* and applies nothing."
+why: "External review 2026-11-22 (digest C-07). The Battlebrain live path re-checks before acting (I0097: stale date, keyed pull, companies read after the snapshot; panel_decision.rs:654-700), and the Prismatic directive has a freshness check (research/agent-loop.md:54). The planner's own path does not: tools/research/mcp-rhai/src/panel_bot.rs:859 turns a plan into settings at once with no snapshot, and the replan service proposes settings that wait for the owner's approval (tools/research/mcp-panel/rhai/replan.rhai:27-29) and apply whenever they are approved, on whatever world exists then. cd63f1ca1d (PR #57) bounds an openttd.ai.set_settings approval by expires_tick, but nothing derives that tick from the plan's snapshot."
+scope:
+  - "tools/research/mcp-rhai/src/panel_bot.rs"
+  - "tools/research/mcp-panel/rhai/build_plan.rhai"
+  - "tools/research/mcp-panel/rhai/replan.rhai"
+  - "research/mechanisms/planner-and-algoglyph.md"
+non_scope:
+  - "The Battlebrain live path (already gated by I0097)"
+  - "Any change to the game's approval mechanism"
+depends_on:
+  - I0138
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "settings_from_plan output and every replan proposal carry the plan's snapshot identity and an expires_tick derived from it"
+  - "A change whose snapshot is too old, whose endpoint is gone or which no longer fits the money is refused with its own code and applies nothing (unit tests)"
+  - "The refusal is a plan.* event in the store"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+  - "tools/research/mcp-panel-check"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

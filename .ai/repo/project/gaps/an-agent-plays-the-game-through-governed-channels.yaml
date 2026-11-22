@@ -27,6 +27,27 @@ observations:
 - id: own-lines-was-noise
   statement: "The +10.4% for own lines came from runs before the held start; the held-start re-measure gave -1.0% over ten years on seed 31337, with the two runs 0.3% apart at month 12"
   source: file:research/results/duel-20261117T234725-seed31337.md
+- id: planner-reads-one-at-a-time
+  statement: "Added 2026-11-22 from an external review re-checked on master: read_many is used only on mcp-plan's --capture branch (tools/research/mcp-rhai/src/bin/mcp-plan.rs:483); the hub's track_plan reads five resources back to back (hub.rs:1015-1020, hub_algoglyph.rs:116); no plan carries a tick or digest an executor could re-check (I0138-I0149)"
+  source: file:tools/research/mcp-rhai/src/bin/mcp-plan.rs
+- id: battlebrain-gate-cannot-pass
+  statement: "Added 2026-11-22 from an external review re-checked on master: research/battlebrain/README.md:186-188 contradicts its own I0097 section (:137-167); the cutover gate (:169-182) cannot pass because none of the three captures is coherent (:152-154); nothing in tools/research/mcp-rhai/src calls the atomic openttd.ai.set_settings (I0150-I0160)"
+  source: file:research/battlebrain/README.md
+- id: loop-not-joined
+  statement: "Added 2026-11-22 from an external review re-checked on master: research/agent-loop.md:62 says nothing is joined up, :78-84 shows the decision path proven against a stand-in, I0092 recorded the live Prismatic check NOT RUN, and idempotency keys live in process memory (tools/research/mcp-rhai/src/panel_decision.rs:604-607) (I0168-I0179)"
+  source: file:research/agent-loop.md
+- id: approver-self-declared
+  statement: "Added 2026-11-22 from an external review re-checked on master: on loopback POST /api/approve records `by` unchecked (tools/research/mcp-rhai/src/panel.rs:2382) and approved_by is {channel, declared} (panel_decision.rs:530-552); research/mcp-hub.md:221 says the hub has no authentication while :30-31 documents --bind/--token (I0182-I0188)"
+  source: file:tools/research/mcp-rhai/src/panel.rs
+- id: algoglyph-unreconciled
+  statement: "Added 2026-11-22 from an external review re-checked on master: the bot lays its own path, not the route AlgoGlyph priced (research/mcp-control.md:1017-1021); only mcp-human lays the kernel's pieces (tools/research/mcp-human/src/rail.rs:445-500); calibration compares profit, never build cost (tools/research/mcp-rhai/src/calibrate.rs:7-8) (I0212-I0217)"
+  source: file:tools/research/mcp-rhai/src/calibrate.rs
+- id: no-network-resource
+  statement: "Added 2026-11-22 from an external review re-checked on master: no MCP resource exposes network or coordinator state (src/prismatic_mcp/prismatic_mcp_server.cpp:329-332 exposes meta and status only), and a remote opponent must build the same commit (research/real-game.md:79-81, ADR 0030) (I0218-I0219)"
+  source: file:research/real-game.md
+- id: rhai-ide-milestone-done
+  statement: "Added 2026-11-22: milestone rhai-is-a-live-ide is 6/6 done (I0088-I0093), but its criterion's evidence (tools/research/mcp-scripts-check and cargo llvm-cov on mcp-rhai) was not re-run when this gap was re-read"
+  source: file:.ai/repo/project/milestones/rhai-is-a-live-ide.yaml
 conditions:
 - criterion: the-bridge-steers-a-company
   state: satisfied
@@ -78,5 +99,40 @@ conditions:
   because: "no default is derived from history; the one measured history-driven change (calibration) averaged about zero over three held-start seeds and stays off"
   observations:
   - own-lines-was-noise
+- criterion: the-planner-reads-one-coherent-priced-world
+  state: missing
+  because: "milestone the-planner-reads-one-coherent-priced-world owns the fix; nothing in it has started"
+  observations:
+  - planner-reads-one-at-a-time
+- criterion: battlebrain-decides-live-with-rollback
+  state: missing
+  because: "milestone battlebrain-decides-live-with-rollback owns the fix; nothing in it has started"
+  observations:
+  - battlebrain-gate-cannot-pass
+- criterion: prismatic-closes-one-real-loop
+  state: missing
+  because: "milestone prismatic-closes-one-real-loop owns the fix; nothing in it has started"
+  observations:
+  - loop-not-joined
+- criterion: governed-access-is-authenticated-and-exercised
+  state: missing
+  because: "milestone governed-access-is-authenticated-and-every-capability-reaches-every-surface owns the fix; nothing in it has started"
+  observations:
+  - approver-self-declared
+- criterion: algoglyph-plans-are-accountable
+  state: missing
+  because: "milestone algoglyph-is-accountable owns the fix; nothing in it has started"
+  observations:
+  - algoglyph-unreconciled
+- criterion: a-remote-human-plays-the-bot
+  state: missing
+  because: "milestone a-remote-human-plays-the-bot owns the fix; nothing in it has started"
+  observations:
+  - no-network-resource
+- criterion: rhai-is-a-live-ide
+  state: unknown
+  because: "the milestone is done, but the criterion's command was not re-run in this observation"
+  observations:
+  - rhai-ide-milestone-done
 risks:
 - "Upstream API drift may break the MCP module when it is rebased"

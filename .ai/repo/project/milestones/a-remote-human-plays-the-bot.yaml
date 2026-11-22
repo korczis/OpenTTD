@@ -1,0 +1,18 @@
+id: a-remote-human-plays-the-bot
+title: "A remote human plays the bot over the internet"
+slug: a-remote-human-plays-the-bot
+order: 210
+priority: p3
+problem: "Every game the bot has played is on loopback or the LAN, against other AIs or the owner. research/real-game.md:105-106 lists 'A remote human joining over the internet' and 'An invite-only game through the coordinator' as NOT RUN, and README.md:637-638 says the same. The setup is written (research/real-game.md:79-94: a clean-commit build, the bot installed, `network.server_game_type` invite-only or public, auto-approve off, the bot disclosed as an AI) and tools/research/real-game-check checks a stack against it, but no check reads whether the server registered with the game coordinator or whether anyone joined from outside. A remote opponent must build the same fork commit, because the revision check admits only an exact match (research/real-game.md:79-81, ADR 0030)."
+outcome: "An invite-only game hosted on the owner's research server is joined through the game coordinator by a client on a second machine outside the host's network, and a remote person then plays a recorded game against the bot. Each run's record (build id, invite path, who joined from where in anonymised terms, the bot's disclosure, every approval the host gave, the outcome) is under research/results/, the two NOT RUN rows of research/real-game.md and README.md are replaced by what was run, and real-game-check verifies the coordinator registration."
+acceptance_criteria:
+- "real-game-check reports the coordinator registration (invite code issued, server reachable through it) as PASS, FAIL or NOT RUN"
+- "A client on a second machine outside the host's network joins through the invite code; the record says which connection path the coordinator used"
+- "A remote person plays a game of a stated length against the disclosed bot with auto-approve off; the record lists the host's approvals and the result"
+- "research/real-game.md and README.md state what was run and keep any part not run as NOT RUN"
+validation:
+- "tools/research/real-game-check http://127.0.0.1:8800"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

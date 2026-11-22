@@ -100,6 +100,9 @@ id = "documents"
 group = "record"
 label = "published documents on the site and the wiki"
 docs = ""
+# Nearly every pull request adds a document, so this number in README.md made every two open pull
+# requests conflict on one line; it is shown on the site's overview, computed at build time.
+site_only = true
 
 # Tools that own derived text the regions do not: their own markers, or whole generated files.
 # `surfaces sync` runs every `sync` before it regenerates the regions, and `surfaces check` (the

@@ -1197,8 +1197,11 @@ class Regions:
         raise ValueError(f"fact {item.get('id', '?')}: needs matches, files or docs")
 
     def gen_facts(self, args: dict, doc: Doc) -> str:
+        # A fact marked `site_only` changes with nearly every pull request (the document count):
+        # committed into a region it made every two open pull requests conflict on one line, so it
+        # is shown only where the site computes it at build time.
         items = [i for i in load_config(self.repo.root)["facts"]["items"]
-                 if not args.get("group") or i.get("group") == args["group"]]
+                 if (not args.get("group") or i.get("group") == args["group"]) and not i.get("site_only")]
         rows = []
         for item in items:
             n, how = self.fact_value(item)

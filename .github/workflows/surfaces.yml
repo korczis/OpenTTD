@@ -60,8 +60,8 @@ jobs:
       - name: Check regions, links and anchors
         run: tools/surfaces/surfaces check
 
-      - name: refresh-branch keeps a branch current with master (every path, scratch repositories)
-        run: python3 -m unittest tools/surfaces/test_refresh_branch.py
+      - name: The generator's own tests (refresh-branch, site-only facts; scratch repositories)
+        run: python3 -B -m unittest discover -s tools/surfaces -p 'test_*.py'
 
       - name: Check the README scoreboard against research/results
         run: tools/research/readme-scoreboard --check

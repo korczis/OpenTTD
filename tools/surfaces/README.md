@@ -111,6 +111,10 @@ A region is a pair of HTML comments whose contents the generator owns:
 | `include` | `src=<document>`, `region=<name>` | The body of a marked region of another document (`<!-- name:begin -->`, any tool's marker, or a surfaces region of that generator), its relative links rewritten for this document and its comment lines dropped |
 | `facts` | `group=<name>`, `as=table\|line\|pie` | Numbers counted from the tracked files: each `[[facts.items]]` in `surfaces.toml` counts regex `matches` `in` a glob, tracked `files` matching a glob, or published `docs` under a path; the table shows what was counted, `line` is one sentence of bold numbers, `pie` a Mermaid pie |
 
+A fact marked `site_only = true` is left out of every Markdown region and shown only on the site's
+overview, where it is computed at build time. The document count is one: nearly every pull request
+adds a document, so in `README.md` it made every two open pull requests conflict on the same line.
+
 A fact is the one kind of number a committed document can state without going stale: it changes
 only when the files it counts change, and `surfaces sync` rewrites it in the same commit. A count
 of commits or of today's date is not a fact in this sense, since every commit would change it; the

@@ -1,0 +1,35 @@
+id: I0174
+milestone: prismatic-closes-one-real-loop
+title: "ZeroMQ consumers detect a gap in the publisher's seq and backfill the missing events from the DuckDB store, or report the range they could not fill"
+slug: bus-gap-backfill
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "A shared module, bus_gap.rs, tracks the last seq per (instance, session). mcp-bus-tail, mcp-kernel-feed (kernel_feed.rs) and mcp-bus-blackboard use it. It detects a gap, and a restart (seq going back). It reads the missing range from the panel's store through its named queries and delivers it in order, marked backfilled, before live events continue. A range the store cannot fill is reported, never skipped silently. Tests use a fixture publisher that drops messages."
+why: "External review 2026-11-22 (digest C-05). research/mechanisms/event-bus-and-store.md:4: the bus forwards each event to a ZeroMQ PUB socket and to the store. :37: the envelope carries seq. PUB drops what no subscriber takes, yet tools/research/mcp-rhai/src/bin/mcp-bus-tail.rs:87-94 receives and prints with no seq check. The only 'gap' in tools/research/mcp-rhai/src/bin/mcp-bus-blackboard.rs:47-85 is its post rate limit."
+scope:
+  - "tools/research/mcp-rhai/src/bus_gap.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-bus-tail.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-kernel-feed.rs"
+  - "tools/research/mcp-rhai/src/kernel_feed.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-bus-blackboard.rs"
+  - "research/mechanisms/event-bus-and-store.md"
+non_scope:
+  - "Changing the publisher or the envelope"
+  - "The store's SQL files (open PR #56). This issue starts after it lands and adds its range query there as a named query"
+  - "kernel_feed.rs's feed definitions for transport-investment and knapsack-dp (I0148)"
+depends_on:
+  - I0148
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
+acceptance_criteria:
+  - "Unit tests cover a gap, a restart and a range the store cannot fill, for each of the three consumers"
+  - "A live run with a consumer paused past the socket's high-water mark ends with every seq delivered once, in order, the backfilled ones marked"
+  - "research/mechanisms/event-bus-and-store.md documents the guarantee and its limit"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-bus-tail --bin mcp-kernel-feed --bin mcp-bus-blackboard"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -1,0 +1,25 @@
+id: I0160
+milestone: battlebrain-decides-live-with-rollback
+title: "The AlgoGlyph flow serve has a per-request deadline and restarts after a failure: a hung kernel costs one caller its deadline, not every caller the shared lock"
+slug: flow-serve-deadline-restart
+priority: p2
+profile: implementation
+parallel_safe: true
+objective: "flow_serve.rs reads each answer with a per-request deadline (a reader thread or non-blocking pipe, not a blocking read_line under the mutex), kills a serve that misses it, and starts a new one on the next call after a bounded backoff, with a restart cap. summary() reports deadlines missed and restarts beside calls and fallbacks."
+why: "External review 2026-11-22 (digest C-06). tools/research/mcp-rhai/src/flow_serve.rs:59-71 blocks in read_line with no timeout, :104-117 holds the shared mutex across that call, and :90-91 plus :116 mark the serve gone for the rest of the process ('it is then not restarted'). The fallback is already counted (:120-124) and the switch is off by default."
+scope:
+  - "tools/research/mcp-rhai/src/flow_serve.rs"
+non_scope:
+  - "Changing AlgoGlyph's serve protocol"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "A fake serve that never answers fails one call at its deadline, and a second concurrent caller is not blocked past it (test)"
+  - "After a killed serve, the next call starts a new one; after the cap, calls fall back with the reason (test)"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
