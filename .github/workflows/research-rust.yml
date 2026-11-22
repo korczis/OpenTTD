@@ -32,6 +32,8 @@ on:
     - 'tools/research/vendor/**'
     - 'tools/research/algoglyph-pin'
     - 'tools/research/test_algoglyph_pin.py'
+    - 'tools/research/battlebrain-cutover'
+    - 'tools/research/battlebrain-cutover-check'
   # Manual runs. No CI job pushes to a pull request's branch any more (surfaces.yml, the note
   # above `pages`), so nothing dispatches this workflow there.
   workflow_dispatch:
@@ -93,7 +95,7 @@ jobs:
           pattern='^(tools/research/(mcp-rhai|schema|prismatic-ai|real-world|mcp-panel|town-model)/'
           pattern+='|research/(results|battlebrain|prismatic-bridge|mechanisms)/'
           pattern+='|\.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds\.md$'
-          pattern+='|tools/research/battlebrain-cutover(-check)?$'
+          pattern+='|tools/research/(battlebrain-cutover|battlebrain-cutover-check)$'
           pattern+='|src/window_type\.h$|\.github/workflows/research-rust\.yml$'
           pattern+='|\.gitmodules$|tools/research/vendor/|tools/research/(algoglyph-pin|test_algoglyph_pin\.py)$)'
           matched=$(git diff --name-only "$base" HEAD | grep -E "$pattern" || true)
