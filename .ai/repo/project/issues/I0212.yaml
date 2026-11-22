@@ -1,0 +1,33 @@
+id: I0212
+milestone: algoglyph-is-accountable
+title: "A track-planning cost fixture matrix (straight, bend, slope, bridge, tunnel, blocked, level crossing, each rail type) holds the kernel's route and price to what the game charges for the same pieces"
+slug: track-plan-cost-fixtures
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Record a fixture per case from a research server on a seeded map: the five resources the track input reads (map, map/ways, map/terrain, economy/prices, bridges, as hub_algoglyph.rs TRACK_INPUTS), the endpoints, and the game's own test-mode cost of every piece of the expected route through openttd.decision.validate (read-only, no approval). Cases: straight, one bend, a slope needing a foundation, a bridge, a tunnel, a blocked pair that must be refused, a level crossing over a road, and RAIL, ELRL, MONO and MGLV for one route. A cargo test runs the pinned AlgoGlyph track-planning kernel on each fixture through the fork's flow runner and checks feasibility (found or refused), topology (pieces connect end to end, bridge and tunnel heads match), and price (the kernel's money against the game's summed test-mode cost within a stated tolerance), with track money kept apart from stations, vehicles and inflation (fixtures record the inflation factor and the construction-cost setting)."
+why: "External review 2026-11-22 (digest A-38). tools/research/mcp-rhai/src/linecost.rs has one test (:104, endpoint geometry only) and hub_algoglyph.rs six (:151-208, input assembly, railtype choice, answer parsing); none compares a kernel price with the game's. The game's price for a piece is available without mutation: openttd.decision.validate answers would_succeed and estimated_cost from the command's test phase (src/prismatic_mcp/prismatic_mcp_server.cpp:750-754, prismatic_mcp_commands.cpp:115-122). A built tunnel has not been seen (research/mcp-control.md:1021). Railtype build costs exist (I0074) but are checked against no fixture. AlgoGlyph is used from outside and not edited; a kernel defect found here is reported to its repository, not patched."
+scope:
+  - "tools/research/mcp-rhai/src/linecost.rs"
+  - "tools/research/mcp-rhai/fixtures/track-plan/**"
+  - "tools/research/track-plan-fixtures"
+  - "research/mechanisms/planner-and-algoglyph.md"
+non_scope:
+  - "Changing AlgoGlyph's track-planning kernel (used from outside)"
+  - "The hub's read path (I0138); fixtures are recorded files"
+  - "Station, depot and vehicle prices"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#algoglyph-plans-are-accountable"
+acceptance_criteria:
+  - "tools/research/track-plan-fixtures record --panel <url> writes the eleven fixtures with the build id, seed, inflation factor and construction-cost setting; record refuses a stack it did not start"
+  - "cargo test runs every fixture offline: found or refused as expected, connected topology, kernel money within the stated tolerance of the game's test-mode sum; a fixture whose kernel answer drifts fails with both figures"
+  - "Without an AlgoGlyph checkout the fixture tests report NOT RUN by name, never PASS"
+  - "research/mechanisms/planner-and-algoglyph.md lists the matrix, the tolerance and the AlgoGlyph commit it passed on"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml track_fixture"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

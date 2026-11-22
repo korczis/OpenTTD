@@ -667,13 +667,36 @@ pub fn keyed<F: FnOnce() -> Result<(u16, Value), String>>(key: Option<&str>, now
 /// always; a shadow decision never reaches the game. A live block is applied only through a keyed
 /// pull whose key is the block's idempotency key (so it runs once: `keyed`), and only on or before
 /// its stale date in game time (`today`, the game's date now). Pure: the caller records and answers.
+/// Whether a setting name is a PrismaticAI freight-line slot (fr_* or fr2_* .. fr16_*).
+pub fn is_freight_slot_setting(name: &str) -> bool {
+    (1..=crate::battlebrain_contract::FREIGHT_SLOTS).any(|i| name.starts_with(&crate::battlebrain_contract::freight_slot_prefix(i)))
+}
+
+/// The game tick at which a live decision's single approval expires: the end of its stale date.
+pub fn live_expiry(now_tick: i64, today: &str, valid_until: &str) -> Option<i64> {
+    let days = crate::battlebrain_contract::days_between(today, valid_until)?;
+    (days >= 0).then(|| now_tick + (days + 1) * DAY_TICKS)
+}
+
 pub fn decision_gate(raw: &Value, key: Option<&str>, today: Option<&str>) -> Result<(), (u16, &'static str, Vec<String>)> {
-    let Some(block) = raw.get("decision") else { return Ok(()) };
+    let Some(block) = raw.get("decision") else {
+        // A freight-line slot has one author (I0117): only a Battlebrain decision may set fr_*.
+        let fr: Vec<&str> = raw["settings"].as_str().unwrap_or_default().split(',').filter_map(|kv| kv.split('=').next())
+            .map(str::trim).filter(|k| is_freight_slot_setting(k)).collect();
+        if !fr.is_empty() {
+            return Err((422, "fr_needs_decision", vec![format!("{} set a freight-line slot, which only a Battlebrain decision block may do", fr.join(", "))]));
+        }
+        return Ok(());
+    };
     if let Err(rs) = crate::battlebrain_contract::validate_decision_block(block) {
         return Err((422, "invalid_decision_block", rs.iter().map(|r| format!("decision.{}: {} ({})", r.path, r.message, r.code)).collect()));
     }
     if block["mode"] != "live" {
         return Err((409, "shadow_refused", vec![format!("decision {} is a {} decision; only live decisions are applied", block["decision"], block["mode"])]));
+    }
+    let settings = raw["settings"].as_str().unwrap_or_default();
+    if block["settings_digest"].as_str() != Some(crate::battlebrain_contract::settings_digest(settings).as_str()) {
+        return Err((409, "payload_mismatch", vec!["the directive's settings are not the ones its decision block authorises (settings_digest)".into()]));
     }
     let want = block["idempotency_key"].as_str().unwrap_or_default();
     if key != Some(want) {
@@ -684,6 +707,46 @@ pub fn decision_gate(raw: &Value, key: Option<&str>, today: Option<&str>) -> Res
         (Some(t), Some(until)) => Err((409, "stale_decision", vec![format!("the decision was valid until {until}; the game is at {t}")])),
         _ => Err((409, "stale_decision", vec!["the game's date cannot be read, so the decision's freshness cannot be checked".into()])),
     }
+}
+
+/// Apply a live decision (I0117): its company must be an AI company now, the game must offer
+/// openttd.ai.set_settings, and every setting goes under one approval that expires with the
+/// decision. Recorded as plan.directive like every directive.
+fn apply_live(g: &Arc<Game>, url: &str, raw: &Value, d: &Directive, ignored: &[String], key: Option<&str>) -> Result<(u16, Value), String> {
+    let refuse = |status: u16, outcome: &str, why: String| -> Result<(u16, Value), String> {
+        g.event("ai", &format!("Battlebrain's live decision ({url}) is not applied: {why}"));
+        let errors = vec![why.clone()];
+        let mut data = directive_event(url, raw, Err(&errors), ignored, &[]);
+        data["choice"]["outcome"] = json!(outcome);
+        g.plan("plan.directive", data);
+        Ok((status, json!({"error": why, "called_url": url, "raw_response": raw})))
+    };
+    let Some(company) = d.company_id else { return refuse(422, "invalid_decision_block", "a live decision names its company_id".into()) };
+    let companies = g.resource("openttd://companies")?;
+    let list = companies.get("companies").or_else(|| companies.get("data")).cloned().unwrap_or(companies.clone());
+    let is_ai = list.as_array().into_iter().flatten().any(|c| c["id"].as_i64() == Some(company) && c["is_ai"] == true);
+    if !is_ai {
+        return refuse(409, "not_an_ai_company", format!("company {company} is not an AI company now"));
+    }
+    if !g.tool_names().contains("openttd.ai.set_settings") {
+        return refuse(409, "no_atomic_apply", "this game offers no openttd.ai.set_settings, so the decision cannot be applied under one approval".into());
+    }
+    let (now_tick, today) = game_time(g)?;
+    let Some(expires) = today.as_str().and_then(|t| live_expiry(now_tick, t, raw["decision"]["valid_until"].as_str().unwrap_or_default())) else {
+        return refuse(409, "stale_decision", "the decision's stale date has passed or the game's date cannot be read".into());
+    };
+    let settings: serde_json::Map<String, Value> = d.settings.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
+    let steps = vec![step(format!("company {company}: {} setting(s) under one approval, expiring at tick {expires}", settings.len()),
+        g.tool("openttd.ai.set_settings", json!({"company": company, "settings": settings, "expires_tick": expires})))];
+    g.event("ai", &format!("Battlebrain decided ({url}): {}", steps[0]["line"].as_str().unwrap_or_default()));
+    let mut data = directive_event(url, raw, Ok(d), ignored, &steps);
+    data["inputs"]["live"]["key"] = json!(key);
+    if let Some(seq) = g.plan("plan.directive", data) { track(seq, url, &steps); }
+    let errors: Vec<&str> = steps.iter().filter(|s| s["state"] == json!("error")).filter_map(|s| s["error"].as_str()).collect();
+    if !errors.is_empty() {
+        return Ok((502, json!({"error": format!("applying the decision failed: {}", errors.join("; ")), "called_url": url, "steps": steps})));
+    }
+    Ok((200, json!({"called_url": url, "applied": "openttd.ai.set_settings", "steps": steps, "expires_tick": expires})))
 }
 
 pub fn pull_with(g: &Arc<Game>, url: &str, key: Option<&str>) -> Result<(u16, Value), String> {
@@ -716,6 +779,11 @@ pub fn pull_with(g: &Arc<Game>, url: &str, key: Option<&str>) -> Result<(u16, Va
         g.plan("plan.directive", data);
         return Ok((status, json!({"error": "the directive's decision block may not be applied", "errors": errors,
                                   "called_url": url, "raw_response": raw})));
+    }
+    // A live Battlebrain decision (it passed decision_gate) is bound to its own snapshot, key and
+    // stale date, so it is applied as one approval through openttd.ai.set_settings, or not at all.
+    if raw.get("decision").is_some() {
+        return apply_live(g, url, &raw, &d, &ignored, key);
     }
     // Bound to what Prismatic observed during this pull, or not applied at all.
     let (_, obs) = last();
@@ -789,14 +857,37 @@ pub fn directive_event(url: &str, raw: &Value, d: Result<&Directive, &Vec<String
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_live_decision_is_bound_to_its_settings_and_slots_have_one_author() {
+        let s = "planned_freight_only=1,fr_from=41,fr_to=1,fr_cargo=1";
+        let block = json!({"schema": "battlebrain-decision/v2", "decision": format!("bb:{}", "1".repeat(64)),
+            "snapshot_digest": format!("sha256:{}", "2".repeat(64)), "idempotency_key": "k", "policy": "freight-margin@2",
+            "valid_until": "1963-03-24", "mode": "live", "settings_digest": crate::battlebrain_contract::settings_digest(s)});
+        assert!(decision_gate(&json!({"company_id": 0, "settings": s, "decision": block}), Some("k"), Some("1963-03-01")).is_ok());
+        let swapped = json!({"company_id": 0, "settings": "planned_freight_only=1,fr_from=29,fr_to=34,fr_cargo=1", "decision": block});
+        assert_eq!(decision_gate(&swapped, Some("k"), Some("1963-03-01")).unwrap_err().1, "payload_mismatch");
+        assert_eq!(decision_gate(&json!({"company_id": 0, "settings": "fr2_from=7,aggressiveness=50"}), None, None).unwrap_err().1, "fr_needs_decision");
+        assert!(decision_gate(&json!({"company_id": 0, "settings": "aggressiveness=50,planned_freight_only=0"}), None, None).is_ok(), "rollback and other settings need no block");
+        assert!(is_freight_slot_setting("fr16_cargo") && is_freight_slot_setting("fr_to") && !is_freight_slot_setting("freight") && !is_freight_slot_setting("frost"));
+    }
+
+    #[test]
+    fn a_live_approval_expires_at_the_end_of_the_decisions_stale_date() {
+        assert_eq!(live_expiry(1000, "1963-03-01", "1963-03-01"), Some(1000 + DAY_TICKS));
+        assert_eq!(live_expiry(1000, "1963-03-01", "1963-03-03"), Some(1000 + 3 * DAY_TICKS));
+        assert_eq!(live_expiry(1000, "1963-03-02", "1963-03-01"), None, "already stale");
+        assert_eq!(live_expiry(1000, "bad", "1963-03-01"), None);
+    }
+
+    #[test]
     fn a_shadow_or_broken_decision_block_never_passes_the_executor() {
         // I0096: the executor boundary. A directive without a block is unaffected.
         let (k, today) = (Some("i:3:1953-02-09:freight-line"), Some("1953-02-20"));
-        assert!(decision_gate(&json!({"company_id": 3, "settings": "fr_from=13"}), None, None).is_ok());
-        let block = |mode: &str| json!({"schema": "battlebrain-decision/v1", "decision": format!("bb:{}", "1".repeat(64)),
+        assert!(decision_gate(&json!({"company_id": 3, "settings": "aggressiveness=75"}), None, None).is_ok());
+        let block = |mode: &str| json!({"schema": "battlebrain-decision/v2", "decision": format!("bb:{}", "1".repeat(64)),
             "snapshot_digest": format!("sha256:{}", "2".repeat(64)), "idempotency_key": "i:3:1953-02-09:freight-line",
-            "policy": "freight-margin@1", "valid_until": "1953-03-12", "mode": mode});
-        let shadow = decision_gate(&json!({"company_id": 3, "settings": "fr_from=13", "decision": block("shadow")}), k, today).unwrap_err();
+            "policy": "freight-margin@2", "valid_until": "1953-03-12", "mode": mode,
+            "settings_digest": crate::battlebrain_contract::settings_digest("")});
+        let shadow = decision_gate(&json!({"company_id": 3, "decision": block("shadow")}), k, today).unwrap_err();
         assert_eq!((shadow.0, shadow.1), (409, "shadow_refused"));
         assert!(decision_gate(&json!({"company_id": 3, "decision": block("live")}), k, today).is_ok());
         // I0097: a live decision runs only through a pull keyed with its own key, and only while fresh.
@@ -808,7 +899,7 @@ mod tests {
         let unknown = decision_gate(&json!({"company_id": 3, "decision": block("auto")}), k, today).unwrap_err();
         assert_eq!((unknown.0, unknown.1), (422, "invalid_decision_block"));
         let mut v2 = block("live");
-        v2["schema"] = json!("battlebrain-decision/v2");
+        v2["schema"] = json!("battlebrain-decision/v3");
         assert_eq!(decision_gate(&json!({"company_id": 3, "decision": v2}), k, today).unwrap_err().0, 422);
         let mut nokey = block("live");
         nokey.as_object_mut().unwrap().remove("idempotency_key");

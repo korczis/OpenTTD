@@ -47,6 +47,14 @@ flowchart TB
   closes a line to match, removing only what the line owns: its track (a level crossing keeps its
   road), its own platforms (`AIRail.RemoveRailStationTileRectangle`, never a whole joined station)
   and its throats and depot. The bot never decides there; it reconciles.
+- **Events are read, and vehicles that cannot earn are dealt with** (`events.nut`). Each heartbeat
+  drains the game's events. A lost vehicle's line is checked with the builders' own checks
+  (`VerifyRailLine` lays a missing piece again, `RailWalk` follows the track from one station to
+  the other, `RepairDepot` joins or rebuilds the depot); a train whose line cannot be repaired is
+  sold and the line gets no new train until a monthly walk finds it whole; a line whose trains get
+  lost on a track that does join its stations takes no new train either. A losing vehicle on a
+  broken route is sold; on a whole one the fleet's two-year rule and the steward judge it. Once a
+  month a vehicle stopped in a depot with no orders gets a line's orders or is sold.
 - **Every build step checks the game's answer.** A step that fails is logged and skipped; the
   API's return values are the source of truth (header of `main.nut`).
 
@@ -62,6 +70,7 @@ reasoning is in [`../rail-steward.md`](../rail-steward.md).
 | [`PrismaticAI/main.nut`](../../tools/research/prismatic-ai/PrismaticAI/main.nut) | the heartbeat and the starter route |
 | [`PrismaticAI/rail.nut`](../../tools/research/prismatic-ai/PrismaticAI/rail.nut) | termini, the A* line search, laying, the walk check, depots, trains |
 | [`PrismaticAI/lines.nut`](../../tools/research/prismatic-ai/PrismaticAI/lines.nut) | line slots, the record, `ReconcileLines` |
+| [`PrismaticAI/events.nut`](../../tools/research/prismatic-ai/PrismaticAI/events.nut) | the game's events: lost and unprofitable vehicles, line repair, vehicles with no orders |
 | [`PrismaticAI/fleet.nut`](../../tools/research/prismatic-ai/PrismaticAI/fleet.nut) | road and air capacity from waiting cargo and the link graph |
 | [`PrismaticAI/roadstop.nut`](../../tools/research/prismatic-ai/PrismaticAI/roadstop.nut), [`intercity.nut`](../../tools/research/prismatic-ai/PrismaticAI/intercity.nut), [`air.nut`](../../tools/research/prismatic-ai/PrismaticAI/air.nut) | bus stops and depots, intercity roads, airports |
 | [`install`](../../tools/research/prismatic-ai/install) | links the bot into the personal `ai/` folder; `--check` verifies it |

@@ -654,9 +654,9 @@ from the code. The right-hand column says what was counted.
 | **12** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **17** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **37** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
-| **103** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
-| **90** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
-| **872** | published documents on the site and the wiki | published documents under `/` |
+| **205** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
+| **98** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
+| **883** | published documents on the site and the wiki | published documents under `/` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
@@ -1326,6 +1326,7 @@ those files:
 |---|---|---|
 | [project.a-tuning-claim-needs-held-start-pairs](.ai/repo/rules/project/a-tuning-claim-needs-held-start-pairs.v1.md) | advisory | Change a default of the bot or the planner on the strength of a measurement only when held-start duel pairs on three seeds favour it beyond the rival's spread, and record the pairs; report anything less as inconclusive. |
 | [project.battle-records-are-reproducible](.ai/repo/rules/project/battle-records-are-reproducible.v1.md) | blocking | Publish AI-battle results only as records written by battle.py report from a committed edition, never edit a record or its derived Markdown by hand, and keep battle.py check passing. |
+| [project.decision-authority-boundaries](.ai/repo/rules/project/decision-authority-boundaries.v1.md) | blocking | Do not add a second writer of an executable decision, a path from a kernel output to a game, a command path from the blackboard, a hand copy of the MCP or kernel catalogue, or a fallback labelled as the kernel; keep cargo test --bin battlebrain and tools/gate.sh change passing, and when a boundary must move, edit its named list, this rule and ADR 0037 in the same change. |
 | [project.docs-are-derived-and-current](.ai/repo/rules/project/docs-are-derived-and-current.v1.md) | blocking | Derive every number, table, list and chart from the sources; infer what can be inferred instead of declaring it; keep code generic (no instance named where data can give it); draw every Markdown diagram in Mermaid; and keep the gates that prove this, surfaces check, e2e-coverage, readme-scoreboard and diagrams-check, passing on every change. |
 | [project.extend-and-integrate-before-adding](.ai/repo/rules/project/extend-and-integrate-before-adding.v1.md) | blocking | Extend the existing piece before writing a parallel one, integrate with what exists (the store and its views, the Rhai library, AlgoGlyph through the hub, the MCP catalogue, the blackboard and the mesh), and leave no second implementation behind. |
 | [project.game-state-mutates-only-through-commands](.ai/repo/rules/project/game-state-mutates-only-through-commands.v1.md) | blocking | Change vehicles, companies, map tiles or any other persistent game state only through a registered command issued with Command<>::Post, never by writing a pool from a research hook, the MCP server or any other side channel. |
@@ -1352,7 +1353,7 @@ those files:
 ```mermaid
 pie showData title Rules (project) by class
     %% links: README.md?col=Class&filter=blocking#06-ground-rules-short-version | README.md?col=Class&filter=advisory#06-ground-rules-short-version
-    "blocking" : 20
+    "blocking" : 21
     "advisory" : 2
 ```
 <!-- surfaces:end ai-rules -->
@@ -1542,13 +1543,26 @@ Milestones of the plan with the issues done and still open, derived from the iss
 | M1 | [The fork states what it is, and one set of ground rules binds every agent](.ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml) | 2/2 | — |
 | M2 | [A change is validated at the tier its size needs, and the report cannot round up](.ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml) | 4/4 | — |
 | M3 | [Internal state is observable through gated instrumentation, and every experiment records how it ran](.ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml) | 8/8 | — |
-| M4 | [Prismatic steers a company in a live game through the standalone bridge](.ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 8/8 | — |
+| M4 | [Prismatic steers a company in a live game through the standalone bridge](.ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 10/10 | — |
 | M5 | [An agent reads and, with approval, changes the game over an embedded MCP server](.ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml) | 53/53 | — |
 | M6 | [The fork is published, supervised by Majordomus, and current with upstream](.ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml) | 7/7 | — |
 | M7 | [NoirGFX: the game in the owner's SIG NIHL noir, from OpenGFX and Kenney models](.ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml) | 1/1 | — |
 | M8 | [Planning decisions read recorded history from the store and publish what they chose as data](.ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml) | 7/7 | — |
 | M9 | [Rhai is a live IDE: edited, run, debugged and inspected in the panel, and it reaches Prismatic's models and blackboard](.ai/repo/project/milestones/rhai-is-a-live-ide.yaml) | 6/6 | — |
 | M10 | [Every status surface and record says what the code does today, and a capability matrix proves it](.ai/repo/project/milestones/records-and-status-tell-the-truth.yaml) | 0/7 | I0110, I0111, I0112, I0113, I0114, I0115, I0116 |
+| M11 | [The fork's own toolchain carries no open dependency vulnerability, and new alerts are seen and triaged](.ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml) | 1/1 | — |
+| M12 | [Every changed line is run by a test, and a coverage gate refuses a change whose new lines no test ran](.ai/repo/project/milestones/every-changed-line-is-tested.yaml) | 0/4 | I0180, I0181, I0189, I0190 |
+| M13 | [Every AI battle match records why each company won or lost, with the settings it actually ran under, and replays identically on another arena](.ai/repo/project/milestones/every-battle-match-explains-itself.yaml) | 0/7 | I0118, I0119, I0120, I0121, I0122, I0123, I0124 |
+| M14 | [PrismaticAI grows its fleet and survives its own failures](.ai/repo/project/milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml) | 0/13 | I0125, I0126, I0127, I0128, I0129, I0130, I0131, I0132, I0133, I0134, I0135, I0136, I0137 |
+| M15 | [The planner reads one coherent world and prices it from the game](.ai/repo/project/milestones/the-planner-reads-one-coherent-priced-world.yaml) | 0/12 | I0138, I0139, I0140, I0141, I0142, I0143, I0144, I0145, I0146, I0147, I0148, I0149 |
+| M16 | [Battlebrain owns the freight-line decision live, behind gates and a rollback switch](.ai/repo/project/milestones/battlebrain-decides-live-with-rollback.yaml) | 0/11 | I0150, I0151, I0152, I0153, I0154, I0155, I0156, I0157, I0158, I0159, I0160 |
+| M17 | [Evaluations are fair, pre-registered and paired: every claim about the bot, the planner, AlgoGlyph or Prismatic rests on a protocol fixed before its first run](.ai/repo/project/milestones/evaluations-are-fair-pre-registered-and-paired.yaml) | 0/7 | I0161, I0162, I0163, I0164, I0165, I0166, I0167 |
+| M18 | [Prismatic closes one real loop: retrieve, coordinate, decide, act, observe, in one recorded run against live services](.ai/repo/project/milestones/prismatic-closes-one-real-loop.yaml) | 0/12 | I0168, I0169, I0170, I0171, I0172, I0173, I0174, I0175, I0176, I0177, I0178, I0179 |
+| M19 | [Governed access is authenticated, and every capability is derived onto every surface and exercised live](.ai/repo/project/milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml) | 0/7 | I0182, I0183, I0184, I0185, I0186, I0187, I0188 |
+| M20 | [The live agent workbench: in-game commands, Rhai revisions with rollback, AlgoGlyph flows](.ai/repo/project/milestones/the-live-agent-workbench.yaml) | 0/10 | I0192, I0193, I0194, I0195, I0196, I0197, I0198, I0199, I0200, I0201 |
+| M21 | [The panel has integrity: every control works, every view is derived](.ai/repo/project/milestones/the-panel-has-integrity.yaml) | 0/8 | I0203, I0204, I0205, I0206, I0207, I0208, I0209, I0211 |
+| M22 | [AlgoGlyph is accountable: cost fixtures, plan receipts, predicted versus actual, fault injection](.ai/repo/project/milestones/algoglyph-is-accountable.yaml) | 0/6 | I0212, I0213, I0214, I0215, I0216, I0217 |
+| M23 | [A remote human plays the bot over the internet](.ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml) | 0/2 | I0218, I0219 |
 <!-- surfaces:end ai-plan -->
 
 <!-- surfaces:begin ai-plan as=bar -->
@@ -1564,12 +1578,12 @@ config:
 ---
 xychart-beta
     title "Issues done (bar) and planned (line) per milestone, in plan order"
-    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10"]
+    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21", "M22", "M23"]
     %% series: Issues done | Issues planned
-    %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml | .ai/repo/project/milestones/records-and-status-tell-the-truth.yaml
+    %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml | .ai/repo/project/milestones/records-and-status-tell-the-truth.yaml | .ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml | .ai/repo/project/milestones/every-changed-line-is-tested.yaml | .ai/repo/project/milestones/every-battle-match-explains-itself.yaml | .ai/repo/project/milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml | .ai/repo/project/milestones/the-planner-reads-one-coherent-priced-world.yaml | .ai/repo/project/milestones/battlebrain-decides-live-with-rollback.yaml | .ai/repo/project/milestones/evaluations-are-fair-pre-registered-and-paired.yaml | .ai/repo/project/milestones/prismatic-closes-one-real-loop.yaml | .ai/repo/project/milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml | .ai/repo/project/milestones/the-live-agent-workbench.yaml | .ai/repo/project/milestones/the-panel-has-integrity.yaml | .ai/repo/project/milestones/algoglyph-is-accountable.yaml | .ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml
     y-axis "Issues done" 0 --> 58.3
-    bar [2, 4, 8, 8, 53, 7, 1, 7, 6, 0]
-    line [2, 4, 8, 8, 53, 7, 1, 7, 6, 7]
+    bar [2, 4, 8, 10, 53, 7, 1, 7, 6, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    line [2, 4, 8, 10, 53, 7, 1, 7, 6, 7, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 6, 2]
 ```
 <!-- surfaces:end ai-plan -->
 

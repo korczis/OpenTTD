@@ -53,6 +53,8 @@ class PrismaticAI extends AIController {
 	was_frozen = false; /* whether the last heartbeat froze construction (BuildFrozen) */
 	selling = null; /* vehicle id -> true while it drives to its depot to be sold */
 	resizing = null; /* train id -> true while it drives to its depot to change its wagons (lines.nut) */
+	lost = null; /* vehicle id -> the date its ET_VEHICLE_LOST arrived, until it reaches a station (events.nut) */
+	orphans = null; /* vehicle id -> true: stopped in a depot with no orders at the last monthly look (events.nut) */
 	month = -1; /* the game month the line records were last logged in */
 	idle = null; /* route key -> heartbeats in a row with almost nothing waiting */
 	self_targets = null; /* slot -> {trains, wagons}: the in-bot steward's targets (steward.nut) */
@@ -76,6 +78,8 @@ class PrismaticAI extends AIController {
 		this.freight_tried = {};
 		this.selling = {};
 		this.resizing = {};
+		this.lost = {};
+		this.orphans = {};
 		this.idle = {};
 		this.self_targets = {};
 		this.air_towns = {};
@@ -111,6 +115,7 @@ require("pressure.nut");
 require("infra.nut");
 require("modernize.nut");
 require("restore.nut");
+require("events.nut");
 
 /* Cheapest buildable road engine that carries a passenger-class cargo. */
 function PrismaticAI::PickPassengerEngine() {
@@ -160,7 +165,10 @@ function PrismaticAI::BuildStarterRoute(aggressiveness, used_towns) {
 		tried++;
 		if (PrismaticAI.BuildRouteInTown(town, aggressiveness)) return town;
 	}
-	AILog.Warning("PrismaticAI: no new route in the " + tried + " largest unused town(s)");
+	/* Every town already has a route: nothing was tried, so there is nothing to warn about. With
+	 * rich growth lifting max_routes the bot reached this every heartbeat, and the narrator relayed
+	 * "no new route in the 0 largest unused town(s)" into the owner's chat (2026-11-22). */
+	if (tried > 0) AILog.Warning("PrismaticAI: no new route in the " + tried + " largest unused town(s)");
 	return -1;
 }
 
@@ -585,6 +593,9 @@ function PrismaticAI::Start() {
 			}
 		}
 
+		/* The game's events: lost and unprofitable vehicles are checked, their line repaired or the
+		 * vehicle sold, engine previews kept for AcceptPreviews (events.nut). */
+		this.HandleEvents(b);
 		/* Capacity follows demand: add where cargo piles up, sell what keeps losing money. */
 		this.air_cap = b.invest_air_cap;
 		this.air_add_waiting = b.air_add_waiting;
@@ -623,6 +634,9 @@ function PrismaticAI::Start() {
 		if (!frozen && b.rich && b.upgrade_track == 1 && PrismaticAI.MonthKey() != this.month) this.UpgradeTrack(b);
 		/* New models offered to us first: taken, like AAAHogEx does (modernize.nut). */
 		if (b.modernize == 1 && b.rich) PrismaticAI.AcceptPreviews();
+		/* Vehicles stopped in a depot with no orders get a line's orders or are sold; broken lines are
+		 * walked again (events.nut). */
+		if (PrismaticAI.MonthKey() != this.month) this.LookAfterVehicles();
 		if (PrismaticAI.MonthKey() != this.month) { this.month = PrismaticAI.MonthKey(); PrismaticAI.LogLines(); }
 		/* Borrowed money that sits idle only costs interest: repay what is above twice the reserve. */
 		PrismaticAI.RepaySurplus(max(2 * b.cash_reserve, afloat));

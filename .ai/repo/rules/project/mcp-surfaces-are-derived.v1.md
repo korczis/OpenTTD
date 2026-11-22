@@ -51,6 +51,10 @@ time the C++ side adds a tool, and a stale surface claims capability the game do
   OpenAPI, GraphQL and Rhai like every hub method. `track_plan` feeds the kernel a game's
   `openttd://map`, `map/ways`, `map/terrain`, `economy/prices` and `bridges` verbatim; a planner prices a build
   from `openttd://economy/prices` (what the game charges now), never from base prices typed into it (I0073).
+- No source keeps its own copy of the kernel catalogue: a list literal naming two kernels of the
+  discovered catalogue, or three `openttd.<group>.<tool>` names, fails
+  `cargo test --bin battlebrain` (rule `project.decision-authority-boundaries`, B4). The one
+  per-kernel registry allowed is the domain checks in `battlebrain_contract.rs`.
 - Rhai reaches the hub the same way: `mcp-rhai --hub URL` registers one `hub_<method>` function per
   method of the hub's OpenAPI document; none is named in mcp-rhai.
 - No duplicate buildings: `hub.audit` judges every instance by the game's own catchment

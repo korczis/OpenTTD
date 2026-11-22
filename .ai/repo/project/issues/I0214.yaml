@@ -1,0 +1,40 @@
+id: I0214
+milestone: algoglyph-is-accountable
+title: "A track plan leaves a replayable plan receipt: kernel and catalogue, input, resource and plan digests, game tick, step receipts and expected against observed effects, and a replay reproduces its plan digest"
+slug: replayable-plan-receipt
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Define plan-receipt/v1 in battlebrain_contract.rs (generated into tools/research/schema/ like the other contracts, validated by `battlebrain validate`) as a composition of records that already exist, not a parallel one: the algoglyph-invocation/v1 envelopes of the kernel calls (kernel id, catalogue digest, input, status, duration), the snapshot identity of the reads (I0138: game tick, date, per-resource digests, coherence), the plan digest and the parameter digest, the step receipts of the execution (I0175), each step's expected effect next to its observed effect, and the measurement quality (I0213's window and verdict). linecost.rs, the hub's algoglyph.track_plan and mcp-human's rail plan emit invocation envelopes for each kernel call. `battlebrain replay <receipt>` re-runs the pinned kernel on the recorded input and compares plan digests."
+why: "External review 2026-11-22 (digest A-39). The parts exist apart: mcp-plan --capture writes per-resource digests and the tick window (tools/research/mcp-rhai/src/bin/mcp-plan.rs:167-168, :188-193); the invocation envelope is a contract (tools/research/mcp-rhai/src/battlebrain_contract.rs:22, schema tools/research/schema/algoglyph-invocation.v1.schema.json) but only Battlebrain records carry it (battlebrain_contract.rs:579); plan.* events are in the store (I0081). linecost.rs and hub_algoglyph.rs emit no envelope, and nothing ties a track plan to its observed build or checks that the same input gives the same plan. Rule project.extend-and-integrate-before-adding asks for the composition, not a new store."
+scope:
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs"
+  - "tools/research/mcp-rhai/src/linecost.rs"
+  - "tools/research/mcp-human/src/rail.rs"
+  - "tools/research/schema/plan-receipt.v1.schema.json"
+  - "research/battlebrain/README.md"
+  - "research/results/**"
+non_scope:
+  - "The step receipts themselves (I0175) and the snapshot identity (I0138); the receipt links them"
+  - "hub_algoglyph.rs's read path, which I0138 changes; the hub emits envelopes after it"
+depends_on:
+  - I0138
+  - I0175
+  - I0213
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#algoglyph-plans-are-accountable"
+acceptance_criteria:
+  - "plan-receipt/v1 is generated, with valid and invalid fixtures; `battlebrain validate` accepts the valid ones and refuses each invalid one with a named refusal"
+  - "Every kernel call of linecost.rs and of mcp-human's rail plan writes an algoglyph-invocation/v1 envelope; a test checks one per call"
+  - "`battlebrain replay` on I0213's committed receipt reproduces its plan digest at the recorded AlgoGlyph commit, or reports the kernel or catalogue drift that prevents it"
+  - "The receipt links each step receipt and states expected and observed effect per step"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml battlebrain"
+  - "cargo test --release -q --manifest-path tools/research/mcp-human/Cargo.toml"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -1,0 +1,30 @@
+id: I0199
+milestone: the-live-agent-workbench
+title: "A browser journey check pauses a dedicated game through an approval and confirms it by a fresh read from the game, then resumes it the same way"
+slug: journey-pause-resume
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Write tools/research/mcp-journey-check, a Playwright check against a disposable stack whose journeys are acceptance stories rather than control presses. The first: select the instance, press Pause, see the pending plan with its exact arguments, approve it through the page, and confirm the pause by an independent read of openttd://game/state (not by the approval's answer); then resume the same way and read it back. The check is generic over instances and declares e2e-covers for the pages it drives."
+why: "External review 2026-11-22 (digest A-21). The panel has Pause/Resume and Approve (tools/research/mcp-panel/static/app.js:130, :137-138), mcp-panel-check drives game.set_pause with curl (tools/research/mcp-panel-check:65), and the generic crawl (tools/research/mcp-ui-crawl-check:14-21, landed with PR #47) presses every control but only requires that it does something visible. No browser check confirms a game state change by a fresh read after an approval."
+scope:
+  - "tools/research/mcp-journey-check"
+  - "tools/research/mcp-panel/test/"
+  - "research/mcp-control.md"
+non_scope:
+  - "The approval core (ADR 0038 slice 2, peer worktree fix/approval-core); the journey is written against approve-executes semantics and lands after it"
+  - "Approving from a live game anyone is playing; the check refuses a stack it did not start"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#the-workbench-drives-the-game-end-to-end"
+acceptance_criteria:
+  - "mcp-journey-check <panel-url> runs pause, approve, readback, resume, approve, readback in Chrome and exits 0 only when both reads show the expected state"
+  - "A refused or expired approval fails the journey with the step named"
+  - "tools/research/e2e-coverage counts the check for the pages it declares"
+validation:
+  - "node --test tools/research/mcp-panel/test/"
+  - "tools/research/e2e-coverage"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
