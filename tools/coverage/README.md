@@ -16,7 +16,10 @@ python3 -B -m unittest discover -s tools/coverage -p 'test_*.py'   # its own tes
 
 1. **The change.** `git diff -U0 -M <base>` gives the added and modified lines. Untracked
    files count whole. The base is `--base`, else `COVERAGE_BASE`, else the merge base with
-   `origin/HEAD`. On the trunk itself it is HEAD (a dirty tree) or HEAD's first parent.
+   `origin/HEAD`. On the trunk itself it is HEAD (a dirty tree) or HEAD's first parent. A
+   given base counts from its merge base with HEAD, or from the newest `origin/HEAD` commit
+   that HEAD already holds when that is newer. A branch that merged a newer master than its
+   pull request's `base.sha` is judged by its own lines only.
 2. **What is judged.** Python files: `*.py`, and extensionless scripts with a python shebang.
    The tests (`test_*.py`) and `src/3rdparty/` are not judged. Only executable lines count,
    those a compiled code object maps an instruction to.

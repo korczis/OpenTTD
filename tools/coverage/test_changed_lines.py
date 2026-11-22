@@ -212,6 +212,52 @@ class RefusesAndAccepts(Scratch):
         self.assertEqual(out.stdout.split(), ["tools/x"])
 
 
+class MergedTrunk(Scratch):
+    """A branch that merged a newer master is judged by its own lines only."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.a = git(self.root, "rev-parse", "HEAD").strip()
+        git(self.root, "checkout", "-q", "-b", "feature")
+        self.write("tools/x/foo.py", FOO + "\n\ndef own(a):\n    return -a\n")
+        git(self.root, "commit", "-qam", "own line, no test")
+        git(self.root, "checkout", "-q", "master")
+        self.write("tools/x/bar.py", "def trunk(a):\n    return a * 2\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "master's line, no test")
+        self.b = git(self.root, "rev-parse", "HEAD").strip()
+        git(self.root, "update-ref", "refs/remotes/origin/master", self.b)
+        git(self.root, "checkout", "-q", "feature")
+        git(self.root, "merge", "-q", "--no-edit", "master")
+
+    def test_a_stale_pull_request_base_judges_only_the_branch(self) -> None:
+        self.assertEqual(cl.resolve_base(self.root, self.a), self.b)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        out = subprocess.run([sys.executable, "-B", str(SCRIPT), "--repo", str(self.root)],
+                             env=dict(env, COVERAGE_BASE=self.a), capture_output=True, text=True)
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("missing tools/x/foo.py:6: no test runs this line: return -a", out.stdout)
+        self.assertNotIn("bar.py", out.stdout)
+        self.assertIn(f"since {self.b[:12]}", out.stdout)
+
+    def test_a_base_off_the_branch_counts_from_the_merge_base(self) -> None:
+        git(self.root, "update-ref", "-d", "refs/remotes/origin/master")
+        git(self.root, "checkout", "-q", "-b", "side", self.a)
+        self.write("tools/x/side.py", "s = 1\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "side")
+        side = git(self.root, "rev-parse", "HEAD").strip()
+        git(self.root, "checkout", "-q", "feature")
+        self.assertEqual(cl.resolve_base(self.root, side), self.a)
+
+    def test_a_push_to_the_trunk_keeps_its_before(self) -> None:
+        git(self.root, "checkout", "-q", "master")
+        git(self.root, "merge", "-q", "--no-edit", "feature")
+        head = git(self.root, "rev-parse", "HEAD").strip()
+        git(self.root, "update-ref", "refs/remotes/origin/master", head)
+        self.assertEqual(cl.resolve_base(self.root, self.b), self.b)
+
+
 class Exemptions(Scratch):
     UNTESTED = FOO + "\n\ndef sub(a, b):\n    return a - b\n"
 

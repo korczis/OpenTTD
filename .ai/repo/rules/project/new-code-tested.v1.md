@@ -28,7 +28,10 @@ reaches. The gate therefore judges only the lines the change touched, and each o
 - **The change** is the diff from a base to the working tree. The base is `--base`, else
   `COVERAGE_BASE` (CI: the pull request's base, or the commit before the push), else the merge
   base with `origin/HEAD` (or `origin/master`). Where that is HEAD itself, the base is HEAD when
-  the working tree holds the change, else HEAD's first parent. Untracked files count whole.
+  the working tree holds the change, else HEAD's first parent. A given base counts from its
+  merge base with HEAD, or from the newest default-branch commit HEAD already holds when that is
+  newer. A pull request's `base.sha` can be older than the master its branch merged, and the
+  branch owes no test for master's lines. Untracked files count whole.
 - **Judged**: the added or modified lines of every Python file. That means `*.py`, and a file
   without an extension whose first line is a python shebang. The tests themselves (`test_*.py`)
   and vendored code (`src/3rdparty/`) are not judged. Only executable lines count: those a
