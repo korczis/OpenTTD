@@ -14,7 +14,7 @@
 // the panel's AI (/api/status `ai`, /api/bots `running`), the one `mcp-e2e --coplay` joins.
 // Once a game quarter, and when the narrator starts, it reminds the owner of the bot's requests
 // that wait for an Approve in the panel (/api/status `pending`, those whose args.company is the
-// owner's), with the oldest one's time.
+// owner's), naming the oldest one.
 import "ttd" as ttd;
 
 // Rhai's String.replace changes the string in place and returns (), so it never chains: each
@@ -92,40 +92,42 @@ fn mine(e, company) {
     company != () && type_of(e.data.company) != "()" && as_int(e.data.company) == company
 }
 
-// Unix seconds -> "YYYY-MM-DD HH:MM UTC" (days to the civil date as in H. Hinnant's algorithm).
-fn utc_of(secs) {
-    let s = as_int(secs);
-    let z = s / 86400 + 719468;
-    let era = z / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400;
-    if month <= 2 { year += 1; }
-    let tod = s % 86400;
-    let two = |n| if n < 10 { `0${n}` } else { `${n}` };
-    `${year}-${two.call(month)}-${two.call(day)} ${two.call(tod / 3600)}:${two.call(tod % 3600 / 60)} UTC`
+// What one pending request would change, in a few words: an AI setting (ai.set_setting's
+// args.name/value), a plan of settings (ai.set_settings' args.settings map), else the tool's name.
+fn request_what(r) {
+    let a = r.args ?? #{};
+    let tool = `${r.tool ?? "request"}`;
+    tool.replace("openttd.", "");
+    if type_of(a.settings) == "map" {
+        let parts = [];
+        for k in a.settings.keys() { parts.push(`${k}=${a.settings[k]}`); }
+        let shown = if parts.len() > 3 { `${parts[0]}, ${parts[1]}, ${parts[2]} and ${parts.len() - 3} more` }
+                    else { parts.reduce(|x, y| if x == "" { y } else { x + ", " + y }, "") };
+        return `${tool} ${shown}`;
+    }
+    if type_of(a.name) != "()" { return `${tool} ${a.name}=${a.value ?? ""}`; }
+    tool
 }
 
-// The owner's bot's requests waiting for an Approve, as one line, or () when none waits.
-fn pending_reminder(company, panel) {
+// The owner's bot's requests waiting for an Approve, as one line, or () when none waits. The
+// requests are the game server's queue as status().pending gives it ({id, tool, args,
+// created_tick, expires_tick}, ADR 0038): the oldest is the one with the smallest created_tick.
+fn reminder_of(pending, company, panel) {
     if company == () { return (); }
     let n = 0;
     let oldest = ();
-    for r in status().pending ?? [] {
+    for r in pending {
         let c = r.args?.company;
         if c == () || as_int(c) != company { continue; }
         n += 1;
-        if oldest == () || r.created < oldest.created { oldest = r; }
+        if oldest == () || as_int(r.created_tick ?? 0) < as_int(oldest.created_tick ?? 0) { oldest = r; }
     }
     if n == 0 { return (); }
-    let what = `${oldest.tool} ${oldest.args?.name ?? ""}=${oldest.args?.value ?? ""}`;
     let at = if panel == "" { "the control panel" } else { `${panel}/` };
-    `${n} change${if n == 1 { "" } else { "s" }} for your bot wait for your Approve at ${at} (oldest #${oldest.id} from ${utc_of(oldest.created)}: ${what})`
+    `${n} change${if n == 1 { "" } else { "s" }} for your bot wait for your Approve at ${at} (oldest #${oldest.id}: ${request_what(oldest)})`
 }
+
+fn pending_reminder(company, panel) { reminder_of(status().pending ?? [], company, panel) }
 
 // A game quarter starts: "1961-04-01" -> true.
 fn quarter_start(date) {
