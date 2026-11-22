@@ -11,6 +11,7 @@
 
 #include "prismatic_mcp_ai.h"
 #include "prismatic_mcp_commands.h"
+#include "prismatic_mcp_detail.h"
 
 #include "../ai/ai.hpp"
 #include "../ai/ai_config.hpp"
@@ -22,7 +23,9 @@
 #include "../network/network.h"
 #include "../openttd.h"
 #include "../settings_type.h"
+#include "../timer/timer_game_tick.h"
 
+#include <algorithm>
 #include <optional>
 
 #include "../safeguards.h"
@@ -106,6 +109,29 @@ bool ValueFits(const ScriptConfigItem &item, const json &value, std::string &err
 	return true;
 }
 
+/**
+ * Check one change of a setting of company `c`'s AI: the setting exists, may change now (while the AI
+ * runs only with the in_game flag) and `value` fits its range. ai.set_setting and ai.set_settings
+ * both check through here, so one setting is refused for the same reasons either way.
+ * @param value The new value, or nullptr when none was given.
+ * @param[out] errors Every reason the change is refused.
+ * @return The setting as its script declared it, or null when the AI has no such setting.
+ */
+json CheckSetting(CompanyID c, const std::string &name, const json *value, json &errors)
+{
+	AIConfig *config = AIConfig::GetConfig(c);
+	const ScriptConfigItem *item = FindItem(config->HasScript() ? config->GetConfigList() : nullptr, name);
+	if (item == nullptr) { errors.push_back(fmt::format("the AI of company {} has no setting {}", c.base(), name)); return nullptr; }
+	bool running = Company::Get(c)->ai_instance != nullptr;
+	json described = DescribeSetting(*item, config->GetSetting(name), running);
+	if (running && !item->flags.Test(ScriptConfigFlag::InGame)) {
+		errors.push_back(fmt::format("{} cannot be changed while the AI runs (no in_game flag)", name));
+	}
+	std::string err;
+	if (value == nullptr || !ValueFits(*item, *value, err)) errors.push_back(err.empty() ? "value (integer) required" : err);
+	return described;
+}
+
 /** The first company slot no company holds: where start_ai puts a new AI. */
 CompanyID FreeSlot()
 {
@@ -133,7 +159,7 @@ bool PostCompanyCtrl(CompanyCtrlAction action, CompanyID company, CompanyRemoveR
 
 bool IsAiAction(std::string_view type)
 {
-	return type == "ai.set_setting" || type == "ai.start" || type == "ai.stop" || type == "ai.reload";
+	return type == "ai.set_setting" || type == "ai.set_settings" || type == "ai.start" || type == "ai.stop" || type == "ai.reload";
 }
 
 json Resource()
@@ -176,17 +202,28 @@ json Validate(std::string_view type, const json &args, json &errors)
 		auto c = AiCompany(args, errors);
 		if (!c) return details;
 		if (!args.contains("name") || !args["name"].is_string()) { errors.push_back("name (string) required"); return details; }
-		AIConfig *config = AIConfig::GetConfig(*c);
-		std::string name = args["name"].get<std::string>();
-		const ScriptConfigItem *item = FindItem(config->HasScript() ? config->GetConfigList() : nullptr, name);
-		if (item == nullptr) { errors.push_back(fmt::format("the AI of company {} has no setting {}", c->base(), name)); return details; }
-		bool running = Company::Get(*c)->ai_instance != nullptr;
-		details["setting"] = DescribeSetting(*item, config->GetSetting(name), running);
-		if (running && !item->flags.Test(ScriptConfigFlag::InGame)) {
-			errors.push_back(fmt::format("{} cannot be changed while the AI runs (no in_game flag)", name));
+		json described = CheckSetting(*c, args["name"].get<std::string>(), args.contains("value") ? &args["value"] : nullptr, errors);
+		if (!described.is_null()) details["setting"] = described;
+	} else if (type == "ai.set_settings") {
+		/* Every setting is checked, and every refusal named: the decision runs whole or not at all. */
+		if (IsNetworkClient()) { errors.push_back("only the server runs AIs; this process is a network client"); return details; }
+		detail::SetSettingsPlan plan = detail::PlanSetSettings(args);
+		for (const std::string &e : plan.errors) errors.push_back(e);
+		auto c = AiCompany(args, errors);
+		if (!c || !plan.errors.empty()) return details;
+		if (plan.expires_tick.has_value()) {
+			uint64_t now = (uint64_t)TimerGameTick::counter;
+			details["expires_tick"] = *plan.expires_tick;
+			if (!detail::StillFresh(now, plan.expires_tick)) {
+				errors.push_back(fmt::format("the decision expired at tick {}; it is now tick {}", *plan.expires_tick, now));
+			}
 		}
-		std::string err;
-		if (!args.contains("value") || !ValueFits(*item, args["value"], err)) errors.push_back(err.empty() ? "value (integer) required" : err);
+		json described = json::array();
+		for (const auto &[name, value] : plan.settings) {
+			json d = CheckSetting(*c, name, &args["settings"][name], errors);
+			if (!d.is_null()) described.push_back(std::move(d));
+		}
+		details["settings"] = std::move(described);
 	} else if (type == "ai.start") {
 		CheckCanManage(errors);
 		if (Company::GetNumItems() == CompanyPool::MAX_SIZE) errors.push_back("no free company slot");
@@ -225,7 +262,14 @@ Posted Execute(std::string_view type, const json &args, const std::function<void
 	Posted p;
 	json errors = json::array();
 	Validate(type, args, errors);
-	if (!errors.empty()) { p.error = errors[0].get<std::string>(); return p; }
+	if (!errors.empty()) {
+		if (type != "ai.set_settings") { p.error = errors[0].get<std::string>(); return p; }
+		/* All or nothing: nothing was applied, and the answer names every setting that stopped it. */
+		p.error = "nothing applied:";
+		for (const auto &e : errors) p.error += fmt::format(" {};", e.get<std::string>());
+		p.error.pop_back();
+		return p;
+	}
 
 	if (type == "ai.set_setting") {
 		CompanyID c(static_cast<uint8_t>(args["company"].get<int64_t>()));
@@ -234,6 +278,24 @@ Posted Execute(std::string_view type, const json &args, const std::function<void
 		AIConfig::GetConfig(c)->SetSetting(name, value);
 		/* Read back through the same configuration AIController.GetSetting reads. */
 		p.observe = [c, name, value]() { return Company::IsValidAiID(c) && AIConfig::GetConfig(c)->GetSetting(name) == value; };
+		p.ok = true;
+		return p;
+	}
+	if (type == "ai.set_settings") {
+		/* Validated whole just above, on this main-thread call: every setting is applied here, in the
+		 * same call, so the script never reads half of the decision. */
+		CompanyID c(static_cast<uint8_t>(args["company"].get<int64_t>()));
+		AIConfig *config = AIConfig::GetConfig(c);
+		std::vector<std::pair<std::string, int>> applied;
+		for (const auto &[name, value] : args["settings"].items()) {
+			config->SetSetting(name, value.get<int>());
+			applied.emplace_back(name, value.get<int>());
+		}
+		p.observe = [c, applied]() {
+			if (!Company::IsValidAiID(c)) return false;
+			const AIConfig *cfg = AIConfig::GetConfig(c);
+			return std::ranges::all_of(applied, [cfg](const auto &s) { return cfg->GetSetting(s.first) == s.second; });
+		};
 		p.ok = true;
 		return p;
 	}
@@ -291,6 +353,17 @@ json Tools()
 		{"description", "Approval-gated: change one setting of a company's AI; while it runs only settings flagged in_game. The script reads it on its next GetSetting; the verdict reads it back"},
 		{"inputSchema", {{"type", "object"}, {"properties", {{"company", company}, {"name", {{"type", "string"}}}, {"value", {{"type", "integer"}}}}},
 			{"required", json::array({"company", "name", "value"})}}}});
+	arr.push_back({{"name", "openttd.ai.set_settings"},
+		{"description", fmt::format("Approval-gated: change several settings of one company's AI under ONE approval, all applied in the same "
+			"main-thread call or none (an unknown name, a value out of range or a setting that cannot change while the AI runs "
+			"refuses the whole call and is named). At most {} settings. expires_tick (optional, a game tick) is bound with the "
+			"arguments: the approval expires at the earlier of it and the usual TTL, and a call after it is refused even when "
+			"approved. The verdict reads every value back", detail::SET_SETTINGS_MAX)},
+		{"inputSchema", {{"type", "object"}, {"properties", {{"company", company},
+			{"settings", {{"type", "object"}, {"minProperties", 1}, {"maxProperties", detail::SET_SETTINGS_MAX}, {"additionalProperties", {{"type", "integer"}}}}},
+			{"expires_tick", {{"type", "integer"}, {"minimum", 0}}}}},
+			{"required", json::array({"company", "settings"})}}},
+		{"annotations", {{"readOnlyHint", false}, {"destructiveHint", true}, {"idempotentHint", false}, {"openWorldHint", false}}}});
 	arr.push_back({{"name", "openttd.ai.start"},
 		{"description", "Approval-gated: start an AI in the next free company slot (start_ai), optionally a named AI and version with initial settings {name: value}"},
 		{"inputSchema", {{"type", "object"}, {"properties", {{"name", {{"type", "string"}}}, {"version", {{"type", "integer"}}},
