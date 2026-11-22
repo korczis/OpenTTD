@@ -1,0 +1,14 @@
+{
+ "companies": [
+  {
+   "id": 1,
+   "is_ai": true,
+   "loan": 100000,
+   "max_loan": 300000,
+   "money": 80000,
+   "money_unit": "internal_currency",
+   "name": "Fixture Transport"
+  }
+ ],
+ "synthetic": "I0096 test fixture; NOT a captured game"
+}

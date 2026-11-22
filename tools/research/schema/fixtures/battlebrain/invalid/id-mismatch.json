@@ -1,0 +1,54 @@
+{
+ "case": "an edited body under its old id",
+ "expect": "id_mismatch",
+ "value": {
+  "at": {
+   "date": "1961-01-01",
+   "tick": 74010
+  },
+  "body": {
+   "action": {
+    "kind": "freight_line",
+    "settings": {
+     "fr_cargo": 1,
+     "fr_from": 12,
+     "fr_to": 31
+    }
+   },
+   "assumptions": [
+    "load factor 0.7",
+    "no competitor at the producer"
+   ],
+   "estimate": {
+    "cost": {
+     "unit": "money",
+     "value": 1
+    },
+    "profit": {
+     "unit": "money_per_year",
+     "value": 52000
+    }
+   },
+   "inputs_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+   "invocations": [
+    "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+   ]
+  },
+  "derived_from": [
+   "bb:76337ad2a40c3a385fd670726b38b3e84db0389982678f2616ca1b4023c1f382",
+   "bb:c2b073fa022a4e9aa52e06128d8e25c0e13ea6cd5bdea59b4ee4e45a4f757486"
+  ],
+  "id": "bb:bea7cfb6a74eb3eaf0b5b63756cd8b8ead231edfb65cce2ab872c61d01532cc2",
+  "producer": {
+   "id": "mcp-plan",
+   "version": "v4"
+  },
+  "schema": "battlebrain-record/v1",
+  "scope": {
+   "company": 1,
+   "instance": "research-fixture"
+  },
+  "status": "proposed",
+  "type": "candidate"
+ }
+}
