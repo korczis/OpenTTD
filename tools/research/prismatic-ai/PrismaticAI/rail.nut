@@ -689,20 +689,53 @@ function PrismaticAI::BridgeType(a, b) {
 	return list.Begin();
 }
 
+/* Days a line being laid may wait in all for the money of its next piece (RailCashWait). */
+RAIL_CASH_WAIT_DAYS <- 120;
+
+/* After a piece refused for ERR_NOT_ENOUGH_CASH: borrow up to the limit, then wait a day at a time
+ * for the income of the lines already running, and build the piece again (`kind` "rail" with the
+ * tiles a, b, c; "bridge" with the type a and heads b, c; "tunnel" from the portal a) until it is
+ * built or the line has waited RAIL_CASH_WAIT_DAYS in all (`budget.days`, shared by the line's
+ * pieces). True when the piece was built. A re-plan around the tile cannot help: money is short,
+ * not land. Before this, the owner's live game of 2026-11-22 (seed 15805) logged six
+ * "rail at tile N failed: ERR_NOT_ENOUGH_CASH" in its first three years: each line was re-planned
+ * twice, then given up with its track already laid and paid for. */
+function PrismaticAI::RailCashWait(budget, kind, a, b = 0, c = 0) {
+	if (AIError.GetLastError() != AIError.ERR_NOT_ENOUGH_CASH) return false;
+	local start = budget.days;
+	while (budget.days < RAIL_CASH_WAIT_DAYS) {
+		AICompany.SetLoanAmount(AICompany.GetMaxLoanAmount());
+		local ok = false;
+		if (kind == "rail") ok = AIRail.BuildRail(a, b, c);
+		else if (kind == "bridge") ok = AIBridge.BuildBridge(AIVehicle.VT_RAIL, a, b, c);
+		else ok = AITunnel.BuildTunnel(AIVehicle.VT_RAIL, a);
+		if (ok) {
+			if (budget.days > start) AILog.Info("PrismaticAI: waited " + (budget.days - start) + " day(s) for the money of the next rail piece");
+			return true;
+		}
+		if (AIError.GetLastError() != AIError.ERR_NOT_ENOUGH_CASH) return false;
+		AIController.Sleep(74);
+		budget.days++;
+	}
+	AILog.Warning("PrismaticAI: still short of money after waiting " + budget.days + " day(s) for a rail line");
+	return false;
+}
+
 /* Lays `path` piece by piece between the station end tiles `a_end` and `b_end`. Returns the tiles
  * actually laid, or null. A piece the game refuses (a house, a rival's track or a vehicle took the
  * tile since the search, ERR_AREA_NOT_CLEAR) is not the end of the line: from the last laid tile the
  * search runs again around the refused one, the last piece is relaid toward the new route, and the
  * rest follows (at most `replans` times). On seed 31337 a 212-tile coal line was dropped this way. */
-function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straight = false, from_straight = false) {
+function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straight = false, from_straight = false, cash = null) {
 	local n = path.len();
 	local corners = 0;
+	if (cash == null) cash = {days = 0};
 	for (local i = 0; i < n; i++) {
 		/* Two portals in a row that are not neighbours and a tunnel joins: the tunnel FindRailPath
 		 * planned (the game digs from the first to the far end it finds itself). */
 		if (i + 1 < n && AIMap.DistanceManhattan(path[i], path[i + 1]) > 1 &&
 				AITile.GetSlope(path[i]) != AITile.SLOPE_FLAT && AITunnel.GetOtherTunnelEnd(path[i]) == path[i + 1]) {
-			if (!AITunnel.BuildTunnel(AIVehicle.VT_RAIL, path[i])) {
+			if (!AITunnel.BuildTunnel(AIVehicle.VT_RAIL, path[i]) && !PrismaticAI.RailCashWait(cash, "tunnel", path[i])) {
 				AILog.Warning("PrismaticAI: rail tunnel from tile " + path[i] + " to " + path[i + 1] + " failed: " + AIError.GetLastErrorString());
 				return null;
 			}
@@ -713,7 +746,8 @@ function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straigh
 		/* Two heads in a row that are not neighbours: the bridge FindRailPath planned between them. */
 		if (i + 1 < n && AIMap.DistanceManhattan(path[i], path[i + 1]) > 1) {
 			local bridge = PrismaticAI.BridgeType(path[i], path[i + 1]);
-			if (bridge == -1 || !AIBridge.BuildBridge(AIVehicle.VT_RAIL, bridge, path[i], path[i + 1])) {
+			if (bridge == -1 || (!AIBridge.BuildBridge(AIVehicle.VT_RAIL, bridge, path[i], path[i + 1]) &&
+					!PrismaticAI.RailCashWait(cash, "bridge", bridge, path[i], path[i + 1]))) {
 				AILog.Warning("PrismaticAI: rail bridge from tile " + path[i] + " to " + path[i + 1] + " failed: " + AIError.GetLastErrorString());
 				return null;
 			}
@@ -724,7 +758,7 @@ function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straigh
 		local prev = (i == 0) ? a_end : path[i - 1];
 		local next = (i == n - 1) ? b_end : path[i + 1];
 		if (next - path[i] != path[i] - prev) corners++;
-		if (!AIRail.BuildRail(prev, path[i], next)) {
+		if (!AIRail.BuildRail(prev, path[i], next) && !PrismaticAI.RailCashWait(cash, "rail", prev, path[i], next)) {
 			AILog.Warning("PrismaticAI: rail at tile " + path[i] + " failed: " + AIError.GetLastErrorString());
 			if (replans <= 0 || i < 1) return null;
 			local f = path[i - 1], e = (i == 1) ? a_end : path[i - 2], g = path[i];
@@ -741,7 +775,7 @@ function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straigh
 			/* The piece on f still points at g; it is relaid toward the new route's first step. */
 			AIRail.RemoveRail(e, f, g);
 			AILog.Info("PrismaticAI: re-planned from tile " + f + " around tile " + g + ", " + rest.len() + " tiles to go");
-			local tail = PrismaticAI.BuildRailAlong(rest, e, b_end, replans - 1, to_straight, from_straight && i == 1);
+			local tail = PrismaticAI.BuildRailAlong(rest, e, b_end, replans - 1, to_straight, from_straight && i == 1, cash);
 			if (tail == null) return null;
 			local laid = path.slice(0, i - 1);
 			laid.extend(tail);
