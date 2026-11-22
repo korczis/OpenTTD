@@ -1208,7 +1208,7 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
  * An industry built on water (an oil rig) has no land for a rail station. Its large output put it
  * first, and every attempt ended at "no rail station site", yet still counted against own_lines and
  * own_fail_pause: on OpenTTD seed 930967890 its own plans 9 to 12 of 32 were all oil rigs. */
-function PrismaticAI::NextOwnFreightLine(tried) {
+function PrismaticAI::NextOwnFreightLine(tried, feed = 0) {
 	local best = null, best_score = 0;
 	/* Transit time at the speed of a typical early steam engine: about 100 km/h, some 3.7 tiles a day. */
 	local tiles_a_day = 3.7;
@@ -1226,7 +1226,10 @@ function PrismaticAI::NextOwnFreightLine(tried) {
 				if (tried.rawin(p + "-" + q + "-" + c)) continue;
 				local days = (dist / tiles_a_day).tointeger() + 1;
 				local income = AICargo.GetCargoIncome(c, dist, days);
-				local score = (prod * income / (2 * days + 10)).tointeger();
+				/* Multi-source (rail_feed): the unserved producers of the same cargo a station at p
+				 * can join (growth.nut ClusterProduction) count towards the line's supply. */
+				local supply = prod + ((feed > 0) ? PrismaticAI.ClusterProduction(p, c, feed) : 0);
+				local score = (supply * income / (2 * days + 10)).tointeger();
 				if (score > best_score) {
 					best_score = score;
 					best = {from = p, to = q, cargo = c, distance = dist, production = prod, score = score};
