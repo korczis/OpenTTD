@@ -46,7 +46,7 @@ class PrismaticAI extends AIController {
 	air_done = ""; /* the planner air pair ("a-b") already tried */
 	rail_done = ""; /* the planner rail pair ("a-b") already tried */
 	freight_tried = null; /* the planner freight lines ("from-to-cargo") already tried, a table */
-	own_built = 0; /* freight lines the bot planned itself and tried (own_lines caps them) */
+	own_built = 0; /* freight lines the bot planned itself and built (own_lines caps them) */
 	own_failed = 0; /* own freight lines in a row that were not built (OWN_FAIL_PAUSE) */
 	own_failed_year = 0; /* the game year own_failed counts for */
 	rescued_at = -1; /* the date StayAfloat last borrowed to keep the company alive */
@@ -573,6 +573,12 @@ function PrismaticAI::Start() {
 					if (b.rail_feed > 0) this.FeedNewLine(RAIL_LINES.len(), b.rail_feed);
 				} else {
 					this.own_failed++;
+					/* A line that was not built does not use up own_lines: only own_fail_pause limits
+					 * the failures, per game year. Counted as built, three lines refused for "no rail
+					 * station site" on the hills of the owner's live game (seed 15805, 1954) took
+					 * three of its four own lines, and the company ran one train from then on. A
+					 * load already counted only the built ones (restore.nut). */
+					this.own_built--;
 					AICompany.SetLoanAmount(loan_before);
 					AILog.Info("PrismaticAI: no freight route built; loan back to " + AICompany.GetLoanAmount());
 				}

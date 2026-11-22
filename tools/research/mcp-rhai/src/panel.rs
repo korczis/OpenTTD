@@ -3775,6 +3775,9 @@ mod tests {
         assert!(!is_approval_line("prismatic_mcp status"));
         assert!(!is_approval_line("mcpapprove 1"));
         assert!(!is_approval_line("prismatic_mcp deny 3"));
+        // The deadline's standing approve verdict is consent in advance; keep enacts nothing.
+        assert!(is_approval_line("prismatic_mcp approval_deadline 30 approve"));
+        assert!(!is_approval_line("prismatic_mcp approval_deadline 30 keep"));
     }
 
     #[test]
