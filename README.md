@@ -27,6 +27,7 @@
   <a href="#what-the-duels-have-taught-so-far"><b>Findings</b></a> &nbsp;&middot;&nbsp;
   <a href="#against-other-ais-the-lan-battle"><b>AI battle</b></a> &nbsp;&middot;&nbsp;
   <a href="#rail-lines-that-pay"><b>Rail</b></a> &nbsp;&middot;&nbsp;
+  <a href="#towns-that-say-yes"><b>Towns</b></a> &nbsp;&middot;&nbsp;
   <a href="#every-event-on-a-bus-and-in-a-store"><b>Events</b></a> &nbsp;&middot;&nbsp;
   <a href="#a-real-place-as-the-map"><b>Real place</b></a> &nbsp;&middot;&nbsp;
   <a href="#a-real-game-over-the-internet"><b>Real game</b></a> &nbsp;&middot;&nbsp;
@@ -66,6 +67,8 @@ On top of that sit:
 - **a company AI** ([PrismaticAI](tools/research/prismatic-ai/README.md)) that builds that plan with
   [rail lines a train can always run](#rail-lines-that-pay), and a Rhai steward that keeps each line
   paying;
+- **a town-authority model** [derived from the engine's source](#towns-that-say-yes), so the bot,
+  the scripts and the panel know what a town will refuse before they ask it;
 - **an event bus and a store** in every control panel: each event goes out on ZeroMQ and into a
   DuckDB file, and planning decisions [read that history back](#every-event-on-a-bus-and-in-a-store);
 - **recorded duels** that measure whether the plan helps, and
@@ -283,7 +286,7 @@ decides when a measurement may change a default.
 | **The script budget was the hidden ceiling** | Every bot before r13 ran with 10,000 opcodes instead of the 250,000 the panel meant to give it; with the real budget, seed 31337 at 36 months went from 597,075 to 995,647. | rows r12 and r13 of the [scoreboard](#the-planner-against-itself) |
 | **The planner overpredicts what a line earns** | Real over predicted profit per vehicle: freight rail median 0.5, bus 0.11. A plan calibrated on those readings, held-start pairs on three seeds: -2.7%, -3.8% and +6.8%. | calibration stays off until there are more readings ([record](.ai/repo/knowledge/curated/the-planner-overpredicts-what-a-line-earns.md)) |
 | **Deriving the bot's own lines from stored duels did not beat the constant** | `own_lines` derived from earlier duel outcomes against the constant 8, held-start pairs, 120 months: -14.7%, -8.7% and +17.6%, each inside its rival's spread. | the derived rule stays off, `OWN_LINES` = 8 stays ([record](.ai/repo/knowledge/curated/own-lines-derived-from-stored-duels-did-not-beat-the-constant.md), I0087) |
-| **Exposure is complete, exercise is not** | Every game command, console command and Script API function is routed as a tool (146/146, 87/87, 630/630), but live scenarios had called about 2% of the tools and resources, and none of `openttd.api.*` or `openttd.cmd.*`. | "exposed" is not "tested"; the coverage probe is the next piece of work ([record](.ai/repo/knowledge/curated/mcp-exercise-coverage-is-two-percent.md)) |
+| **Exposure is complete, exercise is not** | Every game command, console command and Script API function is routed as a tool (`mcp-api-coverage` holds it at 100% in every dimension, rule [`project.public-api-is-exposed`](.ai/repo/rules/project/public-api-is-exposed.v1.md)), but live scenarios had called about 2% of the tools and resources, and none of `openttd.api.*` or `openttd.cmd.*`. | "exposed" is not "tested"; the coverage probe is the next piece of work ([record](.ai/repo/knowledge/curated/mcp-exercise-coverage-is-two-percent.md)) |
 
 <details><summary>Every curated knowledge record (generated)</summary>
 
@@ -355,12 +358,12 @@ every quarter, and nothing under `src/` changes.
   when it is stale. Some matches are replayed on a second arena to prove a result does not depend
   on the machine (rule [`project.battle-records-are-reproducible`](.ai/repo/rules/project/battle-records-are-reproducible.v1.md),
   ADR 0035).
-- **The honest standing.** In the first air edition (record
-  [`battle-20261119T060827-361b802f`](research/results/battle-20261119T060827-361b802f.md), 64
-  matches, 4 of 4 replays identical), AAAHogEx won every match. The three PrismaticAI
-  configurations ranked second to fourth on points per match, ahead of AdmiralAI, LuDiAI and
-  CivilAI, and won none. The [live table](research/ai-battle/README.md#leaderboard) is the
-  current one.
+- **The standing is the record, below.** It is included from the
+  [leaderboard](research/ai-battle/README.md#leaderboard) of the newest record on every
+  `tools/surfaces/surfaces sync`, so this page never states a standing of its own. PrismaticAI
+  never ending last is a blocking rule
+  ([`project.prismatic-ai-is-never-last`](.ai/repo/rules/project/prismatic-ai-is-never-last.v1.md)),
+  checked by `battle.py check` on every commit.
 - **A post-mortem says why.** After every finished match a Rust tool
   ([`battle-postmortem`](research/battle-postmortem.md)) names why each contestant lost, shows year
   by year where PrismaticAI falls behind the winner, proposes the next round's settings and posts
@@ -371,10 +374,68 @@ every quarter, and nothing under `src/` changes.
   PrismaticAI is a live AI setting, so the same knobs reach the `~` console, MCP, Rhai, the panel,
   a battle settings string and the genes. Variants meet the same maps on common seeds, the best
   one is kept, and the rest are bred into the next edition.
+- **A tournament is owned, bounded and stoppable.** Every arena names its owner, refuses work
+  above the host's load ceiling or under its disk floor, and anyone can pause it with a `PAUSED`
+  file (rule [`project.long-runs-are-owned-bounded-and-stoppable`](.ai/repo/rules/project/long-runs-are-owned-bounded-and-stoppable.v1.md),
+  written after [an unowned battle held three machines](research/incident-2026-11-19-ai-battle-overload.md)).
 - **The live arena is the visible counterpart.** [`arena.rhai`](tools/research/mcp-panel/rhai/arena.rhai)
   keeps the same contestants playing in one game you watch in a window and the panel, and
   editing its lineup changes the running game within seconds. It makes no ranking claim
   ([`research/live-arena.md`](research/live-arena.md)).
+
+<!-- surfaces:begin table-chart src=research/ai-battle/README.md region=battle label=Contestant value=Points/match line=Avg_rank -->
+```mermaid
+---
+config:
+  xyChart:
+    width: 900
+    height: 360
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#d11f1a, #8a8a8a, #0b0b0b, #ece4d6"
+---
+xychart-beta
+    title "Points/match by contestant (line: Avg rank)"
+    x-axis ["AAAHogEx", "PrismaticAI GA g347.3", "PrismaticAI pre-g150", "PrismaticAI GA g347.brainSafe", "PrismaticAI", "PrismaticAI GA g347.brainExplore", "PrismaticAI GA g347.0", "AdmiralAI", "LuDiAI AfterFix", "CivilAI"]
+    %% series: Points/match | Avg rank
+    y-axis "Points/match" 0 --> 5.368
+    bar [4, 3, 3, 3, 2.857, 2.833, 2.833, 2.024, 0.927, 0.122]
+    line [1, 2, 2, 2, 2.14, 2.17, 2.17, 2.98, 4.07, 4.88]
+```
+<!-- surfaces:end table-chart -->
+
+<details><summary>The newest battle record (generated)</summary>
+
+<!-- surfaces:begin include src=research/ai-battle/README.md region=battle -->
+Latest record: [`battle-20261122T045411-a80cc94a`](research/results/battle-20261122T045411-a80cc94a.md) (0/4 replays identical).
+
+- Edition `a80cc94a275dbec1`: PrismaticAI and referee at `8c8d025388e85261a60027d9983d8588d720a2e9`, base set `opengfx-8.0.tar`
+- 20-year free-for-all from 1960, map 256x256 temperate, breakdowns 1
+- 41 scored match(es) on `imac` (20261119-master-gdf1e05e7d8), `mbp` (20261120-master-m17653b726e), `ubuntu` (20261119-master-gdf1e05e7d8)
+- Replays: 0 of 4 identical to their original on another arena
+
+| # | Contestant | Played | Wins | Points | Points/match | Avg rank | Avg final value | Squirrel errors | Matches with anomalies |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | AAAHogEx | 41 | 41 | 164 | 4.0 | 1.0 | 104.4 M | 0 | 0 |
+| 2 | PrismaticAI GA g347.3 | 6 | 0 | 18 | 3.0 | 2.0 | 16.5 M | 0 | 0 |
+| 3 | PrismaticAI pre-g150 | 8 | 0 | 24 | 3.0 | 2.0 | 15.1 M | 0 | 0 |
+| 4 | PrismaticAI GA g347.brainSafe | 8 | 0 | 24 | 3.0 | 2.0 | 14.5 M | 0 | 0 |
+| 5 | PrismaticAI | 7 | 0 | 20 | 2.857 | 2.14 | 15.5 M | 0 | 0 |
+| 6 | PrismaticAI GA g347.brainExplore | 6 | 0 | 17 | 2.833 | 2.17 | 10.5 M | 0 | 0 |
+| 7 | PrismaticAI GA g347.0 | 6 | 0 | 17 | 2.833 | 2.17 | 10.5 M | 0 | 0 |
+| 8 | AdmiralAI | 41 | 0 | 83 | 2.024 | 2.98 | 7.0 M | 47 | 3 |
+| 9 | LuDiAI AfterFix | 41 | 0 | 38 | 0.927 | 4.07 | 2.0 M | 0 | 1 |
+| 10 | CivilAI | 41 | 0 | 5 | 0.122 | 4.88 | 572.0 k | 0 | 8 |
+
+| Seed | Original | Replay | Arenas | Identical |
+|---|---|---|---|---|
+| 155420217 | m-0012 | m-0040 | imac / mbp | NO |
+| 422264390 | m-0010 | m-0048 | imac / mbp | NO |
+| 422264390 | m-0011 | m-0056 | imac / mbp | NO |
+| 167540501 | m-0030 | m-0064 | ubuntu / mbp | NO |
+<!-- surfaces:end include -->
+
+</details>
 
 ## Rail lines that pay
 
@@ -403,6 +464,23 @@ What runs now ([`research/rail-steward.md`](research/rail-steward.md)):
 
 Every number the steward uses comes from the game or the line's own record; the scripts name no
 line, station or engine.
+
+## Towns that say yes
+
+A town's local authority decides whether a company may build a station, remove a road or level a
+site, and its mood depends on things done far from the town hall: clearing trees, leaving a station
+idle, removing a town bridge. PrismaticAI once levelled an airport site, the trees it cleared made
+the town refuse the airport it had just paid for, and the game ended without an aircraft
+([record](.ai/repo/knowledge/curated/levelling-an-airport-site-clears-trees-and-costs-town-rating.md)).
+
+The rules are spread over a dozen engine files, so they are not copied, they are derived
+([`research/mechanisms/town-authority.md`](research/mechanisms/town-authority.md)):
+[`derive.py`](tools/research/town-model/README.md) reads `src/` and writes one model (rating
+constants and bands, every rating change with its trigger, every refusal with its threshold, the
+town actions, the settings they read), each rule with the file and line it came from. The same model
+reaches the bot as a Squirrel table, scripts as a Rhai map with advice (`town_lib.rhai`), the
+panel's Towns page next to the live ratings, and the tables of its own page; `derive.py --check`
+fails, in the commit hook and CI, while any of them disagrees with the engine.
 
 ## Every event on a bus and in a store
 
@@ -487,6 +565,10 @@ snapshot offline and deterministically into a heightmap and a GameScript.
 - **The committed Brno slice replays offline.** `rw-scenario replay` proves the compile is
   deterministic; the network is used only with `--live`, paced, cached and bounded. The panel
   previews a scenario on its own page.
+- **A second place needed no code.** Olomouc was resolved, acquired live, compiled and
+  load-checked headless on a Linux build host with no core code or rule changed; its towns,
+  industries and signs were all placed, each with its note
+  ([evidence](research/real-world-scenario.md#decision-closed-with-three-items-not-run-all-three-run-since)).
 
 ```bash
 tools/research/real-world/rw-scenario compile --snapshot tools/research/real-world/fixtures/brno/snapshot.json --out build-real-world/brno
@@ -517,7 +599,7 @@ Everything else is proven on loopback; a remote person joining over the internet
 
 ## Counted from the source
 
-Each number is counted from the tracked files whenever the documents are regenerated
+Each number and chart is counted from the tracked files whenever the documents are regenerated
 (`tools/surfaces/surfaces sync`, declared in [`surfaces.toml`](surfaces.toml)), so it cannot drift
 from the code. The right-hand column says what was counted.
 
@@ -528,13 +610,22 @@ from the code. The right-hand column says what was counted.
 | **22** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
 | **28** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **42** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **43** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **11** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **16** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **35** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **93** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **89** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
 | **861** | published documents on the site and the wiki | published documents under `/` |
+<!-- surfaces:end facts -->
+
+<!-- surfaces:begin facts group=tooling as=pie -->
+```mermaid
+pie showData title Counted from the sources: tooling
+    "research tools and checks (tools/research/, shell and Python)" : 43
+    "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 11
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 16
+```
 <!-- surfaces:end facts -->
 
 ## How it compares
@@ -840,9 +931,9 @@ tools/research/vanilla-client build 15.3
 tools/research/vanilla-client check 15.3
 tools/research/vanilla-client run 15.3
 
-# The documents: check them, regenerate their tables and numbers, build the site locally
-tools/surfaces/surfaces check
+# The documents: regenerate every derived table, number and generated file, check them, build the site
 tools/surfaces/surfaces sync
+tools/surfaces/surfaces check
 tools/surfaces/surfaces site                     # -> target/web/site
 ```
 
@@ -876,39 +967,48 @@ and threshold lives in [`style.toml`](tools/research/noirgfx/style.toml). Build 
 
 ## Table of contents
 
-- 0.0) [About this fork](#00-about-this-fork)
-    - 0.1) [Purpose and goals](#01-purpose-and-goals)
-    - 0.2) [Relationship to the Prismatic platform](#02-relationship-to-the-prismatic-platform)
-    - 0.3) [What this fork is not](#03-what-this-fork-is-not)
-    - 0.4) [What this fork adds on top of upstream OpenTTD](#04-what-this-fork-adds-on-top-of-upstream-openttd)
-        - 0.4.1) [Getting started — Prismatic MCP for contributors](#041-getting-started--prismatic-mcp-for-contributors)
-        - 0.4.2) [Published surfaces](#042-published-surfaces)
-        - 0.4.3) [Research documents](#043-research-documents)
-    - 0.5) [Validation / gating model](#05-validation--gating-model)
-    - 0.6) [Ground rules (short version)](#06-ground-rules-short-version)
-    - 0.7) [Relationship to upstream OpenTTD](#07-relationship-to-upstream-openttd)
-        - 0.7.1) [Architecture decisions](#071-architecture-decisions)
-    - 0.8) [Research questions](#08-research-questions)
-    - 0.9) [Agent and cognition concepts under evaluation](#09-agent-and-cognition-concepts-under-evaluation)
-    - 0.10) [Integration points](#010-integration-points)
-    - 0.11) [Experiment lifecycle, outputs, and evidence policy](#011-experiment-lifecycle-outputs-and-evidence-policy)
-    - 0.12) [Limitations](#012-limitations)
-    - 0.13) [Where the work stands](#013-where-the-work-stands)
-- 1.0) [About](#10-about)
-    - 1.1) [Downloading OpenTTD](#11-downloading-openttd)
-    - 1.2) [OpenTTD gameplay manual](#12-openttd-gameplay-manual)
-    - 1.3) [Supported platforms](#13-supported-platforms)
-    - 1.4) [Installing and running OpenTTD](#14-installing-and-running-openttd)
-    - 1.5) [Add-on content / mods](#15-add-on-content--mods)
-    - 1.6) [OpenTTD directories](#16-openttd-directories)
-    - 1.7) [Compiling OpenTTD](#17-compiling-openttd)
-- 2.0) [Contact and community](#20-contact-and-community)
-    - 2.1) [Multiplayer games](#21-multiplayer-games)
-    - 2.2) [Contributing to OpenTTD](#22-contributing-to-openttd)
-    - 2.3) [Reporting bugs](#23-reporting-bugs)
-    - 2.4) [Translating](#24-translating)
-- 3.0) [Licensing](#30-licensing)
-- 4.0) [Credits](#40-credits)
+Generated from the headings below (`tools/surfaces/surfaces sync`), so it cannot miss one.
+
+<!-- surfaces:begin toc depth=4 -->
+- [0.0) About this fork](#00-about-this-fork)
+    - [0.1) Purpose and goals](#01-purpose-and-goals)
+    - [0.2) Relationship to the Prismatic platform](#02-relationship-to-the-prismatic-platform)
+    - [0.3) What this fork is not](#03-what-this-fork-is-not)
+    - [0.4) What this fork adds on top of upstream OpenTTD](#04-what-this-fork-adds-on-top-of-upstream-openttd)
+        - [0.4.1) Getting started — Prismatic MCP for contributors](#041-getting-started--prismatic-mcp-for-contributors)
+        - [0.4.2) Published surfaces](#042-published-surfaces)
+        - [0.4.3) Research documents](#043-research-documents)
+    - [0.5) Validation / gating model](#05-validation--gating-model)
+    - [0.6) Ground rules (short version)](#06-ground-rules-short-version)
+    - [0.7) Relationship to upstream OpenTTD](#07-relationship-to-upstream-openttd)
+        - [0.7.1) Architecture decisions](#071-architecture-decisions)
+    - [0.8) Research questions](#08-research-questions)
+    - [0.9) Agent and cognition concepts under evaluation](#09-agent-and-cognition-concepts-under-evaluation)
+    - [0.10) Integration points](#010-integration-points)
+    - [0.11) Experiment lifecycle, outputs, and evidence policy](#011-experiment-lifecycle-outputs-and-evidence-policy)
+    - [0.12) Limitations](#012-limitations)
+    - [0.13) Where the work stands](#013-where-the-work-stands)
+- [1.0) About](#10-about)
+- [1.1) Downloading OpenTTD](#11-downloading-openttd)
+- [1.2) OpenTTD gameplay manual](#12-openttd-gameplay-manual)
+- [1.3) Supported platforms](#13-supported-platforms)
+    - [1.3.1) Legacy support](#131-legacy-support)
+- [1.4) Installing and running OpenTTD](#14-installing-and-running-openttd)
+    - [1.4.1) Free graphics and sound files](#141-free-graphics-and-sound-files)
+    - [1.4.2) Original Transport Tycoon Deluxe graphics and sound files](#142-original-transport-tycoon-deluxe-graphics-and-sound-files)
+    - [1.4.3) Original Transport Tycoon Deluxe music](#143-original-transport-tycoon-deluxe-music)
+- [1.5) Add-on content / mods](#15-add-on-content--mods)
+    - [1.5.1) Social Integration](#151-social-integration)
+    - [1.6) OpenTTD directories](#16-openttd-directories)
+    - [1.7) Compiling OpenTTD](#17-compiling-openttd)
+- [2.0) Contact and Community](#20-contact-and-community)
+    - [2.1) Multiplayer games](#21-multiplayer-games)
+    - [2.2) Contributing to OpenTTD](#22-contributing-to-openttd)
+    - [2.3) Reporting bugs](#23-reporting-bugs)
+    - [2.4) Translating](#24-translating)
+- [3.0) Licensing](#30-licensing)
+- [4.0) Credits](#40-credits)
+<!-- surfaces:end toc -->
 
 ## 0.0) About this fork
 
@@ -1007,6 +1107,9 @@ the bridge: [a real place as the map](#a-real-place-as-the-map).
 | [`tools/research/e2e-coverage`](./tools/research/e2e-coverage) and the `tools/research/mcp-*-check` family | Every web page driven in a real browser, and one live check per surface of the panel, the hub and the game. |
 | [`tools/gate.sh`](./tools/gate.sh), [`tools/research/research`](./tools/research/research) | Layered local validation (0.5) and the research-mode CLI with its experiment manifest ([`research/tooling.md`](./research/tooling.md)). |
 | [`tools/surfaces/`](./tools/surfaces/README.md), [`surfaces.toml`](./surfaces.toml), [`tools/knowledge/`](./tools/knowledge/README.md) | The published surfaces (0.4.2), and the checks that keep the `.ai/` records' citations true. |
+| [`tools/research/town-model/`](./tools/research/town-model/README.md) | The town-authority model derived from `src/`, and its outputs for the bot, Rhai, the panel and [its page](./research/mechanisms/town-authority.md). |
+| [`tools/research/real-world/`](./tools/research/real-world/) | `rw-scenario`: a real place compiled from open data into a heightmap and a GameScript ([`research/real-world-scenario.md`](./research/real-world-scenario.md)). |
+| [`tools/research/ai-battle/`](./tools/research/ai-battle/) | The LAN AI battle: arenas, derived records, post-mortems and the genetic algorithm ([`research/ai-battle/README.md`](./research/ai-battle/README.md)). |
 | [`tools/research/noirgfx/`](./tools/research/noirgfx/README.md) | NoirGFX, the fork's base graphics set, and its deterministic build pipeline. |
 | [`AGENTS.md`](./AGENTS.md), [`CLAUDE.md`](./CLAUDE.md), [`.ai/`](./.ai/README.md) | Ground rules for any agent, Claude Code notes, and the supervised AI layer (ADRs, rules, plan, intents, knowledge) under Majordomus. |
 | `.claude/`, `.aiad/` *(not committed)* | Personal agent tooling, kept local through `.git/info/exclude`. |
@@ -1081,7 +1184,11 @@ Known limitations (also generated from the same source):
 Everything this fork publishes is derived from what git tracks: its Markdown, its history and its
 `.ai/` layer. `tools/surfaces/surfaces` renders every document to a GitHub Pages site and to the
 GitHub wiki, and keeps the generated tables in these documents current; a stale table or a link to
-nothing fails the commit, `tools/gate.sh change` and CI. Design: [`tools/surfaces/README.md`](./tools/surfaces/README.md), ADR 0012.
+nothing fails the commit, `tools/gate.sh change` and CI. `tools/surfaces/surfaces sync` also runs
+every other generator [`surfaces.toml`](./surfaces.toml) declares (the scoreboard, the MCP
+contributor docs, the town model, the battle records' check), so one command brings every derived
+document up to date and one check proves it. Each push to `master` publishes the site and the
+wiki. Design: [`tools/surfaces/README.md`](./tools/surfaces/README.md), ADR 0012.
 
 <!-- surfaces:begin surfaces -->
 | Surface | Where | What it carries |
@@ -1106,6 +1213,14 @@ What the fork delivers, from its `.ai/` feature records:
 | [Event bus and store](.ai/repo/features/event-bus-and-store.md) | draft | Any process on the machine follows a game live over ZeroMQ, and every decision can query what earlier games recorded. |
 | [Surfaces](.ai/repo/features/published-surfaces.md) | stable | The site, the wiki and the Markdown index tables, all generated from what git tracks and the .ai/ layer, and checked on every commit. |
 | [AI layer](.ai/repo/features/supervised-ai-layer.md) | stable | Decisions, rules, plan, intents and knowledge live in tracked records that every agent and provider reads the same way. |
+<!-- surfaces:end ai-features -->
+
+<!-- surfaces:begin ai-features as=pie -->
+```mermaid
+pie showData title Features by status
+    "stable" : 5
+    "draft" : 5
+```
 <!-- surfaces:end ai-features -->
 
 #### 0.4.3) Research documents
@@ -1190,6 +1305,14 @@ those files:
 | [project.web-ui-is-covered-end-to-end](.ai/repo/rules/project/web-ui-is-covered-end-to-end.v1.md) | blocking | Cover every web UI page with a Playwright end-to-end check that drives it in a real browser against a live game, declare it with an `e2e-covers:` line, and keep tools/research/e2e-coverage passing; a page, button or flow no such check drives is treated as not built. |
 <!-- surfaces:end ai-rules -->
 
+<!-- surfaces:begin ai-rules origin=project as=pie -->
+```mermaid
+pie showData title Rules (project) by class
+    "blocking" : 19
+    "advisory" : 2
+```
+<!-- surfaces:end ai-rules -->
+
 A failing gate is reported plainly as `FAIL` or `NOT RUN`, with the reason. An agent never retries
 with `--no-verify`, never narrows scope quietly to make a gate pass, and never commits now to "fix
 it in a follow-up"; an override exists only at the owner's own request, with the stated reason.
@@ -1205,6 +1328,15 @@ the fork adds is in the paths listed in 0.4 and in this section of the README.
 
 Every decision behind the rules above, upstream's architecture recorded as it is and the fork's own
 choices, with its status (generated from [`.ai/repo/adrs/`](./.ai/repo/adrs/README.md)):
+
+<!-- surfaces:begin ai-adrs as=pie -->
+```mermaid
+pie showData title Decisions by status
+    "proposed" : 31
+    "accepted" : 3
+    "superseded" : 1
+```
+<!-- surfaces:end ai-adrs -->
 
 <details><summary>All ADRs</summary>
 
@@ -1315,8 +1447,9 @@ Open questions, not conclusions:
 | A real game over the internet | a hosted dedicated server of one clean commit; the vanilla client for public servers | Prepared; a remote opponent is `NOT RUN` ([`research/real-game.md`](./research/real-game.md)) |
 | Build/test gates and experiment manifests | exit codes, test output, `manifest.json` and a generated `summary.md` | Implemented (0.5) |
 | Published surfaces | site, wiki and generated Markdown tables, checked on every commit | Implemented (0.4.2) |
-| Real-world scenarios | a place compiled from OpenStreetMap and Copernicus GLO-30 into a heightmap (`-g`) and a GameScript, every entity labelled with its evidence | Experimental: the Brno slice compiles, replays and loads headless ([`research/real-world-scenario.md`](./research/real-world-scenario.md)) |
+| Real-world scenarios | a place compiled from OpenStreetMap and Copernicus GLO-30 into a heightmap (`-g`) and a GameScript, every entity labelled with its evidence | Experimental: the Brno slice compiles, replays and loads headless; a second place, Olomouc, ran live on a Linux host with no code changed ([`research/real-world-scenario.md`](./research/real-world-scenario.md)) |
 | LAN AI battle | headless matches between PrismaticAI and BaNaNaS AIs on every SSH-reachable machine; a derived leaderboard, post-mortems and a genetic algorithm over the bot's settings | Implemented ([`research/ai-battle/README.md`](./research/ai-battle/README.md), ADR 0035, ADR 0036) |
+| Town-authority model | the engine's rating rules, refusals and town actions as one derived model for the bot, Rhai and the panel's Towns page | Implemented, checked against `src/` on every commit ([`research/mechanisms/town-authority.md`](./research/mechanisms/town-authority.md)) |
 | Human oversight | every commit, push, override and approval of a game change | Implemented |
 
 ### 0.11) Experiment lifecycle, outputs, and evidence policy
@@ -1358,17 +1491,38 @@ Milestones of the plan with the issues done and still open, derived from the iss
 [`.ai/repo/project/`](./.ai/repo/project/README.md) (generated):
 
 <!-- surfaces:begin ai-plan -->
-| Milestone | Issues done | Open issues |
-|---|---|---|
-| [The fork states what it is, and one set of ground rules binds every agent](.ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml) | 2/2 | — |
-| [A change is validated at the tier its size needs, and the report cannot round up](.ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml) | 4/4 | — |
-| [Internal state is observable through gated instrumentation, and every experiment records how it ran](.ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml) | 8/8 | — |
-| [Prismatic steers a company in a live game through the standalone bridge](.ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 5/5 | — |
-| [An agent reads and, with approval, changes the game over an embedded MCP server](.ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml) | 53/53 | — |
-| [The fork is published, supervised by Majordomus, and current with upstream](.ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml) | 7/7 | — |
-| [NoirGFX: the game in the owner's SIG NIHL noir, from OpenGFX and Kenney models](.ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml) | 1/1 | — |
-| [Planning decisions read recorded history from the store and publish what they chose as data](.ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml) | 7/7 | — |
-| [Rhai is a live IDE: edited, run, debugged and inspected in the panel, and it reaches Prismatic's models and blackboard](.ai/repo/project/milestones/rhai-is-a-live-ide.yaml) | 6/6 | — |
+| # | Milestone | Issues done | Open issues |
+|---|---|---|---|
+| M1 | [The fork states what it is, and one set of ground rules binds every agent](.ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml) | 2/2 | — |
+| M2 | [A change is validated at the tier its size needs, and the report cannot round up](.ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml) | 4/4 | — |
+| M3 | [Internal state is observable through gated instrumentation, and every experiment records how it ran](.ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml) | 8/8 | — |
+| M4 | [Prismatic steers a company in a live game through the standalone bridge](.ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 5/5 | — |
+| M5 | [An agent reads and, with approval, changes the game over an embedded MCP server](.ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml) | 53/53 | — |
+| M6 | [The fork is published, supervised by Majordomus, and current with upstream](.ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml) | 7/7 | — |
+| M7 | [NoirGFX: the game in the owner's SIG NIHL noir, from OpenGFX and Kenney models](.ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml) | 1/1 | — |
+| M8 | [Planning decisions read recorded history from the store and publish what they chose as data](.ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml) | 7/7 | — |
+| M9 | [Rhai is a live IDE: edited, run, debugged and inspected in the panel, and it reaches Prismatic's models and blackboard](.ai/repo/project/milestones/rhai-is-a-live-ide.yaml) | 6/6 | — |
+<!-- surfaces:end ai-plan -->
+
+<!-- surfaces:begin ai-plan as=bar -->
+```mermaid
+---
+config:
+  xyChart:
+    width: 900
+    height: 360
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#d11f1a, #8a8a8a, #0b0b0b, #ece4d6"
+---
+xychart-beta
+    title "Issues done (bar) and planned (line) per milestone, in plan order"
+    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"]
+    %% series: Issues | Planned
+    y-axis "Issues" 0 --> 58.3
+    bar [2, 4, 8, 5, 53, 7, 1, 7, 6]
+    line [2, 4, 8, 5, 53, 7, 1, 7, 6]
+```
 <!-- surfaces:end ai-plan -->
 
 ## 1.0) About

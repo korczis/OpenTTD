@@ -31,6 +31,12 @@ Advice does not keep either from coming back. A failing check does.
   - a page rendered from data at build time (the site's charts).
 
   Prose explains; it never carries a number the data gives.
+- **Charts are generated and drawn by one layer.** A chart in Markdown is a Mermaid `pie` or
+  `xychart-beta` written by a region (`facts as=pie`, `ai-* as=pie|bar`, `table-chart`) or by a
+  tool between its own markers, so GitHub renders it. The site draws the same data with Apache
+  ECharts (tooltip, zoom, bar/line, data view, export, maximize). Charts and graphs use ECharts,
+  bespoke layouts and force physics D3, 3D three.js, generative art p5; a second library for a view
+  one of these draws (Chart.js, Cytoscape, ...) is refused (`[check] libraries` in `surfaces.toml`).
 - **Inferred, not declared.** Code reads what the game, git or the registry already states. Pages
   come from the shell's registry, routes from `routes()`, settings from the AI's `info.nut`, line
   geometry from the bot's records. No second list is kept beside the first.
@@ -49,12 +55,13 @@ Advice does not keep either from coming back. A failing check does.
 
 | Gate | What fails | Wired |
 |---|---|---|
-| `tools/surfaces/surfaces check` | a stale region, a link or anchor to nothing, a tool flag the docs and the usage disagree on, front matter that does not parse, **a diagram drawn in characters** (`check_diagrams`) | pre-commit (`.ai/repo/policy.yaml` `surfaces-on-commit`), `tools/gate.sh change`, CI `surfaces.yml` |
+| `tools/surfaces/surfaces check` | a stale region, a link or anchor to nothing, a tool flag the docs and the usage disagree on, front matter that does not parse, **a diagram drawn in characters** (`check_diagrams`), **a hand-typed chart** (`check_charts`), **a second chart library** (`check_libraries`), **a declared doc generator whose check fails** (`[[generators.items]]`) | pre-commit (`.ai/repo/policy.yaml` `surfaces-on-commit`), `tools/gate.sh change`, CI `surfaces.yml` |
 | `tools/research/readme-scoreboard --check` | the README scoreboard behind `research/results` | pre-commit (`scoreboard-on-commit`), `tools/gate.sh change` |
 | `tools/research/e2e-coverage` | a web UI page no browser check drives | `tools/gate.sh change`, CI `surfaces.yml`; the pre-commit hook line is the owner's to add (below) |
-| `tools/surfaces/diagrams-check` | a Mermaid block that does not render to an SVG in Chrome | CI `surfaces.yml`, after the site build |
+| `tools/surfaces/diagrams-check` | a Mermaid block that does not render to an SVG in Chrome, or a generated chart the site does not draw as an ECharts canvas | CI `surfaces.yml`, after the site build |
 | `tools/knowledge/refs check` | a knowledge record citing a path that is gone | `tools/gate.sh change` |
 | `python3 -m unittest tools/research/test_surfaces_diagrams.py` | the diagram detector missing a drawing or flagging code | `tools/gate.sh change` |
+| `python3 -m unittest tools/research/test_surfaces_charts.py` | the chart check, the chart read-back for ECharts and the generated table of contents | `tools/gate.sh change` |
 
 `majordomus doctor` reconciles every `enforcement` entry of the policy: the tool resolves, is
 executable and its exit code reaches the hook.
