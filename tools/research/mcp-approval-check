@@ -21,19 +21,30 @@
 // <panel>/?owner=<s> first, which sets the page's cookie mcp_owner_<port>. Without it part 1 and
 // the full-queue part are NOT RUN.
 //
-// The chat channel ('!approve <id>' from a client, and the client console that sends it) needs
-// second client processes that join a company and send console lines after joining (on_client.scr
-// scheduling a script, since on_server_connect.scr runs on the server). It is not driven here; it
-// was verified live by hand on 2026-11-22 (ADR 0038, slice 2 PR).
+// 4. The in-game channel, with --bin <openttd> and --game <host:port> (else NOT RUN). A client
+//    process (null video driver, its own MCP server) joins the bot's company, opened for co-play
+//    as in research/coplay.md. A pending setting change for that company must appear in the
+//    client's control window: openttd.ui.control on the client's own MCP lists it, marked
+//    on_server, read from the server's '[approvals]' answer (the window's quiet refresh). Consent
+//    comes from the client's own console, as the owner's would: on_client.scr schedules
+//    approve.scr every game month, and the check writes 'prismatic_mcp approve <id>' into it,
+//    which the client sends to the server as '!approve <id>'. While the client's key is not a
+//    registered approver the server refuses it and the approval stays pending; once the check
+//    registers the key ('prismatic_mcp approvers add <client id>' on the server), it executes.
+//    The key is removed again, the client is stopped and the co-play opening closed.
 //
 // e2e-covers: panel /
 //
-// Usage: tools/research/mcp-approval-check <panel-url> [--owner <secret>]   (a disposable stack: it pauses the game
+// Usage: tools/research/mcp-approval-check <panel-url> [--owner <secret>] [--bin <openttd> --game <host:port>]   (a disposable stack: it pauses the game
 //        and fills the approval queue; tools/research/mcp-e2e --no-gui on free ports; the owner's
 //        live panel, port 8800, is refused)
 // Exit 0 when every check passes, 1 otherwise, 2 on bad usage. Drives the installed Chrome through
 // playwright-core (npm ci in tools/research/mcp-panel); CHROME overrides its path.
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import { spawn } from 'node:child_process';
+import net from 'node:net';
 import { createRequire } from 'node:module';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
@@ -41,7 +52,8 @@ const { chromium } = createRequire(path.join(here, 'mcp-panel', 'package.json'))
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const argv = process.argv.slice(2);
 const opt = (n) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] || '' : '');
-const base = (argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--owner') || '').replace(/\/$/, '');
+const VALUED = ['--owner', '--bin', '--game'];
+const base = (argv.find((a, i) => !a.startsWith('--') && !VALUED.includes(argv[i - 1])) || '').replace(/\/$/, '');
 if (!base) { console.error('usage: mcp-approval-check <panel-url> [--owner <secret>]'); process.exit(2); }
 const url = new URL(base);
 const port = url.port || (url.protocol === 'https:' ? '443' : '80');
@@ -133,6 +145,89 @@ try {
   check('denied again, the queue holds none of them', await waitFor(async () => !(await queue()).some((a) => mine.includes(a.id) && a.state === 'pending')));
 } finally {
   await browser.close();
+}
+
+// 4. The in-game channel: a client in the bot's company sees the server's approval and decides it.
+const bin = opt('--bin');
+const game = opt('--game');
+if (!bin || !game) {
+  console.log('NOT RUN the in-game channel: needs --bin <openttd> (a build with the MCP server) and --game <host:port>');
+} else {
+  const lines = async (command) => (await post('/api/console', { command })).body.output || [];
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-approval-check-client-'));
+  const pd = path.join(home, 'Documents', 'OpenTTD');
+  fs.mkdirSync(path.join(pd, 'scripts'), { recursive: true });
+  fs.symlinkSync(path.join(os.homedir(), 'Documents', 'OpenTTD', 'baseset'), path.join(pd, 'baseset'));
+  const tokenFile = path.join(home, 'token.json');
+  const approveScr = path.join(pd, 'scripts', 'approve.scr');
+  // exec and schedule name a file relative to the personal directory, not to its scripts/.
+  const reschedule = 'schedule on-next-calendar-month scripts/approve.scr\n';
+  // A free loopback port for the client's own MCP server, as mcp-e2e gives its clients.
+  const mcpPort = await new Promise((resolve) => { const srv = net.createServer().listen(0, '127.0.0.1', () => { const p = srv.address().port; srv.close(() => resolve(p)); }); });
+  fs.writeFileSync(path.join(pd, 'scripts', 'autoexec.scr'), `prismatic_mcp start ${mcpPort} ${tokenFile}\n`);
+  fs.writeFileSync(path.join(pd, 'scripts', 'on_client.scr'), reschedule);
+  fs.writeFileSync(approveScr, reschedule);
+  // The config file's directory is the client's personal directory, where exec finds scripts/.
+  const cfg = path.join(pd, 'client.cfg');
+  fs.writeFileSync(cfg, '[network]\nclient_name = approval-check\n[gui]\nautosave = off\n');
+  const bots = (await get('/api/bots')).running || [];
+  const company = bots.length ? bots[0].id : null;
+  let child = null;
+  let id = null;
+  try {
+    // The scripted consent runs at each new game month, so a paused game would never decide it.
+    check('the game runs (part 4 waits on game months)', !(await paused()));
+    check('an AI company to co-play', company !== null);
+    const opened = (await lines(`research_coplay allow ${company + 1}`)).join(' ');
+    check('the server opens it for co-play', new RegExp(`open=\\[([0-9]+,)*${company + 1}(,|\\])`).test(opened), opened);
+    child = spawn(bin, ['-v', 'null:ticks=2000000000', '-s', 'null', '-m', 'null', '-c', cfg, '-n', `${game}#${company + 1}`],
+      { env: { ...process.env, HOME: home, PRISMATIC_MCP_INPUT: '0' }, stdio: 'ignore' });
+    const joined = await waitFor(async () => (await lines('clients')).some((l) => /name: 'approval-check'\s+company: (\d+)/.test(l) && Number(RegExp.$1) === company + 1), 60000);
+    check('the client joins the co-play company', joined);
+    const clientId = Number(((await lines('clients')).find((l) => l.includes("'approval-check'")) || '').replace(/^Client #(\d+).*/, '$1'));
+    await waitFor(async () => fs.existsSync(tokenFile) && fs.statSync(tokenFile).size > 0, 30000);
+    const cred = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
+    const control = async () => {
+      const r = await fetch(cred.endpoint, { method: 'POST', headers: { Authorization: `Bearer ${cred.agent_token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'openttd.ui.control', arguments: {} } }) }).then((x) => x.json());
+      return JSON.parse(r.result.content[0].text);
+    };
+    // A setting change for the company, in its declared range and away from its current value.
+    const st = (bots[0].settings || []).find((x) => x.editable && Number.isInteger(x.min) && Number.isInteger(x.max) && x.max > x.min && !(x.flags || []).includes('boolean'));
+    const asked = await post('/api/bots/setting', { company, name: st.name, value: st.value !== st.min ? st.min : st.min + 1 });
+    id = asked.body.approval_id;
+    check('a setting change for the company waits for approval', asked.body.status === 'pending_approval', `#${id} ${st.name}`);
+    const listed = await waitFor(async () => (await control()).approvals.some((a) => a.id === id && a.on_server), 30000);
+    check('the client\'s control window lists the server\'s approval (openttd.ui.control, on_server)', listed);
+    const state = async () => ((await queue()).find((a) => a.id === id) || {}).state;
+    // Not an approver: the server answers the client's '!approve' with a refusal, and it stays pending.
+    // The bus pages its events (at most 500 after `since`): read from the newest one seen now.
+    const cursor = (await get('/api/events?since=0&kinds=console.line')).last_seq || 0;
+    const replies = async () => (((await get(`/api/events?since=${cursor}&kinds=console.line`)).events) || [])
+      .map((e) => (e.data || {}).line || '')
+      .filter((l) => l.includes('To approval-check:') && !l.includes('[approvals]'));
+    fs.writeFileSync(approveScr, `prismatic_mcp approve ${id}\n${reschedule}`);
+    // approve.scr runs at each new game month (about 67 s at normal speed): wait a few months.
+    const MONTHS = 150000;
+    const answered = await waitFor(async () => (await replies()).length > 0, MONTHS);
+    const answer = (await replies()).join(' | ');
+    check('from a key that is not a registered approver, the server refuses it', answered && (await state()) === 'pending', answer);
+    // A registered approver: the same line executes it.
+    const added = (await lines(`prismatic_mcp approvers add ${clientId}`)).join(' ');
+    check('the client\'s key is registered as an approver', /approver/.test(added), added);
+    check('from the registered approver, the client\'s approval executes on the server', await waitFor(async () => (await state()) === 'consumed', MONTHS));
+    fs.writeFileSync(approveScr, reschedule);
+    const key = ((await lines('prismatic_mcp approvers')).find((l) => l.startsWith('approver ')) || '').split(' ').pop();
+    if (key) await lines(`prismatic_mcp approvers remove ${key.slice(0, 16)}`);
+  } catch (e) {
+    check('the in-game channel ran to its end', false, String(e));
+  } finally {
+    if (child) child.kill('SIGTERM');
+    // Leave no approval of this part pending: a later run (part 1) reads the queue's first row.
+    if (id && (await queue()).some((a) => a.id === id && a.state === 'pending')) await lines(`prismatic_mcp deny ${id}`);
+    if (company !== null) await lines(`research_coplay deny ${company + 1}`);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 }
 const failed = results.filter((r) => !r).length;
 console.log(`${failed ? 'FAIL' : 'PASS'} mcp-approval-check: ${results.length - failed}/${results.length}`);
