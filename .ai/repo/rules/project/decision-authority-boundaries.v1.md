@@ -46,7 +46,10 @@ binary it just built (B8).
   `decision` record that `panel_mesh.rs` mirrors from `plan.directive` is a journal entry of what
   the executor did. It is not executable and carries no decision block, and B1 checks that.
 - **B2.** Who may name a freight slot (`fr_*`):
-  - the authority's live directive, and the contract's `FREIGHT_SETTINGS`;
+  - the authority's live directive, and the contract's `FREIGHT_SETTINGS` and
+    `freight_slot_prefix` (the one spelling of a slot name; a call to it names a slot);
+  - the executor `panel_decision.rs`, which names a slot only to refuse a directive without a
+    decision block that sets one (`fr_needs_decision`, I0117);
   - PrismaticAI's `info.nut`, `main.nut` and `rail.nut`, which declare and read the bot's own
     settings;
   - two **legacy paths, which are gaps until the cutover**: `panel_bot.rs` `settings_from_plan`
@@ -69,8 +72,9 @@ same change.
 What is not machine-checked, and why:
 
 - **B2 in a running game.** The executor still applies a directive that carries no decision
-  block, as before I0096. So the legacy path in `panel_bot.rs` can hand the bot freight lines
-  that no battlebrain decision chose. The test stops a new path; only the cutover (Phase 04)
+  block, as before I0096, unless it sets a freight slot (`fr_needs_decision`, I0117). The legacy
+  path in `panel_bot.rs` does not pass the executor: it can still hand the bot freight lines
+  at `start_ai` that no battlebrain decision chose. The test stops a new path; only the cutover (Phase 04)
   removes the old ones.
 - **B2 for decision types outside the slice.** Other components that consume kernel outputs
   (the Rhai rail steward's `knapsack-dp` in `tools/research/mcp-panel/rhai/rail_lib.rhai`,
