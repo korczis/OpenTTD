@@ -385,7 +385,12 @@
           "type": "string"
         },
         "schema": {
-          "const": "battlebrain-decision/v1"
+          "const": "battlebrain-decision/v2"
+        },
+        "settings_digest": {
+          "description": "the digest (sha256 of the JSON string) of the directive's exact settings; the executor recomputes it",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
         },
         "snapshot_digest": {
           "pattern": "^sha256:[0-9a-f]{64}$",
@@ -404,6 +409,7 @@
         "idempotency_key",
         "policy",
         "valid_until",
+        "settings_digest",
         "mode"
       ],
       "type": "object"

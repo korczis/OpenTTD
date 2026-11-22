@@ -438,7 +438,7 @@ fn get_or<'a>(v: &'a Value, k: &str, default: &'a Value) -> &'a Value {
 }
 
 /// Freight lines handed to the bot at most (fr_*, fr2_* .. fr16_*); bridge 2026-11-17 declares as many.
-pub const MAX_FREIGHT_LINES: usize = 16;
+pub const MAX_FREIGHT_LINES: usize = crate::battlebrain_contract::FREIGHT_SLOTS;
 
 /// Freight lines the planned bot may plan itself once the handed ones are built (bridge own_lines; it
 /// defaults to 0 there, so a bot started without a plan, a duel's baseline, stays unplanned). Held-start
@@ -585,7 +585,7 @@ pub fn settings_from_plan(out: &Value, event: &mut dyn FnMut(String)) -> Planned
     lines.sort_by(|a, b| b.0.total_cmp(&a.0));
     let mut freight = Vec::new();
     for (i, (_, producer, acceptor, cargo, e)) in lines.iter().enumerate() {
-        let prefix = if i == 0 { "fr_".to_string() } else { format!("fr{}_", i + 1) };
+        let prefix = crate::battlebrain_contract::freight_slot_prefix(i + 1);
         freight.push(json!({"slot": prefix, "from": producer, "to": acceptor, "cargo_id": cargo, "cargo": e.get("cargo"),
                             "from_name": e.get("from"), "to_name": e.get("to"), "distance": e.get("distance"),
                             "monthly_profit": e.get("profit"), "score": e.get("score")}));
