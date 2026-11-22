@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0020
 kind: adr
 title: Player-facing text is compiled from english.txt by strgen, and translations arrive from eints and are never edited by hand
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -16,7 +16,7 @@ related:
   - file:docs/eints.md
   - file:src/lang/CMakeLists.txt
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:docs/eints.md
     - file:src/lang/CMakeLists.txt
@@ -34,6 +34,8 @@ OpenTTD ships dozens of languages with plural forms, genders and cases, and its 
 typed parameters. Translators are a separate community working in a web tool.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **English is the master.** `src/lang/english.txt` is the only language file a code change
    edits; `strgen` turns it into the `StringID` table header and each language file into a

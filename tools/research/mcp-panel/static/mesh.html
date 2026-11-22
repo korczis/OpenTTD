@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Mesh · OpenTTD MCP</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 antialiased" data-page="mesh" data-description="The Majordomus mesh this repository's server cooperates with: this node, its discovery providers, every machine, runtime and session with its claims, and every discovered node with its trust and presence, read-only through GET /api/mesh.">
+  <script src="/static/shell.js"></script>
+
+  <main>
+    <div data-nav-extra class="hidden md:flex items-center gap-2 text-xs">
+      <span id="m-live" class="inline-block w-2 h-2 rounded-full bg-gray-500" aria-hidden="true"></span>
+      <span id="m-state" aria-live="polite">connecting</span>
+      <span class="font-mono text-gray-400" id="m-source"></span>
+    </div>
+
+    <p id="m-errors" class="mb-4 text-sm text-red-500" role="alert" hidden></p>
+
+    <!-- KPIs -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
+      <div class="p-4 bg-white border border-gray-200 rounded-lg shadow-sm sm:p-6 dark:border-gray-700 dark:bg-gray-800"><p class="text-xs text-gray-500 dark:text-gray-400">Mesh</p><p id="k-active" class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">–</p></div>
+      <div class="p-4 bg-white border border-gray-200 rounded-lg shadow-sm sm:p-6 dark:border-gray-700 dark:bg-gray-800"><p class="text-xs text-gray-500 dark:text-gray-400">This node</p><p id="k-node" class="mt-1 text-lg font-semibold font-mono truncate text-gray-900 dark:text-white">–</p><p id="k-since" class="text-xs text-gray-500 truncate"></p></div>
+      <div class="p-4 bg-white border border-gray-200 rounded-lg shadow-sm sm:p-6 dark:border-gray-700 dark:bg-gray-800"><p class="text-xs text-gray-500 dark:text-gray-400">Trust policy</p><p id="k-policy" class="mt-1 text-lg font-semibold font-mono truncate text-gray-900 dark:text-white">–</p></div>
+      <div class="col-span-2 sm:col-span-3 p-4 bg-white border border-gray-200 rounded-lg shadow-sm sm:p-6 dark:border-gray-700 dark:bg-gray-800"><p class="text-xs text-gray-500 dark:text-gray-400">Tallies</p><p id="k-tallies" class="mt-1 text-sm flex flex-wrap gap-y-1"></p></div>
+    </div>
+
+    <div class="grid grid-cols-1 gap-4">
+      <div id="peers" data-nav="Peers and sessions" class="p-4 bg-white border border-gray-200 rounded-lg shadow-sm sm:p-6 dark:border-gray-700 dark:bg-gray-800">
+        <div class="flex flex-col items-start gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-x-3 sm:gap-y-0 sm:*:nth-2:col-start-2 sm:*:nth-2:row-start-1 mb-3"><div class="min-w-0 sm:has-[p]:contents sm:*:last:col-span-2"><h2 class="text-xl font-bold leading-none text-gray-900 dark:text-white">Peers and sessions</h2><p class="mt-2 text-sm font-normal text-gray-500 dark:text-gray-400">Every machine and runtime this checkout's server cooperates with, each session, what it does and the paths it claims (majordomus mesh peers)</p></div></div>
+        <div class="relative overflow-x-auto rounded-lg"><table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
+          <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400"><tr><th class="px-3 py-2">Machine</th><th class="px-3 py-2">Runtime</th><th class="px-3 py-2">Liveness</th><th class="px-3 py-2">Session</th><th class="px-3 py-2">Client</th><th class="px-3 py-2">Intent</th><th class="px-3 py-2">Claims</th></tr></thead>
+          <tbody id="peers-body"></tbody>
+        </table></div>
+      </div>
+
+      <div id="nodes" data-nav="Nodes" class="p-4 bg-white border border-gray-200 rounded-lg shadow-sm sm:p-6 dark:border-gray-700 dark:bg-gray-800">
+        <div class="flex flex-col items-start gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-x-3 sm:gap-y-0 sm:*:nth-2:col-start-2 sm:*:nth-2:row-start-1 mb-3"><div class="min-w-0 sm:has-[p]:contents sm:*:last:col-span-2"><h2 class="text-xl font-bold leading-none text-gray-900 dark:text-white">Nodes</h2><p class="mt-2 text-sm font-normal text-gray-500 dark:text-gray-400">Every node discovered on the network, with its trust, presence, version, how it was heard and where it answers (majordomus mesh nodes)</p></div></div>
+        <div class="relative overflow-x-auto rounded-lg"><table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
+          <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400"><tr><th class="px-3 py-2">Node</th><th class="px-3 py-2">Trust</th><th class="px-3 py-2">Presence</th><th class="px-3 py-2">Version</th><th class="px-3 py-2">Heard via</th><th class="px-3 py-2">Endpoints</th><th class="px-3 py-2 text-right">Last seen</th></tr></thead>
+          <tbody id="nodes-body"></tbody>
+        </table></div>
+      </div>
+
+      <div id="providers" data-nav="Providers" class="p-4 bg-white border border-gray-200 rounded-lg shadow-sm sm:p-6 dark:border-gray-700 dark:bg-gray-800">
+        <div class="flex flex-col items-start gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-x-3 sm:gap-y-0 sm:*:nth-2:col-start-2 sm:*:nth-2:row-start-1 mb-3"><div class="min-w-0 sm:has-[p]:contents sm:*:last:col-span-2"><h2 class="text-xl font-bold leading-none text-gray-900 dark:text-white">Providers</h2><p class="mt-2 text-sm font-normal text-gray-500 dark:text-gray-400">How this node discovers the others, and the datagrams each has sent and received (majordomus mesh status)</p></div></div>
+        <div class="relative overflow-x-auto rounded-lg"><table class="w-full text-sm text-left text-gray-500 dark:text-gray-400">
+          <thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400"><tr><th class="px-3 py-2">Provider</th><th class="px-3 py-2">State</th><th class="px-3 py-2 text-right">Sent</th><th class="px-3 py-2 text-right">Received</th><th class="px-3 py-2">Detail</th></tr></thead>
+          <tbody id="providers-body"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/static/mesh.js"></script>
+</body>
+</html>

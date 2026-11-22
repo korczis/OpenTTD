@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0026
 kind: adr
 title: Pathfinding is YAPF, an A* framework composed at compile time from policy templates and specialised per vehicle type
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -15,7 +15,7 @@ related:
   - file:src/pathfinder/yapf/yapf_base.hpp
   - file:src/pathfinder/yapf/yapf_rail.cpp
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/pathfinder/yapf/yapf_base.hpp
     - file:src/pathfinder/yapf/yapf_rail.cpp
@@ -32,6 +32,8 @@ Trains, road vehicles and ships need different node types, costs, destinations a
 following, but share the A* search itself and its performance tuning.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **One search, many policies.** `src/pathfinder/yapf/yapf_base.hpp:CYapfBaseT` is the A* core;
    a vehicle type composes it with origin, destination, cost, cache and follower policies through

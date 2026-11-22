@@ -51,6 +51,10 @@
 //!                                               is the record's, else $MAJORDOMUS_SESSION; every failure is
 //!                                               an error whose text begins "mesh: <kind>"
 //!   env(name)
+//!   http_timeout(seconds)              -> int   this script's timeout for every panel call, 1 to 3600
+//!                                               (default 15); answers the previous one. Only the
+//!                                               calling script's thread changes, so a slow route
+//!                                               (api_botPlanned with track) never slows the others
 //!   sleep(ms)   to_json(value)
 //!   tools()  commands()  help()          the derived functions below, by name
 //!
@@ -63,7 +67,7 @@ use std::time::Duration;
 #[allow(dead_code)]
 mod algoglyph;
 #[allow(dead_code)]
-mod board;
+pub mod board;
 mod graph;
 mod plan;
 pub mod mesh_records;
@@ -74,6 +78,24 @@ use serde_json::{json, Value};
 
 type R<T> = Result<T, Box<EvalAltResult>>;
 
+/// The default timeout of a panel call, in seconds.
+const HTTP_TIMEOUT_S: u64 = 15;
+
+thread_local! {
+    /// This script's timeout for panel calls; each script runs on a thread of its own.
+    static HTTP_TIMEOUT: std::cell::Cell<u64> = const { std::cell::Cell::new(HTTP_TIMEOUT_S) };
+}
+
+/// The calling script's timeout for panel calls.
+fn http_timeout() -> Duration {
+    Duration::from_secs(HTTP_TIMEOUT.with(std::cell::Cell::get))
+}
+
+/// Set the calling script's timeout (clamped to 1..=3600 s) and answer the previous one.
+fn set_http_timeout(seconds: i64) -> i64 {
+    HTTP_TIMEOUT.with(|t| t.replace(seconds.clamp(1, 3600) as u64)) as i64
+}
+
 #[derive(Clone)]
 struct Panel {
     base: String,
@@ -82,7 +104,7 @@ struct Panel {
 impl Panel {
     fn get(&self, path: &str) -> R<Dynamic> {
         let v: Value = ureq::get(&format!("{}{}", self.base, path))
-            .timeout(Duration::from_secs(15))
+            .timeout(http_timeout())
             .call()
             .map_err(|e| format!("GET {path}: {e}"))?
             .into_json()
@@ -92,7 +114,7 @@ impl Panel {
 
     fn post(&self, path: &str, body: Value) -> R<Dynamic> {
         let resp = ureq::post(&format!("{}{}", self.base, path))
-            .timeout(Duration::from_secs(15))
+            .timeout(http_timeout())
             .send_json(body);
         let v: Value = match resp {
             Ok(r) => r.into_json().map_err(|e| format!("POST {path}: {e}"))?,
@@ -349,6 +371,7 @@ fn engine(panel: Panel) -> Engine {
     mesh_records::register(&mut e);
     e.register_fn("loopback_get", loopback_get);
     e.register_fn("env", |name: &str| -> String { std::env::var(name).unwrap_or_default() });
+    e.register_fn("http_timeout", set_http_timeout);
     e.register_fn("sleep", |ms: i64| std::thread::sleep(Duration::from_millis(ms.max(0) as u64)));
     e.register_fn("to_json", |d: Dynamic| -> R<String> {
         serde_json::to_string_pretty(&from_dyn(d)?).map_err(|e| e.to_string().into())
@@ -576,6 +599,19 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn http_timeout_is_clamped_and_per_thread() {
+        use super::{http_timeout, set_http_timeout, HTTP_TIMEOUT_S};
+        assert_eq!(set_http_timeout(600), HTTP_TIMEOUT_S as i64);
+        assert_eq!(http_timeout().as_secs(), 600);
+        // Another script's thread still has the default.
+        assert_eq!(std::thread::spawn(|| http_timeout().as_secs()).join().unwrap(), HTTP_TIMEOUT_S);
+        assert_eq!(set_http_timeout(0), 600);
+        assert_eq!(http_timeout().as_secs(), 1);
+        set_http_timeout(1_000_000);
+        assert_eq!(http_timeout().as_secs(), 3600);
+    }
+
     #[test]
     fn loopback_get_only_reads_this_machine() {
         use super::is_loopback_url as ok;

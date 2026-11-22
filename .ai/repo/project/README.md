@@ -54,3 +54,27 @@ issues, the same derivation `majordomus plan` makes.
 | M8 | [Planning decisions read recorded history from the store and publish what they chose as data](milestones/planning-is-generated-from-recorded-history.yaml) | 7/7 | — |
 | M9 | [Rhai is a live IDE: edited, run, debugged and inspected in the panel, and it reaches Prismatic's models and blackboard](milestones/rhai-is-a-live-ide.yaml) | 6/6 | — |
 <!-- surfaces:end ai-plan -->
+
+The same derivation as a chart; each bar opens its milestone on the site:
+
+<!-- surfaces:begin ai-plan as=bar -->
+```mermaid
+---
+config:
+  xyChart:
+    width: 900
+    height: 360
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#d11f1a, #8a8a8a, #0b0b0b, #ece4d6"
+---
+xychart-beta
+    title "Issues done (bar) and planned (line) per milestone, in plan order"
+    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"]
+    %% series: Issues done | Issues planned
+    %% links: milestones/the-fork-is-a-governed-research-target.yaml | milestones/a-change-is-validated-in-cost-tiers.yaml | milestones/internals-are-observable-with-recorded-provenance.yaml | milestones/prismatic-steers-a-company-through-the-bridge.yaml | milestones/an-agent-reaches-the-game-over-mcp.yaml | milestones/the-fork-is-published-supervised-and-current.yaml | milestones/the-game-wears-the-owners-noir-style.yaml | milestones/planning-is-generated-from-recorded-history.yaml | milestones/rhai-is-a-live-ide.yaml
+    y-axis "Issues done" 0 --> 58.3
+    bar [2, 4, 8, 6, 53, 7, 1, 7, 6]
+    line [2, 4, 8, 7, 53, 7, 1, 7, 6]
+```
+<!-- surfaces:end ai-plan -->

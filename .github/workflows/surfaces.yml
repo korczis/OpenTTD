@@ -74,6 +74,9 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: target/web/site
+          # Every .ai/ page lives under a dot directory, which the action leaves out by default:
+          # without this the site links them and Pages answers 404.
+          include-hidden-files: true
 
       - name: Upload the wiki
         if: env.PUBLISH == 'true'

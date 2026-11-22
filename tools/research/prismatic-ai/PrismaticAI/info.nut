@@ -126,7 +126,10 @@ class PrismaticAI extends AIInfo {
 			name = "rail_len",
 			description = "Platform length in tiles of a new rail line (0: derive from demand, capped by the game's vehicle.max_train_length and station.station_spread).",
 			min_value = 0, max_value = 16,
-			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0, step_size = 1,
+			/* 4 by default: the length derived from supply at build time gave 2-3 tiles and short
+			 * trains. Over 9 replayed arena matches (ablate --match, 2026-11-22) 4 beat 0 in all 9,
+			 * +13.5% geometric, +1.4% at least; 5 and 7 did worse than 4. */
+			easy_value = 4, medium_value = 4, hard_value = 4, custom_value = 4, step_size = 1,
 			flags = CONFIG_INGAME,
 		});
 		AddSetting({

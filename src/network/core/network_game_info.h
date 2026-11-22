@@ -77,6 +77,7 @@
 #include "../../timer/timer_game_calendar.h"
 #include "../../timer/timer_game_tick.h"
 #include "../../landscape_type.h"
+#include "../../company_type.h"
 
 #include <unordered_map>
 
@@ -166,6 +167,18 @@ extern ResearchNetCompat _research_net_compat;
 std::string_view ResearchNetRevisionPolicyName(ResearchRevisionPolicy policy);
 std::optional<ResearchRevisionPolicy> ParseResearchNetRevisionPolicy(std::string_view name);
 void ResearchNetCompatInitFromEnv();
+
+/*
+ * RESEARCH-ONLY / UNSTABLE (fork): the AI companies a client may join or be moved into, each opened
+ * by the server operator ('research_coplay allow <company>'). Upstream refuses every client an AI
+ * company. With one opened, the owner plays it together with its AI: the AI keeps running on the
+ * server, and the client's commands go through the command system like any client's. This is a
+ * server-side join policy, never game state, so lockstep is untouched. Empty by default; an opened
+ * company skips the company allow list, because the operator opening it is the authorisation.
+ * See research/coplay.md.
+ */
+extern CompanyMask _research_coplay;
+bool ResearchCoplayAllows(CompanyID company);
 #endif /* OTTD_RESEARCH_INSTRUMENTATION */
 
 void FillStaticNetworkServerGameInfo();

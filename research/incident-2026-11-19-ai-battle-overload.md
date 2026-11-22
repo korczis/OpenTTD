@@ -79,7 +79,9 @@ Each new test fails against the code before the fix.
   is invisible to every coordination layer. The generic fix belongs in Majordomus: a job record with
   machine, pid, budget, heartbeat and stop handle; one machine guard that jobs consult; and owner stop
   orders as typed records. The prismatic-majordomus landing seat accepted it as one owner-ordered
-  issue on 2026-11-22. Its id is pending, because the issue allocator was unavailable.
+  issue on 2026-11-22: prismatic-majordomus I4674, the registration and stop half. Its detection
+  half is I4668 (prismatic-majordomus #3104): doctor names heavy process groups that nothing
+  accounts for.
 - **The paused arenas.** This Mac and lundra stay out of the tournament until someone makes their
   battle binary executable again (`chmod +x ~/ttd-battle/openttd-src/build/openttd`). The reason
   is written in `~/ttd-battle/PAUSED.txt` on each machine. With the guards in place, a host comes

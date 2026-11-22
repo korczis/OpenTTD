@@ -512,11 +512,14 @@ class Links:
         if problem or target is None:
             return href
         suffix = f"#{frag}" if frag else ""
+        query = href.partition("#")[0].partition("?")[2]
         tdoc = self.docs.get(target) or (
             target in self.repo.dirs and self.docs.get(posixpath.join(target, "README.md"))
         )
         if tdoc and not image:
-            return posixpath.relpath(tdoc.page, posixpath.dirname(doc.page) or ".") + suffix
+            # A query (a chart's ?col=&filter=) reaches the page, where the site filters a table.
+            return posixpath.relpath(tdoc.page, posixpath.dirname(doc.page) or ".") \
+                + (f"?{query}" if query else "") + suffix
         if image or target in self.repo.tracked and re.search(r"\.(png|jpe?g|gif|svg|webp)$", target, re.I):
             return self.repo.raw(target)
         if target in self.repo.dirs:
@@ -677,7 +680,7 @@ GENERATED_RE = re.compile(r"<!-- ?(?:surfaces:begin ([a-z0-9-]+)|([A-Za-z0-9_-]+
                           r"<!-- ?(?:surfaces:end \1|\2:end)\b.*?-->", re.S)
 
 
-def check_charts(doc: Doc, tokens) -> list[Finding]:
+def check_charts(doc: Doc, tokens, links: "Links | None" = None) -> list[Finding]:
     """A Mermaid chart (xychart, pie, sankey, ...) plots numbers, so it is generated: it must sit
     inside a generated region (a surfaces region or another tool's begin/end markers)."""
     spans = []
@@ -690,6 +693,12 @@ def check_charts(doc: Doc, tokens) -> list[Finding]:
             continue
         body = re.sub(r"\A\s*---\n.*?\n---\n", "", tok.content, flags=re.S)
         kind = (body.strip().split() or [""])[0]
+        marks = re.search(r"^\s*%% links: (.*)$", tok.content, re.M)
+        if links and kind in CHART_KINDS and marks:
+            for target in marks[1].split(" | "):
+                if (why := links.problem(doc, target.strip())):
+                    found.append(Finding("chart", doc.path, tok.map[0] + 1 + doc.offset,
+                                         f"a chart links a mark to nothing: {why}"))
         if kind in CHART_KINDS and not any(a <= tok.map[0] <= b for a, b in spans):
             found.append(Finding("chart", doc.path, tok.map[0] + 1 + doc.offset,
                                  f"a hand-typed {kind} chart: generate it in a region (facts, ai-*, "
@@ -872,9 +881,16 @@ def mermaid_links(links: list[str] | None) -> list[str]:
     return [f"    %% links: {' | '.join(links)}"] if links else []
 
 
+def mermaid_num(v: float) -> str:
+    """A number as Mermaid parses it: plain digits, never an exponent (1.044e+08 is a parse error)."""
+    if float(v).is_integer():
+        return str(int(v))
+    return f"{v:.6f}".rstrip("0").rstrip(".")
+
+
 def mermaid_pie(title: str, items: list[tuple[str, float]], links: list[str] | None = None) -> str:
     lines = ["```mermaid", f"pie showData title {mermaid_label(title)}"] + mermaid_links(links)
-    lines += [f'    "{mermaid_label(k)}" : {v:g}' for k, v in items if v]
+    lines += [f'    "{mermaid_label(k)}" : {mermaid_num(v)}' for k, v in items if v]
     return "\n".join(lines + ["```"])
 
 
@@ -887,9 +903,9 @@ def mermaid_bars(title: str, labels: list[str], series: list[tuple[str, list[flo
              "  themeVariables:", "    xyChart:", f'      plotColorPalette: "{CHART_PALETTE}"', "---",
              "xychart-beta", f'    title "{mermaid_label(title)}"', f"    x-axis [{xs}]",
              f"    %% series: {' | '.join(mermaid_label(n) for n, _ in series)}", *mermaid_links(links),
-             f'    y-axis "{mermaid_label(series[0][0])}" 0 --> {top * 1.1:.4g}']
+             f'    y-axis "{mermaid_label(series[0][0])}" 0 --> {mermaid_num(float(f"{top * 1.1:.3g}"))}']
     for i, (_, vals) in enumerate(series):
-        lines.append(f"    {'bar' if i == 0 else 'line'} [{', '.join(f'{v:g}' for v in vals)}]")
+        lines.append(f"    {'bar' if i == 0 else 'line'} [{', '.join(mermaid_num(v) for v in vals)}]")
     return "\n".join(lines + ["```"])
 
 
@@ -938,6 +954,48 @@ class Regions:
             raise KeyError(name)
         self.pos = pos
         return fn(args, doc).strip()
+
+    def table_link(self, doc: Doc, region: str, match: dict, column: str, value: str) -> str:
+        """Where the table a chart summarises lives: the document that carries that table region
+        (this one first), at the heading before it, filtered on the site to rows whose `column`
+        is `value` (?col=&filter=, read by app.js; GitHub ignores the query)."""
+        def has_table(d: Doc) -> re.Match | None:
+            for m in REGION_RE.finditer(d.text):
+                a = parse_args(m["args"])
+                if region == "ai-rules":
+                    a.setdefault("origin", "project")
+                if region == "docs-index":  # the table must show the column the chart counts
+                    a.setdefault("dir", "")
+                    if column.lower() not in a.get("fields", "").lower().split(","):
+                        continue
+                if m["name"] == region and "as" not in a and all(a.get(k) == v for k, v in match.items()):
+                    return m
+            return None
+        order = [doc] + [d for d in self.docs.values() if d.path != doc.path]
+        for d in order:
+            m = has_table(d)
+            if not m:
+                continue
+            line = d.text[: m.start()].count("\n") - d.offset
+            tokens, seen, slug = markdown().parse(d.body), {}, ""
+            for i, tok in enumerate(tokens):
+                if tok.type != "heading_open":
+                    continue
+                base = github_slug(inline_text(tokens[i + 1]))
+                n = seen.get(base, 0)
+                seen[base] = n + 1
+                if tok.map and tok.map[0] < line:
+                    slug = base if n == 0 else f"{base}-{n}"
+            q = urllib.parse.urlencode({"col": column, "filter": value})
+            return f"{rel_md(doc, d.path) if d.path != doc.path else posixpath.basename(d.path)}?{q}" \
+                + (f"#{slug}" if slug else "")
+        return ""
+
+    def pie_by(self, doc: Doc, title: str, region: str, match: dict, column: str, values) -> str:
+        items = counted(values)
+        # A value the records leave empty is counted as "unknown"; its table cell is empty.
+        links = [self.table_link(doc, region, match, column, "" if k == "unknown" else k) for k, _ in items]
+        return mermaid_pie(title, items, links if all(links) else None)
 
     def gen_toc(self, args: dict, doc: Doc) -> str:
         """The headings that follow the region, down to `depth` (default 3), nested by level,
@@ -1004,8 +1062,8 @@ class Regions:
         `value` name the columns (an underscore stands for a space), `line` a second value column
         drawn as a line. Numbers may carry k, M or G."""
         src = args.get("src", "").strip("/")
-        if not src or src == doc.path:
-            raise ValueError("table-chart needs src=<another document>")
+        if not src or (src == doc.path and not args.get("region")):
+            raise ValueError("table-chart needs src=<document> (its own only with region=<name>)")
         text = self.region_body(src, args["region"]) if args.get("region") else self.docs[src].text \
             if src in self.docs else None
         if text is None:
@@ -1027,19 +1085,34 @@ class Regions:
         raise ValueError(f"table-chart: no table in {src} with columns {', '.join(w for w in want if w)}")
 
     def gen_docs_index(self, args: dict, doc: Doc) -> str:
+        """Every published document under `dir` (to `depth`), with its summary; `fields=a,b` adds a
+        column per front-matter field, and `as=pie by=<field>` draws the same documents as a pie
+        of that field, each slice linked to the table filtered to its value."""
         prefix = args.get("dir", "").strip("/")
-        rows = []
+        picked = []
         for d in self.docs.values():
             if d.path == doc.path or (prefix and not d.path.startswith(prefix + "/")):
                 continue
             if args.get("depth") and d.path.count("/") - prefix.count("/") - (1 if prefix else 0) >= int(args["depth"]):
                 continue
-            rows.append([f"[{d.title}]({rel_md(doc, d.path)})", d.summary])
-        return table(["Document", "What it is"], rows)
+            picked.append(d)
+        value = lambda d, f: "" if (d.fm or {}).get(f) is None else str((d.fm or {})[f])  # noqa: E731
+        if args.get("as") == "pie":
+            field = args.get("by")
+            if not field:
+                raise ValueError("docs-index as=pie needs by=<front-matter field>")
+            where = f" under {prefix}/" if prefix else ""
+            return self.pie_by(doc, f"Documents{where} by {field}", "docs-index", {"dir": args.get("dir", "")},
+                               field.capitalize(), (value(d, field) for d in picked))
+        fields = [f for f in args.get("fields", "").split(",") if f]
+        rows = [[f"[{d.title}]({rel_md(doc, d.path)})"] + [value(d, f) for f in fields] + [d.summary]
+                for d in picked]
+        return table(["Document"] + [f.capitalize() for f in fields] + ["What it is"], rows)
 
     def gen_ai_features(self, args: dict, doc: Doc) -> str:
         if args.get("as") == "pie":
-            return mermaid_pie("Features by status", counted(f.get("status") for f in self.layer.features))
+            return self.pie_by(doc, "Features by status", "ai-features", {}, "Status",
+                               (f.get("status") for f in self.layer.features))
         rows = [
             [f"[{f.get('short_title') or f.get('title')}]({rel_md(doc, f['path'])})",
              f.get("status", ""), f.get("headline") or f.get("summary", "")]
@@ -1049,7 +1122,8 @@ class Regions:
 
     def gen_ai_adrs(self, args: dict, doc: Doc) -> str:
         if args.get("as") == "pie":
-            return mermaid_pie("Decisions by status", counted(a.get("status") for a in self.layer.adrs))
+            return self.pie_by(doc, "Decisions by status", "ai-adrs", {}, "Status",
+                               (a.get("status") for a in self.layer.adrs))
         rows = [
             [f"[{a.get('id', '')}]({rel_md(doc, a['path'])})", a.get("status", ""),
              a.get("title", "")]
@@ -1060,8 +1134,8 @@ class Regions:
     def gen_ai_rules(self, args: dict, doc: Doc) -> str:
         origin = args.get("origin", "project")
         if args.get("as") == "pie":
-            return mermaid_pie(f"Rules ({origin}) by class", counted(
-                r.get("class") for r in self.layer.rules if origin == "all" or r["origin"] == origin))
+            return self.pie_by(doc, f"Rules ({origin}) by class", "ai-rules", {"origin": origin}, "Class",
+                               (r.get("class") for r in self.layer.rules if origin == "all" or r["origin"] == origin))
         rows = [
             [f"[{r.get('id', '')}]({rel_md(doc, r['path'])})", r.get("class", ""),
              r.get("statement") or r.get("title", "")]
@@ -2100,7 +2174,7 @@ def run_check(repo: Repo, cfg: dict, docs: dict[str, Doc], layer: Layer) -> list
             continue
         findings += check_links(md, links, doc, parsed[path])
         findings += check_diagrams(doc, parsed[path])
-        findings += check_charts(doc, parsed[path])
+        findings += check_charts(doc, parsed[path], links)
     for name in ("site", "wiki"):
         out = Path(cfg[name]["out"])
         if out.is_absolute() or out.parts[:2] != tuple(GENERATED_ROOT.split("/")):

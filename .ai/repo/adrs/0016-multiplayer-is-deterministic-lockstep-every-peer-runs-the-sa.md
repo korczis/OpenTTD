@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0016
 kind: adr
 title: "Multiplayer is deterministic lockstep: every peer runs the same command stream and only commands cross the wire"
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -19,7 +19,7 @@ related:
   - file:src/network/network_command.cpp
   - file:docs/desync.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:docs/desync.md
     - file:src/network/network.cpp
@@ -40,6 +40,8 @@ joining client receives a savegame, and afterwards only commands — player, AI,
 admin port and rcon actions — plus the instruction to run up to a network frame.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Join by savegame, then commands only.** The server sends the map as a savegame; from then
    on `src/network/network_command.cpp:NetworkDistributeCommands` assigns each queued command a
