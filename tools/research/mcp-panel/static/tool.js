@@ -7,7 +7,7 @@
    item page and its card cannot disagree (rule project.panel-items-are-routable-pages). */
 
 import { catalogueItems, mountCatalogue, KIND_LABEL } from './catalogue.js';
-import { UI, TONE, $, esc } from './components.js';
+import { UI, TONE, $, esc, api } from './components.js';
 
 /** A card and a badge from the shell's Pro sets (static/shell.js UI and TONE, via components.js). */
 const card = `${UI.card} mb-4`;
@@ -110,6 +110,7 @@ function renderTool(it) {
     let body;
     try { body = readForm(); } catch (e) { $('answer').innerHTML = alert('A JSON field does not parse: ' + e.message, 'red'); return; }
     $('answer').innerHTML = '<p class="text-sm text-gray-500">Calling…</p>';
+    // raw fetch: the page shows any endpoint's exact HTTP status and raw body (text, arrays), which api() folds.
     const r = await fetch(it.path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const text = await r.text();
     let v; try { v = JSON.parse(text); } catch { v = text; }
@@ -148,6 +149,7 @@ function renderResource(it) {
     </div>`;
   let timer = null;
   const read = async () => {
+    // raw fetch: the exact HTTP status and raw body of any resource, as for a call above; both are rendered.
     const r = await fetch(it.path);
     const text = await r.text();
     let v; try { v = JSON.parse(text); } catch { v = text; }
@@ -162,7 +164,7 @@ function renderResource(it) {
 
 /** Draw the page of the current address; the module runs it once as it loads (`boot`). */
 async function start() {
-  const doc = await (await fetch('/openapi.json')).json();
+  const doc = await api('/openapi.json');
   const all = catalogueItems(doc);
   const path = decodeURIComponent(location.pathname);
   // The catalogue is one component (catalogue.js), shared with the panel's home (#catalogue).

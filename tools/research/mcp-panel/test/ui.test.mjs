@@ -173,7 +173,8 @@ test('without a GUI client the page says so', async () => {
     throw new Error('503');
   };
   await env.tick();
-  assert.match($('u-msg').textContent, /no GUI client attached yet \(503\)/);
+  // The one API client turns the failure into an answer (and a toast), so the page names why.
+  assert.match($('u-msg').textContent, /No GUI client is attached[^]*\(503\)/);
 });
 
 test('a game without a GUI client answers with an error, and the page names why the cards are empty', async () => {

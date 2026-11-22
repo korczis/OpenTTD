@@ -10,7 +10,8 @@
  * each setting's name, description, range, step, flags and labels are what the script's
  * info.nut declared, and its value is what AIController.GetSetting returns to the running
  * script. Changing a setting writes the same configuration the script reads on its next
- * GetSetting. Starting, stopping and reloading an AI go through Commands::CompanyControl,
+ * GetSetting; ai.set_settings changes several under one approval, all in one main-thread call or none.
+ * Starting, stopping and reloading an AI go through Commands::CompanyControl,
  * the path the start_ai, stop_ai and reload_ai console commands take.
  */
 
@@ -37,7 +38,7 @@ struct Posted {
 	std::string error;          ///< Why the action was refused.
 };
 
-/** @return Whether the action type is one of ai.set_setting, ai.start, ai.stop, ai.reload. */
+/** @return Whether the action type is one of ai.set_setting, ai.set_settings, ai.start, ai.stop, ai.reload. */
 bool IsAiAction(std::string_view type);
 /** openttd://ai: every company's AI with its settings, and the AIs this game can start. */
 json Resource();
@@ -52,7 +53,7 @@ json Validate(std::string_view type, const json &args, json &errors);
  * @param expect_callback Called once per command about to be posted, before it is posted.
  */
 Posted Execute(std::string_view type, const json &args, const std::function<void()> &expect_callback);
-/** @return The MCP tool entries: openttd.ai.list and the four gated actions. */
+/** @return The MCP tool entries: openttd.ai.list and the five gated actions. */
 json Tools();
 
 } // namespace PrismaticMCP::ai

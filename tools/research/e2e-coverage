@@ -6,6 +6,8 @@
 // APPS: the panel and the hub), derived, never listed here. A page is "<app> <href>".
 // Checks: every tools/research/*-check that drives Chrome through playwright-core and declares, in a
 // comment line, what it covers:   // e2e-covers: panel /scripts, hub /viz
+// `e2e-covers: *` is every page of every app, as the shell has them when the check runs: the
+// generic crawl (mcp-ui-crawl-check) drives every control of every page, derived, nothing listed.
 // A declaration in a file that does not drive a browser is refused, so a page cannot be "covered"
 // by a check that never opens it; a declared page the shell does not have is refused too.
 //
@@ -62,7 +64,7 @@ export function coverage(pages, found) {
   const covered = {};
   const refused = [];
   for (const c of found) {
-    for (const page of c.covers) {
+    for (const page of c.covers.flatMap((x) => (x === '*' ? [...names] : [x]))) {
       if (!c.browser) { refused.push(`${c.file} declares ${page} but drives no browser (playwright-core chromium.launch)`); continue; }
       // A declared sub-page (/resource/<path>, /scripts/<name>) counts for the page it belongs to.
       const [app, href = ''] = page.split(' ');
@@ -83,7 +85,7 @@ export function coverage(pages, found) {
 /** The command lines --run executes: [{file, argv, apps}] for every check declaring coverage. */
 export function runPlan(found, panel, hub) {
   return found.filter((c) => c.browser && c.covers.length).map((c) => {
-    const apps = [...new Set(c.covers.map((x) => x.split(' ')[0]))];
+    const apps = c.covers.includes('*') ? ['panel', 'hub'] : [...new Set(c.covers.map((x) => x.split(' ')[0]))];
     const argv = apps.includes('panel') ? [panel] : [hub];
     if (apps.includes('panel') && apps.includes('hub') && hub) argv.push('--hub', hub);
     return { file: c.file, argv, apps, runnable: !argv.includes('') && !argv.includes(undefined) };
