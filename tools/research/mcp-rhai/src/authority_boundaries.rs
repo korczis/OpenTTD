@@ -234,13 +234,15 @@ fn b2_freight_slots_are_written_only_by_the_authority_and_the_named_legacy_paths
     const ALLOWED: Allowed = &[
         (AUTHORITY_BIN, "the authority's live directive: planned_freight_only=1 plus one fr_* slot"),
         (CONTRACT, "FREIGHT_SETTINGS, the contract's names of the slot"),
+        ("tools/research/mcp-rhai/src/panel_decision.rs", "the executor names a slot only to refuse it in a directive without a decision block (fr_needs_decision)"),
         ("tools/research/mcp-rhai/src/panel_bot.rs", "LEGACY, a gap until the cutover: settings_from_plan hands the planner's portfolio to the bot at start_ai"),
         ("tools/research/mcp-rhai/src/intent.rs", "LEGACY, a gap until the cutover: a plain-language answer names a slot, sent by the approval-gated set_setting or a later start_ai"),
         ("tools/research/prismatic-ai/PrismaticAI/info.nut", "the bot declares its own settings"),
         ("tools/research/prismatic-ai/PrismaticAI/main.nut", "the bot reads its own settings"),
         ("tools/research/prismatic-ai/PrismaticAI/rail.nut", "the bot reads its own settings"),
     ];
-    closed("B2", &["fr_from", "\"fr_\"", "\"fr\"", "format!(\"fr{"], ALLOWED);
+    // freight_slot_prefix is the contract's one spelling of a slot name: calling it names a slot.
+    closed("B2", &["fr_from", "\"fr_\"", "\"fr\"", "format!(\"fr{", "freight_slot_prefix("], ALLOWED);
     // The contract's side of B2: anyone may propose a candidate, only the authority decides.
     let writers = |kind: &str| bb::TYPES.iter().find(|t| t.0 == kind).map(|t| t.4.to_vec()).unwrap();
     assert_eq!(writers("decision"), vec![bb::AUTHORITY]);
