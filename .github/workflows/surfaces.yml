@@ -6,7 +6,10 @@ name: Surfaces
 # documents to the wiki. Nothing it publishes is hand-written: tools/surfaces/README.md.
 
 on:
+  # A pull request's branch is checked by its `pull_request` run (and by the run the refresh job
+  # dispatches after it pushes); a second `push` run on the same commit only doubled the queue.
   push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
