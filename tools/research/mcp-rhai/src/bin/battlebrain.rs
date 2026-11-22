@@ -2,7 +2,7 @@
 //! decision (I0095, research/battlebrain/README.md). Phase 02 holds only its contracts; it decides
 //! nothing and reaches no game.
 //!
-//!   battlebrain schema <record|invocation|decision>   print a contract's JSON Schema (generated)
+//!   battlebrain schema <record|invocation|decision|match> print a contract's JSON Schema (generated)
 //!   battlebrain validate <file>...                    check records, invocations or decision blocks;
 //!                                                     exit 1 with structured refusals on any failure
 //!   battlebrain id <file>                             print a record's id (the digest of its body)
@@ -26,6 +26,15 @@
 //!   battlebrain catalogue --commit <sha> [--kernel <id> --engine <e>] < kernels.json
 //!                                                     the discovered catalogue's digest, from the
 //!                                                     runner's own `flow -- kernels` answer
+//!   battlebrain capabilities --catalogue <file> [--json | --snapshot <record>]
+//!                                                     which kernel of that catalogue satisfies each
+//!                                                     capability (I0098): the match table, the
+//!                                                     capability-match/v1 decisions, or their
+//!                                                     inference records; exit 1 if one is refused
+//!
+//! `shadow` and `live` take `--catalogue <file>` too: the run then also writes one capability-match
+//! inference per capability, and a live run is refused when a capability has no kernel or the
+//! planner computed it with another one (or with none).
 //!
 //! A file holds one JSON value or {"value": ..., "catalogue": {"kernels": [...], "commit": ...}}
 //! (an invocation is checked against the catalogue it carries; there is no built-in list).
@@ -115,6 +124,95 @@ pub fn snapshot_from_capture(dir: &std::path::Path, instance: &str, company: i64
 pub struct LiveGate {
     /// The widest game-tick window a snapshot may span (0: one tick, coherent).
     pub max_window_ticks: u64,
+}
+
+/// Where the planner's answer names the kernel it computed a capability with. A capability absent
+/// here is one the planner's answer does not attribute (rail-line-price: the track answers carry no
+/// kernel id).
+const PLAN_KERNELS: &[(&str, &str)] = &[("portfolio-within-budget", "/portfolio/kernel/id")];
+
+/// The catalogue a file holds: `{"kernels": [...], "commit": ...}`, as tools/research/schema/
+/// fixtures/battlebrain/catalogue.json records the runner's answer.
+fn catalogue_file(path: &str) -> Result<bb::Catalogue, Vec<bb::Refusal>> {
+    let v = read_json(path).map_err(|e| vec![bb::Refusal::new("unreadable", "", e)])?;
+    let v = v.get("value").cloned().unwrap_or(v);
+    bb::Catalogue::from_runner(&v["kernels"], v["commit"].as_str().unwrap_or_default()).map_err(|r| vec![r])
+}
+
+/// Add to a shadow or live run one capability-match inference per capability (derived from the
+/// run's snapshot, stale with its decision) and the summary `capabilities`. A live run is refused
+/// when a capability resolves to no kernel, or the planner computed it with another kernel or none.
+pub fn attach_capabilities(out: &mut Value, plan: &Value, cat: &bb::Catalogue) -> Result<(), Vec<bb::Refusal>> {
+    let snap = out["comparison"]["snapshot"].clone();
+    let decision = out["records"].as_array().and_then(|r| r.iter().find(|r| r["type"] == "decision")).cloned().unwrap_or(Value::Null);
+    let valid_until = out["directive_block"]["valid_until"].as_str().unwrap_or_default().to_string();
+    let (mut records, mut summary, mut why) = (Vec::new(), Vec::new(), Vec::new());
+    for c in bb::CAPABILITIES {
+        let m = bb::match_capability(c.id, cat, bb::ADAPTERS);
+        let r = bb::match_record(&m, &decision["scope"], &decision["at"], &[snap.clone()], &valid_until);
+        bb::validate_record(&r)?;
+        let used = PLAN_KERNELS.iter().find(|p| p.0 == c.id).map(|p| plan.pointer(p.1).cloned().unwrap_or(Value::Null));
+        let agrees = used.as_ref().map(|u| m.chosen.is_some() && u.as_str() == m.chosen.as_deref());
+        match (&m.refusal, agrees) {
+            (Some(r), _) => why.push(bb::Refusal::new("capability_unmatched", c.id, format!("{}: {}", r.code, r.message))),
+            (None, Some(false)) => why.push(bb::Refusal::new("capability_mismatch", c.id, format!("the planner computed {} with {}, the catalogue's match is {}",
+                c.id, used.as_ref().map_or("?".to_string(), |u| if u.is_null() { "no kernel (a built-in fallback)".into() } else { u.to_string() }), m.chosen.as_deref().unwrap_or("?")))),
+            _ => {}
+        }
+        summary.push(json!({"capability": c.id, "chosen": m.chosen, "refusal": m.refusal.as_ref().map(bb::Refusal::to_json), "record": r["id"],
+            "planner_kernel": used, "agrees": agrees}));
+        records.push(r);
+    }
+    if out["mode"] == "live" && !why.is_empty() {
+        return Err(why);
+    }
+    out["records"].as_array_mut().expect("a run has records").extend(records);
+    out["capabilities"] = json!({"catalogue": {"digest": cat.digest, "commit": cat.commit}, "matches": summary});
+    Ok(())
+}
+
+/// The match table of every capability against a catalogue (Markdown), and whether every
+/// capability resolved to a kernel. research/battlebrain/README.md carries it for the fixture.
+pub fn match_table(cat: &bb::Catalogue) -> (String, bool) {
+    let mut ok = true;
+    let fields = |fs: &[bb::Field]| fs.iter().map(|f| match f.unit {
+        Some(u) => format!("`{}`: {} ({u})", f.name, f.kind),
+        None => format!("`{}`: {}", f.name, f.kind),
+    }).collect::<Vec<_>>().join(", ");
+    let mut out = vec!["| capability | goal | inputs | outputs |".to_string(), "|---|---|---|---|".to_string()];
+    for c in bb::CAPABILITIES {
+        out.push(format!("| `{}` | {} | {} | {} |", c.id, c.goal, fields(c.inputs), fields(c.outputs)));
+    }
+    out.extend([
+        String::new(),
+        format!("Catalogue `{}` at AlgoGlyph `{}`: {} kernels (`{}`).", cat.digest, &cat.commit[..10], cat.kernels.len(), bb::CATALOGUE_SOURCE),
+        String::new(),
+        "| capability | kernel | engine | input shape | exact | verdict |".to_string(),
+        "|---|---|---|---|---|---|".to_string(),
+    ]);
+    for c in bb::CAPABILITIES {
+        let m = bb::match_capability(c.id, cat, bb::ADAPTERS);
+        let d = &m.decision;
+        for k in d["candidates"].as_array().into_iter().flatten() {
+            let verdict = if m.chosen.as_deref() == k["kernel"].as_str() {
+                format!("**chosen**: {}", d["why"].as_str().unwrap_or(""))
+            } else if k["compatible"] == true {
+                "compatible, not chosen".to_string()
+            } else {
+                format!("rejected: {}", k["rejected"].as_array().into_iter().flatten().filter_map(|r| r["code"].as_str()).collect::<Vec<_>>().join(", "))
+            };
+            out.push(format!("| `{}` | `{}` | {} | {} | {} | {} |", c.id, k["kernel"].as_str().unwrap_or("?"), k["engine"].as_str().unwrap_or("absent"),
+                k["shape"].as_str().unwrap_or("-"), if k["exact"] == true { "yes" } else { "no" }, verdict));
+        }
+        if let Some(r) = &m.refusal {
+            ok = false;
+            out.push(format!("| `{}` | - | - | - | - | **refused** `{}`: {} |", c.id, r.code, r.message));
+        }
+    }
+    out.push(String::new());
+    out.push(format!("Every other kernel of the catalogue was considered and has no adapter for that capability ({}).",
+        bb::CAPABILITIES.iter().map(|c| format!("`{}`: {}", c.id, bb::match_capability(c.id, cat, bb::ADAPTERS).decision["unadapted"].as_array().map_or(0, Vec::len))).collect::<Vec<_>>().join(", ")));
+    (out.join("\n") + "\n", ok)
 }
 
 pub fn shadow(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &policy::Params) -> Result<Value, Vec<bb::Refusal>> {
@@ -376,6 +474,14 @@ fn serve_once(port: u16, body: &str) -> Result<String, String> {
     if ok { Ok(line.trim().to_string()) } else { Err(format!("refused {}", line.trim())) }
 }
 
+/// `--catalogue <file>` on a run: attach the capability matches, or nothing without the flag.
+fn with_catalogue(out: &mut Value, plan: &Value, file: Option<String>) -> Result<(), Vec<bb::Refusal>> {
+    match file {
+        None => Ok(()),
+        Some(f) => attach_capabilities(out, plan, &catalogue_file(&f)?),
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
@@ -385,7 +491,7 @@ fn main() {
                 0
             }
             None => {
-                eprintln!("battlebrain schema <record|invocation|decision>");
+                eprintln!("battlebrain schema <record|invocation|decision|match>");
                 2
             }
         },
@@ -466,7 +572,7 @@ fn main() {
             let gate = LiveGate { max_window_ticks: flag("--max-window-ticks").and_then(|t| t.parse().ok()).unwrap_or(0) };
             match (flag("--snapshot"), flag("--plan"), flag("--companies"), flag("--company").and_then(|c| c.parse::<i64>().ok())) {
                 (Some(s), Some(pl), Some(c), Some(id)) => match (read_json(&s), read_json(&pl), read_json(&c)) {
-                    (Ok(s), Ok(pl), Ok(c)) => match run(&s, &pl, &c, id, &p, Some(&gate)) {
+                    (Ok(s), Ok(pl), Ok(c)) => match run(&s, &pl, &c, id, &p, Some(&gate)).and_then(|mut out| with_catalogue(&mut out, &pl, flag("--catalogue")).map(|_| out)) {
                         Ok(out) => {
                             println!("{}", serde_json::to_string_pretty(&out).expect("serialises"));
                             0
@@ -530,7 +636,7 @@ fn main() {
             };
             match files {
                 (Some(s), Some(pl), Some(c), Some(id)) => match (read_json(&s), read_json(&pl), read_json(&c)) {
-                    (Ok(s), Ok(pl), Ok(c)) => match shadow(&s, &pl, &c, id, &p) {
+                    (Ok(s), Ok(pl), Ok(c)) => match shadow(&s, &pl, &c, id, &p).and_then(|mut out| with_catalogue(&mut out, &pl, flag("--catalogue")).map(|_| out)) {
                         Ok(out) => {
                             println!("{}", serde_json::to_string_pretty(&out).expect("serialises"));
                             0
@@ -559,7 +665,7 @@ fn main() {
                     let kernel = flag("--kernel");
                     let found = kernel.as_deref().map(|k| cat.engine(k).map(str::to_string));
                     let engine = found.clone().flatten();
-                    println!("{}", json!({"digest": cat.digest, "commit": cat.commit, "kernels": cat.entries.len(),
+                    println!("{}", json!({"digest": cat.digest, "commit": cat.commit, "kernels": cat.kernels.len(),
                         "kernel": kernel, "engine": engine, "known": found.map(|f| f.is_some())}));
                     if flag("--engine").is_some() && engine != flag("--engine") { 1 } else { 0 }
                 }
@@ -569,8 +675,43 @@ fn main() {
                 }
             }
         }
+        Some("capabilities") => match flag(&args, "--catalogue").map(|f| catalogue_file(&f)) {
+            Some(Ok(cat)) => {
+                let matches: Vec<bb::Match> = bb::CAPABILITIES.iter().map(|c| bb::match_capability(c.id, &cat, bb::ADAPTERS)).collect();
+                let ok = matches.iter().all(|m| m.chosen.is_some());
+                if args.iter().any(|a| a == "--json") {
+                    println!("{}", serde_json::to_string_pretty(&matches.iter().map(|m| &m.decision).collect::<Vec<_>>()).expect("serialises"));
+                } else if let Some(s) = flag(&args, "--snapshot") {
+                    let snap = match read_json(&s) {
+                        Ok(v) => v.get("value").cloned().unwrap_or(v),
+                        Err(e) => {
+                            eprintln!("{e}");
+                            std::process::exit(1);
+                        }
+                    };
+                    if let Err(rs) = bb::validate_record(&snap).and_then(|k| if k == "snapshot" { Ok(()) } else { Err(vec![bb::Refusal::new("not_a_snapshot", "type", format!("--snapshot is a {k} record"))]) }) {
+                        std::process::exit(refused(&rs));
+                    }
+                    let until = add_days(snap["at"]["date"].as_str().unwrap_or_default(), snap["body"]["max_age_days"].as_i64().unwrap_or(1)).unwrap_or_default();
+                    let recs: Vec<Value> = matches.iter().map(|m| bb::match_record(m, &snap["scope"], &snap["at"], &[snap["id"].clone()], &until)).collect();
+                    let errs: Vec<bb::Refusal> = recs.iter().filter_map(|r| bb::validate_record(r).err()).flatten().collect();
+                    if !errs.is_empty() {
+                        std::process::exit(refused(&errs));
+                    }
+                    println!("{}", serde_json::to_string_pretty(&recs).expect("serialises"));
+                } else {
+                    print!("{}", match_table(&cat).0);
+                }
+                if ok { 0 } else { 1 }
+            }
+            Some(Err(rs)) => refused(&rs),
+            None => {
+                eprintln!("battlebrain capabilities --catalogue <file with kernels and commit> [--json | --snapshot <record>]");
+                2
+            }
+        },
         _ => {
-            eprintln!("battlebrain <schema|validate|id|transition|check|snapshot|shadow|live|serve|report|rollback|catalogue> ... (see the header of src/bin/battlebrain.rs)");
+            eprintln!("battlebrain <schema|validate|id|transition|check|snapshot|shadow|live|serve|report|rollback|catalogue|capabilities> ... (see the header of src/bin/battlebrain.rs)");
             2
         }
     };
@@ -763,6 +904,101 @@ mod tests {
             n += 1;
         }
         assert!(n > 0, "no battlebrain result under research/results");
+    }
+
+    fn real_catalogue() -> bb::Catalogue {
+        catalogue_file(Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain/catalogue.json").to_str().unwrap()).unwrap()
+    }
+
+    fn live_inputs() -> (Value, Value) {
+        let mut snap = fx("valid/snapshot.json");
+        snap["body"]["window"] = json!({"tick_from": 74000, "tick_to": 74000, "coherent": true});
+        snap.as_object_mut().unwrap().remove("id");
+        snap["id"] = json!(bb::record_id(&snap));
+        let mut fresh = fx("shadow/companies.json");
+        fresh["game_tick"] = json!(74100);
+        (snap, fresh)
+    }
+
+    #[test]
+    fn a_run_with_the_catalogue_records_one_capability_match_per_capability() {
+        let plan = fx("shadow/plan.json");
+        let mut out = shadow_on(&plan).unwrap();
+        let before = out.clone();
+        attach_capabilities(&mut out, &plan, &real_catalogue()).unwrap();
+        let recs = out["records"].as_array().unwrap();
+        assert_eq!(recs.len(), 3 + bb::CAPABILITIES.len());
+        assert_eq!(&recs[..3], before["records"].as_array().unwrap().as_slice(), "the decision's records are unchanged");
+        assert_eq!(out["directive_block"], before["directive_block"]);
+        for r in &recs[3..] {
+            assert_eq!(bb::validate_record(r), Ok("inference"), "{r}");
+            assert_eq!(r["body"]["method"]["id"], bb::MATCH_METHOD);
+            assert_eq!(r["derived_from"], json!([out["comparison"]["snapshot"]]));
+            assert_eq!(r["body"]["valid_until"], out["directive_block"]["valid_until"]);
+        }
+        let m = &out["capabilities"]["matches"];
+        assert_eq!(m[0], json!({"capability": "portfolio-within-budget", "chosen": "knapsack-dp", "refusal": null, "record": recs[3]["id"],
+            "planner_kernel": "knapsack-dp", "agrees": true}));
+        assert_eq!(m[1]["chosen"], "track-planning");
+        assert!(m[1]["planner_kernel"].is_null(), "the planner's track answers name no kernel");
+        assert_eq!(out["capabilities"]["catalogue"]["commit"], "1b8e009059c299b29d7a829d2d51d4e057304d4d");
+    }
+
+    #[test]
+    fn a_live_run_is_refused_when_a_capability_has_no_kernel_or_another_one() {
+        let (snap, fresh) = live_inputs();
+        let p = policy::Params { margin: 0.2, reserve: 25_000, require_priced: true };
+        let gate = LiveGate { max_window_ticks: 0 };
+        let plan = fx("shadow/plan.json");
+        let live = || run(&snap, &plan, &fresh, 1, &p, Some(&gate)).unwrap();
+        let mut ok = live();
+        attach_capabilities(&mut ok, &plan, &real_catalogue()).unwrap();
+        assert_eq!(ok["directive"]["settings"], "planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1");
+        // The runner no longer lists track-planning: nothing may price the line.
+        let (k, commit) = {
+            let v: Value = serde_json::from_str(&std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain/catalogue.json")).unwrap()).unwrap();
+            (v["kernels"].as_array().unwrap().clone(), v["commit"].as_str().unwrap().to_string())
+        };
+        let expired = bb::Catalogue::from_runner(&json!(k.iter().filter(|x| x["id"] != "track-planning").collect::<Vec<_>>()), &commit).unwrap();
+        let e = attach_capabilities(&mut live(), &plan, &expired).unwrap_err();
+        assert_eq!((e[0].code, e[0].path.as_str()), ("capability_unmatched", "rail-line-price"));
+        assert!(e[0].message.starts_with("kernel_expired"));
+        // The planner fell back to its built-in knapsack: not the catalogue's kernel.
+        let mut builtin = plan.clone();
+        builtin["portfolio"]["kernel"] = Value::Null;
+        let out = run(&snap, &builtin, &fresh, 1, &p, Some(&gate)).unwrap();
+        let e = attach_capabilities(&mut out.clone(), &builtin, &real_catalogue()).unwrap_err();
+        assert_eq!(e[0].code, "capability_mismatch");
+        // In shadow the same disagreement is recorded, not refused.
+        let mut sh = shadow_on(&builtin).unwrap();
+        attach_capabilities(&mut sh, &builtin, &real_catalogue()).unwrap();
+        assert_eq!(sh["capabilities"]["matches"][0]["agrees"], false);
+    }
+
+    #[test]
+    fn the_readme_match_table_is_the_real_catalogues() {
+        let readme = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../research/battlebrain/README.md")).unwrap();
+        let (begin, end) = ("<!-- battlebrain capabilities:begin -->\n", "<!-- battlebrain capabilities:end -->");
+        let i = readme.find(begin).expect("README has the capabilities markers") + begin.len();
+        let j = readme[i..].find(end).expect("an end marker") + i;
+        let (table, ok) = match_table(&real_catalogue());
+        assert!(ok, "every capability resolves on the real catalogue");
+        assert_eq!(&readme[i..j], table, "regenerate with `battlebrain capabilities --catalogue tools/research/schema/fixtures/battlebrain/catalogue.json`");
+    }
+
+    #[test]
+    fn nothing_here_executes_a_kernel() {
+        // The matcher chooses; it never runs what it chose, so no synthetic kernel can be executed.
+        // No process is spawned by the contract, the policy or this binary.
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let needles = [concat!("Command", "::new"), concat!("process", "::Command"), concat!("process", "::Child")];
+        for f in ["battlebrain_contract.rs", "battlebrain_policy.rs", "bin/battlebrain.rs"] {
+            let text = std::fs::read_to_string(src.join(f)).unwrap();
+            for n in needles {
+                let code: String = text.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+                assert!(!code.contains(n), "{f} contains {n}");
+            }
+        }
     }
 
     #[test]

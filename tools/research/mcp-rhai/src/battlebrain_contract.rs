@@ -393,6 +393,12 @@ pub fn validate_record(r: &Value) -> Result<&'static str, Vec<Refusal>> {
                     c.errs.push(Refusal::new("invalid_field", "body.confidence", "confidence must be within 0..1"));
                 }
             }
+            // A capability match carries its capability-match/v1 decision as its params.
+            if r.pointer("/body/method/id").and_then(Value::as_str) == Some(MATCH_METHOD) {
+                if let Err(es) = validate_match(r.pointer("/body/params").unwrap_or(&Value::Null)) {
+                    c.errs.extend(es.into_iter().map(|e| Refusal::new(e.code, &format!("body.params.{}", e.path), e.message)));
+                }
+            }
         }
         "candidate" => {
             let action = c.one_of("body.action.kind", ACTIONS);
@@ -449,12 +455,24 @@ pub fn validate_record(r: &Value) -> Result<&'static str, Vec<Refusal>> {
     }
 }
 
+/// One kernel as the AlgoGlyph runner lists it: exactly the fields its answer carries. `input` is
+/// the runner's own description of the input (a shape such as `{from: {x, y}, ...}`, or prose);
+/// graph kernels carry `goal`, `shape` and `params` instead. Nothing here is added by this fork.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Kernel {
+    pub id: String,
+    pub engine: String,
+    pub input: Option<String>,
+    pub goal: Option<String>,
+    pub params: Value,
+}
+
 /// The kernels the AlgoGlyph runner reports (`flow -- kernels`), with the digest of that answer
 /// and the checkout it came from. Built from the runner's answer only: no kernel is known here
 /// that the runner did not list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Catalogue {
-    pub entries: Vec<(String, String)>,
+    pub kernels: Vec<Kernel>,
     pub digest: String,
     pub commit: String,
 }
@@ -463,23 +481,32 @@ impl Catalogue {
     /// Parse the runner's answer: a list of objects with at least `id` and `engine`.
     pub fn from_runner(answer: &Value, commit: &str) -> Result<Catalogue, Refusal> {
         let list = answer.as_array().ok_or_else(|| Refusal::new("invalid_catalogue", "", "the runner's kernel list is not an array"))?;
-        let mut entries = Vec::new();
+        let mut kernels = Vec::new();
         for (i, k) in list.iter().enumerate() {
             match (k.get("id").and_then(Value::as_str), k.get("engine").and_then(Value::as_str)) {
-                (Some(id), Some(engine)) if !id.is_empty() => entries.push((id.to_string(), engine.to_string())),
+                (Some(id), Some(engine)) if !id.is_empty() => kernels.push(Kernel {
+                    id: id.to_string(),
+                    engine: engine.to_string(),
+                    input: k.get("input").and_then(Value::as_str).map(str::to_string),
+                    goal: k.get("goal").and_then(Value::as_str).map(str::to_string),
+                    params: k.get("params").cloned().unwrap_or(Value::Null),
+                }),
                 _ => return Err(Refusal::new("invalid_catalogue", &i.to_string(), "a kernel entry needs a non-empty id and an engine")),
             }
         }
-        if entries.is_empty() {
+        if kernels.is_empty() {
             return Err(Refusal::new("invalid_catalogue", "", "the runner lists no kernel"));
         }
         if !(commit.len() == 40 && commit.bytes().all(|b| b.is_ascii_hexdigit())) {
             return Err(Refusal::new("invalid_catalogue", "commit", "the checkout commit must be 40 hex digits"));
         }
-        Ok(Catalogue { entries, digest: digest(answer), commit: commit.to_ascii_lowercase() })
+        Ok(Catalogue { kernels, digest: digest(answer), commit: commit.to_ascii_lowercase() })
+    }
+    pub fn kernel(&self, id: &str) -> Option<&Kernel> {
+        self.kernels.iter().find(|k| k.id == id)
     }
     pub fn engine(&self, id: &str) -> Option<&str> {
-        self.entries.iter().find(|e| e.0 == id).map(|e| e.1.as_str())
+        self.kernel(id).map(|k| k.engine.as_str())
     }
 }
 
@@ -533,52 +560,410 @@ pub fn validate_invocation(inv: &Value, cat: &Catalogue) -> Result<(), Vec<Refus
     }
 }
 
-/// Domain checks of a kernel's output against its input. These are adapters at a real protocol
-/// boundary (the runner's outputs carry no schema): a kernel without a check here is accepted only
-/// as opaque evidence, never as a candidate's cost or selection (`domain_check_known`).
-pub fn domain_check(kernel: &str, input: &Value, output: &Value) -> Result<(), Refusal> {
+// ---------------------------------------------------------------------------------------------
+// Capabilities (Phase 05, I0098): what Battlebrain needs computed, as typed requirements, and the
+// kernels of the discovered catalogue that satisfy them. The requirement table is the one place a
+// capability is declared; the adapter registry is the one explicit list of kernel ids in this
+// crate's contract layer, at the protocol boundary where AlgoGlyph publishes no schema yet.
+// ---------------------------------------------------------------------------------------------
+
+/// The version of a capability-match decision (the `params` of a capability-match inference).
+pub const MATCH_SCHEMA: &str = "capability-match/v1";
+/// The method id of the inference record a capability match is written as.
+pub const MATCH_METHOD: &str = "capability-match";
+/// The kinds a requirement field may have. `amount` kinds carry a unit from `UNITS`; the others
+/// carry none.
+pub const FIELD_KINDS: &[&str] = &["amount", "amount[]", "number", "number[]", "index[]", "tile", "resource", "status", "list"];
+/// Why a capability resolved to no kernel.
+pub const MATCH_REFUSALS: &[&str] = &["unknown_capability", "no_adapter", "kernel_expired", "no_match", "ambiguous_capability"];
+/// Why one candidate kernel was rejected for a capability.
+pub const CANDIDATE_REJECTIONS: &[&str] = &["kernel_absent", "engine_mismatch", "unmapped_field", "unknown_field", "input_shape_drift"];
+/// The ranking among compatible kernels, in order. It is deterministic and uses only the adapter
+/// and the catalogue; a tie after every rule is refused, never broken by name.
+pub const RANKING: &[&str] = &[
+    "exact: a kernel whose adapter states it returns an optimal answer ranks above a heuristic one",
+    "verified: a kernel whose catalogue input shape declares every key the adapter maps ranks above one whose shape is opaque",
+    "a tie after both rules is refused as ambiguous_capability; a kernel id never breaks a tie",
+];
+
+/// One typed field of a requirement.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Field {
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub unit: Option<&'static str>,
+    pub doc: &'static str,
+}
+
+/// A capability Battlebrain needs computed: a goal with typed inputs and outputs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Capability {
+    pub id: &'static str,
+    pub goal: &'static str,
+    /// Where Battlebrain consumes the answer.
+    pub used_by: &'static str,
+    pub inputs: &'static [Field],
+    pub outputs: &'static [Field],
+}
+
+const fn field(name: &'static str, kind: &'static str, unit: Option<&'static str>, doc: &'static str) -> Field {
+    Field { name, kind, unit, doc }
+}
+
+/// The capabilities, declared once.
+pub const CAPABILITIES: &[Capability] = &[
+    Capability {
+        id: "portfolio-within-budget",
+        goal: "the set of items with the highest total value whose total cost fits a budget",
+        used_by: "the planner's portfolio (cargo.rs portfolio) every freight-line candidate rests on",
+        inputs: &[
+            field("costs", "amount[]", Some("money"), "each item's investment"),
+            field("values", "number[]", None, "each item's value (the planner's score), one scale for all items"),
+            field("budget", "amount", Some("money"), "what may be spent in total"),
+        ],
+        outputs: &[
+            field("chosen", "index[]", None, "the chosen items' indices, each at most once"),
+            field("total_value", "number", None, "the sum of the chosen items' values"),
+        ],
+    },
+    Capability {
+        id: "rail-line-price",
+        goal: "what a rail line between two station tiles costs to build on this map, or that it has no route",
+        used_by: "a freight-line candidate's track price (linecost.rs price; policy require_priced)",
+        inputs: &[
+            field("from", "tile", None, "the first station site's end tile and exit {x, y, dir}"),
+            field("to", "tile", None, "the second station site's end tile and entry {x, y, dir}"),
+            field("map", "resource", None, "openttd://map data"),
+            field("prices", "resource", None, "openttd://economy/prices data: only with it is the price in game money"),
+        ],
+        outputs: &[
+            field("status", "status", None, "found | unreachable | budget; only found prices a line"),
+            field("price", "amount", Some("money"), "what the route costs to build, in game money"),
+            field("pieces", "list", None, "the track pieces, bridges and tunnels to lay"),
+        ],
+    },
+];
+
+/// The capability with this id.
+pub fn capability(id: &str) -> Option<&'static Capability> {
+    CAPABILITIES.iter().find(|c| c.id == id)
+}
+
+/// An adapter: the declaration that one kernel of the catalogue satisfies one capability, how each
+/// requirement field maps onto the kernel's input and output, and the domain check its output must
+/// pass. It is the one explicit kernel list, at a protocol boundary: the runner's answers carry no
+/// schema. Owner: `ADAPTER_OWNER`; retirement: `ADAPTER_RETIREMENT`.
+#[derive(Clone, Copy)]
+pub struct Adapter {
+    pub capability: &'static str,
+    pub kernel: &'static str,
+    /// The engine the catalogue must list the kernel with.
+    pub engine: &'static str,
+    /// (requirement input, kernel input key, conversion).
+    pub inputs: &'static [(&'static str, &'static str, &'static str)],
+    /// (requirement output, path in the kernel's answer).
+    pub outputs: &'static [(&'static str, &'static str)],
+    /// Whether the kernel returns an optimal answer (the first ranking rule).
+    pub exact: bool,
+    /// Why `exact` holds, from the kernel's own source.
+    pub exact_because: &'static str,
+    pub check: fn(&Value, &Value) -> Result<(), Refusal>,
+}
+
+/// Who owns the adapter registry.
+pub const ADAPTER_OWNER: &str = "battlebrain (tools/research/mcp-rhai/src/battlebrain_contract.rs, research/battlebrain/README.md)";
+/// When the adapter registry retires.
+pub const ADAPTER_RETIREMENT: &str = "when AlgoGlyph publishes, per kernel, a versioned input and output schema with units (research/battlebrain/algoglyph-contract-proposal.md): the matcher then reads the mapping from the catalogue, and an adapter shrinks to its domain check or goes";
+
+/// The adapters, declared once. Nothing else in the contract layer names a kernel.
+pub const ADAPTERS: &[Adapter] = &[
+    Adapter {
+        capability: "portfolio-within-budget",
+        kernel: "knapsack-dp",
+        engine: "grid",
+        inputs: &[
+            ("costs", "weights", "ceil(money / 1000): the kernel counts integer thousands (cargo.rs portfolio)"),
+            ("values", "values", "as is"),
+            ("budget", "capacity", "floor(money / 1000)"),
+        ],
+        outputs: &[("chosen", "result.items"), ("total_value", "result.best")],
+        exact: true,
+        exact_because: "dynamic programming over integer capacities: the optimum of the 0/1 knapsack",
+        check: check_knapsack,
+    },
+    Adapter {
+        capability: "rail-line-price",
+        kernel: "track-planning",
+        engine: "custom",
+        inputs: &[
+            ("from", "from", "the station tile itself, leaving by its exit (linecost.rs endpoints)"),
+            ("to", "to", "the station tile itself, entered against its exit"),
+            ("map", "map", "as read; ways, terrain and bridges ride along (hub_algoglyph.rs track_input)"),
+            ("prices", "prices", "as read; without it result.money is null and result.cost is in tile units"),
+        ],
+        outputs: &[("status", "result.status"), ("price", "result.money"), ("pieces", "result.pieces")],
+        exact: true,
+        exact_because: "A* with an admissible heuristic, tested against Dijkstra (algoglyph src/plates/track-planning/plan.ts): the least-cost route of its cost model",
+        check: check_track,
+    },
+];
+
+fn check_knapsack(input: &Value, output: &Value) -> Result<(), Refusal> {
     let res = output.get("result").unwrap_or(output);
-    match kernel {
-        "knapsack-dp" => {
-            let w = input.get("weights").and_then(Value::as_array).ok_or_else(|| Refusal::new("invalid_input", "weights", "knapsack input has no weights"))?;
-            let vals = input.get("values").and_then(Value::as_array).ok_or_else(|| Refusal::new("invalid_input", "values", "knapsack input has no values"))?;
-            let cap = input.get("capacity").and_then(Value::as_u64).ok_or_else(|| Refusal::new("invalid_input", "capacity", "knapsack input has no capacity"))?;
-            let items = res.get("items").and_then(Value::as_array).ok_or_else(|| Refusal::new("invalid_output", "result.items", "the kernel answered no items"))?;
-            let best = res.get("best").and_then(Value::as_f64).ok_or_else(|| Refusal::new("invalid_output", "result.best", "the kernel answered no best value"))?;
-            let mut seen = std::collections::BTreeSet::new();
-            let (mut weight, mut value) = (0u64, 0f64);
-            for it in items {
-                let i = it.as_u64().ok_or_else(|| Refusal::new("invalid_output", "result.items", "an item is not an index"))? as usize;
-                if i >= w.len() || i >= vals.len() || !seen.insert(i) {
-                    return Err(Refusal::new("invalid_output", "result.items", format!("item {i} is out of range or repeated")));
+    let w = input.get("weights").and_then(Value::as_array).ok_or_else(|| Refusal::new("invalid_input", "weights", "knapsack input has no weights"))?;
+    let vals = input.get("values").and_then(Value::as_array).ok_or_else(|| Refusal::new("invalid_input", "values", "knapsack input has no values"))?;
+    let cap = input.get("capacity").and_then(Value::as_u64).ok_or_else(|| Refusal::new("invalid_input", "capacity", "knapsack input has no capacity"))?;
+    let items = res.get("items").and_then(Value::as_array).ok_or_else(|| Refusal::new("invalid_output", "result.items", "the kernel answered no items"))?;
+    let best = res.get("best").and_then(Value::as_f64).ok_or_else(|| Refusal::new("invalid_output", "result.best", "the kernel answered no best value"))?;
+    let mut seen = std::collections::BTreeSet::new();
+    let (mut weight, mut value) = (0u64, 0f64);
+    for it in items {
+        let i = it.as_u64().ok_or_else(|| Refusal::new("invalid_output", "result.items", "an item is not an index"))? as usize;
+        if i >= w.len() || i >= vals.len() || !seen.insert(i) {
+            return Err(Refusal::new("invalid_output", "result.items", format!("item {i} is out of range or repeated")));
+        }
+        weight += w[i].as_u64().unwrap_or(u64::MAX / 2);
+        value += vals[i].as_f64().unwrap_or(f64::NAN);
+    }
+    if weight > cap {
+        return Err(Refusal::new("invalid_output", "result.items", format!("chosen weight {weight} exceeds the capacity {cap}")));
+    }
+    if (value - best).abs() > 1e-6 * best.abs().max(1.0) {
+        return Err(Refusal::new("invalid_output", "result.best", format!("best {best} is not the chosen items' value {value}")));
+    }
+    Ok(())
+}
+
+fn check_track(input: &Value, output: &Value) -> Result<(), Refusal> {
+    let res = output.get("result").unwrap_or(output);
+    // The kernel's statuses are found | unreachable | budget (algoglyph
+    // src/plates/track-planning/plan.ts, Plan.status); only a found plan prices a line.
+    let status = res.get("status").and_then(Value::as_str).unwrap_or_default();
+    if status != "found" {
+        return Err(Refusal::new("invalid_output", "result.status", format!("the plan's status is {status:?}, not \"found\"")));
+    }
+    if !res.get("cost").and_then(Value::as_f64).is_some_and(|c| c.is_finite() && c >= 0.0) {
+        return Err(Refusal::new("invalid_output", "result.cost", "the plan has no finite non-negative cost"));
+    }
+    if !res.get("pieces").and_then(Value::as_array).is_some_and(|p| !p.is_empty()) {
+        return Err(Refusal::new("invalid_output", "result.pieces", "the plan lays no piece"));
+    }
+    // With the game's prices in the input the answer's money is the line's price in game money
+    // (algoglyph src/plates/track-planning/data.ts moneyOf); it must then be there.
+    if input.get("prices").is_some_and(Value::is_object) && !res.get("money").and_then(Value::as_f64).is_some_and(|m| m.is_finite() && m >= 0.0) {
+        return Err(Refusal::new("invalid_output", "result.money", "priced input, but the plan has no finite non-negative money"));
+    }
+    Ok(())
+}
+
+/// Domain checks of a kernel's output against its input, by the adapter registry (`ADAPTERS`): a
+/// kernel without an adapter is accepted only as opaque evidence, never as a candidate's cost or
+/// selection. A kernel with several adapters must pass every one of their checks.
+pub fn domain_check(kernel: &str, input: &Value, output: &Value) -> Result<(), Refusal> {
+    let mut any = false;
+    for a in ADAPTERS.iter().filter(|a| a.kernel == kernel) {
+        any = true;
+        (a.check)(input, output)?;
+    }
+    if any {
+        Ok(())
+    } else {
+        Err(Refusal::new("no_domain_check", "kernel.id", format!("{kernel:?} has no domain check; its output cannot price or select a candidate")))
+    }
+}
+
+/// Whether the runner's input description declares `key` as a field: `key` after a separator and
+/// before one of `:`, `?`, `,` or `}` (`{from: {x, y}, cash, loan?}` declares from, cash and loan). None when the description is opaque (prose without a `{...}` shape).
+fn shape_declares(shape: Option<&str>, key: &str) -> Option<bool> {
+    let s = shape.filter(|s| s.contains('{'))?;
+    let b = s.as_bytes();
+    let mut from = 0;
+    while let Some(i) = s[from..].find(key).map(|i| i + from) {
+        let before = i.checked_sub(1).map(|j| b[j]);
+        let after = b.get(i + key.len()).copied();
+        let sep = before.map_or(true, |c| !(c.is_ascii_alphanumeric() || c == b'_'));
+        if sep && matches!(after, Some(b':' | b'?' | b',' | b'}')) {
+            return Some(true);
+        }
+        from = i + key.len();
+    }
+    Some(false)
+}
+
+fn requirement_json(c: &Capability) -> Value {
+    let f = |fs: &[Field]| fs.iter().map(|f| {
+        let mut v = json!({"name": f.name, "kind": f.kind, "doc": f.doc});
+        if let Some(u) = f.unit {
+            v["unit"] = json!(u);
+        }
+        v
+    }).collect::<Vec<_>>();
+    json!({"id": c.id, "goal": c.goal, "used_by": c.used_by, "inputs": f(c.inputs), "outputs": f(c.outputs)})
+}
+
+/// The rejections of one adapter for its capability against the catalogue, and the evidence on it.
+fn judge(c: &Capability, a: &Adapter, cat: &Catalogue) -> Value {
+    let mut why = Vec::new();
+    let k = cat.kernel(a.kernel);
+    let mut shape = Value::Null;
+    match k {
+        None => why.push(Refusal::new("kernel_absent", "kernel.id", format!("{} is not in the catalogue {} at {}: the adapter has expired", a.kernel, cat.digest, cat.commit))),
+        Some(k) => {
+            if k.engine != a.engine {
+                why.push(Refusal::new("engine_mismatch", "kernel.engine", format!("the adapter expects engine {:?}, the catalogue lists {:?}", a.engine, k.engine)));
+            }
+            let mut opaque = false;
+            for (_, key, _) in a.inputs {
+                let top = key.split('.').next().unwrap_or(key);
+                match shape_declares(k.input.as_deref(), top) {
+                    None => opaque = true,
+                    Some(true) => {}
+                    Some(false) => why.push(Refusal::new("input_shape_drift", &format!("input.{top}"), format!("the catalogue's input shape of {} no longer declares {top:?}", a.kernel))),
                 }
-                weight += w[i].as_u64().unwrap_or(u64::MAX / 2);
-                value += vals[i].as_f64().unwrap_or(f64::NAN);
             }
-            if weight > cap {
-                return Err(Refusal::new("invalid_output", "result.items", format!("chosen weight {weight} exceeds the capacity {cap}")));
-            }
-            if (value - best).abs() > 1e-6 * best.abs().max(1.0) {
-                return Err(Refusal::new("invalid_output", "result.best", format!("best {best} is not the chosen items' value {value}")));
-            }
-            Ok(())
+            shape = json!(if opaque { "opaque" } else { "verified" });
         }
-        "track-planning" => {
-            // The kernel's statuses are found | unreachable | budget (algoglyph
-            // src/plates/track-planning/plan.ts, Plan.status); only a found plan prices a line.
-            let status = res.get("status").and_then(Value::as_str).unwrap_or_default();
-            if status != "found" {
-                return Err(Refusal::new("invalid_output", "result.status", format!("the plan's status is {status:?}, not \"found\"")));
+    }
+    for (side, fields, mapped) in [("inputs", c.inputs, a.inputs.iter().map(|m| m.0).collect::<Vec<_>>()), ("outputs", c.outputs, a.outputs.iter().map(|m| m.0).collect())] {
+        for f in fields {
+            let n = mapped.iter().filter(|m| **m == f.name).count();
+            if n != 1 {
+                why.push(Refusal::new("unmapped_field", &format!("{side}.{}", f.name), format!("the adapter maps {} {n} times, not once", f.name)));
             }
-            if !res.get("cost").and_then(Value::as_f64).is_some_and(|c| c.is_finite() && c >= 0.0) {
-                return Err(Refusal::new("invalid_output", "result.cost", "the plan has no finite non-negative cost"));
-            }
-            if !res.get("pieces").and_then(Value::as_array).is_some_and(|p| !p.is_empty()) {
-                return Err(Refusal::new("invalid_output", "result.pieces", "the plan lays no piece"));
-            }
-            Ok(())
         }
-        _ => Err(Refusal::new("no_domain_check", "kernel.id", format!("{kernel:?} has no domain check; its output cannot price or select a candidate"))),
+        for m in &mapped {
+            if !fields.iter().any(|f| f.name == *m) {
+                why.push(Refusal::new("unknown_field", &format!("{side}.{m}"), format!("{} declares no field {m:?}", c.id)));
+            }
+        }
+    }
+    json!({"kernel": a.kernel, "engine": k.map(|k| k.engine.clone()), "compatible": why.is_empty(), "exact": a.exact,
+        "exact_because": a.exact_because, "shape": shape, "units": "asserted by the adapter; the catalogue states none",
+        "mapping": {"inputs": a.inputs.iter().map(|(r, k, conv)| json!({"field": r, "kernel": k, "conversion": conv})).collect::<Vec<_>>(),
+                    "outputs": a.outputs.iter().map(|(r, k)| json!({"field": r, "kernel": k})).collect::<Vec<_>>()},
+        "rejected": why.iter().map(Refusal::to_json).collect::<Vec<_>>()})
+}
+
+/// The outcome of matching one capability against one catalogue.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Match {
+    /// The capability-match/v1 decision: requirement, catalogue, candidates, chosen, why.
+    pub decision: Value,
+    pub chosen: Option<String>,
+    pub refusal: Option<Refusal>,
+}
+
+/// Select the kernel of the discovered catalogue that satisfies capability `cap`, using only what
+/// the catalogue says (id, engine, input shape) and the adapters. Every catalogue kernel is
+/// considered: those with an adapter for `cap` are judged, the rest are listed as unadapted.
+/// Nothing is executed.
+pub fn match_capability(cap: &str, cat: &Catalogue, adapters: &[Adapter]) -> Match {
+    let catalogue = json!({"digest": cat.digest, "commit": cat.commit, "source": CATALOGUE_SOURCE, "kernels": cat.kernels.len()});
+    let base = |requirement: Value, candidates: Vec<Value>, unadapted: Vec<&str>| json!({
+        "schema": MATCH_SCHEMA, "requirement": requirement, "catalogue": catalogue,
+        "adapters": {"owner": ADAPTER_OWNER, "retire_when": ADAPTER_RETIREMENT}, "ranking": RANKING,
+        "candidates": candidates, "unadapted": unadapted, "chosen": null, "why": null, "refusal": null});
+    let finish = |mut d: Value, chosen: Result<(String, String), Refusal>| -> Match {
+        match chosen {
+            Ok((k, why)) => {
+                d["chosen"] = json!(k);
+                d["why"] = json!(why);
+                Match { decision: d, chosen: Some(k), refusal: None }
+            }
+            Err(r) => {
+                d["refusal"] = r.to_json();
+                Match { decision: d, chosen: None, refusal: Some(r) }
+            }
+        }
+    };
+    let Some(c) = capability(cap) else {
+        let d = base(json!({"id": cap}), vec![], cat.kernels.iter().map(|k| k.id.as_str()).collect());
+        return finish(d, Err(Refusal::new("unknown_capability", "requirement.id", format!("no capability {cap:?} is declared (CAPABILITIES)"))));
+    };
+    let mine: Vec<&Adapter> = adapters.iter().filter(|a| a.capability == cap).collect();
+    let candidates: Vec<Value> = mine.iter().map(|a| judge(c, a, cat)).collect();
+    let unadapted: Vec<&str> = cat.kernels.iter().map(|k| k.id.as_str()).filter(|id| !mine.iter().any(|a| a.kernel == *id)).collect();
+    let d = base(requirement_json(c), candidates.clone(), unadapted);
+    if mine.is_empty() {
+        return finish(d, Err(Refusal::new("no_adapter", "adapters", format!("no adapter declares {cap}; the catalogue's {} kernels stay opaque to it", cat.kernels.len()))));
+    }
+    let ok: Vec<&Value> = candidates.iter().filter(|v| v["compatible"] == true).collect();
+    if ok.is_empty() {
+        let absent = candidates.iter().all(|v| v["rejected"].as_array().into_iter().flatten().any(|r| r["code"] == "kernel_absent"));
+        return finish(d, Err(if absent {
+            Refusal::new("kernel_expired", "candidates", format!("every kernel adapted for {cap} is absent from the catalogue at {}", cat.commit))
+        } else {
+            Refusal::new("no_match", "candidates", format!("no kernel adapted for {cap} is compatible with the catalogue at {}", cat.commit))
+        }));
+    }
+    // The ranking: exact first, then a verified shape; what is left tied is refused.
+    let rank = |v: &Value| (v["exact"] == true, v["shape"] == "verified");
+    let top = ok.iter().map(|v| rank(v)).max().expect("ok is not empty");
+    let best: Vec<&&Value> = ok.iter().filter(|v| rank(v) == top).collect();
+    if best.len() > 1 {
+        let ids: Vec<&str> = best.iter().filter_map(|v| v["kernel"].as_str()).collect();
+        return finish(d, Err(Refusal::new("ambiguous_capability", "candidates", format!("{} kernels tie for {cap} after the ranking: {ids:?}", ids.len()))));
+    }
+    let k = best[0]["kernel"].as_str().unwrap_or_default().to_string();
+    let why = if ok.len() == 1 {
+        "the only compatible kernel".to_string()
+    } else {
+        format!("ranked first of {} compatible kernels (exact: {}, shape verified: {})", ok.len(), top.0, top.1)
+    };
+    finish(d, Ok((k, why)))
+}
+
+/// The inference record a capability match is written as (method capability-match, params the
+/// decision), derived from the records the run rests on (its snapshot).
+pub fn match_record(m: &Match, scope: &Value, at: &Value, derived_from: &[Value], valid_until: &str) -> Value {
+    let d = &m.decision;
+    let cap = d["requirement"]["id"].as_str().unwrap_or("?");
+    let claim = match &m.chosen {
+        Some(k) => format!("{k} satisfies {cap} in the AlgoGlyph catalogue {} at {}", d["catalogue"]["digest"].as_str().unwrap_or("?"), d["catalogue"]["commit"].as_str().unwrap_or("?")),
+        None => format!("no kernel satisfies {cap} in the AlgoGlyph catalogue at {}: {}", d["catalogue"]["commit"].as_str().unwrap_or("?"), m.refusal.as_ref().map_or("", |r| r.code)),
+    };
+    record("inference", "valid", scope, at, (AUTHORITY, env!("CARGO_PKG_VERSION")), derived_from, json!({
+        "claim": claim, "method": {"id": MATCH_METHOD, "version": "v1"}, "params": d, "valid_until": valid_until}))
+}
+
+/// Validate a capability-match/v1 decision (the `params` of a capability-match inference).
+pub fn validate_match(d: &Value) -> Result<(), Vec<Refusal>> {
+    let mut c = Check { errs: vec![], root: d };
+    match d.get("schema").and_then(Value::as_str) {
+        Some(MATCH_SCHEMA) => {}
+        Some(other) => return Err(vec![Refusal::new("unknown_schema", "schema", format!("{other:?} is not {MATCH_SCHEMA:?}"))]),
+        None => return Err(vec![Refusal::new("missing_field", "schema", format!("schema is required ({MATCH_SCHEMA:?})"))]),
+    }
+    c.need("requirement.id", nonempty_str, "the capability");
+    c.need("catalogue.digest", is_digest, "the digest of the runner's kernel list");
+    c.need("catalogue.commit", |v| v.as_str().is_some_and(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())), "the 40-hex checkout commit");
+    c.need("unadapted", |v| v.as_array().is_some_and(|a| a.iter().all(nonempty_str)), "the catalogue kernels without an adapter");
+    let cands = c.need("candidates", Value::is_array, "the judged candidates (may be empty)").and_then(Value::as_array).cloned().unwrap_or_default();
+    for (i, x) in cands.iter().enumerate() {
+        let codes_ok = x["rejected"].as_array().is_some_and(|a| a.iter().all(|r| r["code"].as_str().is_some_and(|s| CANDIDATE_REJECTIONS.contains(&s))));
+        if !x.get("kernel").is_some_and(nonempty_str) || !x["compatible"].is_boolean() || !codes_ok
+            || (x["compatible"] == true) != x["rejected"].as_array().is_some_and(Vec::is_empty) {
+            c.errs.push(Refusal::new("invalid_field", &format!("candidates.{i}"), format!("a candidate is {{kernel, compatible, rejected: [{{code in {CANDIDATE_REJECTIONS:?}}}]}}, compatible exactly when nothing rejected it")));
+        }
+    }
+    match (d.get("chosen").filter(|v| !v.is_null()), d.get("refusal").filter(|v| !v.is_null())) {
+        (Some(k), None) => {
+            if !cands.iter().any(|x| x["kernel"] == *k && x["compatible"] == true) {
+                c.errs.push(Refusal::new("invalid_field", "chosen", format!("the chosen kernel {k} is not a compatible candidate")));
+            }
+            c.need("why", nonempty_str, "why it was chosen");
+        }
+        (None, Some(r)) => {
+            if !r["code"].as_str().is_some_and(|s| MATCH_REFUSALS.contains(&s)) {
+                c.errs.push(Refusal::new("invalid_field", "refusal.code", format!("a refusal code is one of {MATCH_REFUSALS:?}")));
+            }
+        }
+        _ => c.errs.push(Refusal::new("invalid_field", "chosen", "exactly one of chosen and refusal is set")),
+    }
+    if c.errs.is_empty() {
+        Ok(())
+    } else {
+        Err(c.errs)
     }
 }
 
@@ -709,6 +1094,39 @@ pub fn schema(name: &str) -> Option<Value> {
                 "mode": {"enum": DECISION_MODES, "description": "an executor applies only live; shadow is refused before any step"}
             }
         })),
+        "match" => {
+            let fld = json!({"type": "object", "required": ["name", "kind", "doc"], "properties": {"name": nonempty, "kind": {"enum": FIELD_KINDS}, "unit": {"enum": UNITS}, "doc": nonempty},
+                "description": "an amount kind carries a unit; no other kind does"});
+            let refusal = |codes: &[&str]| json!({"type": "object", "required": ["code", "path", "message"], "properties": {"code": {"enum": codes}, "path": {"type": "string"}, "message": nonempty}});
+            Some(json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$id": "https://github.com/korczis/OpenTTD/tools/research/schema/capability-match.v1.schema.json",
+                "title": MATCH_SCHEMA,
+                "description": format!("RESEARCH-ONLY. GENERATED by `battlebrain schema match` from tools/research/mcp-rhai/src/battlebrain_contract.rs; do not edit. Which kernel of the discovered AlgoGlyph catalogue ({CATALOGUE_SOURCE}) satisfies one Battlebrain capability (I0098): the typed requirement, every kernel considered, the one chosen or the refusal. Written as the params of an inference record with method {MATCH_METHOD}."),
+                "type": "object",
+                "required": ["schema", "requirement", "catalogue", "adapters", "ranking", "candidates", "unadapted", "chosen", "why", "refusal"],
+                "properties": {
+                    "schema": {"const": MATCH_SCHEMA},
+                    "requirement": {"type": "object", "required": ["id"], "properties": {"id": nonempty, "goal": nonempty, "used_by": nonempty,
+                        "inputs": {"type": "array", "items": fld}, "outputs": {"type": "array", "items": fld}}},
+                    "catalogue": {"type": "object", "required": ["digest", "commit", "source", "kernels"], "properties": {"digest": dig,
+                        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "source": {"const": CATALOGUE_SOURCE}, "kernels": {"type": "integer", "minimum": 1}}},
+                    "adapters": {"type": "object", "required": ["owner", "retire_when"], "properties": {"owner": nonempty, "retire_when": nonempty}},
+                    "ranking": {"type": "array", "items": nonempty, "description": "the ranking rules applied among compatible kernels, in order"},
+                    "candidates": {"type": "array", "description": "every kernel an adapter declares for this capability, judged against the catalogue", "items": {"type": "object",
+                        "required": ["kernel", "engine", "compatible", "exact", "shape", "mapping", "rejected"], "properties": {
+                            "kernel": nonempty, "engine": {"type": ["string", "null"], "description": "as the catalogue lists it; null when absent"},
+                            "compatible": {"type": "boolean"}, "exact": {"type": "boolean"}, "exact_because": nonempty,
+                            "shape": {"enum": ["verified", "opaque", null], "description": "verified: the catalogue's input shape declares every mapped key"},
+                            "units": nonempty, "mapping": {"type": "object"}, "rejected": {"type": "array", "items": refusal(CANDIDATE_REJECTIONS)}}}},
+                    "unadapted": {"type": "array", "items": nonempty, "description": "the catalogue's kernels no adapter declares for this capability: considered, never chosen"},
+                    "chosen": {"type": ["string", "null"]},
+                    "why": {"type": ["string", "null"]},
+                    "refusal": {"oneOf": [{"type": "null"}, refusal(MATCH_REFUSALS)]}
+                },
+                "x-invariant": "exactly one of chosen and refusal is non-null; chosen is a compatible candidate"
+            }))
+        }
         _ => None,
     }
 }
@@ -870,6 +1288,175 @@ mod tests {
             assert!(domain_check("track-planning", &json!({}), &v).is_err(), "{refused}");
         }
         assert!(domain_check("track-planning", &json!({}), &json!({"result": {"status": "found", "cost": -1.0, "pieces": [1]}})).is_err());
+        // With the game's prices in the input, the line's price is its money, and it must be there.
+        let priced = json!({"prices": {"build_rail": 100}});
+        assert_eq!(domain_check("track-planning", &priced, &ok).unwrap_err().path, "result.money");
+        assert!(domain_check("track-planning", &priced, &json!({"result": {"status": "found", "cost": 6487.0, "money": 51000.0, "pieces": [{"tile": 1}]}})).is_ok());
+    }
+
+    fn real_kernels() -> (Value, String) {
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(repo().join("tools/research/schema/fixtures/battlebrain/catalogue.json")).unwrap()).unwrap();
+        (v["kernels"].clone(), v["commit"].as_str().unwrap().to_string())
+    }
+
+    /// The real catalogue with `edit` applied to its kernel list: a synthetic catalogue.
+    fn synthetic(edit: impl FnOnce(&mut Vec<Value>)) -> Catalogue {
+        let (k, commit) = real_kernels();
+        let mut list = k.as_array().unwrap().clone();
+        edit(&mut list);
+        Catalogue::from_runner(&json!(list), &commit).unwrap()
+    }
+
+    fn code(m: &Match) -> &'static str {
+        m.refusal.as_ref().map_or("chosen", |r| r.code)
+    }
+
+    #[test]
+    fn capabilities_are_typed_and_every_adapter_maps_its_requirement_once() {
+        let mut ids = std::collections::BTreeSet::new();
+        for c in CAPABILITIES {
+            assert!(ids.insert(c.id), "{} is declared twice", c.id);
+            for f in c.inputs.iter().chain(c.outputs) {
+                assert!(FIELD_KINDS.contains(&f.kind), "{}.{}: kind {}", c.id, f.name, f.kind);
+                match (f.kind.starts_with("amount"), f.unit) {
+                    (true, Some(u)) => assert!(UNITS.contains(&u), "{}.{}: unit {u}", c.id, f.name),
+                    (false, None) => {}
+                    other => panic!("{}.{}: an amount carries a unit and nothing else does ({other:?})", c.id, f.name),
+                }
+            }
+        }
+        for a in ADAPTERS {
+            let c = capability(a.capability).unwrap_or_else(|| panic!("{} adapts the undeclared capability {}", a.kernel, a.capability));
+            let j = judge(c, a, &catalogue());
+            assert_eq!(j["rejected"], json!([]), "{} for {}", a.kernel, a.capability);
+        }
+    }
+
+    #[test]
+    fn on_the_real_catalogue_portfolio_is_knapsack_dp_and_rail_pricing_is_track_planning() {
+        let cat = catalogue();
+        assert_eq!(cat.kernels.len(), 53);
+        for (cap, kernel, shape) in [("portfolio-within-budget", "knapsack-dp", "opaque"), ("rail-line-price", "track-planning", "verified")] {
+            let m = match_capability(cap, &cat, ADAPTERS);
+            assert_eq!(m.chosen.as_deref(), Some(kernel), "{cap}: {:?}", m.refusal);
+            let d = &m.decision;
+            assert_eq!(d["catalogue"]["digest"], json!(cat.digest));
+            assert_eq!(d["catalogue"]["commit"], "1b8e009059c299b29d7a829d2d51d4e057304d4d");
+            assert_eq!(d["candidates"][0]["shape"], shape, "{cap}");
+            assert_eq!(d["why"], "the only compatible kernel");
+            // Every catalogue kernel was considered: judged, or listed as unadapted.
+            assert_eq!(d["candidates"].as_array().unwrap().len() + d["unadapted"].as_array().unwrap().len(), 53);
+            assert!(validate_match(d).is_ok(), "{:?}", validate_match(d));
+            let snap = format!("bb:{}", "a".repeat(64));
+            let r = match_record(&m, &json!({"instance": "fixture", "company": 1}), &json!({"tick": 1, "date": "1961-01-01"}), &[json!(snap)], "1961-02-01");
+            assert_eq!(validate_record(&r), Ok("inference"), "{r}");
+        }
+    }
+
+    #[test]
+    fn a_capability_without_a_declaration_or_an_adapter_is_refused() {
+        let cat = catalogue();
+        assert_eq!(code(&match_capability("schedule-under-uncertainty", &cat, ADAPTERS)), "unknown_capability");
+        let m = match_capability("portfolio-within-budget", &cat, &[]);
+        assert_eq!(code(&m), "no_adapter");
+        assert_eq!(m.decision["unadapted"].as_array().unwrap().len(), 53, "every kernel stays opaque to it");
+        assert!(validate_match(&m.decision).is_ok());
+    }
+
+    #[test]
+    fn an_adapted_kernel_absent_from_the_catalogue_has_expired() {
+        let cat = synthetic(|l| l.retain(|k| k["id"] != "knapsack-dp"));
+        let m = match_capability("portfolio-within-budget", &cat, ADAPTERS);
+        assert_eq!(code(&m), "kernel_expired");
+        assert_eq!(m.decision["candidates"][0]["rejected"][0]["code"], "kernel_absent");
+        // A synthetic adapter for a kernel the runner never listed is judged and rejected; the
+        // real one is still chosen. Nothing is executed either way.
+        let ghost = Adapter { kernel: "knapsack-quantum", ..ADAPTERS[0] };
+        let m = match_capability("portfolio-within-budget", &catalogue(), &[ghost, ADAPTERS[0]]);
+        assert_eq!(m.chosen.as_deref(), Some("knapsack-dp"));
+        assert_eq!(m.decision["candidates"][0]["rejected"][0]["code"], "kernel_absent");
+    }
+
+    #[test]
+    fn an_incompatible_kernel_is_refused_with_its_reason() {
+        let cat = synthetic(|l| l.iter_mut().filter(|k| k["id"] == "knapsack-dp").for_each(|k| k["engine"] = json!("numeric")));
+        let m = match_capability("portfolio-within-budget", &cat, ADAPTERS);
+        assert_eq!(code(&m), "no_match");
+        assert_eq!(m.decision["candidates"][0]["rejected"][0]["code"], "engine_mismatch");
+        let cat = synthetic(|l| l.iter_mut().filter(|k| k["id"] == "track-planning").for_each(|k| k["input"] = json!("{map?: data, from: {x, y}, to: {x, y}}")));
+        let m = match_capability("rail-line-price", &cat, ADAPTERS);
+        assert_eq!(code(&m), "no_match");
+        assert_eq!(m.decision["candidates"][0]["rejected"][0]["code"], "input_shape_drift");
+        assert_eq!(m.decision["candidates"][0]["rejected"][0]["path"], "input.prices");
+        // An adapter that leaves a requirement field unmapped, or maps one the requirement lacks.
+        let short = Adapter { outputs: &[("chosen", "result.items")], ..ADAPTERS[0] };
+        let m = match_capability("portfolio-within-budget", &catalogue(), &[short]);
+        assert_eq!(code(&m), "no_match");
+        assert_eq!(m.decision["candidates"][0]["rejected"][0]["code"], "unmapped_field");
+        let extra = Adapter { outputs: &[("chosen", "result.items"), ("total_value", "result.best"), ("weight", "result.weight")], ..ADAPTERS[0] };
+        assert_eq!(match_capability("portfolio-within-budget", &catalogue(), &[extra]).decision["candidates"][0]["rejected"][0]["code"], "unknown_field");
+    }
+
+    #[test]
+    fn a_synthetic_kernel_without_an_adapter_is_considered_and_never_chosen() {
+        let cat = synthetic(|l| l.push(json!({"id": "knapsack-quantum", "engine": "grid", "input": "{weights, values, capacity}", "title": "synthetic"})));
+        let m = match_capability("portfolio-within-budget", &cat, ADAPTERS);
+        assert_eq!(m.chosen.as_deref(), Some("knapsack-dp"));
+        assert!(m.decision["unadapted"].as_array().unwrap().contains(&json!("knapsack-quantum")));
+        assert_eq!(domain_check("knapsack-quantum", &json!({}), &json!({})).unwrap_err().code, "no_domain_check");
+    }
+
+    #[test]
+    fn several_compatible_kernels_are_ranked_and_a_tie_is_refused() {
+        let cat = synthetic(|l| {
+            l.push(json!({"id": "knapsack-twin", "engine": "grid", "input": "the kernel's data form"}));
+            l.push(json!({"id": "knapsack-shaped", "engine": "grid", "input": "{weights: number[], values: number[], capacity}"}));
+        });
+        let twin = Adapter { kernel: "knapsack-twin", ..ADAPTERS[0] };
+        // Both exact, both opaque: a tie, refused rather than broken by name.
+        let m = match_capability("portfolio-within-budget", &cat, &[ADAPTERS[0], twin]);
+        assert_eq!(code(&m), "ambiguous_capability");
+        assert!(validate_match(&m.decision).is_ok());
+        // Exact beats heuristic, whatever the order.
+        let greedy = Adapter { exact: false, ..twin };
+        for set in [[ADAPTERS[0], greedy], [greedy, ADAPTERS[0]]] {
+            let m = match_capability("portfolio-within-budget", &cat, &set);
+            assert_eq!(m.chosen.as_deref(), Some("knapsack-dp"));
+            assert!(m.decision["why"].as_str().unwrap().starts_with("ranked first of 2"));
+        }
+        // Among exact kernels, a verified shape beats an opaque one.
+        let shaped = Adapter { kernel: "knapsack-shaped", ..ADAPTERS[0] };
+        let m = match_capability("portfolio-within-budget", &cat, &[ADAPTERS[0], shaped]);
+        assert_eq!(m.chosen.as_deref(), Some("knapsack-shaped"));
+        assert_eq!(m.decision["candidates"][1]["shape"], "verified");
+    }
+
+    #[test]
+    fn a_match_decision_that_contradicts_itself_is_refused() {
+        let m = match_capability("portfolio-within-budget", &catalogue(), ADAPTERS);
+        let mut d = m.decision.clone();
+        d["chosen"] = json!("transport-investment");
+        assert!(validate_match(&d).unwrap_err().iter().any(|r| r.path == "chosen"));
+        let mut d = m.decision.clone();
+        d["refusal"] = json!({"code": "no_match", "path": "", "message": "x"});
+        assert!(validate_match(&d).is_err(), "chosen and refused at once");
+        let mut d = m.decision.clone();
+        d["schema"] = json!("capability-match/v2");
+        assert_eq!(validate_match(&d).unwrap_err()[0].code, "unknown_schema");
+    }
+
+    #[test]
+    fn shape_declarations_are_read_from_the_runners_own_text() {
+        let track = catalogue().kernel("track-planning").unwrap().input.clone();
+        for key in ["from", "to", "map", "prices"] {
+            assert_eq!(shape_declares(track.as_deref(), key), Some(true), "{key}");
+        }
+        assert_eq!(shape_declares(track.as_deref(), "budget"), Some(false));
+        assert_eq!(shape_declares(Some("{fromData: x}"), "from"), Some(false));
+        assert_eq!(shape_declares(Some("{actions: [], cash, loan?}"), "cash"), Some(true));
+        assert_eq!(shape_declares(Some("{a: 1} then from here"), "from"), Some(false));
+        assert_eq!(shape_declares(Some("the kernel's data form (see its fromData)"), "from"), None);
+        assert_eq!(shape_declares(None, "from"), None);
     }
 
     #[test]
@@ -907,7 +1494,7 @@ mod tests {
 
     #[test]
     fn committed_schemas_are_the_generated_ones() {
-        for (name, file) in [("record", "battlebrain-record.v1.schema.json"), ("invocation", "algoglyph-invocation.v1.schema.json")] {
+        for (name, file) in [("record", "battlebrain-record.v1.schema.json"), ("invocation", "algoglyph-invocation.v1.schema.json"), ("match", "capability-match.v1.schema.json")] {
             let path = repo().join("tools/research/schema").join(file);
             let committed: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).unwrap();
             assert_eq!(committed, schema(name).unwrap(), "{file} differs from `battlebrain schema {name}`: regenerate it");
