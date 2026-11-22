@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0029
 kind: adr
 title: A research-gated, local-only override accepts a mismatched peer revision for a loopback R&D game, without spoofing the build's own revision
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - research

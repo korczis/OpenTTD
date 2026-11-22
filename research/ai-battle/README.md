@@ -21,6 +21,27 @@ The table below is derived from the newest record under `research/results/battle
 `battle.py report`. `battle.py check`, which `tools/gate.sh change` runs, fails when the table
 is stale.
 
+Every record's own page (`research/results/battle-*.md`) adds charts derived from its JSON alone,
+between `<!-- battle-charts:begin -->` and `<!-- battle-charts:end -->`: points per match and
+average final company value per contestant, the winner's final value against the best PrismaticAI
+in each scored match, match wins by contestant, and scored matches per arena with how many
+PrismaticAI won. "PrismaticAI" there is the AI the edition exported (`provenance.prismatic_path`),
+every variant of it. Each bar or slice links to the row it summarises (the site filters the
+page's table to it). `battle.py render` rewrites every tracked page and this leaderboard from the
+records; `tools/surfaces/surfaces sync` runs it, so a change of the page layout reaches all
+records in one commit, and `battle.py check` fails while any page is stale.
+
+An ablation's page (`research/results/ablation-*.md`, written by `battle.py ablate --write`) is
+derived the same way, its charts between `<!-- ablation-charts:begin -->` and
+`<!-- ablation-charts:end -->`: each variant's final company value with the best opponent in the
+same match, its change against the baseline (the first variant) in per cent, its share of that
+best opponent, and its rail, road and air fleet at the end, under a line that names the highest and
+the lowest variant and the spread between them. An ablation record holds one seed, so the charts
+show the spread between variants on that seed, not between seeds; the seeds of one comparison are
+separate records. Each bar links to its variant's row. `battle.py render` re-derives every tracked
+ablation page as well, and `battle.py check` validates each ablation record (schema, id, one row
+per variant, `vs_first` derived from the values) and fails while its page is stale.
+
 <!-- battle:begin -->
 <!-- derived from research/results/battle-20261122T045411-a80cc94a.json by `battle.py report`; `battle.py check` fails when it is stale -->
 Latest record: [`battle-20261122T045411-a80cc94a`](../results/battle-20261122T045411-a80cc94a.md) (0/4 replays identical).
@@ -120,7 +141,7 @@ flowchart LR
 
 | Piece | Path | Role |
 |---|---|---|
-| Orchestrator | `tools/research/ai-battle/battle.py` | discover, fetch, prepare, run, report, check |
+| Orchestrator | `tools/research/ai-battle/battle.py` | discover, fetch, prepare, run, report, render, check |
 | Config | `tools/research/ai-battle/battle.json` | contestants, match parameters, paths; no host names or addresses |
 | Hosts | `~/ttd-battle/hosts.json` (local, untracked) | written by `discover`; names, SSH targets, slots |
 | Referee | `tools/research/ai-battle/referee/BattleReferee/` | read-only Game Script: one `REF` line per company per quarter |
@@ -138,6 +159,7 @@ python3 $B probe      # which arenas are usable now
 python3 $B run        # tournament + dashboard on http://127.0.0.1:8765/ (SIGTERM / Ctrl-C stops)
 python3 $B status     # leaderboard and replays of the current edition
 python3 $B report     # research/results/battle-<utc>-<edition>.{json,md} + README leaderboard
+python3 $B render     # every tracked battle and ablation page (tables, charts) and the leaderboard
 python3 $B check      # every record valid, every derived file current (exit 10 / 11 otherwise)
 python3 $B fitness    # the working tree's PrismaticAI in one short local match (gate, on change)
 python3 $B ablate --variant "base=..." --variant "x=setting=v" --years 10 --seed S --write
@@ -529,7 +551,8 @@ The dashboard has these features:
 | `~/ttd-battle/arena/` | the bundle and `PROVENANCE.json`, rsynced to every arena's `$HOME/ttd-battle/arena` |
 | `$HOME/ttd-battle/matches/<edition>/<id>/` (each arena) | `match.log`, `battle.cfg`, `pid`, `exit_code`, the isolated `home/` |
 | `~/ttd-battle/results/<edition>/matches/<id>.json` | each match: arena, build, seed, lineup, quarterly series, standings |
-| `research/results/battle-*.json` / `.md` | the tracked records; the `.md` is derived from the `.json` |
+| `research/results/battle-*.json` / `.md` | the tracked records; the `.md` (tables and charts) is derived from the `.json` by `render` |
+| `research/results/ablation-*.json` / `.md` | the tracked ablations (`ablate --write`); the `.md` (table and charts) is derived from the `.json` by `render` |
 
 Removing `~/ttd-battle` on every machine removes everything the battle wrote outside this
 repository.

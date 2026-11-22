@@ -1,0 +1,36 @@
+{
+ "case": "a well-formed inference",
+ "value": {
+  "at": {
+   "date": "1961-01-01",
+   "tick": 74010
+  },
+  "body": {
+   "claim": "coal from industry 12 to 31 pays back in 14 months",
+   "confidence": 0.4,
+   "method": {
+    "id": "plan.rs payback",
+    "version": "v4"
+   },
+   "params": {
+    "payback_months": 24
+   },
+   "valid_until": "1961-04-01"
+  },
+  "derived_from": [
+   "bb:76337ad2a40c3a385fd670726b38b3e84db0389982678f2616ca1b4023c1f382"
+  ],
+  "id": "bb:c2b073fa022a4e9aa52e06128d8e25c0e13ea6cd5bdea59b4ee4e45a4f757486",
+  "producer": {
+   "id": "mcp-plan",
+   "version": "v4"
+  },
+  "schema": "battlebrain-record/v1",
+  "scope": {
+   "company": 1,
+   "instance": "research-fixture"
+  },
+  "status": "valid",
+  "type": "inference"
+ }
+}

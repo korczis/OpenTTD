@@ -350,6 +350,44 @@ const auto RESOURCES = std::to_array<ResourceEntry>({
 	{"openttd://engines", "Engines", "Every engine some company can buy now: type, speed (also effective for aircraft), capacity, cargo, price, running cost, plane type, buyers", &ResourceEngines},
 });
 
+/** @return The catalogue entry of resource `uri`, or nullptr when there is none. */
+const ResourceEntry *FindResource(std::string_view uri)
+{
+	for (const auto &r : RESOURCES) {
+		if (uri == r.uri) return &r;
+	}
+	return nullptr;
+}
+
+/**
+ * openttd.resources.read_many: several resources built by their own builders inside this one
+ * main-thread call, so every answer carries the same game tick (a coherent snapshot, without
+ * pausing the game). Each entry's `data` is exactly what resources/read answers as text for it.
+ * Reads only; an unknown or refused uri is an error for its entry, not for the call.
+ */
+json ReadMany(const json &args)
+{
+	detail::ReadManyPlan plan = detail::PlanReadMany(args, [](const std::string &u) { return FindResource(u) != nullptr; });
+	if (!plan.error.empty()) return json{{"ok", false}, {"error", plan.error}, {"max_uris", detail::READ_MANY_MAX_URIS}};
+	json head = MakeEnvelope();
+	json out = {{"ok", true}, {"game_tick", head["game_tick"]}, {"game_date", head["game_date"]}, {"resources", json::array()}};
+	for (const auto &e : plan.entries) {
+		json entry = {{"uri", e.uri}, {"ok", e.error.empty()}};
+		if (e.error.empty()) {
+			Coverage::Count("resource", e.uri);
+			try {
+				entry["data"] = FindResource(e.uri)->build();
+			} catch (const json::exception &ex) {
+				entry = {{"uri", e.uri}, {"ok", false}, {"error", ex.what()}};
+			}
+		} else {
+			entry["error"] = e.error;
+		}
+		out["resources"].push_back(std::move(entry));
+	}
+	return out;
+}
+
 json ResourceMap()
 {
 	json env = MakeEnvelope();
@@ -498,8 +536,9 @@ json ResourceTowns()
  * tool handlers run inside Poll() on the main thread, the command executes on the
  * correct thread through the normal deterministic command path -- never a raw pool
  * write, never a mutation off the main thread. Approval is one-time (replay of an
- * approved call requires a fresh approval), and the digest binds the approval to
- * the exact arguments so post-approval argument changes are rejected. */
+ * approved call requires a fresh approval), and it binds to the tool and its exact
+ * canonical arguments: a post-approval argument change, or the same arguments sent to
+ * another tool, is refused and needs a fresh approval. */
 
 enum class ApprovalState : uint8_t { Pending, Approved, Denied, Consumed };
 
@@ -507,7 +546,7 @@ struct PendingApproval {
 	uint64_t id = 0;
 	std::string tool;
 	std::string arg_digest;      ///< FNV-1a of tool + canonical args; shown/recorded, not the binding.
-	std::string canonical_args;  ///< the exact serialized args this approval binds to (collision-free, unlike the 64-bit digest).
+	std::string canonical_args;  ///< the exact serialized args this approval binds to, together with `tool` (collision-free, unlike the 64-bit digest).
 	std::string args_summary;    ///< Human-readable, shown in the console approval prompt.
 	uint64_t created_tick = 0;
 	uint64_t expiry_tick = 0;
@@ -877,6 +916,13 @@ json HandleToolsCall(const json &id, const json &params)
 	std::string name = params["name"].get<std::string>();
 	json args = params.contains("arguments") ? params["arguments"] : json::object();
 
+	/* Several resources at one game tick; reads only, so no approval. */
+	if (name == "openttd.resources.read_many") {
+		json out = ReadMany(args);
+		bool ok = out.value("ok", false);
+		return RpcResult(id, json{{"content", json::array({{{"type", "text"}, {"text", out.dump()}}})}, {"isError", !ok}});
+	}
+
 	/* The fork's toolbar menu and the questions asked through it (prismatic_mcp_menu.cpp); before the
 	 * UI tools, whose names share the openttd.ui. prefix. */
 	if (auto menu = Menu::Call(name, args); menu.has_value()) {
@@ -960,14 +1006,15 @@ json HandleToolsCall(const json &id, const json &params)
 		std::string canonical = aargs.dump();
 		uint64_t now = (uint64_t)TimerGameTick::counter;
 
-		/* The approval binds to the EXACT canonical arguments, not the 64-bit digest (which could
-		 * collide). The decision -- execute an approved one, reuse a pending one, or ask the operator
+		/* The approval binds to the action AND its EXACT canonical arguments, not the 64-bit digest
+		 * (which could collide): an approval for one tool is never spent by another tool with the same
+		 * arguments. The decision -- execute an approved one, reuse a pending one, or ask the operator
 		 * -- is the pure, unit-tested detail::ClassifySubmit. */
 		std::vector<detail::ApprovalView> views;
 		views.reserve(_approvals.size());
-		for (const auto &a : _approvals) views.push_back({(uint8_t)a.state, a.canonical_args, a.expiry_tick});
+		for (const auto &a : _approvals) views.push_back({(uint8_t)a.state, a.tool, a.canonical_args, a.expiry_tick});
 		size_t matched = 0;
-		detail::SubmitDecision decision = detail::ClassifySubmit(views, canonical, now, matched);
+		detail::SubmitDecision decision = detail::ClassifySubmit(views, type, canonical, now, matched);
 
 		if (decision == detail::SubmitDecision::Execute) {
 			PendingApproval &a = _approvals[matched];
@@ -1048,6 +1095,7 @@ json ToolsList()
 		{"annotations", gated}});
 	arr.push_back({{"name", "openttd.decision.get"}, {"description", "Read one decision's provenance: command result and the verdict taken after the command ran"},
 		{"inputSchema", {{"type", "object"}, {"properties", {{"decision_id", {{"type", "integer"}, {"minimum", 1}}}}}, {"required", json::array({"decision_id"})}}}});
+	arr.push_back(detail::ReadManyTool());
 	for (auto &t : ai::Tools()) arr.push_back(t);
 	/* Every static function of the Game Script API, derived from its registration (prismatic_mcp_api.cpp). */
 	for (auto &t : Api::Tools()) arr.push_back(t);
@@ -1123,14 +1171,11 @@ std::optional<json> DispatchOne(const json &req)
 		}
 		std::string uri = req["params"]["uri"].get<std::string>();
 		Coverage::Count("resource", uri);
-		for (const auto &r : RESOURCES) {
-			if (uri == r.uri) {
-				json contents = json::array();
-				contents.push_back({{"uri", r.uri}, {"mimeType", "application/json"}, {"text", r.build().dump()}});
-				return RpcResult(id, json{{"contents", contents}});
-			}
-		}
-		return RpcError(id, -32602, "Unknown resource uri");
+		const ResourceEntry *r = FindResource(uri);
+		if (r == nullptr) return RpcError(id, -32602, "Unknown resource uri");
+		json contents = json::array();
+		contents.push_back({{"uri", r->uri}, {"mimeType", "application/json"}, {"text", r->build().dump()}});
+		return RpcResult(id, json{{"contents", contents}});
 	}
 	if (method == "tools/list") return RpcResult(id, ToolsList());
 	if (method == "tools/call") {

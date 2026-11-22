@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0019
 kind: adr
 title: Settings are declared once in ini tables that settingsgen compiles into the tables used by the config file, the savegame, the GUI and network sync
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -17,7 +17,7 @@ related:
   - file:src/settingsgen/settingsgen.cpp
   - file:src/table/settings/CMakeLists.txt
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/settingsgen/settingsgen.cpp
     - file:src/table/settings/CMakeLists.txt
@@ -35,6 +35,8 @@ belongs to the game, and kept equal on every peer when it influences the simulat
 those four places by hand for each of hundreds of settings would let them drift.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Declarative source.** Each setting is an entry in an ini file under `src/table/settings/`
    with its type, flags, default, range, callbacks and the savegame versions it exists in.

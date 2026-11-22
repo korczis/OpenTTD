@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0028
 kind: adr
 title: Graphics, sounds and music come from replaceable base sets and NewGRFs, and the engine ships no proprietary data
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -17,7 +17,7 @@ related:
   - file:src/base_media_base.h
   - file:docs/directory_structure.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/base_media_base.h
     - file:docs/directory_structure.md
@@ -34,6 +34,8 @@ OpenTTD began as a re-implementation of a commercial game whose data it may not 
 content creators replace or extend almost every sprite, sound and vehicle.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Base sets.** Graphics, sounds and music are base sets described by metadata files and
    discovered on the search paths (`src/base_media_base.h:BaseSet`, `docs/directory_structure.md`);

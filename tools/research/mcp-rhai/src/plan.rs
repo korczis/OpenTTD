@@ -97,7 +97,54 @@ pub fn time_factor_for(t: f64, td1: f64, td2: f64) -> f64 {
 }
 
 /// Passengers: transit periods [0, 24].
-fn time_factor(t: f64) -> f64 { time_factor_for(t, 0.0, 24.0) }
+const PASSENGER_TRANSIT: (f64, f64) = (0.0, 24.0);
+
+/// Passengers' time factor.
+fn time_factor(t: f64) -> f64 { time_factor_for(t, PASSENGER_TRANSIT.0, PASSENGER_TRANSIT.1) }
+
+// The line economics shared by the passenger planner (here) and the freight planner (cargo.rs):
+// one model, one copy. Each is the exact expression both used inline before, so moving a call site
+// onto it changes no bit of the answer (pinned by plan_output_is_pinned, freight_output_is_pinned).
+
+/// Tiles a vehicle covers in a cargo period per km/h of effective speed: speed_kmh * 2 * 3/4 /
+/// (192 * 16) tiles a tick (src/ground_vehicle.hpp DoUpdateSpeed) times 185 ticks a period.
+const TILES_PER_PERIOD_PER_KMH: f64 = 0.0903;
+
+/// Transit periods of a run of `distance` tiles at `speed_kmh`, plus `overhead` periods.
+pub fn transit_periods(distance: f64, speed_kmh: f64, overhead: f64) -> f64 {
+    distance / (speed_kmh * TILES_PER_PERIOD_PER_KMH) + overhead
+}
+
+/// Income per unit of cargo delivered `distance` tiles in `periods` (src/economy.cpp
+/// GetTransportedGoodsIncome): d * time_factor * payment / 2^21, for the cargo's `transit` periods.
+pub fn income_per_unit(distance: f64, periods: f64, payment: f64, transit: (f64, f64)) -> f64 {
+    distance * time_factor_for(periods, transit.0, transit.1) * payment / 2097152.0
+}
+
+/// Units one vehicle carries a month: a load per one-way run of `periods`, i.e. 12 / periods loads
+/// a month when it is loaded both ways (passengers), half that when it returns empty (freight).
+pub fn carried_per_vehicle(capacity: f64, load_factor: f64, periods: f64, loaded_both_ways: bool) -> f64 {
+    if loaded_both_ways { capacity * load_factor * 12.0 / periods } else { capacity * load_factor * 12.0 / (2.0 * periods) }
+}
+
+/// `calibration.<mode>` (else `calibration.default`): what the mode really earned against what the
+/// model said, read back from the running game (src/calibrate.rs); 1 when nothing was measured.
+pub fn calibration(p: &Value, mode: &str) -> f64 {
+    p.pointer(&format!("/calibration/{mode}")).or_else(|| p.pointer("/calibration/default")).and_then(Value::as_f64).unwrap_or(1.0)
+}
+
+/// Monthly net profit of a line. The calibration is a ratio of NET profit, so it scales income
+/// minus running cost, never income alone: r × income − cost charged the running cost a second
+/// time ((1 − r) × cost), which an independent review found (codex, 2026-11-17) after the
+/// calibrated A/B lost 2.5%.
+pub fn net_profit(carried: f64, per_unit: f64, running_per_month: f64, cal: f64) -> f64 {
+    (carried * per_unit - running_per_month) * cal
+}
+
+/// The score a fleet is chosen by: `payback` months of net profit minus what it costs to build and buy.
+pub fn payback_score(profit: f64, payback: f64, build: f64, purchase: f64) -> f64 {
+    profit * payback - build - purchase
+}
 
 #[cfg(test)]
 mod tests {
@@ -121,6 +168,79 @@ mod tests {
         assert!((time_factor(124.5) - 30.06).abs() < 0.01);
         assert!(time_factor(1000.0) < 3.0);
     }
+    /// A fixed world for the planner: three towns (one pair joined by road), one vehicle per mode.
+    fn fixture() -> (serde_json::Value, serde_json::Value, serde_json::Value) {
+        let towns = serde_json::json!({"towns": [
+            {"id": 1, "name": "A", "x": 10, "y": 10, "population": 900},
+            {"id": 2, "name": "B", "x": 50, "y": 30, "population": 1500},
+            {"id": 3, "name": "C", "x": 170, "y": 90, "population": 2400}]});
+        let graph = serde_json::json!({"towns": [{"town": 1, "component": 7}, {"town": 2, "component": 7}, {"town": 3, "component": 8}]});
+        let engines = serde_json::json!({"engines": [
+            {"type": "road", "name": "Bus", "cargo": "Passengers", "capacity": 31, "effective_speed_kmh": 56, "price": 4100, "running_cost_per_year": 426},
+            {"type": "rail", "name": "Loco", "capacity": 0, "effective_speed_kmh": 101, "price": 11000, "running_cost_per_year": 1300},
+            {"type": "rail", "name": "Coach", "cargo": "Passengers", "capacity": 40, "effective_speed_kmh": 0, "price": 1700, "running_cost_per_year": 90},
+            {"type": "air", "name": "Plane", "cargo": "Passengers", "capacity": 25, "effective_speed_kmh": 117, "plane_type": "small", "price": 21000, "running_cost_per_year": 2200}]});
+        (towns, graph, engines)
+    }
+
+    #[test]
+    fn the_shared_economics_are_the_inline_formulas_bit_for_bit() {
+        // The expressions plan.rs and cargo.rs computed inline before they shared these functions.
+        let p = serde_json::json!({"calibration": {"rail": 0.9, "default": 1.1}});
+        for d in [12.0, 37.0, 60.0, 115.0, 240.0, 1000.0] {
+            for speed in [1.0, 48.0, 56.0, 101.0, 117.0, 643.0] {
+                for overhead in [0.0, 2.0, 3.5] {
+                    let periods = super::transit_periods(d, speed, overhead);
+                    assert_eq!(periods.to_bits(), (d / (speed * 0.0903) + overhead).to_bits());
+                    for (payment, td1, td2) in [(3185.0, 0.0, 24.0), (5916.0, 7.0, 255.0), (4437.0, 4.0, 40.0)] {
+                        let unit = super::income_per_unit(d, periods, payment, (td1, td2));
+                        assert_eq!(unit.to_bits(), (d * super::time_factor_for(periods, td1, td2) * payment / 2097152.0).to_bits());
+                        if (td1, td2) == super::PASSENGER_TRANSIT {
+                            assert_eq!(unit.to_bits(), (d * time_factor(periods) * payment / 2097152.0).to_bits());
+                        }
+                        for (cap, load) in [(31.0, 0.8), (160.0, 0.65)] {
+                            let both = super::carried_per_vehicle(cap, load, periods, true);
+                            let one = super::carried_per_vehicle(cap, load, periods, false);
+                            assert_eq!(both.to_bits(), (cap * load * 12.0 / periods).to_bits());
+                            assert_eq!(one.to_bits(), (cap * load * 12.0 / (2.0 * periods)).to_bits());
+                            for (n, running_year, price, build, payback) in [(1.0, 426.0, 4100.0, 0.0, 24.0), (3.0, 2400.0, 21000.0, 14400.0, 36.0)] {
+                                let (carried, running) = ((n * one).min(150.0), n * running_year / 12.0);
+                                for mode in ["rail", "bus", "truck"] {
+                                    let cal = super::calibration(&p, mode);
+                                    let profit = super::net_profit(carried, unit, running, cal);
+                                    assert_eq!(profit.to_bits(), ((carried * unit - running) * cal).to_bits());
+                                    assert_eq!(super::payback_score(profit, payback, build, n * price).to_bits(),
+                                               ((carried * unit - running) * cal * payback - build - n * price).to_bits());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(super::calibration(&p, "rail"), 0.9);
+        assert_eq!(super::calibration(&p, "air"), 1.1);
+        assert_eq!(super::calibration(&serde_json::json!({}), "air"), 1.0);
+    }
+
+    #[test]
+    fn plan_output_is_pinned() {
+        // Captured from the inline formulas before they moved into the shared economics functions
+        // (refactor/planner-shared-economics): the planner's answer must stay byte-identical.
+        let (towns, graph, engines) = fixture();
+        let calibrated = serde_json::json!({"calibration": {"rail": 0.9, "default": 1.1}, "budget": 60000});
+        let no_vehicles = serde_json::json!({});
+        for (over, eng, want) in [(serde_json::Value::Null, &engines, PINNED_PLAN), (calibrated, &engines, PINNED_PLAN_CALIBRATED),
+                                  (serde_json::Value::Null, &no_vehicles, PINNED_PLAN_NO_VEHICLES)] {
+            let got = super::plan(&towns, &graph, 10, &over, eng).unwrap();
+            let got = serde_json::json!({"pairs": got["pairs"], "by_mode": got["by_mode"]}).to_string();
+            assert_eq!(got, want);
+        }
+    }
+    const PINNED_PLAN: &str = r#"{"by_mode":{"air":[],"bus":[{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":2,"name":"B","population":1500,"x":50,"y":30},"distance":60.0,"mode":"bus","options":[{"build_cost":0.0,"income_per_passenger":21.97,"investment":16400.0,"mode":"bus","monthly_income":1887.0,"monthly_profit":1745.0,"score":25468.0,"transit_periods":13.9,"vehicles":{"capacity":31.0,"count":4.0,"effective_speed_kmh":56.0,"fills_demand_at":5.0,"name":"Bus","price_each":4100.0,"running_per_month":142.0}},{"build_cost":7480.0,"income_per_passenger":22.45,"investment":25280.0,"mode":"rail","monthly_income":2021.0,"monthly_profit":1883.0,"score":19902.0,"transit_periods":8.6,"vehicles":{"capacity":160.0,"count":1.0,"effective_speed_kmh":101.0,"fills_demand_at":1.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":138.0}}],"road_connected":true,"score":25468.0,"supply":900.0}],"rail":[{"a":{"id":2,"name":"B","population":1500,"x":50,"y":30},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":180.0,"mode":"rail","options":[{"build_cost":19480.0,"income_per_passenger":63.77,"investment":55080.0,"mode":"rail","monthly_income":9012.0,"monthly_profit":8736.0,"score":154576.0,"transit_periods":21.7,"vehicles":{"capacity":160.0,"count":2.0,"effective_speed_kmh":101.0,"fills_demand_at":3.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":277.0}},{"build_cost":14400.0,"income_per_passenger":64.51,"investment":35400.0,"mode":"air","monthly_income":813.0,"monthly_profit":630.0,"score":-20283.0,"transit_periods":19.0,"vehicles":{"capacity":25.0,"count":1.0,"effective_speed_kmh":117.0,"fills_demand_at":12.0,"name":"Plane","price_each":21000.0,"running_per_month":183.0}}],"road_connected":false,"score":154576.0,"supply":1500.0},{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":240.0,"mode":"rail","options":[{"build_cost":25480.0,"income_per_passenger":81.05,"investment":61080.0,"mode":"rail","monthly_income":7295.0,"monthly_profit":7018.0,"score":107354.0,"transit_periods":28.3,"vehicles":{"capacity":160.0,"count":2.0,"effective_speed_kmh":101.0,"fills_demand_at":2.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":277.0}},{"build_cost":14400.0,"income_per_passenger":83.68,"investment":35400.0,"mode":"air","monthly_income":813.0,"monthly_profit":629.0,"score":-20300.0,"transit_periods":24.7,"vehicles":{"capacity":25.0,"count":1.0,"effective_speed_kmh":117.0,"fills_demand_at":10.0,"name":"Plane","price_each":21000.0,"running_per_month":183.0}}],"road_connected":false,"score":107354.0,"supply":900.0}]},"pairs":[{"a":{"id":2,"name":"B","population":1500,"x":50,"y":30},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":180.0,"mode":"rail","options":[{"build_cost":19480.0,"income_per_passenger":63.77,"investment":55080.0,"mode":"rail","monthly_income":9012.0,"monthly_profit":8736.0,"score":154576.0,"transit_periods":21.7,"vehicles":{"capacity":160.0,"count":2.0,"effective_speed_kmh":101.0,"fills_demand_at":3.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":277.0}},{"build_cost":14400.0,"income_per_passenger":64.51,"investment":35400.0,"mode":"air","monthly_income":813.0,"monthly_profit":630.0,"score":-20283.0,"transit_periods":19.0,"vehicles":{"capacity":25.0,"count":1.0,"effective_speed_kmh":117.0,"fills_demand_at":12.0,"name":"Plane","price_each":21000.0,"running_per_month":183.0}}],"road_connected":false,"score":154576.0,"supply":1500.0},{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":240.0,"mode":"rail","options":[{"build_cost":25480.0,"income_per_passenger":81.05,"investment":61080.0,"mode":"rail","monthly_income":7295.0,"monthly_profit":7018.0,"score":107354.0,"transit_periods":28.3,"vehicles":{"capacity":160.0,"count":2.0,"effective_speed_kmh":101.0,"fills_demand_at":2.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":277.0}},{"build_cost":14400.0,"income_per_passenger":83.68,"investment":35400.0,"mode":"air","monthly_income":813.0,"monthly_profit":629.0,"score":-20300.0,"transit_periods":24.7,"vehicles":{"capacity":25.0,"count":1.0,"effective_speed_kmh":117.0,"fills_demand_at":10.0,"name":"Plane","price_each":21000.0,"running_per_month":183.0}}],"road_connected":false,"score":107354.0,"supply":900.0},{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":2,"name":"B","population":1500,"x":50,"y":30},"distance":60.0,"mode":"bus","options":[{"build_cost":0.0,"income_per_passenger":21.97,"investment":16400.0,"mode":"bus","monthly_income":1887.0,"monthly_profit":1745.0,"score":25468.0,"transit_periods":13.9,"vehicles":{"capacity":31.0,"count":4.0,"effective_speed_kmh":56.0,"fills_demand_at":5.0,"name":"Bus","price_each":4100.0,"running_per_month":142.0}},{"build_cost":7480.0,"income_per_passenger":22.45,"investment":25280.0,"mode":"rail","monthly_income":2021.0,"monthly_profit":1883.0,"score":19902.0,"transit_periods":8.6,"vehicles":{"capacity":160.0,"count":1.0,"effective_speed_kmh":101.0,"fills_demand_at":1.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":138.0}}],"road_connected":true,"score":25468.0,"supply":900.0}]}"#;
+    const PINNED_PLAN_CALIBRATED: &str = r#"{"by_mode":{"air":[],"bus":[{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":2,"name":"B","population":1500,"x":50,"y":30},"distance":60.0,"mode":"bus","options":[{"build_cost":0.0,"income_per_passenger":21.97,"investment":16400.0,"mode":"bus","monthly_income":1887.0,"monthly_profit":1919.0,"score":29655.0,"transit_periods":13.9,"vehicles":{"capacity":31.0,"count":4.0,"effective_speed_kmh":56.0,"fills_demand_at":5.0,"name":"Bus","price_each":4100.0,"running_per_month":142.0}},{"build_cost":7480.0,"income_per_passenger":22.45,"investment":25280.0,"mode":"rail","monthly_income":2021.0,"monthly_profit":1694.0,"score":15384.0,"transit_periods":8.6,"vehicles":{"capacity":160.0,"count":1.0,"effective_speed_kmh":101.0,"fills_demand_at":1.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":138.0}}],"road_connected":true,"score":29655.0,"supply":900.0}],"rail":[{"a":{"id":2,"name":"B","population":1500,"x":50,"y":30},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":180.0,"mode":"rail","options":[{"build_cost":19480.0,"income_per_passenger":63.77,"investment":55080.0,"mode":"rail","monthly_income":9012.0,"monthly_profit":7862.0,"score":133610.0,"transit_periods":21.7,"vehicles":{"capacity":160.0,"count":2.0,"effective_speed_kmh":101.0,"fills_demand_at":3.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":277.0}},{"build_cost":14400.0,"income_per_passenger":64.51,"investment":35400.0,"mode":"air","monthly_income":813.0,"monthly_profit":693.0,"score":-18771.0,"transit_periods":19.0,"vehicles":{"capacity":25.0,"count":1.0,"effective_speed_kmh":117.0,"fills_demand_at":12.0,"name":"Plane","price_each":21000.0,"running_per_month":183.0}}],"road_connected":false,"score":133610.0,"supply":1500.0},{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":240.0,"mode":"rail","options":[{"build_cost":25480.0,"income_per_passenger":81.05,"investment":43280.0,"mode":"rail","monthly_income":4397.0,"monthly_profit":3833.0,"score":48704.0,"transit_periods":28.3,"vehicles":{"capacity":160.0,"count":1.0,"effective_speed_kmh":101.0,"fills_demand_at":2.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":138.0}},{"build_cost":14400.0,"income_per_passenger":83.68,"investment":35400.0,"mode":"air","monthly_income":813.0,"monthly_profit":692.0,"score":-18790.0,"transit_periods":24.7,"vehicles":{"capacity":25.0,"count":1.0,"effective_speed_kmh":117.0,"fills_demand_at":10.0,"name":"Plane","price_each":21000.0,"running_per_month":183.0}}],"road_connected":false,"score":48704.0,"supply":900.0}]},"pairs":[{"a":{"id":2,"name":"B","population":1500,"x":50,"y":30},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":180.0,"mode":"rail","options":[{"build_cost":19480.0,"income_per_passenger":63.77,"investment":55080.0,"mode":"rail","monthly_income":9012.0,"monthly_profit":7862.0,"score":133610.0,"transit_periods":21.7,"vehicles":{"capacity":160.0,"count":2.0,"effective_speed_kmh":101.0,"fills_demand_at":3.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":277.0}},{"build_cost":14400.0,"income_per_passenger":64.51,"investment":35400.0,"mode":"air","monthly_income":813.0,"monthly_profit":693.0,"score":-18771.0,"transit_periods":19.0,"vehicles":{"capacity":25.0,"count":1.0,"effective_speed_kmh":117.0,"fills_demand_at":12.0,"name":"Plane","price_each":21000.0,"running_per_month":183.0}}],"road_connected":false,"score":133610.0,"supply":1500.0},{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":240.0,"mode":"rail","options":[{"build_cost":25480.0,"income_per_passenger":81.05,"investment":43280.0,"mode":"rail","monthly_income":4397.0,"monthly_profit":3833.0,"score":48704.0,"transit_periods":28.3,"vehicles":{"capacity":160.0,"count":1.0,"effective_speed_kmh":101.0,"fills_demand_at":2.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":138.0}},{"build_cost":14400.0,"income_per_passenger":83.68,"investment":35400.0,"mode":"air","monthly_income":813.0,"monthly_profit":692.0,"score":-18790.0,"transit_periods":24.7,"vehicles":{"capacity":25.0,"count":1.0,"effective_speed_kmh":117.0,"fills_demand_at":10.0,"name":"Plane","price_each":21000.0,"running_per_month":183.0}}],"road_connected":false,"score":48704.0,"supply":900.0},{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":2,"name":"B","population":1500,"x":50,"y":30},"distance":60.0,"mode":"bus","options":[{"build_cost":0.0,"income_per_passenger":21.97,"investment":16400.0,"mode":"bus","monthly_income":1887.0,"monthly_profit":1919.0,"score":29655.0,"transit_periods":13.9,"vehicles":{"capacity":31.0,"count":4.0,"effective_speed_kmh":56.0,"fills_demand_at":5.0,"name":"Bus","price_each":4100.0,"running_per_month":142.0}},{"build_cost":7480.0,"income_per_passenger":22.45,"investment":25280.0,"mode":"rail","monthly_income":2021.0,"monthly_profit":1694.0,"score":15384.0,"transit_periods":8.6,"vehicles":{"capacity":160.0,"count":1.0,"effective_speed_kmh":101.0,"fills_demand_at":1.0,"name":"Loco + 4 x Coach","price_each":17800.0,"running_per_month":138.0}}],"road_connected":true,"score":29655.0,"supply":900.0}]}"#;
+    const PINNED_PLAN_NO_VEHICLES: &str = r#"{"by_mode":{"air":[{"a":{"id":2,"name":"B","population":1500,"x":50,"y":30},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":180.0,"mode":"air","options":[{"build_cost":19480.0,"income_per_passenger":61.55,"investment":19480.0,"mode":"rail","monthly_income":9233.0,"monthly_profit":9233.0,"score":202114.0,"transit_periods":26.9,"vehicles":null},{"build_cost":14400.0,"income_per_passenger":63.71,"investment":14400.0,"mode":"air","monthly_income":9557.0,"monthly_profit":9557.0,"score":214969.0,"transit_periods":21.9,"vehicles":null}],"road_connected":false,"score":214969.0,"supply":1500.0},{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":240.0,"mode":"air","options":[{"build_cost":25480.0,"income_per_passenger":76.02,"investment":25480.0,"mode":"rail","monthly_income":6842.0,"monthly_profit":6842.0,"score":138717.0,"transit_periods":35.2,"vehicles":null},{"build_cost":14400.0,"income_per_passenger":80.86,"investment":14400.0,"mode":"air","monthly_income":7277.0,"monthly_profit":7277.0,"score":160259.0,"transit_periods":28.6,"vehicles":null}],"road_connected":false,"score":160259.0,"supply":900.0}],"bus":[{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":2,"name":"B","population":1500,"x":50,"y":30},"distance":60.0,"mode":"bus","options":[{"build_cost":0.0,"income_per_passenger":21.97,"investment":0.0,"mode":"bus","monthly_income":1978.0,"monthly_profit":1978.0,"score":47462.0,"transit_periods":13.9,"vehicles":null},{"build_cost":7480.0,"income_per_passenger":22.3,"investment":7480.0,"mode":"rail","monthly_income":2007.0,"monthly_profit":2007.0,"score":40682.0,"transit_periods":10.3,"vehicles":null}],"road_connected":true,"score":47462.0,"supply":900.0}],"rail":[]},"pairs":[{"a":{"id":2,"name":"B","population":1500,"x":50,"y":30},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":180.0,"mode":"air","options":[{"build_cost":19480.0,"income_per_passenger":61.55,"investment":19480.0,"mode":"rail","monthly_income":9233.0,"monthly_profit":9233.0,"score":202114.0,"transit_periods":26.9,"vehicles":null},{"build_cost":14400.0,"income_per_passenger":63.71,"investment":14400.0,"mode":"air","monthly_income":9557.0,"monthly_profit":9557.0,"score":214969.0,"transit_periods":21.9,"vehicles":null}],"road_connected":false,"score":214969.0,"supply":1500.0},{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":3,"name":"C","population":2400,"x":170,"y":90},"distance":240.0,"mode":"air","options":[{"build_cost":25480.0,"income_per_passenger":76.02,"investment":25480.0,"mode":"rail","monthly_income":6842.0,"monthly_profit":6842.0,"score":138717.0,"transit_periods":35.2,"vehicles":null},{"build_cost":14400.0,"income_per_passenger":80.86,"investment":14400.0,"mode":"air","monthly_income":7277.0,"monthly_profit":7277.0,"score":160259.0,"transit_periods":28.6,"vehicles":null}],"road_connected":false,"score":160259.0,"supply":900.0},{"a":{"id":1,"name":"A","population":900,"x":10,"y":10},"b":{"id":2,"name":"B","population":1500,"x":50,"y":30},"distance":60.0,"mode":"bus","options":[{"build_cost":0.0,"income_per_passenger":21.97,"investment":0.0,"mode":"bus","monthly_income":1978.0,"monthly_profit":1978.0,"score":47462.0,"transit_periods":13.9,"vehicles":null},{"build_cost":7480.0,"income_per_passenger":22.3,"investment":7480.0,"mode":"rail","monthly_income":2007.0,"monthly_profit":2007.0,"score":40682.0,"transit_periods":10.3,"vehicles":null}],"road_connected":true,"score":47462.0,"supply":900.0}]}"#;
+
     #[test]
     fn coal_keeps_paying_far_longer() {
         // Coal: transit periods [7, 255]: full rate to 7 periods, then -1 a period.
@@ -231,14 +351,10 @@ pub fn plan(towns: &Value, graph: &Value, limit: usize, overrides: &Value, engin
                 let (vehicle, max_n) = &vehicles[name];
                 // The vehicle's own effective speed when the game offers one, else the parameter.
                 let speed = vehicle.as_ref().map_or(*speed, |v| v.speed.max(1.0));
-                let periods = d / (speed * 0.0903) + overhead;
-                // `calibration.<mode>`: what this mode really earned against what the model said, read
-                // back from the running game (src/calibrate.rs); 1 when nothing was measured. It is a
-                // ratio of NET profit, so it scales income minus running cost, never income alone:
-                // r × income − cost charged the running cost a second time ((1 − r) × cost), which an
-                // independent review found (codex, 2026-11-17) after the calibrated A/B lost 2.5%.
-                let cal = p.pointer(&format!("/calibration/{name}")).or_else(|| p.pointer("/calibration/default")).and_then(Value::as_f64).unwrap_or(1.0);
-                let per_passenger = d * time_factor(periods) * payment / 2097152.0;
+                let periods = transit_periods(d, speed, overhead);
+                // A ratio of net profit (net_profit says why).
+                let cal = calibration(&p, name);
+                let per_passenger = income_per_unit(d, periods, payment, PASSENGER_TRANSIT);
                 let demand = supply * supply_factor;
                 let build = match name.as_str() {
                     "bus" => if connected { 0.0 } else { d * road_tile },
@@ -253,7 +369,7 @@ pub fn plan(towns: &Value, graph: &Value, limit: usize, overrides: &Value, engin
                 let (carried, running, purchase, fleet) = match vehicle {
                     Some(v) => {
                         // A round trip takes 2 x periods and carries a load each way: 12 / periods loads a month.
-                        let per_vehicle = v.capacity * load_factor * 12.0 / periods;
+                        let per_vehicle = carried_per_vehicle(v.capacity, load_factor, periods, true);
                         let mut top = (demand / per_vehicle.max(0.1)).ceil().clamp(1.0, *max_n);
                         if let Some(b) = budget {
                             top = top.min(((b - build) / v.price.max(1.0)).floor());
@@ -262,7 +378,7 @@ pub fn plan(towns: &Value, graph: &Value, limit: usize, overrides: &Value, engin
                         let eval = |n: f64| {
                             let carried = demand.min(n * per_vehicle);
                             let running = n * v.running_per_year / 12.0;
-                            ((carried * per_passenger - running) * cal * payback - build - n * v.price, carried, running)
+                            (payback_score(net_profit(carried, per_passenger, running, cal), payback, build, n * v.price), carried, running)
                         };
                         let mut best_n = 1.0;
                         let mut best_s = f64::MIN;
@@ -281,8 +397,10 @@ pub fn plan(towns: &Value, graph: &Value, limit: usize, overrides: &Value, engin
                     None => (demand, 0.0, 0.0, Value::Null),
                 };
                 let income = carried * per_passenger;
-                let profit = (income - running) * cal;
+                let profit = net_profit(carried, per_passenger, running, cal);
                 let invest = build + purchase;
+                // Not payback_score: `- (build + purchase)` can round apart from `- build - purchase`
+                // in the last bit, and the reported score keeps the sum it was always computed with.
                 let score = profit * payback - invest;
                 options.push(json!({"mode": name, "transit_periods": (periods * 10.0).round() / 10.0,
                     "income_per_passenger": (per_passenger * 100.0).round() / 100.0, "monthly_income": income.round(),

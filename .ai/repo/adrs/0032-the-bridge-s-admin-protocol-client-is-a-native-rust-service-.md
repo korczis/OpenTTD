@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0032
 kind: adr
 title: The bridge's admin-protocol client is a native Rust service (axum + tokio), not the Python/FastAPI bridge
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - network

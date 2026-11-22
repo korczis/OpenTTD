@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0022
 kind: adr
 title: Platform backends are drivers registered in factories and chosen at runtime, so one binary can run with a window, headless or silent
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -18,7 +18,7 @@ related:
   - file:.ai/repo/workflows/substrate/core-loop/README.md
   - file:src/driver.h
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/driver.h
     - file:src/driver.cpp
@@ -36,6 +36,8 @@ OpenTTD runs on Windows, macOS, Linux, BSDs and as a dedicated server, with seve
 video, sound and music backends per platform, and must still start when a backend is missing.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Factory registry.** Each backend has a static `src/driver.h:DriverFactoryBase` instance that
    registers itself (by type, name and priority) in `DriverFactoryBase::GetDrivers`.

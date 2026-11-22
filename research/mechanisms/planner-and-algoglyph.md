@@ -68,6 +68,46 @@ The planner's model, its versions, measurements and every route are in
 [`../mcp-control.md`](../mcp-control.md) (from "A route planner with modes of transport" on), and
 the AlgoGlyph hub methods in [`../mcp-hub.md`](../mcp-hub.md) ("AlgoGlyph: the planning engine").
 
+## Replanning while the game runs
+
+The planner runs when the bot starts, and once a game month after that. The monthly run is the
+panel service [`replan.rhai`](../../tools/research/mcp-panel/rhai/replan.rhai) (Scripts page, or
+`POST /api/services/start {"name":"replan"}`). It composes what exists and decides nothing of
+its own:
+
+| Step | Source |
+|---|---|
+| The company's last four quarters: income, expenses, value, performance rating, cargo delivered, and the trend between the last two | `ScriptCompany.GetQuarterly*` through MCP |
+| Its rank by value and its value change over the last six months | the store's views `company_latest` and `company_month` |
+| The competition: each company's last quarter, and per transport type the profit per vehicle a year old, with the leader and this company's gap to it | the same calls, `openttd://vehicles` |
+| A fresh portfolio on today's map and money | `POST /api/bots/planned` (mcp-plan, AlgoGlyph track-planning and knapsack-dp), published as `plan.portfolio` and `plan.bot_settings` |
+| The chance that a new line pays | AlgoGlyph `bayes-update` on this company's own lines a year old: earned or lost |
+| The months to pay back the portfolio's investment | AlgoGlyph `pert-monte-carlo`, optimistic, likely and pessimistic at the posterior's upper end, mean and lower end |
+| The verdict | a switch only when the lower end is at least `MIN_PAYS` (0.5) and 80 % of the draws pay back within `HORIZON_MONTHS` (24) |
+| The changes | `build_plan::apply`: only settings that differ from the bot's live ones, each approval-gated. Nothing new is proposed while an earlier change for the company still waits for the owner, or while another planner holds the company: the shared key `planner.<company>` names it (unset or `replan`: this service) |
+| The record | the shared blackboard `replan.<company>` (a `rhai.shared` event, so on the bus and in the store), and a `plan` record on the Majordomus mesh when the panel has a mesh session |
+
+The planner's call prices up to 16 rail lines with AlgoGlyph and took 3 min 10 s at load 50, so the
+script raises its own HTTP timeout for that call only (`http_timeout(seconds)`, per script thread).
+
+Run on 2026-11-22 against the seed 20261122 co-play game (8 companies). The first round, in July
+1953, found company 1 2nd of 8, with income 140,440 in the last quarter (62,169 less than the
+quarter before) and a rating of 360 (+107). Sindingbury Transport earned 71,323 per train and
+company 1 earned 33,873; company 1 led for road vehicles and aircraft. Its record was 12 of 12
+lines earning, so a new line paid with at least 0.85 at the 90 % lower bound, and 18 settings were
+proposed, each waiting for approval. The round in January 1954 found the plan equal to the live
+settings. In that round track-planning found a route on the map for none of the 21 rail lines, so
+no line went to the bot unpriced and the round held. Mesh records: NOT RUN, because the panel had
+no `$MAJORDOMUS_URL`.
+
+On 2026-11-22 the first version proposed again every round. The plan's `fr*` slots changed
+from round to round, so the proposals did not collapse onto earlier ones, and about 130 waited unanswered.
+That is why a round now holds while anything waits.
+
+The payback is only as good as the planner's monthly profit, and the planner over-predicts
+([`the-planner-overpredicts-what-a-line-earns`](../../.ai/repo/knowledge/curated/the-planner-overpredicts-what-a-line-earns.md)).
+The record-based lower bound is what discounts it.
+
 ## Where it lives
 
 | File | What it holds |

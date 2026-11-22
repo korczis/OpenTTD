@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0017
 kind: adr
 title: Game objects live in typed pools addressed by strong IDs, never by persistent pointers
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -17,7 +17,7 @@ related:
   - file:.ai/repo/workflows/substrate/saveload/README.md
   - file:src/core/pool_type.hpp
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/core/pool_type.hpp
     - file:src/core/pool_func.hpp
@@ -35,6 +35,8 @@ objects are created and destroyed throughout a game, must be written to a savega
 named identically on every peer of a network game (ADR 0016).
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **One pool per object type.** `src/core/pool_type.hpp:Pool` is a template over the item type,
    a strong index type (`requires std::is_base_of_v<PoolIDBase, Tindex>`), a growth step, a pool

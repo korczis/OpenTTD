@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0002
 kind: adr
 title: Validation runs in three cost tiers behind one gate script, and a report never claims a step that did not run
-status: proposed
+status: accepted
 date: 2026-07-23
 tags:
   - validation
@@ -15,7 +15,7 @@ related:
   - file:research/README.md
   - file:research/experiment-template.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:ad96e57c4ad014a28667773bfbcecd55a6669a8a
     - commit:83133b7cef6be3c638c94e2226dde363881fdc7f
@@ -35,6 +35,8 @@ success, or ran everything for a one-line doc fix. Experiments needed a reportin
 that could not round a partial result up to a pass.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 Validation has one entry point, `tools/gate.sh`, with three tiers over the existing
 CMake/CTest toolchain, plus a reporting layer:

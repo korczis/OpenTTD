@@ -5,7 +5,7 @@ kind: feature
 title: Every panel event on a ZeroMQ socket and in a DuckDB store per instance
 short_title: Event bus and store
 headline: Any process on the machine follows a game live over ZeroMQ, and every decision can query what earlier games recorded.
-summary: One tap on the panel's event bus forwards each event to a loopback ZeroMQ PUB socket (topic = kind, envelope prismatic-bus/v1) and to a DuckDB file per instance (runs, events, samples), read through /api/db/query, Rhai and the /data page; planning decisions publish their choices as plan.* events and are to read it.
+summary: One tap on the panel's event bus forwards each event to a loopback ZeroMQ PUB socket (topic = kind, envelope prismatic-bus/v1) and to a DuckDB file per instance (runs, events, samples) and analytic views recreated at every open (run_spans, company_month, company_latest, run_events, news, advice, plan_decisions, kind_month), read through /api/db/query, Rhai and the /data page; planning decisions publish their choices as plan.* events and are to read it.
 status: draft
 weight: 55
 areas: [agent-integration, observability]

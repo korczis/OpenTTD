@@ -10,6 +10,7 @@
 #ifdef OTTD_PRISMATIC_MCP_SERVER
 
 #include "../3rdparty/catch2/catch.hpp"
+#include "../core/format.hpp"
 #include "../prismatic_mcp/prismatic_mcp_detail.h"
 #include "../prismatic_mcp/prismatic_mcp_menu.h"
 #include "../prismatic_mcp/prismatic_mcp_ui.h"
@@ -652,6 +653,7 @@ TEST_CASE("Every client tool says whether it changes anything", "[prismatic_mcp]
 	for (const auto &t : PrismaticMCP::View::Tools()) tools.push_back(t);
 	for (const auto &t : PrismaticMCP::UI::Tools()) tools.push_back(t);
 	for (const auto &t : PrismaticMCP::Menu::Tools()) tools.push_back(t);
+	tools.push_back(ReadManyTool());
 	REQUIRE_FALSE(tools.empty());
 	for (const auto &t : tools) {
 		INFO(t["name"].get<std::string>());
@@ -661,44 +663,104 @@ TEST_CASE("Every client tool says whether it changes anything", "[prismatic_mcp]
 	}
 }
 
-TEST_CASE("The approval state machine binds to canonical args, executes once, refuses replay and changed args", "[prismatic_mcp]")
+TEST_CASE("Several resources at one tick: the call is bounded, and a bad uri fails only its own entry", "[prismatic_mcp]")
+{
+	auto known = [](const std::string &u) { return u == "openttd://towns" || u == "openttd://map"; };
+
+	/* The tool reads only, and its schema says the cap and the scheme the plan enforces. */
+	json tool = ReadManyTool();
+	CHECK(tool["name"] == "openttd.resources.read_many");
+	CHECK(tool["annotations"]["readOnlyHint"] == true);
+	CHECK(tool["inputSchema"]["required"] == json::array({"uris"}));
+	CHECK(tool["inputSchema"]["properties"]["uris"]["maxItems"] == READ_MANY_MAX_URIS);
+	CHECK(tool["inputSchema"]["properties"]["uris"]["minItems"] == 1);
+
+	/* Malformed arguments refuse the whole call, before anything is read. */
+	for (const json &bad : {json::object(), json::array(), json{{"uris", "openttd://towns"}}, json{{"uris", json::array()}}}) {
+		INFO(bad.dump());
+		ReadManyPlan p = PlanReadMany(bad, known);
+		CHECK_FALSE(p.error.empty());
+		CHECK(p.entries.empty());
+	}
+
+	/* The cap: exactly READ_MANY_MAX_URIS is planned, one more is refused as a whole. */
+	json at_cap = {{"uris", json::array()}};
+	for (size_t i = 0; i < READ_MANY_MAX_URIS; i++) at_cap["uris"].push_back(fmt::format("openttd://x{}", i));
+	ReadManyPlan full = PlanReadMany(at_cap, known);
+	CHECK(full.error.empty());
+	CHECK(full.entries.size() == READ_MANY_MAX_URIS);
+	at_cap["uris"].push_back("openttd://towns");
+	ReadManyPlan over = PlanReadMany(at_cap, known);
+	CHECK(over.error.find("at most") != std::string::npos);
+	CHECK(over.entries.empty());
+
+	/* Per entry, in the order asked: known ones are read; the rest say why, and the call still goes on. */
+	json args = {{"uris", json::array({"openttd://towns", "openttd://nope", 7, "https://example.com/", "openttd://map", "openttd://towns"})}};
+	ReadManyPlan p = PlanReadMany(args, known);
+	REQUIRE(p.error.empty());
+	REQUIRE(p.entries.size() == 6);
+	CHECK(p.entries[0].uri == "openttd://towns");
+	CHECK(p.entries[0].error.empty());
+	CHECK(p.entries[1].error == "unknown resource uri");
+	CHECK(p.entries[2].uri == "7");
+	CHECK(p.entries[2].error == "not a string");
+	CHECK(p.entries[3].error == "only openttd:// resources");
+	CHECK(p.entries[4].error.empty());
+	CHECK(p.entries[5].error.starts_with("duplicate"));
+}
+
+TEST_CASE("The approval state machine binds to the tool and canonical args, executes once, refuses replay, changed args and another tool", "[prismatic_mcp]")
 {
 	/* ClassifySubmit is exactly what the submit handler runs to decide pending/reuse/execute. An
-	 * approval binds to the submission's EXACT canonical arguments, not the 64-bit FNV-1a digest
-	 * (which could collide). States mirror ApprovalState: 0 Pending, 1 Approved, 3 Consumed. */
+	 * approval binds to the submission's action (tool) AND its EXACT canonical arguments, not the
+	 * 64-bit FNV-1a digest (which could collide). States mirror ApprovalState: 0 Pending,
+	 * 1 Approved, 3 Consumed. */
+	const std::string pause = "game.set_pause";
 	const std::string pause5 = R"({"ticks":5})";
 	const std::string pause6 = R"({"ticks":6})";
 	size_t idx = 999;
 
 	SECTION("submit with nothing live asks for approval; that pending approval is then reused") {
 		std::vector<ApprovalView> a;
-		CHECK(ClassifySubmit(a, pause5, 10, idx) == SubmitDecision::CreatePending);
-		a.push_back({0, pause5, 100});
+		CHECK(ClassifySubmit(a, pause, pause5, 10, idx) == SubmitDecision::CreatePending);
+		a.push_back({0, pause, pause5, 100});
 		idx = 999;
-		CHECK(ClassifySubmit(a, pause5, 10, idx) == SubmitDecision::ReusePending);
+		CHECK(ClassifySubmit(a, pause, pause5, 10, idx) == SubmitDecision::ReusePending);
 		CHECK(idx == 0);
 	}
-	SECTION("an approved, unexpired approval executes once for the exact args") {
-		std::vector<ApprovalView> a{{1, pause5, 100}};
-		CHECK(ClassifySubmit(a, pause5, 10, idx) == SubmitDecision::Execute);
+	SECTION("an approved, unexpired approval executes once for the exact tool and args") {
+		std::vector<ApprovalView> a{{1, pause, pause5, 100}};
+		CHECK(ClassifySubmit(a, pause, pause5, 10, idx) == SubmitDecision::Execute);
 		CHECK(idx == 0);
 	}
 	SECTION("changed arguments after approval are refused -- a fresh approval is required") {
-		std::vector<ApprovalView> a{{1, pause5, 100}};
-		CHECK(ClassifySubmit(a, pause6, 10, idx) == SubmitDecision::CreatePending);
+		std::vector<ApprovalView> a{{1, pause, pause5, 100}};
+		CHECK(ClassifySubmit(a, pause, pause6, 10, idx) == SubmitDecision::CreatePending);
 	}
 	SECTION("a replay of an already-consumed approval is refused") {
-		std::vector<ApprovalView> a{{3, pause5, 100}};
-		CHECK(ClassifySubmit(a, pause5, 10, idx) == SubmitDecision::CreatePending);
+		std::vector<ApprovalView> a{{3, pause, pause5, 100}};
+		CHECK(ClassifySubmit(a, pause, pause5, 10, idx) == SubmitDecision::CreatePending);
 	}
 	SECTION("an expired approval does not execute") {
-		std::vector<ApprovalView> a{{1, pause5, 5}};
-		CHECK(ClassifySubmit(a, pause5, 10, idx) == SubmitDecision::CreatePending);
+		std::vector<ApprovalView> a{{1, pause, pause5, 5}};
+		CHECK(ClassifySubmit(a, pause, pause5, 10, idx) == SubmitDecision::CreatePending);
 	}
 	SECTION("the binding is the exact args, so two different argument sets never share one approval") {
-		std::vector<ApprovalView> a{{1, pause5, 100}};
-		CHECK(ClassifySubmit(a, pause5, 10, idx) == SubmitDecision::Execute);
-		CHECK(ClassifySubmit(a, pause6, 10, idx) == SubmitDecision::CreatePending);
+		std::vector<ApprovalView> a{{1, pause, pause5, 100}};
+		CHECK(ClassifySubmit(a, pause, pause5, 10, idx) == SubmitDecision::Execute);
+		CHECK(ClassifySubmit(a, pause, pause6, 10, idx) == SubmitDecision::CreatePending);
+	}
+	SECTION("an approval for one tool is never spent by another tool with the same arguments") {
+		/* Audit finding C1: ai.reload and ai.stop both take {company:N}; approving the reload must
+		 * not let a stop (which deletes the company) run on that approval. */
+		const std::string company3 = R"({"company":3})";
+		std::vector<ApprovalView> a{{1, "ai.reload", company3, 100}};
+		CHECK(ClassifySubmit(a, "ai.stop", company3, 10, idx) == SubmitDecision::CreatePending);
+		std::vector<ApprovalView> p{{0, "ai.reload", company3, 100}};
+		CHECK(ClassifySubmit(p, "ai.stop", company3, 10, idx) == SubmitDecision::CreatePending);
+		idx = 999;
+		CHECK(ClassifySubmit(a, "ai.reload", company3, 10, idx) == SubmitDecision::Execute);
+		CHECK(idx == 0);
 	}
 }
 

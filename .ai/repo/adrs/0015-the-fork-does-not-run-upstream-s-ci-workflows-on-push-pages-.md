@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0015
 kind: adr
 title: The fork does not run upstream's CI workflows on push; Pages deploys from Surfaces alone
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - ci

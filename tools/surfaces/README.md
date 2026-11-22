@@ -99,7 +99,7 @@ A region is a pair of HTML comments whose contents the generator owns:
 
 | Generator | Arguments | Table |
 |---|---|---|
-| `docs-index` | `dir=<path>` (default: all), `depth=<n>` | Every published document under the path, with its derived summary |
+| `docs-index` | `dir=<path>` (default: all), `depth=<n>`, `fields=<a,b>`, `as=pie by=<field>` | Every published document under the path, with its derived summary and a column per front-matter field in `fields`; or a pie of the documents by one front-matter field, each slice opening that table filtered to its value |
 | `ai-features` | `as=pie` | `.ai/` features: name, status, headline; or a pie by status |
 | `ai-adrs` | `as=pie` | Architecture decisions: id, status, title; or a pie by status |
 | `ai-rules` | `origin=project\|vendored\|all`, `as=pie` | Rules: id, class, statement; or a pie by class |
@@ -124,8 +124,15 @@ until then.
 
 A chart is a number drawn, so it is generated like one. Every chart in a document is a Mermaid
 `pie` or `xychart-beta` block written by a region (`facts as=pie`, `ai-* as=pie|bar`,
-`table-chart`) or by a tool between its own markers (the README scoreboard). GitHub and the wiki
-render Mermaid natively, so a reader of the repository sees the chart without a build.
+`table-chart`) or by a tool between its own markers: the README scoreboard, every duel page
+(`tools/research/mcp-duel --render`, markers `duel-charts`), every AI battle record and
+ablation page (`battle.py render`, markers `battle-charts` and `ablation-charts`) and every A/B
+record page (`tools/research/mcp-ab --render`, markers `ab-charts`), each drawn from its record's
+JSON and declared as a generator below. The battle post-mortem pages (`battle-postmortem render`,
+markers `postmortem-charts`) are drawn the same way but need cargo, which CI does not have, so
+`tools/gate.sh change` checks them instead of a generator (`research/battle-postmortem.md`).
+GitHub and the wiki render Mermaid natively, so a reader of the repository sees the chart without
+a build.
 
 The site reads the same block back (`mermaid_chart_spec`) and draws it with Apache ECharts in the
 site's palette: a tooltip per value, zoom when there are many categories, a switch between bars and
@@ -209,6 +216,13 @@ elsewhere, which are fixed where they come from.
 - **Data.** `data/site.json` holds the chart inputs: weekly commits, the documentation map,
   per-document age at `HEAD` and plan progress. `data/search.json` holds the search index.
   Both are computed at build time from git, so the same commit always builds the same site.
+- **AI layer page.** `ai.html` opens with charts counted from the `.ai/` records it lists:
+  features, decisions and issues by status, rules by class and by origin (project or vendored),
+  and issues per milestone. `Site.ai_chart` builds each one from the same column a table shows
+  and draws it through `chart_figure`, the card the Markdown charts use. A slice or a bar links to
+  `ai.html?col=<column>&filter=<value>#ai-<table>`, so a click filters that table to the rows it
+  counted (`assets/app.js` `linkedFilter`, with a badge that clears it). The features table is in
+  a collapsed block that opens when a filter targets it.
 
 Every page ends with where it is linked from and what it links to, and the "All documents" page
 draws every link between published documents as a force graph (drag, zoom, hover, click; a

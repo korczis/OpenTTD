@@ -215,6 +215,16 @@ class PrismaticAI extends AIInfo {
 			easy_value = 18, medium_value = 18, hard_value = 18, custom_value = 18,
 			flags = CONFIG_INGAME,
 		});
+		/* RESEARCH-ONLY: one authority for the freight-line decision (the battlebrain service). With it
+		 * set, the bot builds only the freight lines handed over in fr_* to fr16_* and never picks one
+		 * itself, whatever own_lines, self_steward and autopilot say (main.nut, the own plan). */
+		AddSetting({
+			name = "planned_freight_only",
+			description = "1: the bot builds only the freight rail lines handed over in fr_* to fr16_* and plans none itself (no own lines from own_lines, the in-bot steward's reinvestment or the autopilot); twins (rail_twin_max) and the passenger pair still follow their own settings. 0 (default): unchanged.",
+			min_value = 0, max_value = 1,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
 		AddSetting({
 			name = "line_budget",
 			description = "Money (bank balance plus loan headroom) the bot wants at hand before it builds the planner's next freight rail line.",
@@ -350,7 +360,7 @@ class PrismaticAI extends AIInfo {
 		});
 		AddSetting({
 			name = "catchment_stops",
-			description = "Catchment ring (learned from AAAHogEx): most joined drive-through road stops around each passenger airport, so it collects the whole town (catchment.nut; default 2 since the GA elite became the default on 2026-11-19, paired over 40 seeds; 0: off).",
+			description = "Catchment ring (learned from AAAHogEx): most joined drive-through road stops around each passenger airport, so it collects the whole town (catchment.nut; default 8 since GA g150.0 became the default on 2026-11-20; 2 before, from the GA elite of 2026-11-19; 0: off).",
 			min_value = 0, max_value = 30,
 			easy_value = 8, medium_value = 8, hard_value = 8, custom_value = 8, step_size = 1,
 			flags = CONFIG_INGAME,
@@ -385,7 +395,7 @@ class PrismaticAI extends AIInfo {
 		});
 		AddSetting({
 			name = "air_add_waiting",
-			description = "Planes (learned from AAAHogEx): add a plane to an air route while the passengers waiting at BOTH of its airports exceed this, up to invest_air_cap (fleet.nut; default 0, the old rule of 1.5 loads at one end, as in the GA elite that became the default on 2026-11-19; the earlier default 10 with catchment_stops=8 had +14.8% mean value over 36 seeds against the bot before it).",
+			description = "Planes (learned from AAAHogEx): add a plane to an air route while the passengers waiting at BOTH of its airports exceed this, up to invest_air_cap (fleet.nut; default 20 since GA g150.0 became the default on 2026-11-20; 0: the old rule of 1.5 loads at one end, the default of the GA elite of 2026-11-19; the earlier default 10 with catchment_stops=8 had +14.8% mean value over 36 seeds against the bot before it).",
 			min_value = 0, max_value = 500,
 			easy_value = 20, medium_value = 20, hard_value = 20, custom_value = 20, step_size = 10,
 			flags = CONFIG_INGAME,

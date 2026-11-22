@@ -18,6 +18,8 @@
 #include <string_view>
 #include <vector>
 
+#include "../3rdparty/nlohmann/json.hpp"
+
 /**
  * Pure helpers with no OpenTTD or game-state dependency, factored out of the
  * server so the security-critical logic (digest binding, header parsing, bearer
@@ -162,38 +164,115 @@ enum class SubmitDecision : uint8_t {
 	Execute,       ///< an approved, unexpired, unconsumed approval for these exact args: run once
 };
 
-/** One approval as the pure classifier sees it: its state, the canonical args it was granted for,
- * and when it expires. `state` mirrors ApprovalState (0 Pending, 1 Approved, 2 Denied, 3 Consumed). */
+/** One approval as the pure classifier sees it: its state, the action (tool) and the canonical args
+ * it was granted for, and when it expires. `state` mirrors ApprovalState (0 Pending, 1 Approved,
+ * 2 Denied, 3 Consumed). */
 struct ApprovalView {
 	uint8_t state = 0;
+	std::string tool;
 	std::string canonical_args;
 	uint64_t expiry_tick = 0;
 };
 
-/** Classify a submission whose canonical arguments are `canonical_args`, at tick `now`, against the
- * live `approvals` (scanned in order). Returns the decision; for ReusePending/Execute it sets
- * `matched_index` to the matched approval's index. Pure: no globals, no game state, no side effects
- * -- the caller consumes the approval and runs the command. */
-inline SubmitDecision ClassifySubmit(const std::vector<ApprovalView> &approvals,
+/** Classify a submission of action `tool` with canonical arguments `canonical_args`, at tick `now`,
+ * against the live `approvals` (scanned in order). An approval binds to the action AND its exact
+ * arguments: an approval granted for one tool is never spent by another tool with the same
+ * arguments (e.g. ai.reload {company:N} never runs ai.stop {company:N}). Returns the decision; for
+ * ReusePending/Execute it sets `matched_index` to the matched approval's index. Pure: no globals, no
+ * game state, no side effects -- the caller consumes the approval and runs the command. */
+inline SubmitDecision ClassifySubmit(const std::vector<ApprovalView> &approvals, std::string_view tool,
 	std::string_view canonical_args, uint64_t now, size_t &matched_index)
 {
-	/* An approved, unexpired, unconsumed approval bound to these exact args executes once. */
+	/* An approved, unexpired, unconsumed approval bound to this action and these exact args executes once. */
 	for (size_t i = 0; i < approvals.size(); i++) {
 		const ApprovalView &a = approvals[i];
-		if (a.state == 1 && a.canonical_args == canonical_args && now <= a.expiry_tick) {
+		if (a.state == 1 && a.tool == tool && a.canonical_args == canonical_args && now <= a.expiry_tick) {
 			matched_index = i;
 			return SubmitDecision::Execute;
 		}
 	}
-	/* Otherwise reuse a still-pending approval for these exact args. */
+	/* Otherwise reuse a still-pending approval for this action and these exact args. */
 	for (size_t i = 0; i < approvals.size(); i++) {
 		const ApprovalView &a = approvals[i];
-		if (a.state == 0 && a.canonical_args == canonical_args && now <= a.expiry_tick) {
+		if (a.state == 0 && a.tool == tool && a.canonical_args == canonical_args && now <= a.expiry_tick) {
 			matched_index = i;
 			return SubmitDecision::ReusePending;
 		}
 	}
 	return SubmitDecision::CreatePending;
+}
+
+/** At most this many resources one openttd.resources.read_many call reads: a bound on one main-thread poll. */
+inline constexpr size_t READ_MANY_MAX_URIS = 32;
+/** The only scheme openttd.resources.read_many reads; anything else is refused per entry. */
+inline constexpr std::string_view READ_MANY_SCHEME = "openttd://";
+
+/** What openttd.resources.read_many will do with its arguments, decided before any resource is built. */
+struct ReadManyPlan {
+	/** One requested uri, in the order asked; `error` empty means it is read. */
+	struct Entry {
+		std::string uri;   ///< as given (a non-string element as its JSON text)
+		std::string error; ///< why it is not read, or empty
+	};
+	std::string error;          ///< non-empty: the whole call is refused (malformed or over the cap)
+	std::vector<Entry> entries; ///< one per requested uri, when `error` is empty
+};
+
+/**
+ * Plan a read of several resources at one tick from the tool's arguments `{uris: [...]}`. The call
+ * is refused as a whole only when `uris` is missing, not an array, empty or longer than
+ * READ_MANY_MAX_URIS; otherwise each entry stands alone: not a string, another scheme than
+ * openttd://, a uri `is_known` does not know, or a uri already asked for earlier in the call is an
+ * error for that entry only. Pure: `is_known` is the caller's view of the resource table.
+ */
+template <class IsKnown>
+ReadManyPlan PlanReadMany(const nlohmann::json &args, IsKnown &&is_known)
+{
+	ReadManyPlan plan;
+	const nlohmann::json *uris = args.is_object() && args.contains("uris") ? &args["uris"] : nullptr;
+	if (uris == nullptr || !uris->is_array()) {
+		plan.error = "uris (an array of openttd:// resource uris) required";
+		return plan;
+	}
+	if (uris->empty()) {
+		plan.error = "uris is empty";
+		return plan;
+	}
+	if (uris->size() > READ_MANY_MAX_URIS) {
+		plan.error = "at most " + std::to_string(READ_MANY_MAX_URIS) + " uris per call";
+		return plan;
+	}
+	for (const auto &u : *uris) {
+		ReadManyPlan::Entry &e = plan.entries.emplace_back();
+		if (!u.is_string()) {
+			e.uri = u.dump();
+			e.error = "not a string";
+			continue;
+		}
+		e.uri = u.get<std::string>();
+		if (!std::string_view(e.uri).starts_with(READ_MANY_SCHEME)) {
+			e.error = "only openttd:// resources";
+		} else if (!is_known(e.uri)) {
+			e.error = "unknown resource uri";
+		} else if (std::any_of(plan.entries.begin(), plan.entries.end() - 1, [&e](const auto &o) { return o.error.empty() && o.uri == e.uri; })) {
+			e.error = "duplicate: read once, earlier in this call";
+		}
+	}
+	return plan;
+}
+
+/** The tools/list entry of openttd.resources.read_many: read-only, its cap and scheme from the constants above. */
+inline nlohmann::json ReadManyTool()
+{
+	nlohmann::json uri = {{"type", "string"}, {"pattern", "^" + std::string(READ_MANY_SCHEME)}};
+	nlohmann::json uris = {{"type", "array"}, {"minItems", 1}, {"maxItems", READ_MANY_MAX_URIS}, {"items", uri},
+		{"description", "openttd:// resource uris as resources/list names them; an unknown one is an error for its entry only"}};
+	return {{"name", "openttd.resources.read_many"},
+		{"description", "Read several resources at one game tick, without pausing: every one is built in the same "
+			"main-thread call, so their game_tick agree (a coherent snapshot). Answers {ok, game_tick, game_date, "
+			"resources: [{uri, ok, data | error}]}, data being what resources/read answers for that uri"},
+		{"inputSchema", {{"type", "object"}, {"required", nlohmann::json::array({"uris"})}, {"properties", {{"uris", uris}}}}},
+		{"annotations", {{"readOnlyHint", true}, {"idempotentHint", true}, {"openWorldHint", false}}}};
 }
 
 } // namespace PrismaticMCP::detail
