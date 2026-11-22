@@ -5,7 +5,8 @@
 //! CORS headers, so the browser cannot read it directly; this is the panel's read-only proxy.
 //!
 //! Read-only: only GETs, never a claim, beat, enrol or session. The server is
-//! $PRISMATIC_MAJORDOMUS_URL, default http://127.0.0.1:8741 (`majordomus serve ensure`).
+//! `$MAJORDOMUS_URL`, else the server `majordomus serve ensure` names for this checkout: the one
+//! resolution every tool here shares (src/board.rs `majordomus_url`), found once and kept.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,13 +22,15 @@ pub const PARTS: [(&str, &str); 3] = [
     ("nodes", "/api/v1/mesh/nodes"),
 ];
 
-const DEFAULT_URL: &str = "http://127.0.0.1:8741";
-
-/// The Majordomus server the panel reads, without a trailing slash.
-pub fn base_url() -> String {
-    let url = std::env::var("PRISMATIC_MAJORDOMUS_URL").unwrap_or_default();
-    let url = url.trim().trim_end_matches('/');
-    if url.is_empty() { DEFAULT_URL.to_string() } else { url.to_string() }
+/// The Majordomus server the panel reads, without a trailing slash: `$MAJORDOMUS_URL` when set,
+/// else what `majordomus serve ensure` names for this checkout, asked once per process.
+pub fn base_url() -> Result<String, String> {
+    if let Ok(u) = std::env::var("MAJORDOMUS_URL") {
+        let u = u.trim().trim_end_matches('/');
+        if !u.is_empty() { return Ok(u.to_string()); }
+    }
+    static DERIVED: std::sync::OnceLock<Result<String, String>> = std::sync::OnceLock::new();
+    DERIVED.get_or_init(|| crate::rhai_host::board::majordomus_url(None, None).map(|u| u.trim_end_matches('/').to_string())).clone()
 }
 
 fn get(url: &str) -> Result<Value, String> {
@@ -59,8 +62,14 @@ pub fn assemble(source: &str, results: Vec<(&str, Result<Value, String>)>, ms: u
 /// discovered node, read in parallel. Answers 200 also when Majordomus is down (`reachable`
 /// false, `errors` says why per part), like GET /api/bus.
 pub fn h_mesh(_: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
-    let base = base_url();
     let started = Instant::now();
+    let base = match base_url() {
+        Ok(b) => b,
+        Err(e) => {
+            let results = PARTS.iter().map(|(name, _)| (*name, Err(format!("no Majordomus server: {e}")))).collect();
+            return Ok((200, assemble("(unresolved)", results, started.elapsed().as_millis())));
+        }
+    };
     let results = std::thread::scope(|s| {
         let handles: Vec<_> = PARTS.iter()
             .map(|(name, path)| {
@@ -78,6 +87,16 @@ pub fn h_mesh(_: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_address_is_majordomus_url_when_set() {
+        let _e = ENV.lock().unwrap();
+        std::env::set_var("MAJORDOMUS_URL", "http://127.0.0.1:59999/");
+        assert_eq!(base_url().unwrap(), "http://127.0.0.1:59999");
+        std::env::remove_var("MAJORDOMUS_URL");
+    }
+
+    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn assemble_keeps_parts_and_errors_apart() {
