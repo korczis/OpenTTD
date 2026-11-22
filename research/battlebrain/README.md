@@ -58,7 +58,7 @@ allowed to turn a candidate into an executable choice.
 | portfolio within a budget | `cargo.rs` knapsack-dp **or a built-in copy** | AlgoGlyph knapsack-dp as candidate evidence; the built-in copy is a separate, named solver |
 | aggressiveness | Prismatic `OpenttdController` Monte Carlo | unchanged (outside this slice) |
 | GA settings | `battle.py` offline, `prismatic_tune.rhai` live | offline only; it feeds the policy parameters |
-| approval | the operator, but also panel auto-approve and armed UI input | the operator (auto-approve is outside this slice) |
+| approval | the operator; a live decision (`openttd.ai.set_settings`) only at the game's console, never through the panel, auto-approve or Rhai, and the panel's other approvals need its owner secret ([mcp-control](../mcp-control.md#approval-is-bound-to-the-owner)); armed UI input remains | the operator (auto-approve is outside this slice) |
 
 ## Contracts (I0095)
 

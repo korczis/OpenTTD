@@ -44,7 +44,7 @@ and OpenMSX for sound and music), and `PrismaticAI` in `~/Documents/OpenTTD/ai/`
 |---|---|
 | Stat cards, companies, decisions | `openttd://game/state`, `openttd://companies`, `openttd://decisions`, every second |
 | Pause / Resume | `openttd.game.set_pause` through the approval flow; pending approvals get an Approve button |
-| Auto-approve (full auto) | the operator's switch: the panel approves its own pending decisions; off by default |
+| Auto-approve (full auto) | the operator's switch: the panel approves its own pending decisions, never an owner-only one; off by default, and switching it on needs the owner secret (see [Approval is bound to the owner](#approval-is-bound-to-the-owner)) |
 | MCP catalogue | `resources/list` and `tools/list`; click a resource to read it |
 | Scripts (`/scripts`, `/scripts/<name>`) | The Rhai library as a workspace: every script with its header comment, imports and importers; an editor with Rhai highlighting, line numbers, an outline and a live parse check; Save (only text that parses), Run once (streamed), and Start/Stop as a service whose log streams and which reloads within a second when its file or a library it imports changes ([`research/rail-steward.md`](rail-steward.md), `src/panel_scripts.rs`) |
 | Towns (`/towns`) | The [town-authority model](mechanisms/town-authority.md) derived from the engine sources (likes and dislikes, gates with removal thresholds by tolerance, town actions, links, relations, each rule with its source `path:line`) and, with a game connected, the live towns with one company's rating, band and `town_lib.rhai` advice; a company selector kept in the address (`src/panel_town.rs`, `tools/research/mcp-towns-check`) |
@@ -61,8 +61,8 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/rpc` | `{"method", "params"}` | raw MCP JSON-RPC with the panel's token |
 | `POST /api/console` | `{"command"}` | one OpenTTD console line and its output |
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
-| `POST /api/approve` | `{"id"}` | the operator's approval, then the resubmission; 404 for an id the panel does not hold, 409 when the game server no longer holds it, 422 when the game rejected it |
-| `POST /api/auto-approve` | `{"on": bool}` | |
+| `POST /api/approve` | `{"id"}` | the owner's approval, then the resubmission; 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an id the panel does not hold, 409 when the game server no longer holds it, 422 when the game rejected it |
+| `POST /api/auto-approve` | `{"on": bool}` | `on: true` needs the owner secret (401 without it); `on: false` is open to anyone |
 | `POST /api/rhai` | `{"script"}` | a Rhai script's output |
 | `POST /api/rhai/stream` | `{"script"}` | the same, streamed line by line (SSE `out`, `err`, `exit`) |
 | `GET /api/scripts`, `GET /api/script?name=` | | the library ($MCP_RHAI_PATH, else `tools/research/mcp-panel/rhai`), one script with its parse verdict |
@@ -378,7 +378,8 @@ libduckdb (Homebrew duckdb 1.5; `tools/research/mcp-rhai/build.rs` finds it, and
 reports `"store": "off"`, and its query routes answer 503.
 
 **Queries.** `GET /api/db/tables` returns the schema. `GET /api/db/query?sql=...` and
-`POST /api/db/query {sql}` run one read-only statement: SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW,
+`POST /api/db/query {sql, params?}` run one read-only statement (`params` binds its named
+parameters, `$company`, never pasted; a missing one is a 400): SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW,
 checked after leading whitespace and comments. Anything else, or a second statement after `;`, is
 a 400. The answer is `{columns, rows, count, capped}`, where each row is a list in column order,
 capped at 5000 rows. A GET without `sql` answers the newest 20 events. The store's connection runs without external access (no file reads, no
@@ -479,8 +480,9 @@ step's `approval_id` gives that step its decision and, once final, its verdict's
 step waits any more the panel publishes `plan.directive_outcome` (`inputs.live.directive_seq` names
 the `plan.directive`). A denied approval leaves no decision record, so a directive with no verdict
 after an hour is closed as `expired`, never as applied. Each settled step says how its approval was
-given (`approved_by`): `{channel: "api", declared}` for `POST /api/approve` (`by` names the approver
-the caller declares; nothing checks it, the loopback API authenticates no one), `{channel:
+given (`approved_by`): `{channel: "api", declared, owner_secret: true}` for `POST /api/approve`
+(the owner secret was checked; `by` names the approver the caller declares, and nothing checks the
+name), `{channel:
 "auto-approve"}` for the panel's switch, where no person approved, or `{channel: "outside the
 panel"}` for one approved elsewhere, as in the game's console.
 
@@ -528,8 +530,8 @@ tools/research/mcp-duel ...`), a planned bot start derives both from the stored 
 (`tools/research/mcp-rhai/src/duel_outcomes.rs`). Off is the default, and stays the default until the
 derived rule wins held-start pairs on three seeds (rule `project.a-tuning-claim-needs-held-start-pairs`).
 
-- **History.** One statement (`duel_outcomes.rs:outcomes_sql`) on every store of the store directory
-  (`query_every_store`): each `plan.duel` verdict of at least 60 months, with the `plan.bot_settings`
+- **History.** One named query (`duel_outcomes.rs:outcomes_query`, `sql/queries/duel_outcomes.sql`) on
+  every store of the store directory (`every_store`): each `plan.duel` verdict of at least 60 months, with the `plan.bot_settings`
   events of the same instance. A verdict is joined with the settings its own run published before it:
   how many freight lines the plan handed over (`h`), `own_lines` and `rail_after`. Only held starts
   against the unplanned PrismaticAI count. Every duel runs on the map of the panel's generated config,
@@ -706,7 +708,9 @@ and that is the owner's call (knowledge `auto-approve-is-the-owners-switch`).
 `mcp-rhai [--panel URL] [--hub URL] (<file.rhai> | -e '<script>')`, or `/rhai ...` in the developer console.
 
 - Built-in: `rpc`, `read`, `overview`, `status`, `console`, `pause`, `approve`, `auto_approve`,
-  `events`, `sleep`, `to_json`, `tools`, `commands`, `help`.
+  `events`, `sleep`, `to_json`, `tools`, `commands`, `help`. `approve(id)` and `auto_approve(true)`
+  only raise an error that names the console command: a script never approves
+  ([Approval is bound to the owner](#approval-is-bound-to-the-owner)). `auto_approve(false)` works.
 - Derived at start-up, never listed by hand: one function per MCP tool in `tools/list` (dots
   become underscores: `openttd_game_set_pause(#{pause: true})`), and one per OpenTTD console
   command in `list_cmds` (`con_companies()`, `con_newgame("42")`; `list_cmds` counts them), and one per operation
@@ -1077,10 +1081,11 @@ mode nobody measured. Without `default` an unmeasured mode kept factor 1 and won
 the :8800 map the calibrated portfolio swapped two freight lines for three air routes.
 
 The bot start reads the readings when `PRISMATIC_PLAN_CALIBRATION` asks for them: `all` (every
-reading) or `seed` (games of this seed and map size); unset or `off`, the model alone. The statement
-is `calibrate.rs:readings_sql`; `panel_store.rs:query_every_store` runs it on every store of the
-store directory: the panel's own through the code of `/api/db/query`, a stopped panel's file
-read-only, a running panel's through its `/api/db/query`. `plan.portfolio` and `plan.bot_settings`
+reading) or `seed` (games of this seed and map size); unset or `off`, the model alone. The query
+is `calibrate.rs:readings_query` (`sql/queries/calibration_readings.sql`, the seed and map bound,
+null for `all`); `panel_store.rs:every_store` runs it on every store of the store directory: the
+panel's own through the code of `/api/db/named`, a stopped panel's file read-only, a running
+panel's through its `/api/db/named`. `plan.portfolio` and `plan.bot_settings`
 name the query and its rows (`inputs.stored`) and the readings used (`inputs.live.calibration`);
 with calibration off, the store off, or no reading in scope they carry `{fallback: "uncalibrated:
 <why>"}` and the plan runs uncalibrated, and the plan's log says which (`planner: calibration from
@@ -1142,8 +1147,8 @@ looks for the AlgoGlyph runner in the newest stacked branch first (`feature/acti
 **The split (2026-11-18).** AlgoGlyph stays a generic kernel runner. Its `flow serve` takes one JSON
 request per stdin line and answers one line per request. It learns nothing of OpenTTD, ZeroMQ or
 DuckDB. OpenTTD knows the game, so the subscriber lives here. It reads the store through the
-panel's read-only `/api/db/query`, follows the panel's ZeroMQ bus, and builds each kernel's input
-(ADR 0034 point 4). A ZeroMQ input adapter inside AlgoGlyph was rejected for three reasons. It
+panel's read-only `/api/db/named` (the named query `kernel_window`), follows the panel's ZeroMQ bus,
+and builds each kernel's input (ADR 0034 point 4). A ZeroMQ input adapter inside AlgoGlyph was rejected for three reasons. It
 would need a game-specific mapping from envelopes to kernel inputs there. It would add a network
 dependency to a repository whose flow rule (`project.typed-flow`) keeps the flow free of network and
 storage. And it would give AlgoGlyph a second reader of the store besides the panel. No AlgoGlyph
@@ -1340,8 +1345,10 @@ already approved call needs a fresh approval, and the digest binds the approval 
 So no sentence, script, Rhai program or agent can make the game execute a mutation that an operator
 did not approve. The panel's `auto_approve` is a different thing living outside the game: operator
 automation that answers the queue on the operator's behalf. It is set by `POST /api/auto-approve
-{on}` (`panel.rs` `h_auto`), by the panel's own toggle "Auto-approve (full auto)", by
-`--auto-approve` at startup, or from Rhai as `auto_approve(on)`.
+{on}` with the owner secret (`panel.rs` `h_auto`, `owner_gate`), by the panel's own toggle
+"Auto-approve (full auto)" on a page opened with the secret, or by `--auto-approve` at startup.
+Rhai can only switch it off. It never approves an owner-only tool (`OWNER_ONLY_TOOLS`), not even
+when `--auto-approve` started it, so a test stack keeps `--auto-approve` for everything else.
 
 Two properties of that switch are easy to get wrong, and both were measured on 2026-11-17.
 **It is not "approve what comes next": `auto_loop` (`panel.rs:1043`) walks the entire pending queue
@@ -1411,7 +1418,10 @@ game run by `mcp-e2e` takes Prismatic's decisions without the Python bridge
   `samples_query`, one read-only statement of the company's samples in every run of the store: the
   first sample of each game month, with the run's seed and start and the `aggressiveness` the
   latest applied (or pending) `plan.directive` of that run had set for the company by then, null
-  before any (`panel_decision.rs:samples_sql`).
+  before any (`panel_decision.rs:samples_query`, the file `sql/queries/company_samples.sql`). Its
+  company is a named parameter, and `samples_params` (`{company}`) holds its value: a client
+  POSTs `{sql: samples_query, params: samples_params}` to `query_url`, and the value is bound,
+  never pasted.
 - `POST /api/decision/pull {url?}` GETs a directive from `url`, else `PRISMATIC_DECISION_URL`,
   checks it against the contract and applies it, answering a `DecisionPullResult`. A directive
   the contract refuses is answered 422 with every reason, and nothing is applied; no URL is 501.
@@ -1425,8 +1435,8 @@ game run by `mcp-e2e` takes Prismatic's decisions without the Python bridge
   (its `additionalProperties` is true since 2026-11-17; it was false, and Prismatic's real answer
   broke it).
 - One field of the working is read since I0085: `fit` (`prismatic-fit/v1`, `fitRecord` of the
-  contract), what Prismatic fitted its decision from: `model`, `parameters`, `samples` (`query` on
-  `query_url`, or `bus` with `kinds`, and `rows`), `quality`, and `fallback` when it could not fit
+  contract), what Prismatic fitted its decision from: `model`, `parameters`, `samples` (`query`
+  with its `params` on `query_url`, or `bus` with `kinds`, and `rows`), `quality`, and `fallback` when it could not fit
   (required when `rows` is 0). `plan.directive`'s `inputs.stored` records it: the query (or bus)
   and rows with the fit, or `{fallback}` with why none was read: Prismatic sent no fit (today's
   `OpenttdController`, a snapshot and its hand model), Prismatic fell back (its fit stays
@@ -1522,10 +1532,71 @@ the video buffer was unlocked under the drawing thread. `tools/research/mcp-view
 [panel-url]` checks all of this against a running stack: five screenshots in a row, with the client
 still alive afterwards, the proxied view tools, the map, stations and graph, and the OpenAPI entries.
 
-Approvals stay the owner's act: `POST /api/console` refuses `prismatic_mcp approve`, `mcp approve`
-and the auto-approve lines (HTTP 403) and records the refusal as an operator event. Approvals go
-through `POST /api/approve`, which is the panel's Approve button. Withdrawing your own request
-(`deny`) is still allowed. `mcp-panel-check` tests both cases.
+Approvals stay the owner's act: `POST /api/console` refuses (HTTP 403) every line that approves in
+any spelling the game accepts, and records the refusal as an operator event. That covers quotes
+(`"prismatic_mcp" appr""ove 1`), underscores (the game drops them from command names), a leading `/`,
+and the token `approve` anywhere in the line. The panel also refuses `alias`, `exec` and `schedule`,
+because each of them runs lines the panel cannot read first. The panel splits a line as
+`IConsoleCmdExec` does (`console_tokens`). `Game::console` refuses any line with a control
+character, so a newline inside a value (an AI's settings, a content query) cannot add a second
+command. Approvals go through `POST /api/approve` with the owner secret, or through the game's own
+console. Withdrawing your own request (`deny`) is still allowed. `mcp-panel-check` tests both cases.
+
+### Approval is bound to the owner
+
+Before 2026-11-22 the loopback API authenticated no one: any local process, script or agent could
+call `POST /api/approve` or `POST /api/auto-approve`, or the Rhai `approve()`, and so approve its own
+pending request (red-team residual risk 3). Approval is now bound to the owner in three ways
+(`panel.rs`):
+
+- **Owner-only tools never go through the panel.** `OWNER_ONLY_TOOLS` lists them:
+  `openttd.ai.set_settings`, through which a Battlebrain live decision applies.
+  - `Game::approve`, the one function every panel channel reaches, refuses them with a structured
+    answer: `refused: "owner_only"`, plus `console: "prismatic_mcp approve <id>"`, which only the
+    person at the game's console types.
+  - `POST /api/approve` answers that refusal with 403, even with the owner secret.
+  - Auto-approve passes them over (`auto_approve_once`), `--auto-approve` included.
+  - The request stays pending for the console.
+  - The C++ console path is unchanged.
+- **The owner secret.** `mcp-panel` makes a fresh secret at start from 32 bytes of `/dev/urandom`.
+  It prints the secret once, on its own stdout: `mcp-panel: owner secret <hex>`.
+  - The secret never goes to the bus, the store, the event feed or any answer. Comparisons run in
+    constant time (`web_access::same`).
+  - `POST /api/approve`, and `POST /api/auto-approve` with `on: true`, need it, else 401. Switching
+    off stays open.
+  - A client that is not the page sends it as `X-Panel-Owner: <secret>`.
+  - The page needs no change: open it once as `http://127.0.0.1:<port>/?owner=<secret>`. The
+    answer sets the HttpOnly, `SameSite=Strict` cookie `mcp_owner_<port>`, which the one API
+    client sends with every same-origin request. Its Approve button and auto-approve toggle then
+    work as before.
+  - Opened without the secret, those two controls answer 401, and the page shows the reason. When
+    `/dev/urandom` cannot be read the panel has no secret, and approval happens only at the
+    console (fails closed).
+- **Scripts never approve.** The Rhai `approve(id)` and `auto_approve(true)` raise an error that
+  names the console command. They hold no secret, so `POST /api/rhai` cannot approve through them.
+
+What this does not stop, measured honestly:
+
+- **A same-user process can still act as the owner.** Whoever reads the panel's stdout holds the
+  secret: a launcher that captures it, as `mcp-decision-check` does for its own disposable stack,
+  or a process that reads a captured log or the browser's cookie store. The secret raises the bar
+  from "any loopback request" to "a secret only the panel's launcher saw". It is not a sandbox
+  between processes of one user. The guarantee is the owner-only set, which no HTTP caller can
+  approve.
+- **Armed UI input reaches the console.** `mcp-e2e --arm-input` lets a process type into the GUI
+  client's window, and so into its `~` console. On a network client that console approves only
+  the client's own MCP server's queue. Once the approval core (ADR 0038) forwards console
+  approvals to the server, armed input reaches the server's queue too. The in-game control window
+  of PR 66, still open, refuses injected Approve clicks. Typed console lines are not refused.
+- **The page URL with `?owner=` lands in the browser's history.**
+- **Until the approval core lands, a console approval only marks the request approved.** The
+  action runs when its caller resubmits it (ADR 0038, defect 2). An owner-only request approved at
+  the console therefore needs its caller's resubmission, or the approval core, to execute.
+
+`cargo test --release --offline --bin mcp-panel` covers every refusal (`owner_only_approvals_are_refused_by_every_panel_channel`,
+`approving_and_auto_approve_on_need_the_owner_secret`, `console_lines_are_read_as_the_game_reads_them_and_no_spelling_approves`,
+`the_console_writer_sends_one_line_only`). `--bin mcp-rhai` covers the script refusal
+(`a_script_cannot_approve_or_switch_auto_approve_on`).
 
 ## The Prismatic control window in the game
 
