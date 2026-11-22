@@ -26,14 +26,14 @@ relations:
 
 # Constraint
 
-AlgoGlyph's `track-planning` (checkout 1b8e009, `src/plates/track-planning/data.ts`
-`applyTerrain`) checks the slope that openttd://map/terrain gives for each tile against the slope
-that openttd://map's heights give. If one tile differs, it refuses the whole input and prices no
-line: `terrain.slopes[y] says tile (x, y) has Slope a, its heights give b: read map and terrain at
-the same moment`. The fork reads the input's resources one after another while the game runs.
-hub_algoglyph.rs `track_input` reads openttd://map, map/ways, map/terrain, economy/prices and
-bridges in that order. A terraform between the map read and the terrain read, by a town's road or
-by any company, makes the input refuse.
+AlgoGlyph's `track-planning` (checkout 1b8e009: `applyTerrain` in the track-planning plate's data
+module, in the AlgoGlyph repository) checks the slope that openttd://map/terrain gives for each
+tile against the slope that openttd://map's heights give. If one tile differs, it refuses the whole
+input and prices no line: `terrain.slopes[y] says tile (x, y) has Slope a, its heights give b: read
+map and terrain at the same moment`. The fork reads the input's resources one after another while
+the game runs. hub_algoglyph.rs `track_input` reads openttd://map, map/ways, map/terrain,
+economy/prices and bridges in that order. A terraform between the map read and the terrain read, by
+a town's road or by any company, makes the input refuse.
 
 mcp-plan reads that input once and shares it with every candidate, so a refusal is not one line's
 failure. Every line priced in that round gets `error: track-planning refused: ...` and loses its
