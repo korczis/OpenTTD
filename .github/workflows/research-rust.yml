@@ -38,11 +38,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: "Checkout (full history, no blobs: the change set and build.rs read git)"
+      # The AlgoGlyph submodule too: mcp-rhai links its crate algoglyph-kernels by path (ADR 0039,
+      # I0227), and the native tests read its pin record. It has no submodules of its own.
+      - name: "Checkout (full history, no blobs: the change set and build.rs read git; the AlgoGlyph submodule)"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           filter: blob:none
+          submodules: true
 
       # The paths the four test binaries compile or read: the crate and its path dependency, the
       # schemas and fixtures, PrismaticAI (info.nut), the results and documents the tests open
@@ -69,7 +72,8 @@ jobs:
           pattern='^(tools/research/(mcp-rhai|schema|prismatic-ai|real-world|mcp-panel|town-model)/'
           pattern+='|research/(results|battlebrain|prismatic-bridge|mechanisms)/'
           pattern+='|\.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds\.md$'
-          pattern+='|src/window_type\.h$|\.github/workflows/research-rust\.yml$)'
+          pattern+='|src/window_type\.h$|\.github/workflows/research-rust\.yml$'
+          pattern+='|\.gitmodules$|tools/research/vendor/|tools/research/(test_)?algoglyph[-_]pin(\.py)?$)'
           matched=$(git diff --name-only "$base" HEAD | grep -E "$pattern" || true)
           if [ -n "$matched" ]; then
             echo "Changed since $base:"
@@ -79,6 +83,12 @@ jobs:
             echo "No path the tests compile or read changed since $base: nothing to test."
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: The AlgoGlyph pin record is the gitlink's and lists every kernel the stack needs
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          tools/research/algoglyph-pin check
+          python3 -B -m unittest tools/research/test_algoglyph_pin.py
 
       - name: The pinned DuckDB is the one the locked libduckdb-sys encodes
         if: steps.changes.outputs.run == 'true'

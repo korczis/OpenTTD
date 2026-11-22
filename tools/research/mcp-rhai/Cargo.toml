@@ -34,6 +34,10 @@ duckdb = { version = "=1.10506.1", default-features = false, optional = true }
 # parallel on all cores.
 rusqlite = { version = "0.32", features = ["bundled"] }
 rayon = "1.10"
+# AlgoGlyph's Rust kernels, linked from the pinned submodule (I0227, ADR 0039): the sorting
+# registry answers in-process as native-rust catalogue entries (src/algoglyph_native.rs). No
+# dependencies of its own; tools/research/algoglyph-pin installs and bumps the pin.
+algoglyph-kernels = { path = "../vendor/algoglyph/crates/algoglyph-kernels" }
 
 [features]
 default = ["store"]

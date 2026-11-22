@@ -89,8 +89,12 @@ While the hub runs it holds the store file's lock, as a panel does: read through
 
 ## AlgoGlyph: the planning engine
 
-AlgoGlyph (`$MCP_ALGOGLYPH_DIR`, else a checkout of origin/main at `~/dev/algoglyph-wt/main`, else
-`~/dev/algoglyph`) is the planning engine; the hub only
+AlgoGlyph is the planning engine. It is the git submodule `tools/research/vendor/algoglyph`,
+pinned at one commit (ADR 0039; `tools/research/algoglyph-pin`). The runner is
+`$MCP_ALGOGLYPH_DIR` when it is set, else the first installed checkout cleanly at the pin: the
+submodule, `~/dev/algoglyph-wt/main` or `~/dev/algoglyph`. `algoglyph.kernels` lists the runner's
+kernels, then the pinned crate's Rust kernels with engine `native-rust`, which `algoglyph.kernel`
+answers in-process. For the rest the hub only
 forwards (`tools/research/mcp-rhai/src/hub_algoglyph.rs`). `algoglyph.track_plan` reads the five
 resources of the named game back to back (track-planning checks the terrain's slopes against the
 map's heights, so they must be one moment) and pipes them with `from` and `to` to the kernel; a

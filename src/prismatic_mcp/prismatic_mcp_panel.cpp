@@ -109,6 +109,68 @@ json Tool()
 		{"annotations", {{"readOnlyHint", true}, {"idempotentHint", true}, {"openWorldHint", false}}}};
 }
 
+/** The array under \p key, or an empty one: a partial snapshot (a client's cached copy) never throws. */
+static const json &ArrayAt(const json &s, const char *key)
+{
+	static const json empty = json::array();
+	auto it = s.is_object() ? s.find(key) : s.end();
+	return (s.is_object() && it != s.end() && it->is_array()) ? *it : empty;
+}
+
+/** The string under \p key of \p o, or \p fallback when it is absent or not a string. */
+static std::string StringAt(const json &o, const char *key, std::string_view fallback = {})
+{
+	auto it = o.is_object() ? o.find(key) : o.end();
+	return (o.is_object() && it != o.end() && it->is_string()) ? it->get<std::string>() : std::string{fallback};
+}
+
+/** The unsigned number under \p key of \p o, or 0. */
+static uint64_t IdAt(const json &o, const char *key)
+{
+	auto it = o.is_object() ? o.find(key) : o.end();
+	return (o.is_object() && it != o.end() && it->is_number_unsigned()) ? it->get<uint64_t>()
+		: (o.is_object() && it != o.end() && it->is_number_integer() && it->get<int64_t>() > 0) ? static_cast<uint64_t>(it->get<int64_t>()) : 0;
+}
+
+/** The boolean under \p key of \p o, or false. */
+static bool FlagAt(const json &o, const char *key)
+{
+	auto it = o.is_object() ? o.find(key) : o.end();
+	return o.is_object() && it != o.end() && it->is_boolean() && it->get<bool>();
+}
+
+std::vector<Row> Rows(const json &s)
+{
+	std::vector<Row> rows;
+	auto heading = [&rows](std::string text) { rows.push_back({Row::Kind::Heading, std::move(text)}); };
+	auto text = [&rows](std::string text) { rows.push_back({Row::Kind::Text, std::move(text)}); };
+	const json &approvals = ArrayAt(s, "approvals"), &decisions = ArrayAt(s, "decisions");
+	const json &requests = ArrayAt(s, "requests"), &switches = ArrayAt(s, "switches");
+	heading("MCP server");
+	text(StringAt(s, "status", "status unknown"));
+	heading(fmt::format("Waiting for your approval ({})", approvals.size()));
+	if (approvals.empty()) text("nothing waits: a change an agent asks for appears here");
+	for (const json &a : approvals) {
+		rows.push_back({Row::Kind::Approval, fmt::format("#{}  {}  {}", IdAt(a, "id"), StringAt(a, "tool"), StringAt(a, "args")),
+			IdAt(a, "id"), FlagAt(a, "expired")});
+	}
+	heading("Latest decisions: what ran, and what the game showed afterwards");
+	if (decisions.empty()) text("no decision has run yet");
+	for (const json &d : decisions) text(d.is_string() ? d.get<std::string>() : d.dump());
+	heading("Questions from this game");
+	if (requests.empty()) text("none yet: use Ask, or a request item of the toolbar menu");
+	for (const json &r : requests) {
+		std::string asked = StringAt(r, "text");
+		text(fmt::format("#{} {}{}{} - {}", IdAt(r, "id"), StringAt(r, "kind"), asked.empty() ? "" : ": ", asked,
+			FlagAt(r, "answered") ? StringAt(r, "answer") : std::string{"waiting for an answer"}));
+	}
+	if (!switches.empty()) heading("Switches (click to flip)");
+	for (const json &sw : switches) {
+		rows.push_back({Row::Kind::Switch, StringAt(sw, "label"), IdAt(sw, "index"), FlagAt(sw, "on")});
+	}
+	return rows;
+}
+
 namespace {
 
 /** Widgets of the control window. */
@@ -122,46 +184,6 @@ enum ControlWidgets : WidgetID {
 	WID_PC_HUB, ///< Open the hub in the browser.
 	WID_PC_CONSOLE, ///< Open the console.
 };
-
-/** One line of the list. */
-struct Row {
-	enum class Kind : uint8_t { Heading, Text, Approval, Switch };
-	Kind kind;
-	std::string text;
-	uint64_t id = 0; ///< Approval: its id. Switch: the menu item's index.
-	bool flag = false; ///< Approval: expired. Switch: on.
-};
-
-/** The rows of a snapshot, in the order the window lists them. */
-std::vector<Row> RowsOf(const json &s)
-{
-	std::vector<Row> rows;
-	auto heading = [&rows](std::string text) { rows.push_back({Row::Kind::Heading, std::move(text)}); };
-	auto text = [&rows](std::string text) { rows.push_back({Row::Kind::Text, std::move(text)}); };
-	heading("MCP server");
-	text(s.value("status", ""));
-	heading(fmt::format("Waiting for your approval ({})", s["approvals"].size()));
-	if (s["approvals"].empty()) text("nothing waits: a change an agent asks for appears here");
-	for (const json &a : s["approvals"]) {
-		rows.push_back({Row::Kind::Approval, fmt::format("#{}  {}  {}", a.value("id", uint64_t{0}), a.value("tool", ""), a.value("args", "")),
-			a.value("id", uint64_t{0}), a.value("expired", false)});
-	}
-	heading("Latest decisions: what ran, and what the game showed afterwards");
-	if (s["decisions"].empty()) text("no decision has run yet");
-	for (const json &d : s["decisions"]) text(d.get<std::string>());
-	heading("Questions from this game");
-	if (s["requests"].empty()) text("none yet: use Ask, or a request item of the toolbar menu");
-	for (const json &r : s["requests"]) {
-		std::string asked = r.value("text", "");
-		text(fmt::format("#{} {}{}{} - {}", r.value("id", uint64_t{0}), r.value("kind", ""), asked.empty() ? "" : ": ", asked,
-			r.value("answered", false) ? r.value("answer", std::string{}) : std::string{"waiting for an answer"}));
-	}
-	if (!s["switches"].empty()) heading("Switches (click to flip)");
-	for (const json &sw : s["switches"]) {
-		rows.push_back({Row::Kind::Switch, sw.value("label", ""), sw.value("index", uint64_t{0}), sw.value("on", false)});
-	}
-	return rows;
-}
 
 struct ControlWindow : Window {
 	Scrollbar *vscroll = nullptr;
@@ -181,7 +203,7 @@ struct ControlWindow : Window {
 	void Refresh()
 	{
 		this->snapshot = Snapshot();
-		this->rows = RowsOf(this->snapshot);
+		this->rows = Rows(this->snapshot);
 		if (this->selected.has_value()) {
 			bool still = std::ranges::any_of(this->rows, [this](const Row &r) { return r.kind == Row::Kind::Approval && r.id == *this->selected; });
 			if (!still) this->selected.reset();

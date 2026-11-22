@@ -172,7 +172,7 @@ pie showData title Open findings by kind
 | out-of-scope | Any change in prismatic-platform or algoglyph | [I0097](../.ai/repo/project/issues/I0097.yaml):18 | none — needs an issue | DERIVED |
 | out-of-scope | Any change in algoglyph or prismatic-platform (the AlgoGlyph-side gap is a written proposal only) | [I0098](../.ai/repo/project/issues/I0098.yaml):16 | none — needs an issue | DERIVED |
 | out-of-scope | Routing the planner's own kernel calls (cargo.rs, linecost.rs, mcp-plan.rs) through the matcher | [I0098](../.ai/repo/project/issues/I0098.yaml):17 | none — needs an issue | DERIVED |
-| failed | In that round track-planning found a route on the map for none of the 21 rail lines, so no line went to the bot unpriced and the round held. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):102 | none — needs an issue | OBSERVED |
+| failed | In that round track-planning found a route on the map for none of the 21 rail lines, so no line went to the bot unpriced and the round held. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):115 | none — needs an issue | OBSERVED |
 | not-run | without a base set: ctest 94/94 PASS with -E '^regression', regression reported NOT RUN with a pointer to research/baseset-prerequisite-macos.md, change: PARTIAL (exit 3), no 120 s timeouts; | [I0028](../.ai/repo/project/issues/I0028.yaml):35 | none — needs an issue | OBSERVED |
 | not-run | The economy loop (mcp-human game: reinforce, borrow) is implemented but NOT RUN yet. | [I0045](../.ai/repo/project/issues/I0045.yaml):48 | none — needs an issue | OBSERVED |
 | not-run | NOT RUN: the page in a browser (WebGL terrain, clicks, maximize) - the browser extension was disconnected. | [I0048](../.ai/repo/project/issues/I0048.yaml):34 | none — needs an issue | OBSERVED |
@@ -188,7 +188,7 @@ pie showData title Open findings by kind
 | not-run | C4 strategy (H2): NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):269 | none — needs an issue | OBSERVED |
 | not-run | C5 operator safety: NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):270 | none — needs an issue | OBSERVED |
 | not-run | A client restart after a crash (the supervisor fix): NOT RUN: no crash happened in this run | [research/coplay.md](coplay.md):59 | none — needs an issue | OBSERVED |
-| not-run | Mesh records: NOT RUN, because the panel had no $MAJORDOMUS_URL. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):103 | none — needs an issue | OBSERVED |
+| not-run | Mesh records: NOT RUN, because the panel had no $MAJORDOMUS_URL. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):116 | none — needs an issue | OBSERVED |
 | not-run | A remote human joining over the internet: NOT RUN: needs a second machine and a person | [research/real-game.md](real-game.md):105 | none — needs an issue | OBSERVED |
 | not-run | An invite-only game through the coordinator: NOT RUN | [research/real-game.md](real-game.md):106 | none — needs an issue | OBSERVED |
 | partial | without a base set: ctest 94/94 PASS with -E '^regression', regression reported NOT RUN with a pointer to research/baseset-prerequisite-macos.md, change: PARTIAL (exit 3), no 120 s timeouts; | [I0028](../.ai/repo/project/issues/I0028.yaml):35 | none — needs an issue | OBSERVED |
