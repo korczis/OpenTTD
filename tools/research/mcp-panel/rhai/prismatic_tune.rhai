@@ -21,10 +21,10 @@
 // Each change waits for the owner's Approve in the panel (or auto-approve when the owner switches
 // it on), and the chat says so. The tuner never approves. $TUNE_DRY=1 logs and sends nothing.
 //
-// Hot reload: the panel restarts this service when this file or a top-level library it imports
-// changes. policy/ files are imported by a path with a `/`, which the panel's watcher does not
-// stamp today (panel_scripts.rs path_of), and the host's module resolver caches a module per run,
-// so an edit under policy/ takes effect at the next start of the service; the shared key
+// Hot reload: the panel restarts this service when this file or a library it imports changes,
+// policy/lib and policy/chain included; run_stage's template import makes every script under
+// policy/ one it watches (panel_scripts.rs template_dirs_of), so an edit of a stage reloads it
+// too. A stage file added to policy/ is watched from the next start; the shared key
 // `policy.chain` takes effect at the next round. Run it on the Scripts page
 // (/scripts/prismatic_tune), or POST /api/services/start {"name":"prismatic_tune"}.
 import "ttd" as ttd;

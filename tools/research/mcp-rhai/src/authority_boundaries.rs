@@ -364,18 +364,31 @@ fn b5_a_decision_without_provenance_policy_or_snapshot_is_refused() {
 
 /// B6. Stale dependencies are revalidated before execution: in the executor's pull, the decision
 /// block (its key and stale date, `decision_gate`) and the observation it rests on (`freshness`)
-/// are checked before the first step that changes the game.
+/// are checked before the first step that changes the game. A live decision leaves the pull for
+/// `apply_live` only after `decision_gate`, and there the world (`live_world`: not behind the
+/// decision's snapshot tick, the company an AI company now) and the stale date (`live_expiry`) are
+/// checked before `openttd.ai.set_settings` is called.
 #[test]
 fn b6_the_executor_checks_block_and_freshness_before_any_step() {
     let src = read("tools/research/mcp-rhai/src/panel_decision.rs");
-    let start = src.find("pub fn pull_with(").expect("panel_decision.rs pull_with");
-    let body = &src[start..];
-    let body = &body[..body[1..].find("\npub fn ").map_or(body.len(), |e| e + 1)];
+    let body_of = |sig: &str| -> &str {
+        let start = src.find(sig).unwrap_or_else(|| panic!("panel_decision.rs has no {sig}"));
+        let body = &src[start..];
+        &body[..body[1..].find("\npub fn ").or_else(|| body[1..].find("\nfn ")).map_or(body.len(), |e| e + 1)]
+    };
+    let body = body_of("pub fn pull_with(");
     let at = |n: &str| body.find(n).unwrap_or_else(|| panic!("pull_with no longer calls {n}"));
     let gate = at("decision_gate(&raw");
     let fresh = at("freshness(");
+    let live = at("apply_live(g");
     let first_step = ["set_bot_setting(", "start_bot(", "\"openttd.ai.reload\""].iter().filter_map(|n| body.find(n)).min().expect("pull_with acts");
     assert!(gate < fresh && fresh < first_step, "B6: pull_with must check the decision block, then freshness, before any step");
+    assert!(gate < live, "B6: a live decision reaches apply_live only after decision_gate");
+    let body = body_of("fn apply_live(");
+    let at = |n: &str| body.find(n).unwrap_or_else(|| panic!("apply_live no longer calls {n}"));
+    let (world, stale, act) = (at("live_world("), at("live_expiry("), at("g.tool(\"openttd.ai.set_settings\""));
+    assert!(world < stale && stale < act, "B6: apply_live must check the world, then the stale date, before set_settings");
+    assert!(!body.contains("set_bot_setting(") && !body.contains("start_bot("), "B6: apply_live acts only through the one approval");
     // The authority's side: a live directive is refused on companies read before the snapshot.
     assert!(read(AUTHORITY_BIN).contains("\"stale_companies\""));
 }
