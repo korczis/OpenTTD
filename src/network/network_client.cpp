@@ -36,6 +36,7 @@
 #include "table/strings.h"
 #ifdef OTTD_PRISMATIC_MCP_SERVER
 #include "../prismatic_mcp/prismatic_mcp_ui.h" /* RESEARCH-ONLY: no approval from an armed client */
+#include "../prismatic_mcp/prismatic_mcp_panel.h" /* RESEARCH-ONLY: the server's approval queue in the control window */
 #include "../prismatic_mcp/prismatic_mcp_detail.h" /* RESEARCH-ONLY: the chat line read as the server reads it */
 #endif
 
@@ -1006,6 +1007,11 @@ NetworkRecvStatus ClientNetworkGameSocketHandler::ReceiveServerChat(Packet &p)
 	int64_t data = p.Recv_uint64();
 
 	Debug(Facility::Net, Severity::Trace3, "Client::ReceiveServerChat(): action={}, client_id={}, self_send={}", action, client_id, self_send);
+#ifdef OTTD_PRISMATIC_MCP_SERVER
+	/* RESEARCH-ONLY (ADR 0038): the server's '[approvals]' answers feed the control window's copy of
+	 * its queue; an answer to the window's own quiet ask is read, not printed. */
+	if (client_id == ClientID::Server && !self_send && PrismaticMCP::Panel::OnServerChat(msg)) return NetworkRecvStatus::Okay;
+#endif
 
 	ci_to = NetworkClientInfo::GetByClientID(client_id);
 	if (ci_to == nullptr) return NetworkRecvStatus::Okay;
@@ -1145,6 +1151,10 @@ NetworkRecvStatus ClientNetworkGameSocketHandler::ReceiveServerNewGame(Packet &)
 		 * Client ID modulo 16 + 1 (value 0 means no reconnect).
 		 * This way reconnects should be spread out a bit. */
 		_network_reconnect = to_underlying(_network_own_client_id) % 16 + 1;
+#ifdef OTTD_RESEARCH_INSTRUMENTATION
+		/* RESEARCH-ONLY: rejoin the company this client played, not as a spectator (research/coplay.md). */
+		_research_rejoin_company = ResearchRejoinCompany(_local_company);
+#endif
 		ShowErrorMessage(GetEncodedString(STR_NETWORK_MESSAGE_SERVER_REBOOT), {}, WarningLevel::Critical);
 	}
 

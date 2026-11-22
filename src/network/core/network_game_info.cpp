@@ -137,6 +137,19 @@ bool ResearchCoplayAllows(CompanyID company)
 	return Company::IsValidAiID(company) && _research_coplay.Test(company);
 }
 
+/**
+ * The company a client asks for when it reconnects after the server restarted its game.
+ * @param played The company the client played when the server restarted (its local company).
+ * @return \p played when it names a company slot, else COMPANY_SPECTATOR (a spectator, or a
+ *         client that was still choosing, rejoins as upstream does).
+ */
+CompanyID _research_rejoin_company = COMPANY_SPECTATOR;
+
+CompanyID ResearchRejoinCompany(CompanyID played)
+{
+	return played.base() < MAX_COMPANIES ? played : COMPANY_SPECTATOR;
+}
+
 /** Split a comma-separated list into non-empty trimmed revisions. */
 static std::vector<std::string> SplitRevisions(std::string_view list)
 {
