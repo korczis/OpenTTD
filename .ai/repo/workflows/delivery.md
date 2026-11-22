@@ -22,6 +22,13 @@ GitHub merges the pull request as soon as the required check is green; nothing w
 session. When master moves first and the branch conflicts, the pull request stays open: merge
 master into the branch again, re-run the gate and push; auto-merge stays enabled.
 
+CI keeps the generated regions of an open pull request current: when master moves, the Surfaces
+`refresh` job merges master into every same-repository branch with auto-merge, regenerates the
+derived regions (counts, indexes, charts) and pushes a "Doc: [Surfaces] Regenerate derived
+regions after merging master" commit, so a stale count no longer blocks the merge
+(`tools/surfaces/README.md`, "Parallel merges"). Pull before pushing again: such a commit may
+have landed on the branch. A conflict outside the derived regions is still the owner's.
+
 - The title follows the fork's commit-message form (`Add: [Component] ...`, CODINGSTYLE.md); the
   merge commit is a plain merge, so every commit of the branch is kept.
 - The body says what changed and how it was validated, each check as PASS, FAIL or NOT RUN, and
