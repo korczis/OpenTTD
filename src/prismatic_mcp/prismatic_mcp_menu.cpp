@@ -38,6 +38,7 @@
 #include "../window_func.h"
 #include "../window_gui.h"
 
+#include <algorithm>
 #include <array>
 #include <span>
 #include <cstdlib>
@@ -49,22 +50,26 @@ using json = nlohmann::json;
 
 namespace PrismaticMCP::Menu {
 
+/* The only place the menu is written down: the dropdown, openttd://ui/menu, the tests and the menu
+ * table of research/prismatic-mcp/README.md (tools/research/prismatic-mcp-menu) all derive from it.
+ * An item with a group sits in that submenu; the top level lists the other items and one row per
+ * group, in the order the groups first appear here. */
 static constexpr std::array<Item, 14> ITEMS = {{
 	{"Prismatic control...", Action::Window, "control"},
-	{"MCP server: status", Action::Console, "prismatic_mcp status"},
-	{"MCP server: start", Action::Console, "prismatic_mcp start"},
-	{"MCP approvals waiting", Action::Console, "prismatic_mcp approvals"},
-	{"MCP decisions", Action::Console, "prismatic_mcp decisions"},
 	{"Ask the planner...", Action::Ask, "ask"},
 	/* Rows of the human-like player (tools/research/mcp-human, openttd-07): it answers these kinds. */
-	{"Human player: paused", Action::Toggle, "openttd.input.yield", "paused"},
-	{"Serve the towns here", Action::Request, "serve_here"},
-	{"Plan a rail line here", Action::Request, "plan_rail"},
-	{"Watch my buses", Action::Request, "watch"},
-	{"Open the hub", Action::Browse, "/"},
-	{"World view", Action::Browse, "/viz"},
-	{"API (Swagger)", Action::Browse, "/docs"},
-	{"GraphQL schema", Action::Browse, "/graphql/schema"},
+	{"Serve the towns here", Action::Request, "serve_here", {}, "Requests here"},
+	{"Plan a rail line here", Action::Request, "plan_rail", {}, "Requests here"},
+	{"Watch my buses", Action::Request, "watch", {}, "Requests here"},
+	{"Human player: paused", Action::Toggle, "openttd.input.yield", "paused", "Human player"},
+	{"MCP server: status", Action::Console, "prismatic_mcp status", {}, "MCP server"},
+	{"MCP server: start", Action::Console, "prismatic_mcp start", {}, "MCP server"},
+	{"MCP approvals waiting", Action::Console, "prismatic_mcp approvals", {}, "MCP server"},
+	{"MCP decisions", Action::Console, "prismatic_mcp decisions", {}, "MCP server"},
+	{"Open the hub", Action::Browse, "/", {}, "Hub and API"},
+	{"World view", Action::Browse, "/viz", {}, "Hub and API"},
+	{"API (Swagger)", Action::Browse, "/docs", {}, "Hub and API"},
+	{"GraphQL schema", Action::Browse, "/graphql/schema", {}, "Hub and API"},
 }};
 
 std::span<const Item> Items()
@@ -83,20 +88,64 @@ std::string HubUrl()
 /** The switches of the Toggle items, by index; off until flipped. */
 static std::array<bool, ITEMS.size()> _toggled{};
 
-DropDownList DropDown()
+std::vector<std::string_view> Groups()
 {
-	DropDownList list;
+	std::vector<std::string_view> groups;
+	for (const Item &item : ITEMS) {
+		if (item.group.empty() || std::find(groups.begin(), groups.end(), item.group) != groups.end()) continue;
+		groups.push_back(item.group);
+	}
+	return groups;
+}
+
+std::optional<std::string_view> GroupOfRow(int result)
+{
+	auto groups = Groups();
+	if (result < MENU_GROUP_ROW || static_cast<size_t>(result - MENU_GROUP_ROW) >= groups.size()) return std::nullopt;
+	return groups[result - MENU_GROUP_ROW];
+}
+
+std::vector<Row> Rows(std::string_view group)
+{
+	std::vector<Row> rows;
+	/* A submenu opens in place of the top level (the toolbar replaces the list), with a way back. */
+	if (!group.empty()) rows.push_back({MENU_BACK_ROW, "< Back"});
+	auto groups = Groups();
+	std::vector<bool> listed(groups.size(), false);
 	for (size_t i = 0; i < ITEMS.size(); i++) {
+		int result = static_cast<int>(i);
+		if (ITEMS[i].group != group) {
+			/* At the top level, a group's row stands where its first item would. */
+			if (!group.empty() || ITEMS[i].group.empty()) continue;
+			size_t g = std::find(groups.begin(), groups.end(), ITEMS[i].group) - groups.begin();
+			if (listed[g]) continue;
+			listed[g] = true;
+			rows.push_back({MENU_GROUP_ROW + static_cast<int>(g), fmt::format("{} >", ITEMS[i].group)});
+			continue;
+		}
 		if (ITEMS[i].action == Action::Toggle) {
-			list.push_back(std::make_unique<DropDownListCheckedItem>(0, _toggled[i], std::string{ITEMS[i].label}, static_cast<int>(i)));
+			rows.push_back({result, std::string{ITEMS[i].label}, true, _toggled[i]});
 		} else if (ITEMS[i].action == Action::Window) {
 			/* The window's row says, when the menu opens, how many approvals wait for the owner. */
 			size_t waiting = Panel::Snapshot()["approvals"].size();
 			std::string label{ITEMS[i].label};
 			if (waiting > 0) label = fmt::format("{} ({} waiting)", label.substr(0, label.find("...")), waiting);
-			list.push_back(MakeDropDownListStringItem(std::move(label), static_cast<int>(i)));
+			rows.push_back({result, std::move(label)});
 		} else {
-			list.push_back(MakeDropDownListStringItem(std::string{ITEMS[i].label}, static_cast<int>(i)));
+			rows.push_back({result, std::string{ITEMS[i].label}});
+		}
+	}
+	return rows;
+}
+
+DropDownList DropDown(std::string_view group)
+{
+	DropDownList list;
+	for (Row &row : Rows(group)) {
+		if (row.toggle) {
+			list.push_back(std::make_unique<DropDownListCheckedItem>(0, row.checked, std::move(row.label), row.result));
+		} else {
+			list.push_back(MakeDropDownListStringItem(std::move(row.label), row.result));
 		}
 	}
 	return list;
@@ -201,11 +250,14 @@ json Describe()
 	json items = json::array();
 	for (size_t i = 0; i < ITEMS.size(); i++) {
 		json target = ITEMS[i].action == Action::Browse ? json(HubUrl() + std::string{ITEMS[i].arg}) : json(std::string{ITEMS[i].arg});
-		json item = {{"index", i}, {"label", ITEMS[i].label}, {"action", ActionName(ITEMS[i].action)}, {"target", target}};
+		json item = {{"index", i}, {"label", ITEMS[i].label}, {"action", ActionName(ITEMS[i].action)}, {"target", target},
+			{"group", ITEMS[i].group.empty() ? json(nullptr) : json(std::string{ITEMS[i].group})}};
 		if (ITEMS[i].action == Action::Toggle) { item["key"] = ITEMS[i].key; item["on"] = _toggled[i]; }
 		items.push_back(std::move(item));
 	}
-	return {{"items", std::move(items)}, {"hub", HubUrl()}};
+	json groups = json::array();
+	for (std::string_view g : Groups()) groups.push_back(std::string{g});
+	return {{"items", std::move(items)}, {"groups", std::move(groups)}, {"hub", HubUrl()}};
 }
 
 json Requests()

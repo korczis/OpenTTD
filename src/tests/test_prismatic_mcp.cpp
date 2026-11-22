@@ -17,6 +17,7 @@
 #include "../prismatic_mcp/prismatic_mcp_panel.h"
 #include "../prismatic_mcp/prismatic_mcp_ui.h"
 #include "../prismatic_mcp/prismatic_mcp_console.h"
+#include "../console_internal.h"
 #include "../prismatic_mcp/prismatic_mcp_view.h"
 #include "../prismatic_mcp/prismatic_mcp_text.h"
 #include "../network/network.h"
@@ -276,6 +277,66 @@ TEST_CASE("The toolbar menu is one table, described item for item", "[prismatic_
 		if (M::Items()[i].action == M::Action::Request) CHECK(!M::Items()[i].arg.empty());
 	}
 	CHECK(d["hub"].get<std::string>().rfind("http", 0) == 0);
+}
+
+TEST_CASE("Submenus derive from the items' groups: one row per group at the top, Back and the group's items inside", "[prismatic_mcp]")
+{
+	namespace M = PrismaticMCP::Menu;
+	auto groups = M::Groups();
+	REQUIRE_FALSE(groups.empty());
+	/* Item results never collide with the rows that are not items. */
+	REQUIRE(M::Items().size() < static_cast<size_t>(M::MENU_BACK_ROW));
+	std::set<std::string> labels;
+	size_t top_items = 0;
+	for (const auto &item : M::Items()) {
+		CHECK(labels.insert(std::string{item.label}).second); // a label names one item
+		if (item.group.empty()) top_items++;
+	}
+	auto top = M::Rows();
+	CHECK(top.size() == top_items + groups.size());
+	std::set<int> group_rows;
+	for (const auto &row : top) {
+		if (row.result >= M::MENU_GROUP_ROW) group_rows.insert(row.result);
+		else CHECK(M::Items()[row.result].group.empty());
+	}
+	CHECK(group_rows.size() == groups.size());
+	for (size_t g = 0; g < groups.size(); g++) {
+		CHECK(M::GroupOfRow(M::MENU_GROUP_ROW + static_cast<int>(g)) == groups[g]);
+		auto sub = M::Rows(groups[g]);
+		REQUIRE(sub.size() >= 2); // Back and at least one item: no empty submenu
+		CHECK(sub.front().result == M::MENU_BACK_ROW);
+		for (size_t r = 1; r < sub.size(); r++) CHECK(M::Items()[sub[r].result].group == groups[g]);
+	}
+	CHECK_FALSE(M::GroupOfRow(M::MENU_BACK_ROW).has_value());
+	CHECK_FALSE(M::GroupOfRow(M::MENU_GROUP_ROW + static_cast<int>(groups.size())).has_value());
+	/* openttd://ui/menu says the same: each item's group and the groups in order. */
+	auto d = M::Describe();
+	REQUIRE(d["groups"].size() == groups.size());
+	for (size_t g = 0; g < groups.size(); g++) CHECK(d["groups"][g] == std::string{groups[g]});
+	for (size_t i = 0; i < M::Items().size(); i++) {
+		CHECK(d["items"][i]["group"] == (M::Items()[i].group.empty() ? nlohmann::json(nullptr) : nlohmann::json(std::string{M::Items()[i].group})));
+	}
+}
+
+TEST_CASE("Every menu item's target exists: its tool, console command, window or hub path", "[prismatic_mcp]")
+{
+	namespace M = PrismaticMCP::Menu;
+	std::set<std::string> tools;
+	for (const auto &t : PrismaticMCP::View::Tools()) tools.insert(t["name"].get<std::string>());
+	for (const auto &t : PrismaticMCP::UI::Tools()) tools.insert(t["name"].get<std::string>());
+	for (const auto &t : M::Tools()) tools.insert(t["name"].get<std::string>());
+	IConsoleStdLibRegister(); // the console's commands, as the game registers them at start
+	for (const auto &item : M::Items()) {
+		INFO(std::string{item.label});
+		std::string arg{item.arg};
+		switch (item.action) {
+			case M::Action::Toggle: CHECK(tools.contains(arg)); break;
+			case M::Action::Console: CHECK(IConsole::CmdGet(arg.substr(0, arg.find(' '))) != nullptr); break;
+			case M::Action::Window: CHECK(arg == "control"); break; // Panel::Show, the one fork window
+			case M::Action::Browse: CHECK(arg.rfind("/", 0) == 0); break;
+			case M::Action::Request: case M::Action::Ask: CHECK_FALSE(arg.empty()); break;
+		}
+	}
 }
 
 TEST_CASE("The control window is a snapshot of what the console and the menu already read", "[prismatic_mcp]")
