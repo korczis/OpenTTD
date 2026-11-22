@@ -17,19 +17,34 @@
  *   length). A train with another count is sent to the depot, resized there and started again.
  */
 
-/* The trains of `line`: rail vehicles whose orders name both of its stations (two lines may share
- * a station since a platform joins another's). */
+/* The trains of `line`: its first train (rail.nut BuildTrain) and the clones that share its orders.
+ * Telling them by their stations alone counted another line's trains as this line's wherever two
+ * lines share both stations (side-by-side platforms of one station): on 07472abe/m-0006 lines 5 and
+ * 11 both ran to Rarningworth Falls Sawmill, line 5 sold line 11's trains as surplus and line 11
+ * bought them again, 372 trains bought and 360 sent to be sold in one game. Without a valid first
+ * train, the trains that visit both stations and belong to no other line's order group. */
 function PrismaticAI::TrainsOf(line) {
 	local out = [];
+	if (("first" in line) && AIVehicle.IsValidVehicle(line.first)) {
+		foreach (v, _ in AIVehicleList_SharedOrders(line.first)) out.push(v);
+		return out;
+	}
 	local st_a = AIStation.GetStationID(line.a), st_b = AIStation.GetStationID(line.b);
 	if (!AIStation.IsValidStation(st_a) || !AIStation.IsValidStation(st_b)) return out;
+	local claimed = {};
+	foreach (other in RAIL_LINES) {
+		if (other == line || !("first" in other) || !AIVehicle.IsValidVehicle(other.first)) continue;
+		foreach (v, _ in AIVehicleList_SharedOrders(other.first)) claimed[v] <- true;
+	}
 	local list = AIVehicleList_Station(st_a);
 	for (local v = list.Begin(); !list.IsEnd(); v = list.Next()) {
-		if (AIVehicle.GetVehicleType(v) != AIVehicle.VT_RAIL) continue;
+		if (AIVehicle.GetVehicleType(v) != AIVehicle.VT_RAIL || claimed.rawin(v)) continue;
 		for (local i = 0; i < AIOrder.GetOrderCount(v); i++) {
 			if (AIStation.GetStationID(AIOrder.GetOrderDestination(v, i)) == st_b) { out.push(v); break; }
 		}
 	}
+	/* A train found this way leads the line from now on. */
+	if (out.len() > 0) line.first <- out[0];
 	return out;
 }
 
