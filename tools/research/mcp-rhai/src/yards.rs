@@ -4,7 +4,7 @@
 //! reverted (knowledge the-bots-rail-pathfinder-lays-plain-track-only: one yard walled in by the
 //! first line, −16% and −48% against no yards), with the lesson "before another try, prove the
 //! corridor offline on openttd://map with the first line's path". This is that proof, by the same
-//! track planner that prices the lines (AlgoGlyph track-planning, src/linecost.rs):
+//! track planner that prices the lines (the kernel that satisfies `rail-line-price`, src/linecost.rs):
 //!
 //! 1. For two priced rail lines A (the better) and B whose station sites coincide at one end (the
 //!    shared industry or town), lay A's route.
@@ -19,13 +19,15 @@
 //! proven pair, in a later step, and the duel decides whether it pays.
 use serde_json::{json, Value};
 
-/// Every tile a track-planning answer takes: each track piece's tile, and for a bridge or tunnel
-/// both heads and every tile between them along its axis.
-pub fn tiles_of(answer: &Value) -> Vec<[i64; 2]> {
-    let r = answer.get("result").unwrap_or(answer);
+use crate::cargo::{Call, KernelFailure, Kernels};
+use crate::linecost::{route, track};
+
+/// Every tile a plan's `pieces` take: each track piece's tile, and for a bridge or tunnel both
+/// heads and every tile between them along its axis.
+pub fn tiles_of(pieces: &Value) -> Vec<[i64; 2]> {
     let xy = |v: &Value| Some([v.get("x")?.as_i64()?, v.get("y")?.as_i64()?]);
     let mut out = Vec::new();
-    for p in r.get("pieces").and_then(Value::as_array).into_iter().flatten() {
+    for p in pieces.as_array().into_iter().flatten() {
         if let Some(t) = xy(p) { out.push(t); continue; }
         if let (Some(a), Some(b)) = (p.get("from").and_then(xy), p.get("to").and_then(xy)) {
             let (dx, dy) = ((b[0] - a[0]).signum(), (b[1] - a[1]).signum());
@@ -100,24 +102,17 @@ pub fn shared_ends(lines: &[Value]) -> Vec<(usize, usize, &'static str, &'static
     out
 }
 
-fn plan(base: &Value, from: Value, to: Value, blocked: &[[i64; 2]]) -> Result<Value, String> {
-    let mut input = base.clone();
-    input["from"] = from;
-    input["to"] = to;
-    if !blocked.is_empty() { input["blocked"] = json!(blocked); }
-    crate::cargo::algoglyph("track-planning", &input)
-}
-
-fn found_money(answer: &Result<Value, String>) -> Option<f64> {
-    let r = answer.as_ref().ok()?;
-    let r = r.get("result").unwrap_or(r);
-    (r["status"] == "found").then(|| r["money"].as_f64().or_else(|| r["cost"].as_f64())).flatten()
+/// The money of a found plan that passed its domain check: game money when `base` carries the
+/// game's prices, else the kernel's tile cost.
+fn found_money(answer: &Result<Call, KernelFailure>, base: &Value) -> Option<f64> {
+    let t = track(answer, base.get("prices").is_some_and(Value::is_object), 1.0);
+    (t.status == "found").then_some(t.money).flatten()
 }
 
 /// Prove the yards of the best priced rail lines in `candidates`: at most `limit` pairs. Each entry
 /// names both lines, the shared end, whether B still has a route from a platform beside A's with A's
 /// tiles blocked, on which side, and B's track money with the yard against B alone.
-pub fn prove(candidates: &[Value], base: &Value, limit: usize) -> Vec<Value> {
+pub fn prove(candidates: &[Value], base: &Value, limit: usize, kernels: &Kernels) -> Vec<Value> {
     let map = &base["map"];
     let mut lines: Vec<&Value> = candidates.iter()
         .filter(|c| c["options"].as_array().is_some_and(|o| o.iter().any(|o| o["track"]["status"] == "found")))
@@ -132,13 +127,14 @@ pub fn prove(candidates: &[Value], base: &Value, limit: usize) -> Vec<Value> {
     for (a, b, ea, eb) in shared_ends(&owned).into_iter().take(limit) {
         let (la, lb) = (&owned[a], &owned[b]);
         let Some((fa, ta)) = crate::linecost::endpoints(&la["stations"]["from"], &la["stations"]["to"]) else { continue };
-        let answer_a = plan(base, fa, ta, &[]);
-        let mut taken = tiles_of(answer_a.as_ref().unwrap_or(&Value::Null));
+        let answer_a = route(kernels, base, &fa, &ta, &[]);
+        let mut taken = answer_a.as_ref().map_or(vec![], |c| tiles_of(c.get("pieces")));
         for end in ["from", "to"] { taken.extend(platform(&la["stations"][end])); }
         let alone = lb.pointer("/options").and_then(Value::as_array)
             .and_then(|o| o.iter().find_map(|o| o["track"]["money"].as_f64()));
         let mut entry = json!({"a": name(la), "b": name(lb), "shared": {"a": ea, "b": eb, "end": la["stations"][ea]["end"]},
-                               "a_route": found_money(&answer_a).is_some(), "a_tiles": taken.len(), "b_alone": alone,
+                               "a_route": found_money(&answer_a, base).is_some(),
+                               "kernel": answer_a.as_ref().map_or_else(|f| f.to_json(crate::linecost::RAIL_LINE_PRICE), |c| c.kernel()), "a_tiles": taken.len(), "b_alone": alone,
                                "proven": false, "tried": []});
         for side in [1, -1] {
             let Some(yard) = beside(map, &la["stations"][ea], side, &taken) else {
@@ -148,8 +144,8 @@ pub fn prove(candidates: &[Value], base: &Value, limit: usize) -> Vec<Value> {
             let other = &lb["stations"][if eb == "from" { "to" } else { "from" }];
             let (from_site, to_site) = if eb == "from" { (&yard, other) } else { (other, &yard) };
             let Some((f, t)) = crate::linecost::endpoints(from_site, to_site) else { continue };
-            let answer_b = plan(base, f, t, &taken);
-            let money = found_money(&answer_b);
+            let answer_b = route(kernels, base, &f, &t, &taken);
+            let money = found_money(&answer_b, base);
             entry["tried"].as_array_mut().unwrap().push(json!({"side": side, "result": if money.is_some() { "route" } else { "no route" }, "money": money}));
             if let Some(m) = money {
                 entry["proven"] = json!(true);
@@ -182,7 +178,7 @@ mod tests {
     #[test]
     fn a_bridge_takes_every_tile_between_its_heads() {
         let a = json!({"pieces": [{"kind": "track", "x": 5, "y": 5}, {"kind": "bridge", "from": {"x": 6, "y": 5}, "to": {"x": 9, "y": 5}}]});
-        assert_eq!(tiles_of(&a), vec![[5, 5], [6, 5], [7, 5], [8, 5], [9, 5]]);
+        assert_eq!(tiles_of(&a["pieces"]), vec![[5, 5], [6, 5], [7, 5], [8, 5], [9, 5]]);
     }
 
     #[test]
@@ -197,6 +193,45 @@ mod tests {
         let mut hilly = map.clone();
         hilly["types"][9] = json!(format!("{}H{}", "C".repeat(11), "C".repeat(18)));
         assert!(beside(&hilly, &site, -1, &[]).is_none(), "a house beside the platform");
+    }
+
+    fn site(x: i64, y: i64, dir: &str, tile: i64) -> Value {
+        json!({"x": x, "y": y, "length": 3, "axis": "NE_SW", "end": {"x": x + 2, "y": y}, "exit": {"x": x + 3, "y": y, "dir": dir}, "tile": tile})
+    }
+    fn line(to: Value, score: f64, money: f64) -> Value {
+        json!({"producer": {"name": "Mine"}, "acceptor": {"name": "Plant"}, "score": score,
+               "stations": {"from": site(10, 10, "SW", 310), "to": to}, "options": [{"track": {"status": "found", "money": money}}]})
+    }
+
+    #[test]
+    fn a_yard_is_proven_by_the_kernel_the_catalogue_matches() {
+        let lines = vec![line(site(10, 20, "NE", 610), 10.0, 5000.0), line(site(20, 5, "NE", 170), 5.0, 5000.0)];
+        let base = json!({"map": flat_map(30, 30), "prices": {"build_rail": 100}});
+        let answer = json!({"ok": true, "kernel": {"id": "track-planning"}, "result": {"status": "found", "cost": 70.0, "money": 7000.0, "pieces": [{"x": 14, "y": 10}]}});
+        let (asked, run) = crate::cargo::testing::recording(answer);
+        let out = prove(&lines, &base, 2, &crate::cargo::testing::kernels(run));
+        assert_eq!(out.len(), 1);
+        let e = &out[0];
+        assert_eq!((e["a_route"].clone(), e["proven"].clone(), e["side"].clone()), (json!(true), json!(true), json!(1)));
+        assert_eq!((e["b_with_yard"].clone(), e["extra"].clone()), (json!(7000.0), json!(2000.0)));
+        assert_eq!(e["kernel"]["id"], "track-planning");
+        assert_eq!(e["b_candidate"]["stations"]["from"]["y"], 11, "B leaves from the platform beside A's");
+        // B's plan keeps A's route and both A stations free, under the adapter's key.
+        let asked = asked.borrow();
+        assert_eq!(asked[0].1.get("blocked"), None);
+        let blocked = asked[1].1["blocked"].as_array().unwrap();
+        assert!(blocked.contains(&json!([14, 10])) && blocked.contains(&json!([10, 20])), "{blocked:?}");
+    }
+
+    #[test]
+    fn without_a_matching_kernel_no_yard_is_proven_and_the_refusal_is_kept() {
+        let lines = vec![line(site(10, 20, "NE", 610), 10.0, 5000.0), line(site(20, 5, "NE", 170), 5.0, 5000.0)];
+        let expired = crate::cargo::testing::catalogue(|l| l.retain(|k| k["id"] != "track-planning"));
+        let k = crate::cargo::testing::on(expired, |_, _| panic!("an unmatched capability runs no kernel"));
+        let out = prove(&lines, &json!({"map": flat_map(30, 30)}), 2, &k);
+        assert_eq!((out[0]["a_route"].clone(), out[0]["proven"].clone()), (json!(false), json!(false)));
+        assert_eq!(out[0]["kernel"]["refusal"]["code"], "kernel_expired");
+        assert_eq!(out[0]["tried"][0]["result"], "no route");
     }
 
     #[test]

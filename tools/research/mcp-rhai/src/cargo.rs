@@ -6,12 +6,16 @@
 //!   of GetTransportedGoodsIncome), carried by trucks or a freight train that the game offers for
 //!   that cargo now. Freight runs loaded one way and empty back: one load per round trip.
 //! - Portfolio: from the best option of every passenger and freight candidate, the set of
-//!   investments with the highest total score that fits the budget, a 0/1 knapsack. Solved by
-//!   AlgoGlyph's knapsack-dp kernel when its runner is available (MCP_ALGOGLYPH_DIR, a checkout of
-//!   algoglyph's flow CLI), else by the same dynamic programme built in here; the answer names the
-//!   solver, the kernel, its input and its work, so it is visible which one decided.
+//!   investments with the highest total score that fits the budget, a 0/1 knapsack. Solved by the
+//!   AlgoGlyph kernel that satisfies the capability `portfolio-within-budget` in the discovered
+//!   catalogue (`Kernels`, the matcher of battlebrain_contract.rs), else by the same dynamic
+//!   programme built in here; the answer names the solver, the kernel with its capability and
+//!   catalogue, its input and its work, and why the built-in decided, so it is visible which one did.
+//! - Kernels: every kernel the planner calls (here, linecost.rs, yards.rs, invest.rs) is chosen by
+//!   capability through `Kernels`, never by name.
 use serde_json::{json, Value};
 
+use crate::battlebrain_contract as bb;
 use crate::plan::{calibration, carried_per_vehicle, income_per_unit, net_profit, payback_score, transit_periods};
 
 /// One long-lived AlgoGlyph `flow serve` per process, behind MCP_ALGOGLYPH_SERVE (I0086).
@@ -133,38 +137,56 @@ fn knapsack_builtin(weights: &[usize], values: &[f64], capacity: usize) -> (f64,
     (dp[n][capacity], items)
 }
 
-/// Why an AlgoGlyph kernel gave no answer: the runner is not configured, it ran and refused (its
-/// own `errors`), or it crashed (spawn, I/O or an answer that is not JSON).
+/// The capability the portfolio computes (battlebrain_contract.rs CAPABILITIES). The planner
+/// names capabilities; which kernel computes one is the matcher's answer (`Kernels`).
+pub const PORTFOLIO: &str = "portfolio-within-budget";
+
+/// Why an AlgoGlyph kernel gave no answer: the runner is not configured, there is no catalogue to
+/// choose from, no kernel of it satisfies the capability (the matcher's own refusal), the kernel
+/// ran and refused (its own `errors`), it crashed (spawn, I/O or an answer that is not JSON), or
+/// its answer failed the domain check of its adapter.
 #[derive(Clone, Debug, PartialEq)]
 pub enum KernelFailure {
     Unset,
+    NoCatalogue(String),
+    Unmatched(bb::Refusal),
     Refused(Value),
     Crashed(String),
+    Unchecked(bb::Refusal, Value),
 }
 
 impl KernelFailure {
-    /// The reason as `algoglyph` has always worded it.
-    fn message(&self, kernel: &str) -> String {
+    /// The reason in words; `what` is the kernel or the capability it was asked for.
+    pub fn message(&self, what: &str) -> String {
         match self {
             KernelFailure::Unset => "MCP_ALGOGLYPH_DIR is not set".to_string(),
-            KernelFailure::Refused(errors) => format!("{kernel} refused: {errors}"),
+            KernelFailure::NoCatalogue(m) => format!("no AlgoGlyph catalogue to choose {what} from: {m}"),
+            KernelFailure::Unmatched(r) => format!("{what}: {} ({})", r.code, r.message),
+            KernelFailure::Refused(errors) => format!("{what} refused: {errors}"),
             KernelFailure::Crashed(m) => m.clone(),
+            KernelFailure::Unchecked(r, _) => format!("{what}: the answer fails its domain check at {}: {}", r.path, r.message),
+        }
+    }
+    /// The reason as a record carries it (a portfolio's `fallback`, a line's `refused`, a run's).
+    pub fn to_json(&self, what: &str) -> Value {
+        let message = self.message(what);
+        match self {
+            KernelFailure::Unset => json!({"reason": "unset_dir", "message": message}),
+            KernelFailure::NoCatalogue(_) => json!({"reason": "no_catalogue", "message": message}),
+            KernelFailure::Unmatched(r) => json!({"reason": "capability_unmatched", "refusal": r.to_json(), "message": message}),
+            KernelFailure::Refused(errors) => json!({"reason": "runner_refused", "errors": errors, "message": message}),
+            KernelFailure::Crashed(_) => json!({"reason": "crashed", "message": message}),
+            KernelFailure::Unchecked(r, v) => json!({"reason": "domain_check_failed", "code": r.code, "path": r.path, "message": message,
+                                                     "refused_answer": {"kernel": v.get("kernel"), "result": v.get("result")}}),
         }
     }
 }
 
 /// An AlgoGlyph kernel through its flow CLI (`npm run flow -- kernel <id> -`), when MCP_ALGOGLYPH_DIR
-/// names a checkout of it. Err says why there is no answer: no runner, a failed run, or a refusal.
-/// With `MCP_ALGOGLYPH_SERVE=1` every call of the process goes to one long-lived `flow serve`
-/// (src/flow_serve.rs), and to the per-call runner only if that serve cannot start or fails.
-#[allow(dead_code)] // mcp-intent includes cargo.rs and calls no kernel by name
-pub fn algoglyph(kernel: &str, input: &Value) -> Result<Value, String> {
-    algoglyph_run(kernel, input).map_err(|f| f.message(kernel))
-}
-
-/// `algoglyph` with the reason kept as a kind, for a caller that records why it fell back.
+/// names a checkout of it; Err says why there is no answer. With `MCP_ALGOGLYPH_SERVE=1` every
+/// call of the process goes to one long-lived `flow serve` (src/flow_serve.rs), and to the
+/// per-call runner only if that serve cannot start or fails. Callers reach it through `Kernels`.
 pub fn algoglyph_run(kernel: &str, input: &Value) -> Result<Value, KernelFailure> {
-    let crashed = |e: &dyn std::fmt::Display| KernelFailure::Crashed(format!("{kernel}: {e}"));
     let refused = |v: &Value| KernelFailure::Refused(v.get("errors").cloned().unwrap_or(v.clone()));
     let dir = std::env::var("MCP_ALGOGLYPH_DIR").map_err(|_| KernelFailure::Unset)?;
     if flow_serve::wanted() {
@@ -174,87 +196,197 @@ pub fn algoglyph_run(kernel: &str, input: &Value) -> Result<Value, KernelFailure
             Err(_) => flow_serve::fell_back(),
         }
     }
+    let v = flow(std::path::Path::new(&dir), "npm", &["kernel", kernel, "-"], Some(input)).map_err(|e| KernelFailure::Crashed(format!("{kernel}: {e}")))?;
+    if v["ok"] == true { Ok(v) } else { Err(refused(&v)) }
+}
+
+/// One run of the flow CLI in the checkout `dir` (`<npm> run --silent flow -- <args>`), `input` on
+/// its standard input, its answer parsed as JSON.
+fn flow(dir: &std::path::Path, npm: &str, args: &[&str], input: Option<&Value>) -> Result<Value, String> {
     // The answer goes to a file, not a pipe: the flow CLI ends with process.exit(), which drops what
     // a pipe has not taken yet, so an answer above 64 KiB arrived cut off (2026-11-16).
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let path = std::env::temp_dir().join(format!("mcp-algoglyph-{}-{nanos}.json", std::process::id()));
-    let file = std::fs::File::create(&path).map_err(|e| crashed(&e))?;
-    let mut child = std::process::Command::new("npm")
-        .args(["run", "--silent", "flow", "--", "kernel", kernel, "-"])
-        .current_dir(&dir).stdin(std::process::Stdio::piped()).stdout(file)
-        .stderr(std::process::Stdio::null()).spawn().map_err(|e| crashed(&e))?;
+    let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    let mut child = std::process::Command::new(npm).args(["run", "--silent", "flow", "--"]).args(args)
+        .current_dir(dir).stdin(std::process::Stdio::piped()).stdout(file)
+        .stderr(std::process::Stdio::null()).spawn().map_err(|e| e.to_string())?;
     use std::io::Write;
-    child.stdin.take().ok_or_else(|| KernelFailure::Crashed("no stdin".into()))?
-        .write_all(input.to_string().as_bytes()).map_err(|e| crashed(&e))?;
-    child.wait().map_err(|e| crashed(&e))?;
-    let text = std::fs::read(&path).map_err(|e| crashed(&e));
+    let mut stdin = child.stdin.take().ok_or("no stdin")?;
+    if let Some(v) = input { stdin.write_all(v.to_string().as_bytes()).map_err(|e| e.to_string())?; }
+    drop(stdin);
+    child.wait().map_err(|e| e.to_string())?;
+    let text = std::fs::read(&path).map_err(|e| e.to_string());
     let _ = std::fs::remove_file(&path);
-    let v: Value = serde_json::from_slice(&text?).map_err(|e| crashed(&format!("not JSON ({e})")))?;
-    if v["ok"] == true { Ok(v) } else { Err(refused(&v)) }
+    serde_json::from_slice(&text?).map_err(|e| format!("not JSON ({e})"))
+}
+
+/// The catalogue the runner reports for the checkout `dir`: its kernel list (`<npm> run --silent
+/// flow -- kernels`, bb::CATALOGUE_SOURCE) and the commit `git rev-parse HEAD` names there.
+fn catalogue_in(dir: &std::path::Path, npm: &str) -> Result<bb::Catalogue, String> {
+    let list = flow(dir, npm, &["kernels"], None).map_err(|e| format!("flow -- kernels: {e}"))?;
+    let head = std::process::Command::new("git").arg("-C").arg(dir).args(["rev-parse", "HEAD"]).output().map_err(|e| format!("git: {e}"))?;
+    bb::Catalogue::from_runner(&list, String::from_utf8_lossy(&head.stdout).trim()).map_err(|r| format!("{}: {}", r.code, r.message))
+}
+
+/// The catalogue of the checkout the kernels run in (MCP_ALGOGLYPH_DIR, as `algoglyph_run`).
+pub fn runner_catalogue() -> Result<bb::Catalogue, KernelFailure> {
+    let dir = std::env::var("MCP_ALGOGLYPH_DIR").map_err(|_| KernelFailure::Unset)?;
+    catalogue_in(std::path::Path::new(&dir), "npm").map_err(KernelFailure::NoCatalogue)
+}
+
+/// A catalogue file as battlebrain reads one (`bb::Catalogue::from_value`).
+pub fn catalogue_file(path: &str) -> Result<bb::Catalogue, KernelFailure> {
+    let text = std::fs::read_to_string(path).map_err(|e| KernelFailure::NoCatalogue(format!("{path}: {e}")))?;
+    let v: Value = serde_json::from_str(&text).map_err(|e| KernelFailure::NoCatalogue(format!("{path}: not JSON: {e}")))?;
+    bb::Catalogue::from_value(&v).map_err(|r| KernelFailure::NoCatalogue(format!("{path}: {}: {}", r.code, r.message)))
+}
+
+type Discover = Box<dyn Fn() -> Result<bb::Catalogue, KernelFailure>>;
+type Runner = Box<dyn Fn(&str, &Value) -> Result<Value, KernelFailure>>;
+
+/// The AlgoGlyph kernels the planner calls, each chosen by capability from the discovered
+/// catalogue by the matcher of Battlebrain (`bb::match_capability` over the adapter registry),
+/// never by name: no planner code lists a kernel. The catalogue is read once, when the first call
+/// needs it; each capability is matched once, and every match is kept for the record (`record`).
+pub struct Kernels {
+    catalogue: std::cell::OnceCell<Result<bb::Catalogue, KernelFailure>>,
+    discover: Discover,
+    run: Runner,
+    matches: std::cell::RefCell<Vec<bb::Match>>,
+}
+
+/// One kernel call: the adapter of the kernel the matcher chose, the input built through it, the
+/// kernel's answer and the catalogue it was chosen from.
+pub struct Call {
+    pub adapter: &'static bb::Adapter,
+    pub input: Value,
+    pub answer: Value,
+    catalogue: Value,
+}
+
+impl Kernels {
+    /// The runner's own catalogue and kernels (`runner_catalogue`, `algoglyph_run`).
+    pub fn runner() -> Kernels {
+        Kernels::new(runner_catalogue, algoglyph_run)
+    }
+    /// The catalogue of a file (`catalogue_file`), the kernels from the runner.
+    pub fn from_file(path: &str) -> Kernels {
+        let cat = catalogue_file(path);
+        Kernels::new(move || cat.clone(), algoglyph_run)
+    }
+    pub fn new(discover: impl Fn() -> Result<bb::Catalogue, KernelFailure> + 'static,
+               run: impl Fn(&str, &Value) -> Result<Value, KernelFailure> + 'static) -> Kernels {
+        Kernels { catalogue: Default::default(), discover: Box::new(discover), run: Box::new(run), matches: Default::default() }
+    }
+    fn catalogue(&self) -> &Result<bb::Catalogue, KernelFailure> {
+        self.catalogue.get_or_init(|| (self.discover)())
+    }
+    /// The adapter of the kernel that satisfies `cap` in the catalogue, or why none does.
+    pub fn resolve(&self, cap: &str) -> Result<&'static bb::Adapter, KernelFailure> {
+        let cat = self.catalogue().as_ref().map_err(Clone::clone)?;
+        let mut matches = self.matches.borrow_mut();
+        let m = match matches.iter().position(|m| m.decision["requirement"]["id"] == cap) {
+            Some(i) => &matches[i],
+            None => {
+                matches.push(bb::match_capability(cap, cat, bb::ADAPTERS));
+                matches.last().expect("just pushed")
+            }
+        };
+        match (&m.chosen, &m.refusal) {
+            (Some(k), _) => Ok(bb::ADAPTERS.iter().find(|a| a.capability == cap && a.kernel == k).expect("the matcher chooses an adapted kernel")),
+            (None, r) => Err(KernelFailure::Unmatched(r.clone().expect("a match without a kernel carries its refusal"))),
+        }
+    }
+    /// The kernel the matcher chose for `cap`, once a call asked for it.
+    pub fn chosen(&self, cap: &str) -> Option<&'static str> {
+        let matches = self.matches.borrow();
+        let k = matches.iter().find(|m| m.decision["requirement"]["id"] == cap)?.chosen.as_deref()?;
+        bb::ADAPTERS.iter().find(|a| a.capability == cap && a.kernel == k).map(|a| a.kernel)
+    }
+    /// Run the kernel that satisfies `cap` on the input `build` makes through its adapter. No
+    /// match, an input the adapter cannot map and a failed run are each a `KernelFailure`. The
+    /// domain check is the caller's (`Call::check`): a plan with no route is an answer, not a fault.
+    pub fn call(&self, cap: &str, build: impl FnOnce(&bb::Adapter) -> Result<Value, bb::Refusal>) -> Result<Call, KernelFailure> {
+        let adapter = self.resolve(cap)?;
+        let input = build(adapter).map_err(KernelFailure::Unmatched)?;
+        let answer = (self.run)(adapter.kernel, &input)?;
+        let cat = self.catalogue().as_ref().expect("resolve read the catalogue");
+        Ok(Call { adapter, input, answer, catalogue: json!({"digest": cat.digest, "commit": cat.commit}) })
+    }
+    /// What the planner relied on: the catalogue (digest, commit, source, size), or why it had none,
+    /// and the capability-match/v1 decision of every capability it resolved. Both are null and
+    /// empty when nothing needed a kernel.
+    pub fn record(&self) -> Value {
+        let (catalogue, unavailable) = match self.catalogue.get() {
+            None => (Value::Null, Value::Null),
+            Some(Ok(c)) => (json!({"digest": c.digest, "commit": c.commit, "source": bb::CATALOGUE_SOURCE, "kernels": c.kernels.len()}), Value::Null),
+            Some(Err(f)) => (Value::Null, f.to_json("the catalogue")),
+        };
+        json!({"catalogue": catalogue, "unavailable": unavailable,
+               "matches": self.matches.borrow().iter().map(|m| m.decision.clone()).collect::<Vec<_>>()})
+    }
+}
+
+impl Call {
+    /// Requirement output `field` of the answer, by the adapter's path; null when absent.
+    pub fn get(&self, field: &str) -> &Value {
+        static NULL: Value = Value::Null;
+        self.adapter.output(&self.answer, field).unwrap_or(&NULL)
+    }
+    /// The adapter's domain check of the answer against its input.
+    pub fn check(&self) -> Result<(), KernelFailure> {
+        bb::domain_check(self.adapter.kernel, &self.input, &self.answer).map_err(|r| KernelFailure::Unchecked(r, self.answer.clone()))
+    }
+    /// The kernel as an answer records it: which capability, which kernel of which catalogue, and
+    /// the plate and work the runner reported.
+    pub fn kernel(&self) -> Value {
+        json!({"id": self.adapter.kernel, "capability": self.adapter.capability, "catalogue": self.catalogue,
+               "plate": self.answer.pointer("/kernel/plate"), "work": self.answer.get("work")})
+    }
+    /// The solver label of an answer this kernel gave.
+    pub fn solver(&self) -> String {
+        format!("algoglyph {}", self.adapter.kernel)
+    }
 }
 
 /// How many candidates enter the knapsack at most, unless the caller names another cap.
 pub const PORTFOLIO_CAP: usize = 40;
 
-/// A knapsack-dp runner: AlgoGlyph's (`algoglyph_run`) in production, a fake one in tests.
-pub type KernelRunner<'a> = &'a dyn Fn(&str, &Value) -> Result<Value, KernelFailure>;
-
-/// The kernel's answer, or why the built-in solver decides instead. An answer the runner gives is
-/// accepted only when it passes knapsack-dp's domain check (battlebrain_contract.rs, the adapter
-/// registry): indices in range and unique, the capacity held, best equal to the chosen items' sum.
-fn knapsack_algoglyph(input: &Value, run: KernelRunner) -> Result<Value, Value> {
-    const KERNEL: &str = "knapsack-dp";
-    match run(KERNEL, input) {
-        Err(f) => {
-            let message = f.message(KERNEL);
-            Err(match f {
-                KernelFailure::Unset => json!({"reason": "unset_dir", "message": message}),
-                KernelFailure::Refused(errors) => json!({"reason": "runner_refused", "errors": errors, "message": message}),
-                KernelFailure::Crashed(_) => json!({"reason": "crashed", "message": message}),
-            })
-        }
-        Ok(v) => match crate::battlebrain_contract::domain_check(KERNEL, input, &v) {
-            Ok(()) => Ok(v),
-            Err(r) => Err(json!({"reason": "domain_check_failed", "code": r.code, "path": r.path, "message": r.message,
-                                 "refused_answer": {"kernel": v.get("kernel"), "result": v.get("result")}})),
-        },
-    }
-}
-
-/// The label of a portfolio the AlgoGlyph kernel answered.
-const KERNEL_SOLVER: &str = "algoglyph knapsack-dp";
 /// The label of the built-in fallback: a separately named solver that never passes as the kernel
 /// (ADR 0037; rule project.decision-authority-boundaries, B7). battlebrain reports a solver whose
 /// label starts with "builtin" as `fallback_solver` (src/bin/battlebrain.rs).
-/// Why it decided (no runner, a refusal, a crash, an answer that failed its domain check) is the
-/// portfolio's `fallback`, never a variant of this label.
+/// Why it decided (no catalogue, no matching kernel, a refusal, a crash, an answer that failed
+/// its domain check) is the portfolio's `fallback`, never a variant of this label.
 const BUILTIN_SOLVER: &str = "builtin knapsack (no checked kernel answer; the reason is in fallback)";
 
-/// Which solver answered the portfolio, and its answer: the kernel's when it answered, else the
-/// built-in copy, labelled as itself and with no kernel. (solver, best, chosen items, kernel)
-/// `kernel_answer` is one that passed its domain check (`knapsack_algoglyph`): its indices are
-/// in range and unique, so the portfolio may index the items by them.
-fn solve(kernel_answer: Option<Value>, weights: &[usize], values: &[f64], capacity: usize) -> (&'static str, f64, Vec<usize>, Value) {
-    match kernel_answer {
-        Some(v) => {
-            let idx: Vec<usize> = v["result"]["items"].as_array().into_iter().flatten().filter_map(Value::as_u64).map(|i| i as usize).collect();
-            (KERNEL_SOLVER, num(&v["result"], "best"), idx, json!({"id": v["kernel"]["id"], "plate": v["kernel"]["plate"], "work": v["work"]}))
+/// Which solver answered the portfolio, and its answer: the kernel's when it answered, labelled
+/// with that kernel (`Call::solver`), else the built-in copy, labelled as itself and with no
+/// kernel. (solver, best, chosen items, kernel). `call` is one whose answer passed its domain
+/// check: its indices are in range and unique, so the portfolio may index the items by them.
+fn solve(call: Option<&Call>, weights: &[usize], values: &[f64], capacity: usize) -> (String, f64, Vec<usize>, Value) {
+    match call {
+        Some(c) => {
+            let idx: Vec<usize> = c.get("chosen").as_array().into_iter().flatten().filter_map(Value::as_u64).map(|i| i as usize).collect();
+            (c.solver(), c.get("total_value").as_f64().unwrap_or(0.0), idx, c.kernel())
         }
         None => {
             let (b, idx) = knapsack_builtin(weights, values, capacity);
-            (BUILTIN_SOLVER, b, idx, Value::Null)
+            (BUILTIN_SOLVER.to_string(), b, idx, Value::Null)
         }
     }
 }
 
 /// The portfolio: from the candidates (each with its best option's investment and score), the set
 /// with the highest total score within the budget. Money is counted in thousands for the solver.
-pub fn portfolio(candidates: &[Value], budget: Option<f64>) -> Value {
-    portfolio_with(candidates, budget, PORTFOLIO_CAP, &algoglyph_run)
+/// The kernel is the one that satisfies `PORTFOLIO` in `kernels`' catalogue; with none, or with
+/// an answer that fails its domain check, the built-in DP decides and `fallback` says why.
+pub fn portfolio(candidates: &[Value], budget: Option<f64>, kernels: &Kernels) -> Value {
+    portfolio_with(candidates, budget, PORTFOLIO_CAP, kernels)
 }
 
-/// `portfolio` with the candidate cap and the knapsack-dp runner named by the caller.
-pub fn portfolio_with(candidates: &[Value], budget: Option<f64>, cap: usize, run: KernelRunner) -> Value {
+/// `portfolio` with the candidate cap named by the caller.
+pub fn portfolio_with(candidates: &[Value], budget: Option<f64>, cap: usize, kernels: &Kernels) -> Value {
     // A producer's cargo is counted once: each freight candidate assumes it carries the producer's
     // whole production, so two lines from one mine would each count all of it. Only the best-scoring
     // candidate of each (cargo, producer) enters the knapsack; the others are reported as shadowed.
@@ -287,33 +419,71 @@ pub fn portfolio_with(candidates: &[Value], budget: Option<f64>, cap: usize, run
     let weights: Vec<usize> = items.iter().map(|c| (invest(c) / 1000.0).ceil() as usize).collect();
     let values: Vec<f64> = items.iter().map(|c| num(c, "score").round()).collect();
     let capacity = (budget / 1000.0).floor().max(0.0) as usize;
-    let input = json!({"weights": weights, "values": values, "capacity": capacity});
-    let (answer, fallback) = match knapsack_algoglyph(&input, run) {
-        Ok(v) => (Some(v), Value::Null),
-        Err(why) => (None, why),
+    // The adapter's conversion (battlebrain_contract.rs ADAPTERS): money in whole thousands, which
+    // the built-in DP counts in too; the kernel input carries them under the adapter's keys.
+    let call = kernels.call(PORTFOLIO, |a| a.input(&[("costs", json!(weights)), ("values", json!(values)), ("budget", json!(capacity))]));
+    let (answer, fallback, input) = match call {
+        Ok(c) => match c.check() {
+            Ok(()) => { let i = c.input.clone(); (Some(c), Value::Null, i) }
+            Err(f) => (None, f.to_json(c.adapter.kernel), c.input),
+        },
+        Err(f) => (None, f.to_json(PORTFOLIO), json!({"weights": weights, "values": values, "capacity": capacity})),
     };
     let check = match fallback["reason"].as_str() {
         None => json!({"status": "passed"}),
         Some("domain_check_failed") => json!({"status": "failed", "code": fallback["code"], "path": fallback["path"], "message": fallback["message"]}),
         Some(_) => json!({"status": "not_run"}),
     };
-    let (solver, best, chosen, kernel) = solve(answer, &weights, &values, capacity);
+    let (solver, best, chosen, kernel) = solve(answer.as_ref(), &weights, &values, capacity);
     json!({"solver": solver, "kernel": kernel, "input": input, "total_score": best, "shadowed": shadowed,
            "investment_k": chosen.iter().map(|&i| weights[i]).sum::<usize>(), "budget_k": capacity,
            "chosen": chosen.iter().map(|&i| items[i].clone()).collect::<Vec<_>>(),
            "fallback": fallback, "domain_check": check, "truncation": truncation})
 }
 
+/// Kernels over the real catalogue fixture (algoglyph 1b8e009, 53 kernels) with a fake runner,
+/// for the tests of every planner module.
+#[cfg(test)]
+pub mod testing {
+    use super::{Kernels, KernelFailure};
+    use crate::battlebrain_contract as bb;
+    use serde_json::Value;
+
+    pub fn fixture() -> Value {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain/catalogue.json");
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+    /// The fixture's kernel list with `edit` applied: a synthetic catalogue.
+    pub fn catalogue(edit: impl FnOnce(&mut Vec<Value>)) -> bb::Catalogue {
+        let f = fixture();
+        let mut list = f["kernels"].as_array().unwrap().clone();
+        edit(&mut list);
+        bb::Catalogue::from_runner(&Value::Array(list), f["commit"].as_str().unwrap()).unwrap()
+    }
+    pub fn on(cat: bb::Catalogue, run: impl Fn(&str, &Value) -> Result<Value, KernelFailure> + 'static) -> Kernels {
+        Kernels::new(move || Ok(cat.clone()), run)
+    }
+    pub fn kernels(run: impl Fn(&str, &Value) -> Result<Value, KernelFailure> + 'static) -> Kernels {
+        on(catalogue(|_| {}), run)
+    }
+    /// A runner that answers `answer` and keeps every (kernel, input) it was asked.
+    pub fn recording(answer: Value) -> (std::rc::Rc<std::cell::RefCell<Vec<(String, Value)>>>, impl Fn(&str, &Value) -> Result<Value, KernelFailure>) {
+        let asked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let log = asked.clone();
+        (asked, move |k: &str, i: &Value| { log.borrow_mut().push((k.to_string(), i.clone())); Ok(answer.clone()) })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::knapsack_builtin;
+    use super::{knapsack_builtin, testing};
     #[test]
     fn a_producer_enters_the_portfolio_once_with_its_best_line() {
         let c = |acc: u32, score: f64| serde_json::json!({"cargo": "Coal", "producer": {"id": 13}, "acceptor": {"id": acc}, "mode": "freight_rail",
             "score": score, "options": [{"mode": "freight_rail", "investment": 1000.0}]});
         let other = serde_json::json!({"cargo": "Coal", "producer": {"id": 44}, "mode": "freight_rail", "score": 5.0, "options": [{"mode": "freight_rail", "investment": 1000.0}]});
         let pax = serde_json::json!({"kind": "investment", "cargo": "Passengers", "passengers": true, "from": "t1", "mode": "rail", "score": 4.0, "options": [{"mode": "rail", "investment": 1000.0}]});
-        let p = super::portfolio(&[c(20, 10.0), c(38, 9.0), other, pax], Some(100000.0));
+        let p = super::portfolio(&[c(20, 10.0), c(38, 9.0), other, pax], Some(100000.0), &testing::kernels(|_, _| Err(KernelFailure::Unset)));
         let chosen = p["chosen"].as_array().unwrap();
         assert_eq!(chosen.len(), 3);
         assert_eq!(chosen.iter().filter(|x| x.pointer("/producer/id") == Some(&serde_json::json!(13))).count(), 1);
@@ -374,10 +544,11 @@ mod tests {
         assert!(solver.starts_with("builtin"), "battlebrain's fallback_solver test reads this prefix: {solver}");
         assert!(!solver.contains("algoglyph") && !solver.contains("knapsack-dp"), "{solver}");
         assert!(kernel.is_null(), "a built-in answer names no kernel");
-        // The kernel's own answer is labelled as the kernel's, with its id.
-        let answer = serde_json::json!({"ok": true, "kernel": {"id": "knapsack-dp", "plate": "p"}, "work": {}, "result": {"best": 197159.0, "items": [0, 3]}});
-        let (solver, best, items, kernel) = super::solve(Some(answer), &w, &v, 150);
-        assert_eq!((solver, best, items), (super::KERNEL_SOLVER, 197159.0, vec![0, 3]));
+        // The kernel's own answer is labelled with the kernel the matcher chose, with its id.
+        let k = testing::kernels(|_, _| Ok(answer(197159.0, json!([0, 3]))));
+        let call = k.call(PORTFOLIO, |a| a.input(&[("costs", json!(w)), ("values", json!(v)), ("budget", json!(150))])).unwrap();
+        let (solver, best, items, kernel) = super::solve(Some(&call), &w, &v, 150);
+        assert_eq!((solver.as_str(), best, items), ("algoglyph knapsack-dp", 197159.0, vec![0, 3]));
         assert_eq!(kernel["id"], "knapsack-dp");
         assert!(!solver.starts_with("builtin"));
     }
@@ -390,9 +561,10 @@ mod tests {
         assert_eq!(items, vec![0, 3]);
     }
 
-    // The portfolio's knapsack-dp answer and its fallbacks, against a fake runner. The four items
-    // are the AlgoGlyph case below: weights 135, 46, 20, 5 (thousands), capacity 150, best 197159.
-    use super::{portfolio_with, KernelFailure, PORTFOLIO_CAP};
+    // The portfolio's kernel answer and its fallbacks, against a fake runner on the real catalogue.
+    // The four items are the AlgoGlyph case above: weights 135, 46, 20, 5 (thousands), capacity
+    // 150, best 197159.
+    use super::{portfolio_with, Kernels, KernelFailure, PORTFOLIO, PORTFOLIO_CAP};
     use serde_json::{json, Value};
 
     fn line(producer: usize, investment: f64, score: f64) -> Value {
@@ -412,6 +584,7 @@ mod tests {
     /// Every fallback keeps the old keys, names the built-in solver and decides as it does.
     fn fell_back(p: &Value, reason: &str) {
         assert!(p["solver"].as_str().unwrap().starts_with("builtin knapsack"), "{}", p["solver"]);
+        assert_eq!(p["solver"], super::BUILTIN_SOLVER);
         assert_eq!(p["kernel"], Value::Null);
         assert_eq!(p["fallback"]["reason"], reason);
         assert_eq!(p["total_score"], json!(197159.0));
@@ -419,15 +592,38 @@ mod tests {
         assert_eq!(p["investment_k"], json!(140));
         for k in ["input", "shadowed", "budget_k"] { assert!(p.get(k).is_some(), "{k}"); }
     }
+    fn portfolio_on(k: &Kernels) -> Value {
+        portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, k)
+    }
 
     #[test]
-    fn a_checked_kernel_answer_decides() {
-        let p = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &|_, _| Ok(answer(197159.0, json!([0, 3]))));
-        assert_eq!(p["solver"], super::KERNEL_SOLVER);
-        assert_eq!(p["kernel"]["id"], "knapsack-dp");
+    fn the_kernel_is_the_catalogues_match_and_its_checked_answer_decides() {
+        let (asked, run) = testing::recording(answer(197159.0, json!([0, 3])));
+        let k = testing::kernels(run);
+        let p = portfolio_on(&k);
+        assert_eq!(p["solver"], "algoglyph knapsack-dp");
+        let cat = testing::catalogue(|_| {});
+        assert_eq!(p["kernel"], json!({"id": "knapsack-dp", "capability": PORTFOLIO, "catalogue": {"digest": cat.digest, "commit": cat.commit},
+                                       "plate": "knapsack", "work": {"cells": 600}}));
         assert_eq!(p["domain_check"]["status"], "passed");
         assert_eq!(p["fallback"], Value::Null);
         assert_eq!(producers(&p), vec![json!(1), json!(4)]);
+        // The runner was asked for the matched kernel, on the input the adapter's keys make.
+        let input = json!({"weights": [135, 46, 20, 5], "values": [196159.0, 64387.0, 16633.0, 1000.0], "capacity": 150});
+        assert_eq!(asked.borrow().as_slice(), &[("knapsack-dp".to_string(), input.clone())]);
+        assert_eq!(p["input"], input);
+        // The record names the catalogue and the capability-match decision it relied on.
+        let r = k.record();
+        assert_eq!(r["catalogue"], json!({"digest": cat.digest, "commit": cat.commit, "source": crate::battlebrain_contract::CATALOGUE_SOURCE, "kernels": 53}));
+        assert_eq!(r["unavailable"], Value::Null);
+        assert_eq!(r["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(r["matches"][0]["chosen"], "knapsack-dp");
+        assert!(crate::battlebrain_contract::validate_match(&r["matches"][0]).is_ok());
+        // A second portfolio on the same kernels matches once and asks the runner again.
+        portfolio_on(&k);
+        assert_eq!((asked.borrow().len(), k.record()["matches"].as_array().unwrap().len()), (2, 1));
+        assert_eq!(k.chosen(PORTFOLIO), Some("knapsack-dp"));
+        assert_eq!(k.chosen("rail-line-price"), None, "not asked for yet");
     }
 
     #[test]
@@ -435,46 +631,178 @@ mod tests {
         for (why, best, items) in [("out of range", 1000.0, json!([9])), ("repeated", 2000.0, json!([3, 3])),
                                    ("over capacity", 260546.0, json!([0, 1])), ("wrong best", 999999.0, json!([0, 3]))] {
             let bad = answer(best, items.clone());
-            let p = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &|_, _| Ok(bad.clone()));
+            let p = portfolio_on(&testing::kernels(move |_, _| Ok(bad.clone())));
             fell_back(&p, "domain_check_failed");
-            assert_eq!(p["solver"], super::BUILTIN_SOLVER, "{why}");
             assert_eq!(p["fallback"]["code"], "invalid_output", "{why}");
             assert_eq!(p["domain_check"]["status"], "failed", "{why}");
-            assert!(p["fallback"]["message"].as_str().is_some_and(|m| !m.is_empty()), "{why}");
+            assert!(p["fallback"]["message"].as_str().is_some_and(|m| m.starts_with("knapsack-dp: the answer fails its domain check at result.")), "{why}: {}", p["fallback"]["message"]);
             assert_eq!(p["fallback"]["refused_answer"]["result"]["items"], items, "{why}");
+            assert_eq!(p["input"]["capacity"], 150, "{why}: the input the kernel refused");
         }
     }
 
     #[test]
     fn every_fallback_reason_is_kept() {
-        let unset = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &|_, _| Err(KernelFailure::Unset));
+        let unset = portfolio_on(&Kernels::new(|| Err(KernelFailure::Unset), |_, _| panic!("no catalogue, no call")));
         fell_back(&unset, "unset_dir");
-        assert_eq!(unset["solver"], super::BUILTIN_SOLVER);
         assert_eq!(unset["fallback"]["message"], "MCP_ALGOGLYPH_DIR is not set");
         assert_eq!(unset["domain_check"]["status"], "not_run");
+        assert_eq!(unset["input"], json!({"weights": [135, 46, 20, 5], "values": [196159.0, 64387.0, 16633.0, 1000.0], "capacity": 150}));
+
+        let none = Kernels::new(|| Err(KernelFailure::NoCatalogue("flow -- kernels: not JSON".into())), |_, _| panic!("no call"));
+        let p = portfolio_on(&none);
+        fell_back(&p, "no_catalogue");
+        assert_eq!(p["fallback"]["message"], "no AlgoGlyph catalogue to choose portfolio-within-budget from: flow -- kernels: not JSON");
+        assert_eq!(none.record()["unavailable"]["reason"], "no_catalogue");
+        assert_eq!(none.record()["catalogue"], Value::Null);
+
+        // The runner no longer lists the kernel: the matcher refuses, and nothing is run.
+        let expired = testing::catalogue(|l| l.retain(|k| k["id"] != "knapsack-dp"));
+        let k = testing::on(expired, |_, _| panic!("an unmatched capability runs no kernel"));
+        let p = portfolio_on(&k);
+        fell_back(&p, "capability_unmatched");
+        assert_eq!(p["fallback"]["refusal"]["code"], "kernel_expired");
+        assert!(p["fallback"]["message"].as_str().unwrap().starts_with("portfolio-within-budget: kernel_expired ("));
+        assert_eq!(k.record()["matches"][0]["refusal"]["code"], "kernel_expired");
+        assert_eq!(k.chosen(PORTFOLIO), None);
 
         let errors = json!([{"path": "capacity", "message": "must be an integer"}]);
-        let refused = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &|_, _| Err(KernelFailure::Refused(errors.clone())));
+        let e = errors.clone();
+        let refused = portfolio_on(&testing::kernels(move |_, _| Err(KernelFailure::Refused(e.clone()))));
         fell_back(&refused, "runner_refused");
-        assert_eq!(refused["solver"], super::BUILTIN_SOLVER);
         assert_eq!(refused["fallback"]["errors"], errors);
 
-        let crashed = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP,
-                                     &|k, _| Err(KernelFailure::Crashed(format!("{k}: not JSON (EOF while parsing)"))));
+        let crashed = portfolio_on(&testing::kernels(|k, _| Err(KernelFailure::Crashed(format!("{k}: not JSON (EOF while parsing)")))));
         fell_back(&crashed, "crashed");
-        assert_eq!(crashed["solver"], super::BUILTIN_SOLVER);
         assert_eq!(crashed["fallback"]["message"], "knapsack-dp: not JSON (EOF while parsing)");
     }
 
     #[test]
+    fn nothing_is_resolved_or_recorded_before_a_call_needs_it() {
+        let k = testing::kernels(|_, _| panic!("no call"));
+        assert_eq!(k.record(), json!({"catalogue": null, "unavailable": null, "matches": []}));
+        let p = portfolio_with(&four(), None, PORTFOLIO_CAP, &k);
+        assert_eq!(p["solver"], "none");
+        assert_eq!(k.record()["catalogue"], Value::Null, "no budget, no knapsack, no catalogue read");
+        // An input field the requirement does not declare is refused before any run.
+        let e = k.call(PORTFOLIO, |a| a.input(&[("weights", json!([1]))])).err().unwrap();
+        assert_eq!(e.to_json(PORTFOLIO)["refusal"]["code"], "unmapped_field");
+    }
+
+    #[test]
     fn the_candidate_cap_is_recorded_never_silent() {
+        let unset = || testing::kernels(|_, _| Err(KernelFailure::Unset));
         let many: Vec<Value> = (0..45).map(|i| line(i, 1000.0, 100.0 - i as f64)).collect();
-        let p = portfolio_with(&many, Some(1_000_000.0), PORTFOLIO_CAP, &|_, _| Err(KernelFailure::Unset));
+        let p = portfolio_with(&many, Some(1_000_000.0), PORTFOLIO_CAP, &unset());
         assert_eq!(p["truncation"], json!({"cap": 40, "eligible": 45, "entered": 40, "dropped": 5}));
         assert_eq!(p["chosen"].as_array().unwrap().len(), 40);
-        let p = portfolio_with(&many, None, 3, &|_, _| Err(KernelFailure::Unset));
+        let p = portfolio_with(&many, None, 3, &unset());
         assert_eq!(p["truncation"], json!({"cap": 3, "eligible": 45, "entered": 3, "dropped": 42}));
-        let p = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &|_, _| Err(KernelFailure::Unset));
+        let p = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &unset());
         assert_eq!(p["truncation"]["dropped"], 0);
+    }
+
+    // The runner and the catalogue it reports, against a stand-in for npm in a scratch git checkout.
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let d = std::env::temp_dir().join(format!("mcp-cargo-{tag}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+    /// A stand-in for `npm run --silent flow -- <args>`: `kernels` prints the fixture's list,
+    /// `kernel <id> -` prints its standard input back.
+    fn fake_npm(dir: &std::path::Path) -> String {
+        std::fs::write(dir.join("kernels.json"), testing::fixture()["kernels"].to_string()).unwrap();
+        let npm = dir.join("fake-npm");
+        std::fs::write(&npm, "#!/bin/sh\ncase \"$5\" in kernels) cat kernels.json;; *) cat;; esac\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&npm, std::fs::Permissions::from_mode(0o755)).unwrap();
+        npm.to_string_lossy().into_owned()
+    }
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let ok = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap().status.success();
+        assert!(ok, "git {args:?}");
+    }
+
+    #[test]
+    fn the_catalogue_is_the_runners_list_at_the_checkouts_commit() {
+        let d = scratch("catalogue");
+        let npm = fake_npm(&d);
+        assert_eq!(super::flow(&d, &npm, &["kernel", "x", "-"], Some(&json!({"a": [1]}))).unwrap(), json!({"a": [1]}));
+        // Not a git checkout: no commit, so no catalogue.
+        let e = super::catalogue_in(&d, &npm).unwrap_err();
+        assert!(e.starts_with("invalid_catalogue: the checkout commit"), "{e}");
+        git(&d, &["init", "-q"]);
+        git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "t"]);
+        let cat = super::catalogue_in(&d, &npm).unwrap();
+        assert_eq!(cat.kernels.len(), 53);
+        assert_eq!(cat.digest, testing::catalogue(|_| {}).digest, "the digest is the runner's answer's");
+        let head = std::process::Command::new("git").arg("-C").arg(&d).args(["rev-parse", "HEAD"]).output().unwrap();
+        assert_eq!(cat.commit, String::from_utf8_lossy(&head.stdout).trim());
+        // A runner that cannot start, or answers no JSON.
+        assert!(super::flow(&d, "/nonexistent/npm", &["kernels"], None).is_err());
+        std::fs::write(d.join("kernels.json"), "not json").unwrap();
+        assert!(super::catalogue_in(&d, &npm).unwrap_err().starts_with("flow -- kernels: not JSON"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_catalogue_file_is_read_as_battlebrain_reads_one() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain/catalogue.json");
+        let k = Kernels::from_file(path.to_str().unwrap());
+        assert_eq!(k.resolve(PORTFOLIO).unwrap().kernel, "knapsack-dp");
+        assert_eq!(k.record()["catalogue"]["kernels"], 53);
+        let d = scratch("file");
+        std::fs::write(d.join("bad.json"), "{").unwrap();
+        std::fs::write(d.join("empty.json"), "{\"value\": {\"kernels\": []}}").unwrap();
+        for (f, want) in [("absent.json", "absent.json: "), ("bad.json", "bad.json: not JSON"), ("empty.json", "empty.json: invalid_catalogue")] {
+            let p = d.join(f).to_string_lossy().into_owned();
+            match super::catalogue_file(&p) {
+                Err(KernelFailure::NoCatalogue(m)) => assert!(m.contains(want), "{m}"),
+                other => panic!("{f}: {other:?}"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_runner_uses_the_checkout_mcp_algoglyph_dir_names() {
+        // The process environment is shared: this is the one test that sets the variable.
+        let before = std::env::var_os("MCP_ALGOGLYPH_DIR");
+        std::env::remove_var("MCP_ALGOGLYPH_DIR");
+        assert_eq!(super::runner_catalogue().unwrap_err(), KernelFailure::Unset);
+        assert_eq!(super::algoglyph_run("knapsack-dp", &json!({})).unwrap_err(), KernelFailure::Unset);
+        // A directory with no AlgoGlyph in it: the runner answers nothing a catalogue or kernel is.
+        let d = scratch("runner");
+        std::env::set_var("MCP_ALGOGLYPH_DIR", &d);
+        assert!(matches!(super::runner_catalogue(), Err(KernelFailure::NoCatalogue(_))));
+        assert!(matches!(super::algoglyph_run("knapsack-dp", &json!({})), Err(KernelFailure::Crashed(m)) if m.starts_with("knapsack-dp: ")));
+        let k = Kernels::runner();
+        assert!(matches!(k.resolve(PORTFOLIO), Err(KernelFailure::NoCatalogue(_))));
+        // A checkout whose flow script stands in for AlgoGlyph's (`kernels` lists the fixture's
+        // kernels, `kernel <id> -` answers its input back), run by the real npm where there is one.
+        let has_npm = std::process::Command::new("npm").arg("--version").output().is_ok_and(|o| o.status.success());
+        let f = scratch("checkout");
+        std::fs::write(f.join("package.json"), r#"{"name": "stand-in", "private": true, "scripts": {"flow": "sh flow.sh"}}"#).unwrap();
+        std::fs::write(f.join("kernels.json"), testing::fixture()["kernels"].to_string()).unwrap();
+        std::fs::write(f.join("flow.sh"), "if [ \"$1\" = kernels ]; then cat kernels.json; else cat; fi\n").unwrap();
+        git(&f, &["init", "-q"]);
+        git(&f, &["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "t"]);
+        std::env::set_var("MCP_ALGOGLYPH_DIR", &f);
+        let ok = super::algoglyph_run("knapsack-dp", &json!({"ok": true, "result": {"best": 1}}));
+        let refused = super::algoglyph_run("knapsack-dp", &json!({"ok": false, "errors": ["capacity"]}));
+        let k = Kernels::runner();
+        if has_npm {
+            assert_eq!(ok.unwrap()["result"]["best"], 1);
+            assert_eq!(refused.unwrap_err(), KernelFailure::Refused(json!(["capacity"])));
+            assert_eq!(k.resolve(PORTFOLIO).unwrap().kernel, "knapsack-dp");
+            assert_eq!(k.record()["catalogue"]["kernels"], 53);
+        } else {
+            assert!(matches!(ok, Err(KernelFailure::Crashed(_))), "no npm: the runner cannot start");
+            assert!(matches!(k.resolve(PORTFOLIO), Err(KernelFailure::NoCatalogue(_))));
+        }
+        match before { Some(v) => std::env::set_var("MCP_ALGOGLYPH_DIR", v), None => std::env::remove_var("MCP_ALGOGLYPH_DIR") }
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&f);
     }
 }

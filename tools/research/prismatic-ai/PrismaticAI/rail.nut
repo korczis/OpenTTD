@@ -139,8 +139,26 @@ function PrismaticAI::PieceFits(slope, piece) {
  * whole rectangle between the stations and lines the old search found failed (seed 31337, 2026-11-17). */
 H_TILE <- 7;
 
-function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, from_in = null, from_straight = false, to_straight = false) {
+/* The search's node budget scales with the distance it bridges. A search whose goal cannot be
+ * reached under the line's rules tries every tile it can reach first: in the fitness match (OpenTTD
+ * seed 930967890, planned lineup, 2026-11-22) three such searches took 43747 to 52161 nodes and
+ * 202 to 241 game days each, one of them a re-plan between tiles two apart, and a heartbeat that
+ * ran two held the money idle for fifteen months; on seeds 1814625749 and 4242 such searches took
+ * 252 to 331 days (58007 to 75453 nodes), one between tiles ten apart. The 42 searches that found
+ * their line in those three matches used at most 148 nodes a tile of distance (median 66). So a
+ * search gets RAIL_NODES_PER_TILE nodes a tile, at least RAIL_NODES_MIN and at most RAIL_NODES_MAX,
+ * and the heartbeat moves on to roads, air and the fleet sooner. Each search logs its nodes and
+ * game days. */
+const RAIL_NODES_PER_TILE = 200;
+const RAIL_NODES_MIN = 2000;
+const RAIL_NODES_MAX = 150000;
+/* Nodes the last search that found its line used (FindRailPath); BuildDoubleRailLineAndTrain sizes
+ * the second track's search from the first's. */
+RAIL_LAST_NODES <- 0;
+
+function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, from_in = null, from_straight = false, to_straight = false, max_nodes = 0) {
 	local map_w = AIMap.GetMapSizeX();
+	local day0 = AIDate.GetCurrentDate();
 	local open = AIPriorityQueue();
 	local came = {}, cost = {};
 	/* A bridge is a jump in the path: its far head `h2` came from the tile before the near head, and
@@ -149,10 +167,15 @@ function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, fro
 	cost[from] <- 0;
 	came[from] <- -1;
 	open.Insert(from, H_TILE * AIMap.DistanceManhattan(from, to));
-	local budget = 150000, budget0 = budget;
+	local budget = (max_nodes > 0) ? max_nodes : RAIL_NODES_PER_TILE * AIMap.DistanceManhattan(from, to);
+	budget = min(RAIL_NODES_MAX, max(RAIL_NODES_MIN, budget));
+	local budget0 = budget;
 	while (!open.IsEmpty() && budget-- > 0) {
 		local cur = open.Pop();
 		if (cur == to) {
+			RAIL_LAST_NODES = budget0 - budget;
+			AILog.Info("PrismaticAI: rail path from tile " + from + " to " + to + " found: " + RAIL_LAST_NODES + " of " + budget0 + " nodes in " +
+				(AIDate.GetCurrentDate() - day0) + " days");
 			local path = [];
 			for (local t = to; t != -1; t = came[t]) {
 				path.push(t);
@@ -284,7 +307,8 @@ function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, fro
 		}
 	}
 	AILog.Warning("PrismaticAI: no rail path from tile " + from + " to " + to + " (" + AIMap.DistanceManhattan(from, to) + " tiles): "
-		+ (budget <= 0 ? "the node budget of " + budget0 + " ran out" : "every reachable tile tried, " + (budget0 - budget) + " nodes"));
+		+ (budget <= 0 ? "the node budget of " + budget0 + " ran out" : "every reachable tile tried, " + (budget0 - budget) + " nodes")
+		+ " in " + (AIDate.GetCurrentDate() - day0) + " days");
 	return null;
 }
 
@@ -922,6 +946,8 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 		for (local k = 0; k < 3; k++) avoid[d.b2 + k * d.out] <- 1;
 	}
 	local path = PrismaticAI.FindRailPath(sa.exit, sb.exit, sa.end, sb.end, avoid, null, true, true);
+	/* Track A's own search, before a re-plan while laying it overwrites RAIL_LAST_NODES. */
+	local nodes_a = RAIL_LAST_NODES;
 	if (path == null) {
 		AILog.Warning("PrismaticAI: no rail path between the stations; removing them");
 		PrismaticAI.RemoveRailStation(sa, len); PrismaticAI.RemoveRailStation(sb, len);
@@ -953,7 +979,9 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 	local taken = {};
 	foreach (t in laid) taken[t] <- 1;
 	local laid2 = null;
-	local path2 = afford_b ? PrismaticAI.FindRailPath(da.b2, db.b2, da.s1, db.s1, taken, da.lane, true, true) : null;
+	/* Track B runs beside track A: where it is found, its search took 0.88 to 1.09 times track A's
+	 * nodes (the fitness match above, four double lines), so twice that is its budget. */
+	local path2 = afford_b ? PrismaticAI.FindRailPath(da.b2, db.b2, da.s1, db.s1, taken, da.lane, true, true, 2 * nodes_a) : null;
 	if (path2 != null) laid2 = PrismaticAI.BuildRailAlong(path2, da.s1, db.s1, 2, true, true);
 	if (laid2 != null) {
 		broken = PrismaticAI.VerifyRailLine(laid2, da.s1, db.s1);

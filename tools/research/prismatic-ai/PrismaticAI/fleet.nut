@@ -4,7 +4,7 @@
  * - A route is the set of stations in a vehicle's orders. For each route, the cargo waiting at its
  *   stations (AIStation.GetCargoWaiting) is compared with one vehicle's capacity: when more than 1.5
  *   loads wait and money is above the reserve, one more vehicle is cloned with shared orders, up to
- *   a cap per type (road 8, air 4). Trains are not added here: a rail line's trains and wagons are
+ *   a cap per type (road 8, air 4, ships ships_cap). Trains are not added here: a rail line's trains and wagons are
  *   the Rhai steward's targets, which lines.nut ReconcileLines carries out up to the line's
  *   trains_max, the trains its two-platform termini hold without a meeting on the single track.
  * - Too many vehicles: on a two-stop route the game's link graph gives the planned monthly flow
@@ -32,6 +32,7 @@ function PrismaticAI::DepotFor(v) {
 	local type = AIVehicle.GetVehicleType(v);
 	local first = AIOrder.GetOrderDestination(v, 0);
 	if (type == AIVehicle.VT_AIR) return AIAirport.GetHangarOfAirport(first);
+	if (type == AIVehicle.VT_WATER) return PrismaticAI.ShipDepotFor(v); /* ships.nut */
 	if (type != AIVehicle.VT_ROAD) return -1;
 	local depots = AIDepotList(AITile.TRANSPORT_ROAD);
 	depots.Valuate(AIMap.DistanceManhattan, first);
@@ -115,7 +116,7 @@ const INVEST_SURPLUS_RESERVES = 20;
 /* Put idle money to work: one more vehicle on the route whose judged vehicles (a year old) earned
  * the most per vehicle last year, while that is above a third of the vehicle's price and the route
  * is under its cap. The winner of the LAN AI battle grew its fleet tenfold while PrismaticAI sat on
- * millions with ~30 vehicles; waiting cargo alone never called for more. Road and air only: rail
+ * millions with ~30 vehicles; waiting cargo alone never called for more. Road, air and water: rail
  * lines grow through the steward's targets (lines.nut, steward.nut). */
 function PrismaticAI::InvestSurplus(b) {
 	local money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
@@ -127,7 +128,7 @@ function PrismaticAI::InvestSurplus(b) {
 	for (local v = all.Begin(); !all.IsEnd(); v = all.Next()) {
 		if (this.selling.rawin(v)) continue;
 		local type = AIVehicle.GetVehicleType(v);
-		if (type != AIVehicle.VT_ROAD && type != AIVehicle.VT_AIR) continue;
+		if (type != AIVehicle.VT_ROAD && type != AIVehicle.VT_AIR && type != AIVehicle.VT_WATER) continue;
 		local k = PrismaticAI.RouteKey(v);
 		if (k == "") continue;
 		if (!routes.rawin(k)) routes[k] <- {sample = v, count = 0, profit = 0, judged = 0, type = type};
@@ -137,7 +138,8 @@ function PrismaticAI::InvestSurplus(b) {
 	}
 	local best = null, best_ppv = 0;
 	foreach (k, r in routes) {
-		if (r.judged == 0 || r.count >= ((r.type == AIVehicle.VT_AIR) ? b.invest_air_cap : b.invest_road_cap)) continue;
+		local cap = (r.type == AIVehicle.VT_AIR) ? b.invest_air_cap : ((r.type == AIVehicle.VT_WATER) ? b.ships_cap : b.invest_road_cap);
+		if (r.judged == 0 || r.count >= cap) continue;
 		/* A rich cap (rich.nut) above what the airports hold would only jam them. */
 		if (r.type == AIVehicle.VT_AIR && !PrismaticAI.RouteHasAirRoom(r.sample)) continue;
 		/* Nor where its planes already fly part empty (air_add_full, AirRouteHasDemand). */
@@ -271,7 +273,8 @@ function PrismaticAI::ManageFleet(reserve) {
 		if (type == AIVehicle.VT_RAIL) continue;
 		/* Planes per air route: 4, or 8 with the steward on (autopilot): in the battle the winner ran
 		 * 10-14 planes on its first routes by 1962 and its air profit funded everything else. */
-		local cap_limit = (type == AIVehicle.VT_AIR) ? (this.steward_on ? this.air_cap : 4) : 8;
+		/* Ships: ships_cap (ships.nut). */
+		local cap_limit = (type == AIVehicle.VT_AIR) ? (this.steward_on ? this.air_cap : 4) : ((type == AIVehicle.VT_WATER) ? this.ship_cap : 8);
 		if (r.count >= cap_limit) continue;
 		local cargo = AIEngine.GetCargoType(AIVehicle.GetEngineType(v));
 		local cap = AIVehicle.GetCapacity(v, cargo);

@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""RESEARCH-ONLY: the pin of the AlgoGlyph submodule (I0227, ADR 0039).
+
+AlgoGlyph (github.com/korczis/algoglyph) is the git submodule tools/research/vendor/algoglyph,
+pinned at one commit: that commit is the only AlgoGlyph version the fork trusts. Its record,
+tools/research/vendor/algoglyph.pin.json, holds the pinned commit and the flow runner's catalogue
+at it (`npm run --silent flow -- kernels`); mcp-rhai compiles it in (src/algoglyph_native.rs), and
+a unit test there refuses a record whose commit is not the gitlink. Nothing is ever committed into
+the submodule: a bump moves the gitlink to a commit of AlgoGlyph's own history.
+
+  algoglyph-pin status                      the pin, the submodule's checkout, whether it can run
+  algoglyph-pin check                       refuse a record that is not the gitlink's, a needed
+                                            kernel the record lacks, a submodule at another commit
+  algoglyph-pin install [--no-npm]          check the submodule out at the pin, then npm ci in it
+  algoglyph-pin runner                      print the installed checkout at the pin, for
+                                            MCP_ALGOGLYPH_DIR (tools/research/mcp-e2e)
+  algoglyph-pin bump [REF] [--runner-dir DIR] [--need ID]...
+                                            move the pin to REF (default origin/main), list its
+                                            kernels, write the record and stage both paths
+
+A checkout outside the submodule (~/dev/algoglyph-wt/main, ~/dev/algoglyph) serves as the runner
+only when it is cleanly at the pinned commit, so a machine with one installed checkout needs no
+node_modules in every worktree. `bump --runner-dir` lists the kernels in such a checkout (at REF)
+instead of installing the submodule's node_modules. `--need` replaces the kernels the stack needs
+(kept from the previous record otherwise).
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+PATH = "tools/research/vendor/algoglyph"
+RECORD = "tools/research/vendor/algoglyph.pin.json"
+SCHEMA = "algoglyph-pin/v1"
+SOURCE = "npm run --silent flow -- kernels"
+NAME = "algoglyph"
+
+
+def git(cwd, *args):
+    """git's standard output in `cwd`, stripped; CalledProcessError on a failure."""
+    return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def pinned(root):
+    """The commit the index pins the submodule at, or None when PATH is no gitlink."""
+    line = git(root, "ls-files", "-s", "--", PATH)
+    mode, _, rest = line.partition(" ")
+    return rest.split()[0] if mode == "160000" else None
+
+
+def load_record(root):
+    """The pin record, or None when it is missing or not JSON."""
+    try:
+        return json.loads((Path(root) / RECORD).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def clean_head(d):
+    """The commit a checkout is cleanly at: HEAD when no tracked file differs, else None."""
+    try:
+        if git(d, "status", "--porcelain", "--untracked-files=no"):
+            return None
+        return git(d, "rev-parse", "HEAD")
+    except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError):
+        return None
+
+
+def runnable(d):
+    """Whether the flow CLI can run in `d`: its package.json and its node_modules."""
+    return (Path(d) / "package.json").is_file() and (Path(d) / "node_modules").is_dir()
+
+
+def checked_out(root):
+    """Whether the submodule's work tree is there."""
+    return (Path(root) / PATH / ".git").exists()
+
+
+def candidates(root, home):
+    """The checkouts that may serve as the runner, in order."""
+    return [Path(root) / PATH, Path(home) / "dev/algoglyph-wt/main", Path(home) / "dev/algoglyph"]
+
+
+def runner(root, home):
+    """The first candidate that can run and is cleanly at the pin, or None."""
+    pin = pinned(root)
+    return next((d for d in candidates(root, home) if pin and runnable(d) and clean_head(d) == pin), None)
+
+
+def parse_answer(text):
+    """The JSON a flow run printed: the whole output, else its last line that parses."""
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    for line in reversed(text.splitlines()):
+        try:
+            v = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(v, (list, dict)):
+            return v
+    return None
+
+
+def list_kernels(d):
+    """The runner's catalogue in checkout `d`."""
+    out = subprocess.run(["npm", "run", "--silent", "flow", "--", "kernels"], cwd=d, capture_output=True, text=True)
+    v = parse_answer(out.stdout)
+    if not isinstance(v, list):
+        raise SystemExit(f"algoglyph-pin: {SOURCE} in {d} answered no kernel list (exit {out.returncode}): {out.stderr.strip()[-300:]}")
+    return v
+
+
+def npm_ci(d):
+    """Install the checkout's node_modules from its lockfile."""
+    subprocess.run(["npm", "ci", "--no-audit", "--no-fund"], cwd=d, check=True)
+
+
+def url(root):
+    """The submodule's URL as .gitmodules declares it, or None."""
+    try:
+        return git(root, "config", "-f", ".gitmodules", f"submodule.{NAME}.url")
+    except subprocess.CalledProcessError:
+        return None
+
+
+def check(root):
+    """Every way the pin is not what the repository says: a list of problems, empty when sound."""
+    problems = []
+    try:
+        declared = git(root, "config", "-f", ".gitmodules", f"submodule.{NAME}.path")
+    except subprocess.CalledProcessError:
+        declared = None
+    if declared != PATH:
+        problems.append(f".gitmodules declares no submodule {NAME} at {PATH}")
+    pin = pinned(root)
+    if not pin:
+        problems.append(f"{PATH} is not a gitlink in the index")
+    rec = load_record(root)
+    if not rec or rec.get("schema") != SCHEMA:
+        problems.append(f"{RECORD} is missing or not {SCHEMA}")
+        return problems
+    if rec.get("commit") != pin:
+        problems.append(f"{RECORD} records {rec.get('commit')}, the gitlink is {pin}: algoglyph-pin bump {pin}")
+    listed = {k.get("id") for k in rec.get("kernels", []) if isinstance(k, dict)}
+    for need in rec.get("needs", []):
+        if need not in listed:
+            problems.append(f"the runner at {rec.get('commit')} lists no {need}, which the stack needs")
+    if not rec.get("needs"):
+        problems.append(f"{RECORD} names no kernel the stack needs")
+    if pin and checked_out(root):
+        head = clean_head(Path(root) / PATH)
+        if head != pin:
+            problems.append(f"the submodule is {'checked out at ' + head if head else 'modified'}, not at the pin {pin}: git submodule update -- {PATH}")
+    return problems
+
+
+def write_record(root, commit, kernels, needs, source_url):
+    rec = {
+        "schema": SCHEMA,
+        "description": "GENERATED by tools/research/algoglyph-pin bump; do not edit. The commit the "
+                       "AlgoGlyph submodule is pinned at, and its flow runner's catalogue there (I0227).",
+        "path": PATH,
+        "url": source_url,
+        "commit": commit,
+        "source": SOURCE,
+        "needs": list(needs),
+        "kernels": kernels,
+    }
+    (Path(root) / RECORD).write_text(json.dumps(rec, indent=2) + "\n")
+
+
+def install(root, npm=True):
+    git(root, "submodule", "update", "--init", "--", PATH)
+    sub = Path(root) / PATH
+    if npm and not runnable(sub):
+        npm_ci(sub)
+    print(f"algoglyph-pin: {PATH} at {pinned(root)}{'' if runnable(sub) else ' (no node_modules: the flow CLI does not run here)'}")
+    return 0
+
+
+def bump(root, ref, runner_dir=None, needs=None):
+    sub = Path(root) / PATH
+    if not checked_out(root):
+        git(root, "submodule", "update", "--init", "--", PATH)
+    git(sub, "fetch", "--quiet", "origin")
+    sha = git(sub, "rev-parse", "--verify", f"{ref}^{{commit}}")
+    git(sub, "checkout", "--quiet", "--detach", sha)
+    d = Path(runner_dir) if runner_dir else sub
+    if clean_head(d) != sha:
+        print(f"algoglyph-pin: {d} is not cleanly at {sha}; its kernels are not that commit's", file=sys.stderr)
+        return 1
+    if not runnable(d):
+        if d != sub:
+            print(f"algoglyph-pin: {d} has no node_modules", file=sys.stderr)
+            return 1
+        npm_ci(d)
+    kernels = list_kernels(d)
+    needs = needs or (load_record(root) or {}).get("needs") or []
+    listed = {k.get("id") for k in kernels if isinstance(k, dict)}
+    missing = [n for n in needs if n not in listed]
+    if missing or not needs:
+        print(f"algoglyph-pin: {sha} lacks {', '.join(missing) if missing else 'a list of needed kernels (--need)'};"
+              f" the pin is unchanged (git submodule update -- {PATH} restores the checkout)", file=sys.stderr)
+        return 1
+    write_record(root, sha, kernels, needs, url(root))
+    git(root, "add", "--", PATH, RECORD)
+    print(f"algoglyph-pin: pinned {sha} ({len(kernels)} runner kernels; staged {PATH} and {RECORD})")
+    return 0
+
+
+def status(root, home):
+    sub = Path(root) / PATH
+    rec = load_record(root) or {}
+    found = runner(root, home)
+    return {
+        "path": PATH,
+        "pinned": pinned(root),
+        "record": rec.get("commit"),
+        "checked_out": clean_head(sub) if checked_out(root) else None,
+        "installed": runnable(sub),
+        "runner": str(found) if found else None,
+    }
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="algoglyph-pin", description="The pin of the AlgoGlyph submodule (I0227).")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("status", help="the pin, the submodule's checkout and whether it can run")
+    sub.add_parser("check", help="refuse a pin record that is not the gitlink's")
+    p = sub.add_parser("install", help="check the submodule out at the pin, then npm ci in it")
+    p.add_argument("--no-npm", action="store_true", help="leave node_modules out (enough to build mcp-rhai)")
+    sub.add_parser("runner", help="print the installed checkout at the pin")
+    p = sub.add_parser("bump", help="move the pin to REF and record its catalogue")
+    p.add_argument("ref", nargs="?", default="origin/main")
+    p.add_argument("--runner-dir", help="list the kernels in this checkout, cleanly at REF")
+    p.add_argument("--need", action="append", help="a kernel the stack needs (replaces the recorded list)")
+    a = ap.parse_args(argv)
+    root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
+    home = Path(os.environ.get("HOME", "/"))
+    if a.cmd == "status":
+        print(json.dumps(status(root, home), indent=2))
+        return 0
+    if a.cmd == "check":
+        problems = check(root)
+        for p in problems:
+            print(f"algoglyph-pin: {p}", file=sys.stderr)
+        if not problems:
+            print(f"algoglyph-pin: {PATH} pinned at {pinned(root)}, record current")
+        return 1 if problems else 0
+    if a.cmd == "install":
+        return install(root, npm=not a.no_npm)
+    if a.cmd == "runner":
+        found = runner(root, home)
+        if found is None:
+            print(f"algoglyph-pin: no installed checkout cleanly at the pin {pinned(root)}: algoglyph-pin install", file=sys.stderr)
+            return 1
+        print(found)
+        return 0
+    return bump(root, a.ref, a.runner_dir, a.need)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -13,9 +13,10 @@
 #     `<!-- name:end ... -->`, any tool's markers) is resolved by taking master's side; the sync
 #     that follows rewrites the region from the merged sources either way.
 #   - Any other conflict is left to the branch's owner: the merge is aborted and the exit is 10.
-#   - A sync commit is made only when the sync changed something, titled
-#     "Doc: [Surfaces] Regenerate derived regions after merging master". A branch whose head
-#     already is such a commit, with master merged, has nothing to do.
+#   - The merge commit, "Merge origin/master into <branch>", already holds the regenerated
+#     regions, so a local pre-commit hook that runs surfaces check accepts it. A branch that holds
+#     master but has stale regions gets one commit, "Doc: [Surfaces] Regenerate derived regions
+#     after merging master". A branch current on both counts has nothing to do.
 #   - --push pushes the result as a fast-forward of the remote branch, never a force: when its
 #     owner pushed in the meantime the push is refused, and the next run retries.
 #
@@ -47,8 +48,13 @@ git fetch -q origin master "$branch"
 git checkout -q --detach "origin/$branch"
 start="$(git rev-parse HEAD)"
 
-# Detached, git would title the merge "into HEAD"; name the branch it lands on.
-if ! git merge -q --no-edit -m "Merge origin/master into $branch" origin/master >/dev/null 2>&1; then
+# The merge is not committed until the regions are regenerated: a commit with master's side of a
+# region still stale would be refused by a local pre-commit hook that runs surfaces check.
+merging=0
+if ! git merge-base --is-ancestor origin/master HEAD; then
+  merging=1
+fi
+if [[ $merging == 1 ]] && ! git merge -q --no-commit --no-ff origin/master >/dev/null 2>&1; then
   # Resolve the conflicts that sit inside generated regions; anything else stays the owner's.
   if ! python3 - "$(git diff --name-only --diff-filter=U)" <<'EOF'
 import re, sys
@@ -87,13 +93,18 @@ EOF
     exit 10
   fi
   git add -- $(git diff --name-only --diff-filter=U)
-  git commit -q --no-edit
 fi
 
 tools/surfaces/surfaces sync >/dev/null
-if ! git diff --quiet; then
+if [[ $merging == 1 ]]; then
+  # One merge commit that already holds the regenerated regions (detached, git would title it
+  # "into HEAD"; name the branch it lands on).
   git add -u
-  git commit -q -m "$TITLE" -m "tools/surfaces/refresh-branch: origin/master merged into $branch, then tools/surfaces/surfaces sync, so the derived regions count what the merge will hold."
+  git commit -q -m "Merge origin/master into $branch" \
+    -m "tools/surfaces/refresh-branch: the derived regions are regenerated in the merge itself."
+elif ! git diff --quiet; then
+  git add -u
+  git commit -q -m "$TITLE" -m "tools/surfaces/refresh-branch: tools/surfaces/surfaces sync on $branch, so the derived regions count what the branch holds."
 fi
 
 if [[ "$(git rev-parse HEAD)" == "$start" ]]; then
