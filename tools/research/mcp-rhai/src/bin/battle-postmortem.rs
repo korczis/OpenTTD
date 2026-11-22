@@ -34,6 +34,16 @@ mod postmortem;
 #[allow(dead_code)]
 #[path = "../board.rs"]
 mod board;
+// Every statement this binary runs is a file: sql/postmortem/battle (the battle's SQLite store,
+// read-only) and sql/postmortem/analytics (analytics.duckdb); the store's own files go unused here.
+#[allow(dead_code)]
+#[path = "../store_sql.rs"]
+mod store_sql;
+
+/// A statement of `sql/postmortem/battle`.
+fn battle_sql(name: &str) -> Result<&'static str, String> {
+    store_sql::file(store_sql::BATTLE_FILES, "postmortem/battle", name)
+}
 
 use rayon::prelude::*;
 use serde_json::{json, Value};
@@ -131,7 +141,7 @@ fn open_ro(db: &Path) -> Result<rusqlite::Connection, String> {
 /// The editions in the store, newest first (by the latest match start).
 fn editions(db: &Path) -> Result<Vec<String>, String> {
     let c = open_ro(db)?;
-    let mut st = c.prepare("SELECT edition FROM matches GROUP BY edition ORDER BY max(started_at) DESC").map_err(|e| e.to_string())?;
+    let mut st = c.prepare(battle_sql("editions")?).map_err(|e| e.to_string())?;
     let rows = st.query_map([], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
@@ -152,8 +162,9 @@ fn matches_from_store(db: &Path, edition: &str, cfg: &BTreeMap<String, Value>) -
     let c = open_ro(db)?;
     let e = |e: rusqlite::Error| e.to_string();
     let mut out: BTreeMap<String, Value> = BTreeMap::new();
-    let mut st = c.prepare("SELECT id, host, seed, status, replica_of, lineup FROM matches WHERE edition = ?1").map_err(e)?;
-    let rows = st.query_map([edition], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<i64>>(2)?,
+    let at = rusqlite::named_params! {"$edition": edition};
+    let mut st = c.prepare(battle_sql("matches")?).map_err(e)?;
+    let rows = st.query_map(at, |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<i64>>(2)?,
         r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, Option<String>>(5)?))).map_err(e)?;
     for row in rows {
         let (id, host, seed, status, replica, lineup) = row.map_err(e)?;
@@ -162,8 +173,8 @@ fn matches_from_store(db: &Path, edition: &str, cfg: &BTreeMap<String, Value>) -
         out.insert(id.clone(), json!({"id": id, "edition": edition, "host": host, "seed": seed, "status": status,
             "replica_of": replica, "lineup": lineup, "standings": [], "series": {}}));
     }
-    let mut st = c.prepare("SELECT match_id, contestant, value, vehicles, stations FROM standings WHERE edition = ?1 ORDER BY match_id, rank").map_err(e)?;
-    let rows = st.query_map([edition], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<f64>>(2)?,
+    let mut st = c.prepare(battle_sql("standings")?).map_err(e)?;
+    let rows = st.query_map(at, |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<f64>>(2)?,
         r.get::<_, Option<f64>>(3)?, r.get::<_, Option<f64>>(4)?))).map_err(e)?;
     for row in rows {
         let (m, k, v, veh, sta) = row.map_err(e)?;
@@ -171,10 +182,10 @@ fn matches_from_store(db: &Path, edition: &str, cfg: &BTreeMap<String, Value>) -
             rec["standings"].as_array_mut().unwrap().push(json!({"key": k, "value": v, "vehicles": veh, "stations": sta}));
         }
     }
-    let mut st = c.prepare("SELECT * FROM samples WHERE edition = ?1 ORDER BY match_id, contestant, t").map_err(e)?;
+    let mut st = c.prepare(battle_sql("samples")?).map_err(e)?;
     // Every column by name, so a column the referee adds later is carried too (the store is add-only).
     let cols: Vec<String> = st.column_names().iter().map(|c| c.to_string()).collect();
-    let mut rows = st.query([edition]).map_err(e)?;
+    let mut rows = st.query(at).map_err(e)?;
     while let Some(r) = rows.next().map_err(e)? {
         let mut sample = serde_json::Map::new();
         let (mut m, mut k) = (String::new(), String::new());
@@ -208,46 +219,48 @@ fn matches_from_json(dir: &Path, cfg: &BTreeMap<String, Value>) -> Result<Vec<Va
     }).collect())
 }
 
+/// The edition's analyses, contestants and proposals into analytics.duckdb, replacing what the
+/// edition had there; every statement a file of `sql/postmortem/analytics`.
 #[cfg(feature = "store")]
 fn write_duckdb(path: &Path, pm: &Value) -> Result<(), String> {
-    use duckdb::{params, Connection};
+    use duckdb::{named_params, Connection};
     let e = |e: duckdb::Error| e.to_string();
+    let file = |name: &str| store_sql::file(store_sql::ANALYTICS_FILES, "postmortem/analytics", name);
     let mut c = Connection::open(path).map_err(|err| format!("{}: {err}", path.display()))?;
-    c.execute_batch("
-        CREATE TABLE IF NOT EXISTS analyses(edition VARCHAR, match_id VARCHAR, contestant VARCHAR, rank INTEGER, field INTEGER,
-            last BOOLEAN, value DOUBLE, value_share_of_winner DOUBLE, peak_vehicles DOUBLE, final_vehicles DOUBLE,
-            idle_cash_share DOUBLE, income_per_vehicle DOUBLE, stations_per_vehicle DOUBLE, gap_opens VARCHAR, causes VARCHAR[]);
-        CREATE TABLE IF NOT EXISTS contestants(edition VARCHAR, contestant VARCHAR, prismatic BOOLEAN, settings VARCHAR,
-            matches INTEGER, avg_rank DOUBLE, last_place INTEGER, avg_value_share_of_winner DOUBLE, avg_idle_cash_share DOUBLE,
-            median_gap_opens VARCHAR, causes JSON);
-        CREATE TABLE IF NOT EXISTS proposals(edition VARCHAR, contestant VARCHAR, settings VARCHAR, because JSON);
-        -- The seed, so a contestant pairs with the default on the same map (the brain's paired target).
-        ALTER TABLE analyses ADD COLUMN IF NOT EXISTS seed BIGINT;").map_err(e)?;
+    c.execute_batch(file("schema")?).map_err(e)?;
     let ed = pm["edition"].as_str().unwrap_or("");
     let tx = c.transaction().map_err(e)?;
-    for t in ["analyses", "contestants", "proposals"] {
-        tx.execute(&format!("DELETE FROM {t} WHERE edition = ?"), params![ed]).map_err(e)?;
+    for delete in ["delete_analyses", "delete_contestants", "delete_proposals"] {
+        tx.execute(file(delete)?, named_params! {"edition": ed}).map_err(e)?;
     }
     {
-        let mut st = tx.prepare("INSERT INTO analyses (edition, match_id, contestant, rank, field, last, value, value_share_of_winner,
-            peak_vehicles, final_vehicles, idle_cash_share, income_per_vehicle, stations_per_vehicle, gap_opens, causes, seed)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, string_split(?, ','), ?)").map_err(e)?;
+        let mut st = tx.prepare(file("insert_analyses")?).map_err(e)?;
         for a in pm["analyses"].as_array().into_iter().flatten() {
             let causes = a["losses"].as_array().into_iter().flatten().filter_map(|l| l["cause"].as_str()).collect::<Vec<_>>().join(",");
-            st.execute(params![ed, a["match"].as_str(), a["key"].as_str(), a["rank"].as_i64(), a["field"].as_i64(),
-                a["last"].as_bool(), a["value"].as_f64(), a["value_share_of_winner"].as_f64(), a["peak_vehicles"].as_f64(),
-                a["final_vehicles"].as_f64(), a["idle_cash_share"].as_f64(), a["income_per_vehicle"].as_f64(),
-                a["stations_per_vehicle"].as_f64(), a["gap_opens"].as_str(), causes, a["seed"].as_i64()]).map_err(e)?;
+            st.execute(named_params! {
+                "edition": ed, "match_id": a["match"].as_str(), "contestant": a["key"].as_str(), "rank": a["rank"].as_i64(),
+                "field": a["field"].as_i64(), "last": a["last"].as_bool(), "value": a["value"].as_f64(),
+                "value_share_of_winner": a["value_share_of_winner"].as_f64(), "peak_vehicles": a["peak_vehicles"].as_f64(),
+                "final_vehicles": a["final_vehicles"].as_f64(), "idle_cash_share": a["idle_cash_share"].as_f64(),
+                "income_per_vehicle": a["income_per_vehicle"].as_f64(), "stations_per_vehicle": a["stations_per_vehicle"].as_f64(),
+                "gap_opens": a["gap_opens"].as_str(), "causes": causes, "seed": a["seed"].as_i64(),
+            }).map_err(e)?;
         }
-        let mut st = tx.prepare("INSERT INTO contestants VALUES (?,?,?,?,?,?,?,?,?,?,?)").map_err(e)?;
+        let mut st = tx.prepare(file("insert_contestants")?).map_err(e)?;
         for c in pm["contestants"].as_array().into_iter().flatten() {
-            st.execute(params![ed, c["key"].as_str(), c["prismatic"].as_bool(), c["settings"].as_str(), c["matches"].as_i64(),
-                c["avg_rank"].as_f64(), c["last_place"].as_i64(), c["avg_value_share_of_winner"].as_f64(),
-                c["avg_idle_cash_share"].as_f64(), c["median_gap_opens"].as_str(), c["causes"].to_string()]).map_err(e)?;
+            st.execute(named_params! {
+                "edition": ed, "contestant": c["key"].as_str(), "prismatic": c["prismatic"].as_bool(), "settings": c["settings"].as_str(),
+                "matches": c["matches"].as_i64(), "avg_rank": c["avg_rank"].as_f64(), "last_place": c["last_place"].as_i64(),
+                "avg_value_share_of_winner": c["avg_value_share_of_winner"].as_f64(),
+                "avg_idle_cash_share": c["avg_idle_cash_share"].as_f64(), "median_gap_opens": c["median_gap_opens"].as_str(),
+                "causes": c["causes"].to_string(),
+            }).map_err(e)?;
         }
-        let mut st = tx.prepare("INSERT INTO proposals VALUES (?,?,?,?)").map_err(e)?;
+        let mut st = tx.prepare(file("insert_proposals")?).map_err(e)?;
         for p in pm["proposals"].as_array().into_iter().flatten() {
-            st.execute(params![ed, p["for"].as_str(), p["settings"].as_str(), p["because"].to_string()]).map_err(e)?;
+            st.execute(named_params! {
+                "edition": ed, "contestant": p["for"].as_str(), "settings": p["settings"].as_str(), "because": p["because"].to_string(),
+            }).map_err(e)?;
         }
     }
     tx.commit().map_err(e)
@@ -321,9 +334,9 @@ fn check(out: &Path) -> i32 {
 
 /// Finished matches of an edition in the store.
 fn finished(db: &Path, edition: &str) -> i64 {
-    open_ro(db).ok().and_then(|c| c.query_row(
-        "SELECT count(*) FROM matches WHERE edition = ?1 AND status = 'done' AND replica_of IS NULL",
-        [edition], |r| r.get(0)).ok()).unwrap_or(0)
+    let sql = battle_sql("finished").ok();
+    open_ro(db).ok().zip(sql).and_then(|(c, sql)| c.query_row(sql, rusqlite::named_params! {"$edition": edition}, |r| r.get(0)).ok())
+        .unwrap_or(0)
 }
 
 /// The post-round loop (`watch`): analyse the newest edition again whenever it has more finished
@@ -455,4 +468,76 @@ fn main() {
         pm["matches"], if from_store { a.db.display().to_string() } else { "JSON records".into() }, read_s, analyse_s,
         rayon::current_num_threads(), pm["prismatic_last"].as_array().map_or(0, Vec::len),
         pm["proposals"].as_array().map_or(0, Vec::len), base.display(), duck);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A battle store as battle.py writes it (its schema, tools/research/ai-battle/battle.py), with
+    /// two editions: e1 with one finished match, e2 with a finished match, its replica and one running.
+    fn battle_store(dir: &Path) -> PathBuf {
+        let db = dir.join("battle.sqlite");
+        let c = rusqlite::Connection::open(&db).unwrap();
+        c.execute_batch("
+            CREATE TABLE matches (id TEXT, edition TEXT, host TEXT, host_version TEXT, seed INTEGER, years INTEGER, ticks INTEGER,
+              status TEXT, exit_code INTEGER, started_at REAL, finished_at REAL, replica_of TEXT, lineup TEXT);
+            CREATE TABLE samples (edition TEXT, match_id TEXT, contestant TEXT, t TEXT, value INTEGER, vehicles INTEGER);
+            CREATE TABLE standings (edition TEXT, match_id TEXT, rank INTEGER, contestant TEXT, value INTEGER, vehicles INTEGER,
+              stations INTEGER);
+            INSERT INTO matches VALUES ('m1', 'e1', 'h', 'v', 1, 1, 1, 'done', 0, 1.0, 2.0, NULL, '[\"a\"]');
+            INSERT INTO matches VALUES ('m1', 'e2', 'h', 'v', 7, 1, 1, 'done', 0, 5.0, 6.0, NULL, '[\"a\", {\"key\": \"b\", \"ai\": \"B\"}]');
+            INSERT INTO matches VALUES ('m2', 'e2', 'h', 'v', 7, 1, 1, 'done', 0, 6.0, 7.0, 'm1', '[]');
+            INSERT INTO matches VALUES ('m3', 'e2', 'h', 'v', 8, 1, 1, 'running', NULL, 7.0, NULL, NULL, '[]');
+            INSERT INTO standings VALUES ('e2', 'm1', 2, 'b', 10, 1, 1), ('e2', 'm1', 1, 'a', 20, 2, 2), ('e1', 'm1', 1, 'a', 5, 1, 1);
+            INSERT INTO samples VALUES ('e2', 'm1', 'a', '1950-02', 2, 1), ('e2', 'm1', 'a', '1950-01', 1, 1), ('e1', 'm1', 'a', '1950-01', 9, 9);
+        ").unwrap();
+        db
+    }
+
+    #[test]
+    fn the_battle_store_is_read_through_its_files_with_the_edition_bound() {
+        let dir = std::env::temp_dir().join(format!("pm-store-{}-{:?}", std::process::id(), std::thread::current().id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = battle_store(&dir);
+        assert_eq!(editions(&db).unwrap(), vec!["e2", "e1"], "newest first");
+        assert_eq!((finished(&db, "e2"), finished(&db, "e1"), finished(&db, "e2' OR '1'='1")), (1, 1, 0), "a value is only a value");
+        let cfg = BTreeMap::from([("a".to_string(), json!({"ai": "A", "settings": "x=1"}))]);
+        let ms = matches_from_store(&db, "e2", &cfg).unwrap();
+        assert_eq!(ms.len(), 3);
+        let m1 = ms.iter().find(|m| m["id"] == "m1").unwrap();
+        assert_eq!(m1["lineup"], json!([{"key": "a", "ai": "A", "settings": "x=1"}, {"key": "b", "ai": "B", "settings": ""}]));
+        assert_eq!(m1["standings"].as_array().unwrap().iter().map(|s| s["key"].clone()).collect::<Vec<_>>(), vec![json!("a"), json!("b")],
+                   "by rank");
+        assert_eq!(m1["series"]["a"], json!([{"t": "1950-01", "value": 1.0, "vehicles": 1.0}, {"t": "1950-02", "value": 2.0, "vehicles": 1.0}]),
+                   "every column by name, in time order");
+        assert_eq!(m1["seed"], 7);
+        assert!(battle_sql("no_such").unwrap_err().contains("sql/postmortem/battle/no_such.sql"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(feature = "store")]
+    #[test]
+    fn an_edition_written_again_replaces_its_rows_in_analytics() {
+        let dir = std::env::temp_dir().join(format!("pm-duck-{}-{:?}", std::process::id(), std::thread::current().id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("analytics.duckdb");
+        let pm = |v: f64| json!({"edition": "e1",
+            "analyses": [{"match": "m1", "key": "a", "rank": 1, "field": 2, "last": false, "value": v, "seed": 7,
+                          "losses": [{"cause": "idle_cash"}, {"cause": "late_start"}]}],
+            "contestants": [{"key": "a", "prismatic": true, "settings": "x=1", "matches": 1, "avg_rank": 1.0, "causes": {"idle_cash": 1}}],
+            "proposals": [{"for": "a", "settings": "x=2", "because": ["idle"]}]});
+        write_duckdb(&path, &pm(1.0)).unwrap();
+        write_duckdb(&path, &pm(2.0)).unwrap();
+        let c = duckdb::Connection::open(&path).unwrap();
+        let (n, value, causes, seed): (i64, f64, String, i64) = c.query_row(
+            "SELECT count(*), max(value), CAST(max(causes) AS VARCHAR), max(seed) FROM analyses WHERE edition = 'e1'", [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap();
+        assert_eq!((n, value, causes.as_str(), seed), (1, 2.0, "[idle_cash, late_start]", 7), "replaced, not added");
+        let counts: (i64, i64) = c.query_row("SELECT (SELECT count(*) FROM contestants), (SELECT count(*) FROM proposals)", [],
+                                             |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(counts, (1, 1));
+        drop(c);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

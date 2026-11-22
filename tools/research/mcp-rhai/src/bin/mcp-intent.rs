@@ -10,6 +10,9 @@ mod graph;
 mod plan;
 #[path = "../cargo.rs"]
 mod cargo;
+#[allow(dead_code)]
+#[path = "../battlebrain_contract.rs"]
+mod battlebrain_contract;
 #[path = "../intent.rs"]
 mod intent;
 

@@ -18,11 +18,14 @@
  * runs as typed, a URL opens in the browser, a request and its answer are local to this process.
  */
 
+/** @file prismatic_mcp_menu.cpp The fork's own main-toolbar menu: one table drawn as the dropdown, described over MCP, run by both. */
+
 #include "../stdafx.h"
 
 #ifdef OTTD_PRISMATIC_MCP_SERVER
 
 #include "prismatic_mcp_menu.h"
+#include "prismatic_mcp_panel.h"
 #include "prismatic_mcp_view.h"
 
 #include "../console_func.h"
@@ -37,6 +40,7 @@
 #include "../window_func.h"
 #include "../window_gui.h"
 
+#include <algorithm>
 #include <array>
 #include <span>
 #include <cstdlib>
@@ -48,21 +52,26 @@ using json = nlohmann::json;
 
 namespace PrismaticMCP::Menu {
 
-static constexpr std::array<Item, 13> ITEMS = {{
-	{"MCP server: status", Action::Console, "prismatic_mcp status"},
-	{"MCP server: start", Action::Console, "prismatic_mcp start"},
-	{"MCP approvals waiting", Action::Console, "prismatic_mcp approvals"},
-	{"MCP decisions", Action::Console, "prismatic_mcp decisions"},
+/* The only place the menu is written down: the dropdown, openttd://ui/menu, the tests and the menu
+ * table of research/prismatic-mcp/README.md (tools/research/prismatic-mcp-menu) all derive from it.
+ * An item with a group sits in that submenu; the top level lists the other items and one row per
+ * group, in the order the groups first appear here. */
+static constexpr std::array<Item, 14> ITEMS = {{
+	{"Prismatic control...", Action::Window, "control"},
 	{"Ask the planner...", Action::Ask, "ask"},
 	/* Rows of the human-like player (tools/research/mcp-human, openttd-07): it answers these kinds. */
-	{"Human player: paused", Action::Toggle, "openttd.input.yield", "paused"},
-	{"Serve the towns here", Action::Request, "serve_here"},
-	{"Plan a rail line here", Action::Request, "plan_rail"},
-	{"Watch my buses", Action::Request, "watch"},
-	{"Open the hub", Action::Browse, "/"},
-	{"World view", Action::Browse, "/viz"},
-	{"API (Swagger)", Action::Browse, "/docs"},
-	{"GraphQL schema", Action::Browse, "/graphql/schema"},
+	{"Serve the towns here", Action::Request, "serve_here", {}, "Requests here"},
+	{"Plan a rail line here", Action::Request, "plan_rail", {}, "Requests here"},
+	{"Watch my buses", Action::Request, "watch", {}, "Requests here"},
+	{"Human player: paused", Action::Toggle, "openttd.input.yield", "paused", "Human player"},
+	{"MCP server: status", Action::Console, "prismatic_mcp status", {}, "MCP server"},
+	{"MCP server: start", Action::Console, "prismatic_mcp start", {}, "MCP server"},
+	{"MCP approvals waiting", Action::Console, "prismatic_mcp approvals", {}, "MCP server"},
+	{"MCP decisions", Action::Console, "prismatic_mcp decisions", {}, "MCP server"},
+	{"Open the hub", Action::Browse, "/", {}, "Hub and API"},
+	{"World view", Action::Browse, "/viz", {}, "Hub and API"},
+	{"API (Swagger)", Action::Browse, "/docs", {}, "Hub and API"},
+	{"GraphQL schema", Action::Browse, "/graphql/schema", {}, "Hub and API"},
 }};
 
 std::span<const Item> Items()
@@ -81,14 +90,64 @@ std::string HubUrl()
 /** The switches of the Toggle items, by index; off until flipped. */
 static std::array<bool, ITEMS.size()> _toggled{};
 
-DropDownList DropDown()
+std::vector<std::string_view> Groups()
+{
+	std::vector<std::string_view> groups;
+	for (const Item &item : ITEMS) {
+		if (item.group.empty() || std::find(groups.begin(), groups.end(), item.group) != groups.end()) continue;
+		groups.push_back(item.group);
+	}
+	return groups;
+}
+
+std::optional<std::string_view> GroupOfRow(int result)
+{
+	auto groups = Groups();
+	if (result < MENU_GROUP_ROW || static_cast<size_t>(result - MENU_GROUP_ROW) >= groups.size()) return std::nullopt;
+	return groups[result - MENU_GROUP_ROW];
+}
+
+std::vector<Row> Rows(std::string_view group)
+{
+	std::vector<Row> rows;
+	/* A submenu opens in place of the top level (the toolbar replaces the list), with a way back. */
+	if (!group.empty()) rows.push_back({MENU_BACK_ROW, "< Back"});
+	auto groups = Groups();
+	std::vector<bool> listed(groups.size(), false);
+	for (size_t i = 0; i < ITEMS.size(); i++) {
+		int result = static_cast<int>(i);
+		if (ITEMS[i].group != group) {
+			/* At the top level, a group's row stands where its first item would. */
+			if (!group.empty() || ITEMS[i].group.empty()) continue;
+			size_t g = std::find(groups.begin(), groups.end(), ITEMS[i].group) - groups.begin();
+			if (listed[g]) continue;
+			listed[g] = true;
+			rows.push_back({MENU_GROUP_ROW + static_cast<int>(g), fmt::format("{} >", ITEMS[i].group)});
+			continue;
+		}
+		if (ITEMS[i].action == Action::Toggle) {
+			rows.push_back({result, std::string{ITEMS[i].label}, true, _toggled[i]});
+		} else if (ITEMS[i].action == Action::Window) {
+			/* The window's row says, when the menu opens, how many approvals wait for the owner. */
+			size_t waiting = Panel::Snapshot()["approvals"].size();
+			std::string label{ITEMS[i].label};
+			if (waiting > 0) label = fmt::format("{} ({} waiting)", label.substr(0, label.find("...")), waiting);
+			rows.push_back({result, std::move(label)});
+		} else {
+			rows.push_back({result, std::string{ITEMS[i].label}});
+		}
+	}
+	return rows;
+}
+
+DropDownList DropDown(std::string_view group)
 {
 	DropDownList list;
-	for (size_t i = 0; i < ITEMS.size(); i++) {
-		if (ITEMS[i].action == Action::Toggle) {
-			list.push_back(std::make_unique<DropDownListCheckedItem>(0, _toggled[i], std::string{ITEMS[i].label}, static_cast<int>(i)));
+	for (Row &row : Rows(group)) {
+		if (row.toggle) {
+			list.push_back(std::make_unique<DropDownListCheckedItem>(0, row.checked, std::move(row.label), row.result));
 		} else {
-			list.push_back(MakeDropDownListStringItem(std::string{ITEMS[i].label}, static_cast<int>(i)));
+			list.push_back(MakeDropDownListStringItem(std::move(row.label), row.result));
 		}
 	}
 	return list;
@@ -113,6 +172,7 @@ static std::string_view ActionName(Action a)
 		case Action::Ask: return "ask";
 		case Action::Request: return "request";
 		case Action::Toggle: return "toggle";
+		case Action::Window: return "window";
 	}
 	return "unknown";
 }
@@ -136,6 +196,9 @@ bool Run(int index)
 			return false;
 		case Action::Toggle:
 			Flip(index);
+			return false;
+		case Action::Window:
+			Panel::Show();
 			return false;
 	}
 	return false;
@@ -189,11 +252,14 @@ json Describe()
 	json items = json::array();
 	for (size_t i = 0; i < ITEMS.size(); i++) {
 		json target = ITEMS[i].action == Action::Browse ? json(HubUrl() + std::string{ITEMS[i].arg}) : json(std::string{ITEMS[i].arg});
-		json item = {{"index", i}, {"label", ITEMS[i].label}, {"action", ActionName(ITEMS[i].action)}, {"target", target}};
+		json item = {{"index", i}, {"label", ITEMS[i].label}, {"action", ActionName(ITEMS[i].action)}, {"target", target},
+			{"group", ITEMS[i].group.empty() ? json(nullptr) : json(std::string{ITEMS[i].group})}};
 		if (ITEMS[i].action == Action::Toggle) { item["key"] = ITEMS[i].key; item["on"] = _toggled[i]; }
 		items.push_back(std::move(item));
 	}
-	return {{"items", std::move(items)}, {"hub", HubUrl()}};
+	json groups = json::array();
+	for (std::string_view g : Groups()) groups.push_back(std::string{g});
+	return {{"items", std::move(items)}, {"groups", std::move(groups)}, {"hub", HubUrl()}};
 }
 
 json Requests()
@@ -212,10 +278,12 @@ json Requests()
 json Tools()
 {
 	json arr = json::array();
+	/* What the control window shows is data in every process: a dedicated server holds the approvals. */
+	arr.push_back(Panel::Tool());
 	/* Each instance's catalogue is what it can do: a dedicated server has no toolbar to run. */
 	if (_network_dedicated) return arr;
 	arr.push_back({{"name", "openttd.ui.menu.run"},
-		{"description", "Run an item of the fork's toolbar menu (openttd://ui/menu) as a click on it does: a console command, a hub page in the browser, or with text for the Ask item, a request. Local to this process"},
+		{"description", "Run an item of the fork's toolbar menu (openttd://ui/menu) as a click on it does: a console command, a hub page in the browser, a fork window (the Prismatic control window), or with text for the Ask item, a request. Local to this process"},
 		{"inputSchema", {{"type", "object"}, {"required", json::array({"index"})},
 			{"properties", {{"index", {{"type", "integer"}}}, {"text", {{"type", "string"}}}}}}},
 		/* Not read-only: a row runs a console command, opens a browser, queues a request or flips a switch. */
@@ -230,6 +298,11 @@ json Tools()
 
 std::optional<json> Call(std::string_view name, const json &args)
 {
+	if (name == "openttd.ui.control") {
+		json out = Panel::Snapshot();
+		out["ok"] = true;
+		return out;
+	}
 	if (_network_dedicated && (name == "openttd.ui.menu.run" || name == "openttd.ui.requests.answer")) {
 		return json{{"ok", false}, {"error", "no toolbar on a dedicated server"}};
 	}
@@ -246,6 +319,9 @@ std::optional<json> Call(std::string_view name, const json &args)
 				return json{{"ok", true}, {"request", Queue(ITEMS[index].arg, args.value("text", ""))}};
 			case Action::Toggle:
 				return Flip(index);
+			case Action::Window:
+				if (!Panel::Show()) return json{{"ok", false}, {"error", "no interface in this process to open a window in"}};
+				return json{{"ok", true}, {"opened", ITEMS[index].arg}};
 			default:
 				break;
 		}
