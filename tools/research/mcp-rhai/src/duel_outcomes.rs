@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 
 use crate::panel_events::{self, Stored};
 use crate::panel_store::Across;
+use crate::store_sql::Named;
 
 /// The switch: `1` derives own_lines and rail_after from the stored outcomes for this run.
 pub const SWITCH: &str = "PRISMATIC_BOT_FROM_DUELS";
@@ -55,14 +56,11 @@ pub fn enabled() -> bool {
     std::env::var(SWITCH).map_or(false, |v| v.trim() == "1")
 }
 
-/// The statement every store answers: the plan.duel verdicts of at least MIN_MONTHS months and the
-/// plan.bot_settings events of the same instances, in order, so each verdict can be joined with the
-/// settings its run started the planned bot with.
-pub fn outcomes_sql() -> String {
-    format!("WITH d AS (SELECT DISTINCT instance FROM events WHERE kind = 'plan.duel' \
-AND TRY_CAST(json_extract_string(data, '$.choice.months') AS INTEGER) >= {MIN_MONTHS}) \
-SELECT instance, seq, ts_ms, kind, CAST(data AS VARCHAR) AS data FROM events \
-WHERE instance IN (SELECT instance FROM d) AND kind IN ('plan.duel', 'plan.bot_settings') ORDER BY instance, ts_ms, seq")
+/// The query every store answers (`sql/queries/duel_outcomes.sql`): the plan.duel verdicts of at
+/// least MIN_MONTHS months and the plan.bot_settings events of the same instances, in order, so each
+/// verdict can be joined with the settings its run started the planned bot with.
+pub fn outcomes_query() -> Named {
+    Named::new("duel_outcomes", json!({"min_months": MIN_MONTHS}))
 }
 
 /// The rival a verdict ran against, as a group key: B's recorded settings as compact JSON with
@@ -90,7 +88,7 @@ pub fn handed_of(choice: &Value) -> Value {
            "rail_after": int(&settings["rail_after"])})
 }
 
-/// The outcomes of an `outcomes_sql` answer (`{columns, rows}`): one per plan.duel verdict that
+/// The outcomes of an `outcomes_query` answer (`{columns, rows}`): one per plan.duel verdict that
 /// qualifies, `{instance, seq, seed, months, held_start_tick, a, b, handed, own_lines, rail_after,
 /// plan_from}`, and how many verdicts were left out, by reason.
 pub fn outcomes_of(columns: &Value, rows: &[Value]) -> (Vec<Value>, BTreeMap<String, usize>) {
@@ -306,26 +304,29 @@ impl Derivation {
 pub const OFF: &str = "PRISMATIC_BOT_FROM_DUELS is off (the default until held-start pairs on three seeds favour the derived rule; ADR 0034 point 6, I0087)";
 
 /// own_lines and rail_after for a plan that handed over `handed` freight lines, read with `read`
-/// (every store, `panel_store::query_every_store`) when `on`; the constants with their reason when
+/// (every store, `panel_store::every_store`) when `on`; the constants with their reason when
 /// the switch is off, nothing was handed over, the store is off or the outcomes make no pair.
 pub fn from_duels(on: bool, handed: usize, constant_own: i64, scores_rail_after: Option<i64>,
-                  read: impl FnOnce(&str) -> Result<Across, String>) -> Derivation {
+                  read: impl FnOnce(&Named) -> Result<Across, String>) -> Derivation {
     if !on {
         return Derivation::constants(OFF.into(), json!({}));
     }
     if handed == 0 {
         return Derivation::constants("no freight line was handed over, so own_lines is not set".into(), json!({}));
     }
-    let sql = outcomes_sql();
-    let across = match read(&sql) {
+    let query = outcomes_query();
+    let across = match read(&query) {
         Ok(a) => a,
-        Err(why) => return Derivation::constants(why, json!({"query": sql})),
+        Err(why) => return Derivation::constants(why, query.record()),
     };
     // A hub's store holds no duel (and answers an error while the hub runs); it is not history.
     let stores: Vec<Value> = across.stores.iter().filter(|s| !s["store"].as_str().unwrap_or("").starts_with("hub-")).cloned().collect();
     let (outcomes, skipped) = outcomes_of(&across.columns, &across.rows);
     let d = derive(&outcomes, handed as i64, constant_own, scores_rail_after);
-    let base = json!({"query": sql, "rows": across.rows.len(), "stores": stores, "skipped": skipped, "outcomes": outcomes});
+    let mut base = query.record();
+    for (k, v) in [("rows", json!(across.rows.len())), ("stores", json!(stores)), ("skipped", json!(skipped)), ("outcomes", json!(outcomes))] {
+        base[k] = v;
+    }
     if d["own_pairs"].as_array().map_or(true, Vec::is_empty) && d["rail_pairs"].as_array().map_or(true, Vec::is_empty) {
         let why = format!("the stores hold {} qualifying outcome(s) in {} row(s), which make no pair", outcomes.len(), across.rows.len());
         let mut c = Derivation::constants(why, base);
@@ -335,7 +336,7 @@ pub fn from_duels(on: bool, handed: usize, constant_own: i64, scores_rail_after:
     let mut record = json!({"switch": SWITCH, "used": true, "rule": RULE, "derived": d});
     if let (Some(r), Some(x)) = (record.as_object_mut(), base.as_object()) { r.extend(x.clone()); }
     Derivation { own_lines: d["own_lines"]["derived"].as_i64(), rail_after: d["rail_after"]["derived"].as_i64(),
-                 stored: Stored::Query { sql, rows: across.rows.len() }, record }
+                 stored: Stored::Query { query, rows: across.rows.len() }, record }
 }
 
 // ---------------------------------------------------------------------- the one import
@@ -440,7 +441,7 @@ pub fn import_duels(dir: &std::path::Path, results: &std::path::Path) -> Result<
     let (events, left) = import_events(results);
     let path = dir.join(format!("{IMPORT_INSTANCE}.duckdb"));
     let mut st = crate::bus_sinks::db::Store::open(&path, IMPORT_INSTANCE)?;
-    let have = st.query("SELECT json_extract_string(data, '$.inputs.live.record') FROM events WHERE kind = 'plan.duel'")?;
+    let have = st.run(&Named::new("event_field", json!({"kind": "plan.duel", "path": "$.inputs.live.record"})))?;
     let seen: Vec<Value> = have["rows"].as_array().into_iter().flatten().map(|r| r[0].clone()).collect();
     let next = seen.len();
     let fresh: Vec<Value> = events.into_iter().filter(|e| !seen.contains(&e["data"]["inputs"]["live"]["record"])).enumerate()
@@ -458,7 +459,7 @@ pub fn import_duels(dir: &std::path::Path, results: &std::path::Path) -> Result<
 mod tests {
     use super::*;
 
-    /// A plan.duel row of `outcomes_sql` as a store answers it.
+    /// A plan.duel row of `outcomes_query` as a store answers it.
     fn duel(instance: &str, seq: i64, seed: i64, months: i64, a: f64, b: f64, plan: Option<Value>) -> Value {
         let mut choice = json!({"seed": seed, "months": months, "held_start_tick": 1400, "a": {"value": a}, "b": {"value": b}});
         if let Some(p) = plan { choice["plan"] = p; }
@@ -608,7 +609,8 @@ mod tests {
         assert!(none.record["why"].as_str().unwrap().starts_with("no freight line"));
         let store_off = from_duels(true, 13, 8, Some(13), |_| Err("store off: built without the store feature".into()));
         assert_eq!(store_off.stored.to_json(), json!({"fallback": "constants: store off: built without the store feature"}));
-        assert_eq!(store_off.record["query"], json!(outcomes_sql()));
+        assert_eq!((store_off.record["query"].clone(), store_off.record["name"].clone(), store_off.record["params"].clone()),
+                   (json!(outcomes_query().sql()), json!("duel_outcomes"), json!({"min_months": MIN_MONTHS})));
         // One duel makes no pair.
         let one = from_duels(true, 13, 8, Some(13), |_| Ok(across(vec![measured()[0].clone()])));
         assert_eq!((one.own_lines, one.rail_after), (None, None));
@@ -621,11 +623,13 @@ mod tests {
 
     #[test]
     fn the_derivation_names_its_query_rows_and_the_outcomes_it_used() {
-        let mut asked = String::new();
-        let d = from_duels(true, 10, 8, None, |sql| { asked = sql.to_string(); Ok(across(measured())) });
-        assert_eq!(asked, outcomes_sql());
+        let mut asked = None;
+        let d = from_duels(true, 10, 8, None, |q| { asked = Some(q.clone()); Ok(across(measured())) });
+        assert_eq!(asked, Some(outcomes_query()));
         assert_eq!((d.own_lines, d.rail_after), (Some(16), None));
-        assert_eq!(d.stored.to_json(), json!({"query": asked, "rows": 6}));
+        assert_eq!(d.stored.to_json(), json!({"query": outcomes_query().sql(), "name": "duel_outcomes",
+                                              "params": {"min_months": MIN_MONTHS}, "rows": 6}));
+        assert_eq!(d.record["name"], "duel_outcomes");
         assert_eq!(d.record["used"], true);
         assert_eq!(d.record["rule"], RULE);
         assert_eq!(d.record["outcomes"].as_array().unwrap().len(), 6);
@@ -677,7 +681,7 @@ mod tests {
         let again = import_duels(&dir, &results).unwrap();
         assert_eq!((again["imported"].clone(), again["already"].clone()), (json!(0), json!(2)), "once");
         let st = crate::bus_sinks::db::Store::open_read_only(&dir.join(format!("{IMPORT_INSTANCE}.duckdb"))).unwrap();
-        let a = st.query(&outcomes_sql()).unwrap();
+        let a = st.run(&outcomes_query()).unwrap();
         let (o, _) = outcomes_of(&a["columns"], a["rows"].as_array().unwrap());
         assert_eq!(o.iter().map(|x| x["own_lines"].as_i64().unwrap()).collect::<Vec<_>>(), vec![8, 0], "in time order: 011802 ended first");
         assert_eq!(own_pairs(&o)[0]["verdict"], "pays");

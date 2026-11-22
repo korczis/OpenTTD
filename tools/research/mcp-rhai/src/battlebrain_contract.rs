@@ -33,6 +33,14 @@ pub fn freight_slot_prefix(i: usize) -> String {
     if i <= 1 { "fr_".to_string() } else { format!("fr{i}_") }
 }
 
+/// The companies in an openttd://companies answer, whatever its shape: the game's envelope
+/// (`{data: {companies: [...]}}`, prismatic_mcp_server.cpp), a `companies` or `data` array, or a
+/// bare array. The one reader of that shape for the panel's executor and for battlebrain.
+pub fn company_list(v: &Value) -> Vec<Value> {
+    [v.pointer("/data/companies"), v.get("companies"), v.get("data"), Some(v)].into_iter().flatten()
+        .find_map(|x| x.as_array().cloned()).unwrap_or_default()
+}
+
 /// The digest a decision block names for the settings string it authorises.
 pub fn settings_digest(settings: &str) -> String {
     digest(&Value::String(settings.to_string()))
@@ -1548,6 +1556,17 @@ mod tests {
         assert_eq!(days_between("1963-03-24", "1963-02-22"), Some(-30));
         assert_eq!(days_between("x", "1963-02-22"), None);
         assert_eq!(add_days("1963-02-22", 30).as_deref(), Some("1963-03-24"));
+    }
+
+    #[test]
+    fn the_company_list_is_read_from_every_shape_the_game_and_its_records_use() {
+        let a = json!([{"id": 1, "is_ai": true}]);
+        assert_eq!(company_list(&json!({"game_tick": 5, "data": {"companies": a}})), a.as_array().unwrap().clone(), "the game's envelope");
+        assert_eq!(company_list(&json!({"companies": a})), a.as_array().unwrap().clone());
+        assert_eq!(company_list(&json!({"data": a})), a.as_array().unwrap().clone());
+        assert_eq!(company_list(&a), a.as_array().unwrap().clone());
+        assert!(company_list(&json!({"data": {"other": 1}})).is_empty());
+        assert!(company_list(&json!(null)).is_empty());
     }
 
     #[test]

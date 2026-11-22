@@ -68,6 +68,8 @@ fn refused(rs: &[bb::Refusal]) -> i32 {
     1
 }
 
+#[cfg(test)] #[path = "../battlebrain_regression.rs"] mod battlebrain_regression; // Phase 06 gate C1
+
 fn read_json(path: &str) -> Result<Value, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     serde_json::from_str(&text).map_err(|e| format!("{path}: not JSON: {e}"))
@@ -240,8 +242,8 @@ pub fn run(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &
     if snapshot["scope"]["company"].as_i64() != Some(company) {
         return Err(refuse("scope_mismatch", format!("the snapshot is scoped to company {}, not {company}", snapshot["scope"]["company"])));
     }
-    let list = companies.pointer("/data/companies").or_else(|| companies.get("companies")).or_else(|| companies.get("data")).unwrap_or(companies);
-    let Some(co) = list.as_array().and_then(|a| a.iter().find(|c| c["id"].as_i64() == Some(company))) else {
+    let list = bb::company_list(companies);
+    let Some(co) = list.iter().find(|c| c["id"].as_i64() == Some(company)) else {
         return Err(refuse("unknown_company", format!("company {company} is not in the companies record")));
     };
     let snap_id = snapshot["id"].as_str().map(str::to_string).unwrap_or_else(|| bb::record_id(snapshot));

@@ -21,10 +21,10 @@
 // Each change waits for the owner's Approve in the panel (or auto-approve when the owner switches
 // it on), and the chat says so. The tuner never approves. $TUNE_DRY=1 logs and sends nothing.
 //
-// Hot reload: the panel restarts this service when this file or a top-level library it imports
-// changes. policy/ files are imported by a path with a `/`, which the panel's watcher does not
-// stamp today (panel_scripts.rs path_of), and the host's module resolver caches a module per run,
-// so an edit under policy/ takes effect at the next start of the service; the shared key
+// Hot reload: the panel restarts this service when this file or a library it imports changes,
+// policy/lib and policy/chain included; run_stage's template import makes every script under
+// policy/ one it watches (panel_scripts.rs template_dirs_of), so an edit of a stage reloads it
+// too. A stage file added to policy/ is watched from the next start; the shared key
 // `policy.chain` takes effect at the next round. Run it on the Scripts page
 // (/scripts/prismatic_tune), or POST /api/services/start {"name":"prismatic_tune"}.
 import "ttd" as ttd;
@@ -36,7 +36,8 @@ import "fr_author" as fa;
 const CHAIN_KEY = "policy.chain";
 // This tuner's name for the planner key planner.<company> (fr_author.rhai): while the key names
 // another writer (Battlebrain during a cutover), it asks for nothing for that company, so no
-// freight-line slot either, whatever setting a stage or the GA's /api/tuning names.
+// freight-line slot either, whatever setting a stage or the GA's /api/tuning names. Every request
+// names it, so the panel checks the same key before it asks the game (POST /api/bots/setting).
 const WRITER = "prismatic_tune";
 
 fn dry() { env("TUNE_DRY") == "1" }
@@ -350,7 +351,7 @@ fn tune_round() {
         if sent >= c.max_requests { print(`tune:   ${x.name} ${x.from} -> ${x.to}: next round (${c.max_requests} a round)`); continue; }
         if dry() { print(`tune:   ${x.name} ${x.from} -> ${x.to} (${x.why}), dry run`); sent += 1; continue; }
         try {
-            let a = ttd::set_bot(ctx.company, x.name, x.to);
+            let a = ttd::set_bot(ctx.company, x.name, x.to, global::WRITER);
             let id = a.approval_id ?? ();
             print(`tune:   ${x.name} ${x.from} -> ${x.to} (${x.why}): ${if id == () { `${a.status ?? a}` } else { `pending approval #${id}` }}`);
             say(`proposes ${x.name} ${x.from} -> ${x.to} (${x.why})`);

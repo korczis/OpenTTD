@@ -1,11 +1,13 @@
 # Live arena
 
 **RESEARCH-ONLY.** The live arena is the visible counterpart of the [LAN AI battle](ai-battle/README.md).
-It has the same contestants as the battle: PrismaticAI from this repository, its `solo-max`
-variant, and four AIs from BaNaNaS. They play one game that you watch in an OpenTTD window and in
-the control panel. A Rhai service, [`arena.rhai`](../tools/research/mcp-panel/rhai/arena.rhai),
-holds the lineup as desired state. Editing the file changes the running game within seconds,
-without a restart. Nothing under `src/` changes.
+It plays the battle's contestants, read from the battle's own configuration
+([`battle.json`](../tools/research/ai-battle/battle.json) `contestants`) and never copied, plus the
+arena's own local entries (the `solo-max` and `self-steward` PrismaticAI variants). They play one
+game that you watch in an OpenTTD window and in the control panel. A Rhai service,
+[`arena.rhai`](../tools/research/mcp-panel/rhai/arena.rhai), reconciles the game toward that lineup
+as desired state. Editing `battle.json` or the file's `LOCAL` changes the running game within
+seconds, without a restart. Nothing under `src/` changes.
 
 The battle and the arena answer different questions:
 
@@ -15,7 +17,7 @@ The battle and the arena answer different questions:
 | Where | every LAN arena, null video driver, headless | this machine: `mcp-e2e` stack with a GUI spectator |
 | Time | ticks: a match ends the same way under any load | wall clock: the game runs at normal speed |
 | Result | derived, gate-checked records (`research/results/battle-*`) | none: the arena makes no ranking claim |
-| Changes while running | none within an edition | the lineup, live, by editing `arena.rhai` |
+| Changes while running | none within an edition | the lineup, live, by editing `battle.json` or `arena.rhai` |
 
 The arena's standings are a view, not evidence. A claim about which AI is better rests on a
 battle record, never on the arena.
@@ -61,7 +63,9 @@ Watch these during a run:
 
 ```mermaid
 flowchart LR
-  file["arena.rhai<br/>LINEUP (desired state)"] -->|"saved: reload within 1 s"| svc["panel service<br/>(Rhai engine in mcp-panel)"]
+  battle["battle.json<br/>contestants"] -->|"GET /api/battle/contestants"| panel
+  file["arena.rhai<br/>LOCAL entries"] -->|"saved: reload within 1 s"| svc["panel service<br/>(Rhai engine in mcp-panel)"]
+  svc -->|"api_battleContestants()"| panel
   svc -->|"api_bots().running"| panel["mcp-panel :8800"]
   panel -->|"openttd.ai.list over MCP"| game["dedicated server :3979"]
   svc -->|"con_start_ai #quot;Name#quot; settings"| panel
@@ -74,13 +78,18 @@ Every 20 s (`ROUND_S`), the service:
 
 1. reads the AI companies that run now from `api_bots().running`. The game itself names each
    company's AI there (`openttd.ai.list`), so the mapping never depends on start order;
-2. compares them with `LINEUP` per AI name. Two entries with the same AI mean two companies. The
+2. reads the lineup: the battle's contestants from `api_battleContestants()` (`GET
+   /api/battle/contestants`, src/panel_battle.rs, which reads `battle.json` on every request, in its
+   order, with `settings` `""` for an AI's defaults), then `LOCAL`. When the panel cannot serve them
+   (a panel built before the route, a `battle.json` it cannot read), the round starts nothing and the
+   log says `lineup: ...; nothing starts this round`;
+3. compares them with the lineup per AI name. Two entries with the same AI mean two companies. The
    service starts the first entry that is short, one per round, with `start_ai "<name>"
    <settings>`. The name goes in double quotes for an AI whose name has a space;
-3. every sixth round, it ranks the companies by company value and says the ranking in chat, each
+4. every sixth round, it ranks the companies by company value and says the ranking in chat, each
    AI with its company name, so the PrismaticAI variants can be told apart. When the leader changes,
    it shows a newspaper;
-4. in the same report, it says the headless battle's top three by points in one line
+5. in the same report, it says the headless battle's top three by points in one line
    (`LAN battle <edition>: AI points/played, ...`). It reads them from `battle.py run`'s
    `http://127.0.0.1:8765/api/leaderboard` with the built-in `loopback_get`. That built-in reads JSON
    from a loopback URL only: it refuses another host, a URL with userinfo
@@ -88,15 +97,18 @@ Every 20 s (`ROUND_S`), the service:
    lacks it. The script then prints `battle: ... Function not found` in its log and plays on. The
    line appears from the next start of the stack, which builds the panel anew.
 
-The script never removes or stops a company. Removing an entry from `LINEUP` only stops it from
-being restarted. Starting an AI goes through the server console, as the operator would type it,
-and so goes through the command system like every other company action.
+The script never removes or stops a company. Removing a contestant from `battle.json` or an entry
+from `LOCAL` only stops it from being restarted. Starting an AI goes through the server console, as
+the operator would type it, and so goes through the command system like every other company action.
 
 ## Changing the game live
 
-Edit `LINEUP` in `arena.rhai`, on the Scripts page or in any editor, and save. The panel's watcher
-restarts the service within a second (`RELOAD_EVERY`), and the next round starts what is missing.
-A save that does not parse leaves the old run going and says why in the log.
+A contestant added to `battle.json` joins at the next round, since the route reads the file every
+time. For the arena alone, edit `LOCAL` in `arena.rhai`, on the Scripts page or in any editor, and
+save. The panel's watcher restarts the service within a second (`RELOAD_EVERY`), and the next round
+starts what is missing. A save that does not parse leaves the old run going and says why in the log.
+Until 2026-11-22 the file held a hand copy of the battle's contestants (`LINEUP`), which drifted
+whenever `battle.json` changed. The runs below used that copy.
 
 On 2026-11-19, the observed run went like this (seed 20261119, `build-gate-research` from master
 `7ff3f09d7c`). `mcp-e2e` started PrismaticAI as company 0. The service started AAAHogEx,
@@ -130,13 +142,15 @@ run the code from before that commit, and only company 6 runs it.
 
 | Path | What it holds |
 |---|---|
-| [`tools/research/mcp-panel/rhai/arena.rhai`](../tools/research/mcp-panel/rhai/arena.rhai) | the lineup and the reconciling service |
+| [`tools/research/mcp-panel/rhai/arena.rhai`](../tools/research/mcp-panel/rhai/arena.rhai) | the local entries and the reconciling service |
+| [`tools/research/ai-battle/battle.json`](../tools/research/ai-battle/battle.json) | the battle's contestants, the arena's lineup |
+| [`tools/research/mcp-rhai/src/panel_battle.rs`](../tools/research/mcp-rhai/src/panel_battle.rs) | `GET /api/battle/contestants`, and the test that runs one round of `arena.rhai` against stubs |
 | [`tools/research/mcp-panel/rhai/ttd.rhai`](../tools/research/mcp-panel/rhai/ttd.rhai) | `start_ai`, `companies`, `state`, `news`, used by the arena |
 | [`research/mechanisms/rhai-scripting.md`](mechanisms/rhai-scripting.md) | the engine, derived functions, services and hot reload |
 | [`research/ai-battle/README.md`](ai-battle/README.md) | the headless battle with the same contestants |
 
 ## Related
 
-- [Desired-state reconciliation](concepts/desired-state-reconciliation.md): `LINEUP` is the desired
-  state, and each round reconciles toward it.
+- [Desired-state reconciliation](concepts/desired-state-reconciliation.md): the battle's contestants
+  plus `LOCAL` are the desired state, and each round reconciles toward it.
 - [Rhai scripting](mechanisms/rhai-scripting.md), [Control panel](mechanisms/control-panel.md).

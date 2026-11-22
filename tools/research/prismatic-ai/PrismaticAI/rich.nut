@@ -25,6 +25,11 @@
  * airport_fill): a small airport jams long before thirty planes. StayAfloat, BuildFrozen and
  * RepaySurplus (main.nut) are untouched: rich growth spends only money above the threshold.
  *
+ * Air (setting rich_air, default 0): the air lifts above (air_reuse, RichAirCap) and those of
+ * competitive pressure (pressure.nut) apply only with rich_air=1. Replayed on 2026-11-22 (battle.py
+ * ablate, six arena matches), the air lifts took the bot to 53-79 planes and cost 7-49% of company
+ * value; with rich_air=0 it gained 35.5% geometric, better in all six, and still spends.
+ *
  * Every number is an AI setting (info.nut, CONFIG_INGAME), read at every heartbeat, so Rhai
  * policies, openttd.ai.set_setting and the battle's genetic algorithm steer them live. The values
  * the incident above led to (10 line budgets, since lowered to 5 so the bot spends below the fitness hoards floor, one plane per 250000, at most 30 planes, served below
@@ -103,6 +108,8 @@ function PrismaticAI::ApplyRich(b, money) {
 	::RICH_NOW = b.rich;
 	if (!b.rich) return;
 	b.max_routes = max(b.max_routes, AUTOPILOT_MAX_ROUTES);
+	/* rich_air 0 (default): idle money buys no aircraft; the planes it bought lost value. */
+	if (b.rich_air != 1) return;
 	b.air_reuse = 1;
 	b.invest_air_cap = PrismaticAI.RichAirCap(b, money);
 }
