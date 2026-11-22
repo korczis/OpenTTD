@@ -46,7 +46,7 @@
     },
     {
       "title": "Start the server and connect",
-      "detail": "In the in-game console: prismatic_mcp start, then prismatic_mcp token to get the bearer token, and prismatic_mcp approve <id> or deny <id> for a pending mutation. Never share the token; it is never logged.",
+      "detail": "In the in-game console: prismatic_mcp start writes the bearer token to a 0600 file and prints only its path (prismatic_mcp token prints the path and a fingerprint), then prismatic_mcp approve <id> or deny <id> for a pending mutation. Never share the token; it is never printed or logged.",
       "paths": [
         "research/prismatic-mcp/10-in-game-runbook.md"
       ]

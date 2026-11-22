@@ -372,10 +372,19 @@ pub fn find_token(line: &str) -> Option<(usize, usize, String)> {
     None
 }
 
-/// A line as the window shows it: the token line reworded, and the token itself nowhere.
+/// The token file a console line names: "Token written to <path> (mode 0600)", which
+/// `prismatic_mcp start` and `rotate` print in place of the token itself.
+pub fn find_token_file(line: &str) -> Option<&str> {
+    let after = line.find("Token written to ")? + "Token written to ".len();
+    let path = line[after..].trim_end().strip_suffix(" (mode 0600)")?;
+    (!path.is_empty()).then_some(path)
+}
+
+/// A line as the window shows it: the token line reworded, and the token itself nowhere. The
+/// token is the one in the file the line names, or (an older game) the one the line carries.
 pub fn redact(line: &str, token: Option<&str>) -> (String, Option<String>) {
     let mut out = line.to_string();
-    let mut found = None;
+    let mut found = find_token_file(line).and_then(|path| token_file(path).ok()).map(|(_, t)| t);
     if let Some((s, e, t)) = find_token(line) {
         out = format!("{}Bearer token (held by the panel): <REDACTED>{}", &line[..s], &line[e..]);
         found = Some(t);
@@ -3530,6 +3539,20 @@ mod tests {
         assert_eq!(found.as_deref(), Some(tok));
         assert_eq!(redact(&format!("echo {tok}"), Some(tok)).0, "echo <REDACTED>");
         assert!(find_token("Bearer token (x): abc").is_none(), "too short for a token");
+        // The game prints only where the token is; the panel reads it from that file.
+        let dir = std::env::temp_dir().join(format!("mcp-panel-token-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("prismatic_mcp_token_8731.json");
+        std::fs::write(&file, format!("{{\"agent_token\":\"{tok}\",\"endpoint\":\"http://127.0.0.1:8731/mcp\"}}\n")).unwrap();
+        let said = format!("Token written to {} (mode 0600)", file.display());
+        assert_eq!(find_token_file(&said), Some(file.to_str().unwrap()));
+        let (line, found) = redact(&said, None);
+        assert_eq!(found.as_deref(), Some(tok), "the token comes from the file the line names");
+        assert_eq!(line, said, "a line without the token is shown as it is");
+        assert!(find_token_file("MCP server stopped: the token file /x could not be written with mode 0600.").is_none());
+        assert!(find_token_file("Token written to  (mode 0600)").is_none());
+        assert_eq!(redact("Token written to /no/such/file (mode 0600)", None).1, None, "an unreadable file yields no token");
+        std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(denied_id("denied #12 by the operator"), Some(12));
         assert_eq!(denied_id("denied #12x"), None);
         assert_eq!(denied_id("not denied #12"), None);

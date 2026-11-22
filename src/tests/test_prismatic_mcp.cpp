@@ -252,6 +252,25 @@ TEST_CASE("ConstantTimeEquals matches semantics of ==", "[prismatic_mcp]")
 	CHECK(ConstantTimeEquals("", ""));
 }
 
+TEST_CASE("A token fingerprint names the token without containing it", "[prismatic_mcp]")
+{
+	/* BLAKE2b-256("abc") = bddd813c63423972..., the RFC 7693 test vector, truncated to 8 bytes. */
+	CHECK(TokenFingerprint("abc") == "blake2b:bddd813c63423972");
+	const std::string token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+	std::string fp = TokenFingerprint(token);
+	CHECK(fp == "blake2b:3083e1ce982abd7f");
+	CHECK(fp == TokenFingerprint(token));                       // deterministic
+	CHECK(fp.find(token.substr(0, 8)) == std::string::npos);    // no piece of the secret
+	CHECK(TokenFingerprint(token.substr(0, 63) + "0") != fp);   // one digit changes it
+	CHECK(TokenFingerprint("").empty());
+}
+
+TEST_CASE("The default token file is one per port", "[prismatic_mcp]")
+{
+	CHECK(DefaultTokenFileName(8731) == "prismatic_mcp_token_8731.json");
+	CHECK(DefaultTokenFileName(18731) != DefaultTokenFileName(8731));
+}
+
 TEST_CASE("Only a tick counter that went back means another world", "[prismatic_mcp]")
 {
 	using PrismaticMCP::detail::WorldChanged;
