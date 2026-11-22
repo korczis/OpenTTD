@@ -1,0 +1,49 @@
+id: I0097
+milestone: prismatic-steers-a-company-through-the-bridge
+title: "A Battlebrain freight-line decision can go live only through its cutover gates: a priced line, a coherent or bounded snapshot, money re-read after it, one keyed pull while fresh, and a rollback to the baseline"
+slug: battlebrain-live-gates
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Make the live half of the freight-line decision enforceable before any game sees it. Policy freight-margin@2 adopts only a line that track-planning priced (`require_priced`). `battlebrain live` refuses a snapshot wider than its declared tick window, a policy without `require_priced`, and companies read before the snapshot. It then writes one directive that sets planned_freight_only=1 and one fr_* slot. `battlebrain serve` hands that directive out once, on loopback. The executor (panel_decision.rs decision_gate) applies a live decision only through a pull keyed with its own idempotency key, on or before its stale date. `battlebrain rollback` gives the directive back to the baseline (planned_freight_only=0)."
+why: "The shadow runs on real captures of the owner's co-play game (I0096) showed the planner and battlebrain each choosing unpriced or unaffordable lines. The owner chose the co-play game on :8800 for the cutover (2026-11-22), so every gate must hold before a pull is made."
+scope:
+  - "tools/research/mcp-rhai/src/battlebrain_policy.rs"
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs"
+  - "tools/research/mcp-rhai/src/panel_decision.rs"
+  - "research/battlebrain/**"
+  - "research/results/**"
+non_scope:
+  - "The live pull itself on :8800 (it needs the owner's approval of every setting change and p1's go-ahead)"
+  - "Any change in prismatic-platform or algoglyph"
+depends_on:
+  - I0096
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#a-decision-contract-is-defined"
+acceptance_criteria:
+  - "with require_priced an unpriced line is never adopted, and with it off the rule is freight-margin@1's (unit tests)"
+  - "battlebrain live refuses an over-wide window, an unpriced policy and stale companies, each with its own code; it writes planned_freight_only=1 plus one fr_* slot and a live decision block; shadow never writes a directive (unit tests)"
+  - "serve answers exactly one loopback GET and is gone (unit test)"
+  - "decision_gate refuses a live block without its own key, with another key, after its stale date or without the game's date (unit test)"
+  - "shadow runs with freight-margin@2 on the three real captures are recorded"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-panel --bin mcp-plan"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+started_at: 2026-11-22T11:23:20Z
+started_event: sha256:08bfb235cbaff2a475d0942a1f81ea24a8c7ed51de212f72d4ed03f0a40c90f6
+updated_at: 2026-11-22T11:23:38Z
+verified_at: 2026-11-22T11:23:27Z
+verified_event: sha256:29b6dec76c61f2816aae38adb4c4dce489554265ecaddb651d212e895610cc42
+completed_at: 2026-11-22T11:23:38Z
+completed_event: sha256:1ab67e9688d037f57d535a4c74622e6b0abffdc5a8b6af152ff669f973fe2d9f
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-panel --bin mcp-plan; tools/gate.sh change; three read-only captures of :8800 replayed and shadowed twice each"
+    result: "battlebrain 30/30 (require_priced on/off, live gates incoherent_snapshot / unpriced_policy / stale_companies, serve answers one loopback GET, every result .md is its record's report), mcp-panel 225/225 (decision_gate: live needs its own key, refused after its stale date or without the game date), mcp-plan 48/48; gate change PASS. freight-margin@2 on the three captures (company 3): 1953-02-09 and 1962-05-29 input_model_discrepancy (planner over budget / unpriced), 1963-02-22 same; every replay and shadow byte-identical. NOT RUN: a live pull (needs the owner's approval and p1's go-ahead); a coherent capture (game running)."
+    artifact: "research/results/battlebrain-shadow-20261122T105052Z-coplay-8800-freight-margin-2.json"
+    commit: a5ea892a26be8b41471667daa6031c285c17dfde
+    recorded_at: 2026-11-22T11:23:33Z

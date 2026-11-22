@@ -1,0 +1,817 @@
+{
+ "comparison": {
+  "baseline": {
+   "acceptor": 1,
+   "annual_return": 2.1097,
+   "cargo_id": 1,
+   "investment": 125331.0,
+   "mode": "freight_rail",
+   "monthly_profit": 22034.0,
+   "payback_months": 5.6881,
+   "planner_score": 403483.0,
+   "producer": 41,
+   "track": "found"
+  },
+  "battlebrain": {
+   "acceptor": 1,
+   "annual_return": 2.1097,
+   "cargo_id": 1,
+   "investment": 125331.0,
+   "mode": "freight_rail",
+   "monthly_profit": 22034.0,
+   "payback_months": 5.6881,
+   "planner_score": 403483.0,
+   "producer": 41,
+   "track": "found"
+  },
+  "budget": 128858,
+  "divergence": "same",
+  "metrics": {
+   "coherent_snapshot": false,
+   "fallback_solver": false,
+   "missing_kernel": false,
+   "portfolio_solver": "algoglyph knapsack-dp",
+   "snapshot_window": {
+    "coherent": false,
+    "tick_from": 356549,
+    "tick_to": 356588
+   },
+   "unpriced_lines": 24,
+   "unroutable_lines": 6
+  },
+  "params": {
+   "margin": 0.2,
+   "require_priced": true,
+   "reserve": 25000
+  },
+  "plan_digest": "sha256:6447c5e9c17fd4f2667ab79e205cead3dc69ad7d041da121add2329ea055aa5a",
+  "policy": "freight-margin@2",
+  "reason": "both pick the same line",
+  "rejected": [
+   {
+    "line": {
+     "acceptor": 1,
+     "annual_return": 1.6449,
+     "cargo_id": 1,
+     "investment": 107668.0,
+     "mode": "freight_rail",
+     "monthly_profit": 14759.0,
+     "payback_months": 7.2951,
+     "planner_score": 246539.0,
+     "producer": 0,
+     "track": "found"
+    },
+    "reason": "lower annual return than the selected line"
+   },
+   {
+    "line": {
+     "acceptor": 1,
+     "annual_return": 2.0043,
+     "cargo_id": 1,
+     "investment": 132432.0,
+     "mode": "freight_rail",
+     "monthly_profit": 22119.0,
+     "payback_months": 5.9873,
+     "planner_score": 398416.0,
+     "producer": 20,
+     "track": "found"
+    },
+    "reason": "investment 132432 exceeds what the company can spend and keep the reserve (128858)"
+   },
+   {
+    "line": {
+     "acceptor": 13,
+     "annual_return": 2.2499,
+     "cargo_id": 1,
+     "investment": 114840.0,
+     "mode": "freight_rail",
+     "monthly_profit": 21532.0,
+     "payback_months": 5.3335,
+     "planner_score": -1.7976931348623157e+308,
+     "producer": 20,
+     "track": "unreachable"
+    },
+    "reason": "track-planning did not find a route (unreachable)"
+   },
+   {
+    "line": {
+     "acceptor": 14,
+     "annual_return": 1.7928,
+     "cargo_id": 1,
+     "investment": 87870.0,
+     "mode": "freight_rail",
+     "monthly_profit": 13128.0,
+     "payback_months": 6.6933,
+     "planner_score": 227207.0,
+     "producer": 22,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 25,
+     "annual_return": 1.8003,
+     "cargo_id": 1,
+     "investment": 87945.0,
+     "mode": "freight_rail",
+     "monthly_profit": 13194.0,
+     "payback_months": 6.6655,
+     "planner_score": 228701.0,
+     "producer": 22,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 12,
+     "annual_return": 2.2891,
+     "cargo_id": 1,
+     "investment": 83670.0,
+     "mode": "freight_rail",
+     "monthly_profit": 15961.0,
+     "payback_months": 5.2422,
+     "planner_score": 299400.0,
+     "producer": 41,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 13,
+     "annual_return": 2.0322,
+     "cargo_id": 1,
+     "investment": 109365.0,
+     "mode": "freight_rail",
+     "monthly_profit": 18521.0,
+     "payback_months": 5.9049,
+     "planner_score": -1.7976931348623157e+308,
+     "producer": 41,
+     "track": "unreachable"
+    },
+    "reason": "track-planning did not find a route (unreachable)"
+   },
+   {
+    "line": {
+     "acceptor": 46,
+     "annual_return": 1.8413,
+     "cargo_id": 1,
+     "investment": 81270.0,
+     "mode": "freight_rail",
+     "monthly_profit": 12470.0,
+     "payback_months": 6.5172,
+     "planner_score": 218006.0,
+     "producer": 41,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 1,
+     "annual_return": 2.0968,
+     "cargo_id": 1,
+     "investment": 62250.0,
+     "mode": "freight_rail",
+     "monthly_profit": 10877.0,
+     "payback_months": 5.7231,
+     "planner_score": 198802.0,
+     "producer": 48,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 13,
+     "annual_return": 2.0879,
+     "cargo_id": 1,
+     "investment": 91020.0,
+     "mode": "freight_rail",
+     "monthly_profit": 15837.0,
+     "payback_months": 5.7473,
+     "planner_score": -1.7976931348623157e+308,
+     "producer": 48,
+     "track": "unreachable"
+    },
+    "reason": "track-planning did not find a route (unreachable)"
+   },
+   {
+    "line": {
+     "acceptor": 25,
+     "annual_return": 1.9373,
+     "cargo_id": 1,
+     "investment": 89370.0,
+     "mode": "freight_rail",
+     "monthly_profit": 14428.0,
+     "payback_months": 6.1942,
+     "planner_score": -1.7976931348623157e+308,
+     "producer": 48,
+     "track": "unreachable"
+    },
+    "reason": "track-planning did not find a route (unreachable)"
+   },
+   {
+    "line": {
+     "acceptor": 2,
+     "annual_return": 1.8236,
+     "cargo_id": 7,
+     "investment": 89193.0,
+     "mode": "freight_rail",
+     "monthly_profit": 13554.0,
+     "payback_months": 6.5806,
+     "planner_score": 236098.0,
+     "producer": 3,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 34,
+     "annual_return": 1.7459,
+     "cargo_id": 7,
+     "investment": 88368.0,
+     "mode": "freight_rail",
+     "monthly_profit": 12857.0,
+     "payback_months": 6.8731,
+     "planner_score": 220209.0,
+     "producer": 3,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 2,
+     "annual_return": 1.5755,
+     "cargo_id": 7,
+     "investment": 89793.0,
+     "mode": "freight_rail",
+     "monthly_profit": 11789.0,
+     "payback_months": 7.6167,
+     "planner_score": 193151.0,
+     "producer": 24,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 31,
+     "annual_return": 1.7097,
+     "cargo_id": 7,
+     "investment": 91593.0,
+     "mode": "freight_rail",
+     "monthly_profit": 13050.0,
+     "payback_months": 7.0186,
+     "planner_score": 221610.0,
+     "producer": 24,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 30,
+     "annual_return": 1.6024,
+     "cargo_id": 7,
+     "investment": 143369.0,
+     "mode": "freight_rail",
+     "monthly_profit": 19144.0,
+     "payback_months": 7.489,
+     "planner_score": 316076.0,
+     "producer": 29,
+     "track": "found"
+    },
+    "reason": "investment 143369 exceeds what the company can spend and keep the reserve (128858)"
+   },
+   {
+    "line": {
+     "acceptor": 31,
+     "annual_return": 1.6623,
+     "cargo_id": 7,
+     "investment": 109754.0,
+     "mode": "freight_rail",
+     "monthly_profit": 15204.0,
+     "payback_months": 7.2188,
+     "planner_score": 255139.0,
+     "producer": 29,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 34,
+     "annual_return": 2.0275,
+     "cargo_id": 7,
+     "investment": 113279.0,
+     "mode": "freight_rail",
+     "monthly_profit": 19139.0,
+     "payback_months": 5.9188,
+     "planner_score": 346056.0,
+     "producer": 29,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 51,
+     "annual_return": 1.7605,
+     "cargo_id": 7,
+     "investment": 130634.0,
+     "mode": "freight_rail",
+     "monthly_profit": 19165.0,
+     "payback_months": 6.8163,
+     "planner_score": 329326.0,
+     "producer": 29,
+     "track": "found"
+    },
+    "reason": "investment 130634 exceeds what the company can spend and keep the reserve (128858)"
+   },
+   {
+    "line": {
+     "acceptor": 28,
+     "annual_return": 1.7133,
+     "cargo_id": 8,
+     "investment": 83949.0,
+     "mode": "freight_rail",
+     "monthly_profit": 11986.0,
+     "payback_months": 7.0039,
+     "planner_score": 203707.0,
+     "producer": 9,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 40,
+     "annual_return": 1.9003,
+     "cargo_id": 8,
+     "investment": 85299.0,
+     "mode": "freight_rail",
+     "monthly_profit": 13508.0,
+     "payback_months": 6.3147,
+     "planner_score": 238895.0,
+     "producer": 9,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 47,
+     "annual_return": 1.7409,
+     "cargo_id": 8,
+     "investment": 97535.0,
+     "mode": "freight_rail",
+     "monthly_profit": 14150.0,
+     "payback_months": 6.8929,
+     "planner_score": 242067.0,
+     "producer": 9,
+     "track": "found"
+    },
+    "reason": "lower annual return than the selected line"
+   },
+   {
+    "line": {
+     "acceptor": 49,
+     "annual_return": 1.9152,
+     "cargo_id": 8,
+     "investment": 88658.0,
+     "mode": "freight_rail",
+     "monthly_profit": 14150.0,
+     "payback_months": 6.2656,
+     "planner_score": 250944.0,
+     "producer": 9,
+     "track": "found"
+    },
+    "reason": "lower annual return than the selected line"
+   },
+   {
+    "line": {
+     "acceptor": 6,
+     "annual_return": 1.6062,
+     "cargo_id": 8,
+     "investment": 107270.0,
+     "mode": "freight_rail",
+     "monthly_profit": 14358.0,
+     "payback_months": 7.4711,
+     "planner_score": 237333.0,
+     "producer": 21,
+     "track": "found"
+    },
+    "reason": "lower annual return than the selected line"
+   },
+   {
+    "line": {
+     "acceptor": 40,
+     "annual_return": 1.9308,
+     "cargo_id": 8,
+     "investment": 89124.0,
+     "mode": "freight_rail",
+     "monthly_profit": 14340.0,
+     "payback_months": 6.2151,
+     "planner_score": -1.7976931348623157e+308,
+     "producer": 21,
+     "track": "unreachable"
+    },
+    "reason": "track-planning did not find a route (unreachable)"
+   },
+   {
+    "line": {
+     "acceptor": 6,
+     "annual_return": 1.6695,
+     "cargo_id": 8,
+     "investment": 129552.0,
+     "mode": "freight_rail",
+     "monthly_profit": 18024.0,
+     "payback_months": 7.1877,
+     "planner_score": 303028.0,
+     "producer": 35,
+     "track": "found"
+    },
+    "reason": "investment 129552 exceeds what the company can spend and keep the reserve (128858)"
+   },
+   {
+    "line": {
+     "acceptor": 17,
+     "annual_return": 1.9766,
+     "cargo_id": 8,
+     "investment": 85449.0,
+     "mode": "freight_rail",
+     "monthly_profit": 14075.0,
+     "payback_months": 6.071,
+     "planner_score": 252344.0,
+     "producer": 35,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 40,
+     "annual_return": 2.0069,
+     "cargo_id": 8,
+     "investment": 114737.0,
+     "mode": "freight_rail",
+     "monthly_profit": 19189.0,
+     "payback_months": 5.9793,
+     "planner_score": -1.7976931348623157e+308,
+     "producer": 35,
+     "track": "unreachable"
+    },
+    "reason": "track-planning did not find a route (unreachable)"
+   },
+   {
+    "line": {
+     "acceptor": 47,
+     "annual_return": 1.8016,
+     "cargo_id": 8,
+     "investment": 84024.0,
+     "mode": "freight_rail",
+     "monthly_profit": 12615.0,
+     "payback_months": 6.6606,
+     "planner_score": 218746.0,
+     "producer": 35,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 5,
+     "annual_return": 1.6165,
+     "cargo_id": 9,
+     "investment": 111087.0,
+     "mode": "freight_rail",
+     "monthly_profit": 14964.0,
+     "payback_months": 7.4236,
+     "planner_score": 248037.0,
+     "producer": 40,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 18,
+     "annual_return": 1.6151,
+     "cargo_id": 9,
+     "investment": 111612.0,
+     "mode": "freight_rail",
+     "monthly_profit": 15022.0,
+     "payback_months": 7.4299,
+     "planner_score": 248924.0,
+     "producer": 40,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 33,
+     "annual_return": 1.5225,
+     "cargo_id": 9,
+     "investment": 108537.0,
+     "mode": "freight_rail",
+     "monthly_profit": 13771.0,
+     "payback_months": 7.8816,
+     "planner_score": 221964.0,
+     "producer": 40,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 52,
+     "annual_return": 1.6168,
+     "cargo_id": 9,
+     "investment": 110337.0,
+     "mode": "freight_rail",
+     "monthly_profit": 14866.0,
+     "payback_months": 7.4221,
+     "planner_score": 246443.0,
+     "producer": 40,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 53,
+     "annual_return": 1.6143,
+     "cargo_id": 9,
+     "investment": 111837.0,
+     "mode": "freight_rail",
+     "monthly_profit": 15045.0,
+     "payback_months": 7.4335,
+     "planner_score": 249252.0,
+     "producer": 40,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 5,
+     "annual_return": 1.4157,
+     "cargo_id": 9,
+     "investment": 105987.0,
+     "mode": "freight_rail",
+     "monthly_profit": 12504.0,
+     "payback_months": 8.4762,
+     "planner_score": 194110.0,
+     "producer": 49,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 33,
+     "annual_return": 1.4655,
+     "cargo_id": 9,
+     "investment": 124673.0,
+     "mode": "freight_rail",
+     "monthly_profit": 15226.0,
+     "payback_months": 8.1882,
+     "planner_score": 240742.0,
+     "producer": 49,
+     "track": "found"
+    },
+    "reason": "lower annual return than the selected line"
+   },
+   {
+    "line": {
+     "acceptor": 50,
+     "annual_return": 1.6052,
+     "cargo_id": 9,
+     "investment": 113487.0,
+     "mode": "freight_rail",
+     "monthly_profit": 15181.0,
+     "payback_months": 7.4756,
+     "planner_score": 250850.0,
+     "producer": 49,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 52,
+     "annual_return": 1.5708,
+     "cargo_id": 9,
+     "investment": 117087.0,
+     "mode": "freight_rail",
+     "monthly_profit": 15327.0,
+     "payback_months": 7.6393,
+     "planner_score": 250753.0,
+     "producer": 49,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   },
+   {
+    "line": {
+     "acceptor": 53,
+     "annual_return": 1.6063,
+     "cargo_id": 9,
+     "investment": 113337.0,
+     "mode": "freight_rail",
+     "monthly_profit": 15171.0,
+     "payback_months": 7.4706,
+     "planner_score": 250757.0,
+     "producer": 49,
+     "track": null
+    },
+    "reason": "track-planning did not price this line on the map"
+   }
+  ],
+  "same": true,
+  "snapshot": "bb:4ad83bc20036020b056a88384db4f3c7b063e7032d8c0cbbbceb7b02d59a79dc",
+  "snapshot_digest": "sha256:2e948007679fedab97218d4f0d69a0e8b4a3db7aceba5ceb9784781c4ae56e2c"
+ },
+ "directive": null,
+ "directive_block": {
+  "decision": "bb:218f431b997cfceb122db5ad61af5dda098e3bccc52de9530a0cf2170e4d0657",
+  "idempotency_key": "coplay-8800:3:1963-02-22:freight-line",
+  "mode": "shadow",
+  "policy": "freight-margin@2",
+  "schema": "battlebrain-decision/v1",
+  "snapshot_digest": "sha256:2e948007679fedab97218d4f0d69a0e8b4a3db7aceba5ceb9784781c4ae56e2c",
+  "valid_until": "1963-03-25"
+ },
+ "findings": [],
+ "id": "battlebrain-shadow-20261122T105052Z-coplay-8800-freight-margin-2",
+ "live_gate": null,
+ "mode": "shadow",
+ "provenance": {
+  "algoglyph_commit": "1b8e009059c299b29d7a829d2d51d4e057304d4d",
+  "capture": {
+   "dir": "tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1963-02-22",
+   "game": "the owner's 8-company co-play game (feature/research-coplay)",
+   "how": "mcp-plan --panel http://127.0.0.1:8800 --limit 40 --track 16 --capture <dir>, one read-only pass with the consent of the game's owner session (p1); GET /api/resources/* only",
+   "window": {
+    "coherent": false,
+    "tick_from": 356549,
+    "tick_to": 356588
+   }
+  },
+  "company": 3,
+  "company_note": "an AI company the owner does not play; the same company on all three captures",
+  "fork_commit": "a5ea892a26be8b41471667daa6031c285c17dfde",
+  "replay": "mcp-plan --snapshot tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1963-02-22 --limit 40 --track 16 --params '{\"budget\":300000}' (twice: byte-identical)",
+  "shadow": "battlebrain shadow --snapshot tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1963-02-22/snapshot-company-3.json --plan tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1963-02-22/plan.json --companies tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1963-02-22/companies.json --company 3 (on both replays: byte-identical)"
+ },
+ "records": [
+  {
+   "at": {
+    "date": "1963-02-22",
+    "tick": 356549
+   },
+   "body": {
+    "action": {
+     "kind": "freight_line",
+     "settings": {
+      "fr_cargo": 1,
+      "fr_from": 41,
+      "fr_to": 1
+     }
+    },
+    "assumptions": [
+     "planner v4 portfolio: its highest-scored freight_rail line",
+     "portfolio solver: algoglyph knapsack-dp",
+     "the bot's slot order (panel_bot.rs settings_from_plan) may differ when a line is unbuildable"
+    ],
+    "estimate": {
+     "cost": {
+      "unit": "money",
+      "value": 125331.0
+     },
+     "profit": {
+      "unit": "money_per_year",
+      "value": 264408.0
+     }
+    },
+    "inputs_digest": "sha256:6447c5e9c17fd4f2667ab79e205cead3dc69ad7d041da121add2329ea055aa5a",
+    "invocations": []
+   },
+   "derived_from": [
+    "bb:4ad83bc20036020b056a88384db4f3c7b063e7032d8c0cbbbceb7b02d59a79dc"
+   ],
+   "id": "bb:51525427b76f1121c7239a1d834a1ac7a9da28cfc7245ed116cf5cfbca0992c9",
+   "producer": {
+    "id": "mcp-plan",
+    "version": "v4"
+   },
+   "schema": "battlebrain-record/v1",
+   "scope": {
+    "company": 3,
+    "instance": "coplay-8800"
+   },
+   "status": "proposed",
+   "type": "candidate"
+  },
+  {
+   "at": {
+    "date": "1963-02-22",
+    "tick": 356549
+   },
+   "body": {
+    "action": {
+     "kind": "freight_line",
+     "settings": {
+      "fr_cargo": 1,
+      "fr_from": 41,
+      "fr_to": 1
+     }
+    },
+    "assumptions": [
+     "policy freight-margin@2",
+     "estimates are the planner's (plan.rs model), not re-derived"
+    ],
+    "estimate": {
+     "cost": {
+      "unit": "money",
+      "value": 125331.0
+     },
+     "profit": {
+      "unit": "money_per_year",
+      "value": 264408.0
+     }
+    },
+    "inputs_digest": "sha256:6447c5e9c17fd4f2667ab79e205cead3dc69ad7d041da121add2329ea055aa5a",
+    "invocations": []
+   },
+   "derived_from": [
+    "bb:4ad83bc20036020b056a88384db4f3c7b063e7032d8c0cbbbceb7b02d59a79dc"
+   ],
+   "id": "bb:f28e49c5db66931c6418db389a646799ec750d2bbc06ca629073b67c892436e7",
+   "producer": {
+    "id": "battlebrain",
+    "version": "0.1.0"
+   },
+   "schema": "battlebrain-record/v1",
+   "scope": {
+    "company": 3,
+    "instance": "coplay-8800"
+   },
+   "status": "proposed",
+   "type": "candidate"
+  },
+  {
+   "at": {
+    "date": "1963-02-22",
+    "tick": 356549
+   },
+   "body": {
+    "approval": "operator",
+    "goal": "next freight rail line (one fr_* slot) or HOLD",
+    "idempotency_key": "coplay-8800:3:1963-02-22:freight-line",
+    "policy": {
+     "id": "freight-margin",
+     "params": {
+      "margin": 0.2,
+      "require_priced": true,
+      "reserve": 25000
+     },
+     "version": "2"
+    },
+    "rejected": [
+     {
+      "candidate": "bb:51525427b76f1121c7239a1d834a1ac7a9da28cfc7245ed116cf5cfbca0992c9",
+      "reason": "same: both pick the same line"
+     }
+    ],
+    "selected": "bb:f28e49c5db66931c6418db389a646799ec750d2bbc06ca629073b67c892436e7",
+    "snapshot": "bb:4ad83bc20036020b056a88384db4f3c7b063e7032d8c0cbbbceb7b02d59a79dc",
+    "valid_until": "1963-03-25"
+   },
+   "derived_from": [
+    "bb:4ad83bc20036020b056a88384db4f3c7b063e7032d8c0cbbbceb7b02d59a79dc",
+    "bb:f28e49c5db66931c6418db389a646799ec750d2bbc06ca629073b67c892436e7",
+    "bb:51525427b76f1121c7239a1d834a1ac7a9da28cfc7245ed116cf5cfbca0992c9"
+   ],
+   "id": "bb:218f431b997cfceb122db5ad61af5dda098e3bccc52de9530a0cf2170e4d0657",
+   "producer": {
+    "id": "battlebrain",
+    "version": "0.1.0"
+   },
+   "schema": "battlebrain-record/v1",
+   "scope": {
+    "company": 3,
+    "instance": "coplay-8800"
+   },
+   "status": "decided",
+   "type": "decision"
+  }
+ ],
+ "schema": "battlebrain-shadow-result/v1"
+}
