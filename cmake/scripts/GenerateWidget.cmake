@@ -54,6 +54,21 @@ foreach(ENUM IN LISTS ENUM_LINES)
         foreach(LINE IN LISTS SOURCE_LINES)
             string(REPLACE "${RM_INDENT}" "" LINE "${LINE}")
 
+            # RESEARCH-ONLY (fork): an enum member between '#ifdef OTTD_RESEARCH_INSTRUMENTATION' or
+            # '#ifdef OTTD_PRISMATIC_MCP_SERVER' and its '#endif' (not nested) exists only in a
+            # research build. It is never exported to the script API, so a script sees the same
+            # constants in every build and a default build names no research member.
+            if(ACTIVE AND "${LINE}" MATCHES "^#[ \t]*if(def)?[ \t]+.*OTTD_(RESEARCH_INSTRUMENTATION|PRISMATIC_MCP_SERVER)")
+                set(RESEARCH_ONLY 1)
+                continue()
+            endif()
+            if(RESEARCH_ONLY)
+                if("${LINE}" MATCHES "^#[ \t]*endif")
+                    unset(RESEARCH_ONLY)
+                endif()
+                continue()
+            endif()
+
             # Remember possible doxygen comment before enum declaration
             if((NOT ACTIVE) AND "${LINE}" MATCHES "/\\*\\*")
                 remove_invalid_links("${LINE}")

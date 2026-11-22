@@ -19,6 +19,7 @@ add_test_files(
     test_network_research_compat.cpp
     test_prismatic_mcp.cpp
     test_prismatic_mcp_ai_control.cpp
+    test_prismatic_mcp_ai_status.cpp
     test_script_admin.cpp
     test_window_desc.cpp
     tilearea.cpp
