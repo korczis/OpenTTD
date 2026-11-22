@@ -15,6 +15,10 @@ BIN="$HERE/target/release/atlas"
 if [[ ! -x "$BIN" || -n "$(find "$HERE/src" "$HERE/Cargo.toml" "$HERE/Cargo.lock" -newer "$BIN" 2>/dev/null | head -1)" ]]; then
   echo "atlas: building (cargo build --release, $HERE/target)" >&2
   export CARGO_TARGET_DIR="$HERE/target"
+  # RUSTFLAGS replaces a target's rustflags from a global cargo config; a `-C lto` there breaks
+  # build scripts ("options `-C embed-bitcode=no` and `-C lto` are incompatible"), as tools/gate.sh
+  # notes for its own cargo runs (research/live-arena.md). A RUSTFLAGS already set wins.
+  export RUSTFLAGS="${RUSTFLAGS:--C target-cpu=native}"
   cargo build --release --offline --quiet --manifest-path "$HERE/Cargo.toml" >&2 \
     || cargo build --release --quiet --manifest-path "$HERE/Cargo.toml" >&2
 fi
