@@ -55,12 +55,6 @@ const routes = (url, init) => {
 
 const env = fakeDom({ url: 'http://127.0.0.1:8800/', routes });
 env.document.body.innerHTML = bodyOf(INDEX);
-// app.js's api(), which the page publishes as a global for bots.js: POST with a JSON body, the answer parsed.
-globalThis.api = async (p, body) => {
-  const r = await fetch(p, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const text = await r.text();
-  try { return JSON.parse(text); } catch { return { status: r.status, text }; }
-};
 let ticks = 0;
 globalThis.tick = () => { ticks++; };
 // One instance of the module per process (node's coverage report keeps one per file): later documents

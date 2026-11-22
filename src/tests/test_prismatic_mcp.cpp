@@ -827,6 +827,85 @@ TEST_CASE("The approval state machine binds to the tool and canonical args, exec
 	}
 }
 
+TEST_CASE("Several AI settings are one decision: the shape is checked whole, the expiry clamps the approval, and every map is its own approval", "[prismatic_mcp]")
+{
+	CHECK(IsKnownActionType("ai.set_settings"));
+
+	SECTION("a well-formed call plans every setting in canonical order, with its expiry") {
+		SetSettingsPlan p = PlanSetSettings(json{{"company", 1}, {"settings", {{"fr_to", 7}, {"fr_from", 3}}}, {"expires_tick", 500}});
+		CHECK(p.errors.empty());
+		REQUIRE(p.settings.size() == 2);
+		CHECK(p.settings[0] == std::pair<std::string, int64_t>{"fr_from", 3});
+		CHECK(p.settings[1] == std::pair<std::string, int64_t>{"fr_to", 7});
+		CHECK(p.expires_tick == std::optional<uint64_t>{500});
+		CHECK_FALSE(PlanSetSettings(json{{"company", 1}, {"settings", {{"a", 1}}}}).expires_tick.has_value());
+	}
+	SECTION("no map, a map that is not an object, and an empty map are refused") {
+		for (const json &bad : {json{{"company", 1}}, json{{"company", 1}, {"settings", json::array({1})}}, json{{"company", 1}, {"settings", json::object()}}, json::array()}) {
+			INFO(bad.dump());
+			SetSettingsPlan p = PlanSetSettings(bad);
+			CHECK(p.errors.size() == 1);
+			CHECK(p.settings.empty());
+		}
+		CHECK(PlanSetSettings(json{{"settings", json::object()}}).errors[0].find("empty") != std::string::npos);
+	}
+	SECTION("the cap: SET_SETTINGS_MAX settings are planned, one more refuses the call") {
+		json args = {{"company", 1}, {"settings", json::object()}};
+		for (size_t i = 0; i < SET_SETTINGS_MAX; i++) args["settings"][fmt::format("s{:02}", i)] = static_cast<int>(i);
+		SetSettingsPlan full = PlanSetSettings(args);
+		CHECK(full.errors.empty());
+		CHECK(full.settings.size() == SET_SETTINGS_MAX);
+		args["settings"]["one_more"] = 1;
+		SetSettingsPlan over = PlanSetSettings(args);
+		REQUIRE(over.errors.size() == 1);
+		CHECK(over.errors[0].find(fmt::format("at most {}", SET_SETTINGS_MAX)) != std::string::npos);
+		CHECK(over.settings.empty());
+	}
+	SECTION("every value that is not an integer is named, and a bad expires_tick is refused") {
+		SetSettingsPlan p = PlanSetSettings(json{{"settings", {{"a", 1}, {"b", "2"}, {"c", 1.5}, {"d", true}}}});
+		CHECK(p.errors == std::vector<std::string>{"b: value must be an integer", "c: value must be an integer", "d: value must be an integer"});
+		CHECK(p.settings.size() == 1);
+		for (const json &e : {json(-1), json("100"), json(2.5)}) {
+			INFO(e.dump());
+			CHECK(PlanSetSettings(json{{"settings", {{"a", 1}}}, {"expires_tick", e}}).errors.size() == 1);
+		}
+		CHECK(PlanSetSettings(json::parse(R"({"settings":{"a":1},"expires_tick":0})")).errors.empty());
+	}
+	SECTION("the approval expires at the earlier of the TTL and expires_tick; execution re-checks the date") {
+		CHECK(ApprovalExpiry(1000, 100000, std::nullopt) == 101000);
+		CHECK(ApprovalExpiry(1000, 100000, 5000) == 5000);
+		CHECK(ApprovalExpiry(1000, 100000, 900000) == 101000);
+		CHECK(BoundExpiresTick("ai.set_settings", json{{"settings", {{"a", 1}}}, {"expires_tick", 5000}}) == std::optional<uint64_t>{5000});
+		CHECK_FALSE(BoundExpiresTick("ai.set_setting", json{{"name", "a"}, {"value", 1}, {"expires_tick", 5000}}).has_value());
+		CHECK(StillFresh(5000, 5000));
+		CHECK_FALSE(StillFresh(5001, 5000));
+		CHECK(StillFresh(1u << 30, std::nullopt));
+		/* Approved, but past its own date: the clamped approval no longer executes. */
+		const std::string args = json{{"company", 1}, {"settings", {{"a", 1}}}, {"expires_tick", 5000}}.dump();
+		std::vector<ApprovalView> a{{1, "ai.set_settings", args, ApprovalExpiry(1000, 100000, 5000)}};
+		size_t idx = 999;
+		CHECK(ClassifySubmit(a, "ai.set_settings", args, 5000, idx) == SubmitDecision::Execute);
+		CHECK(ClassifySubmit(a, "ai.set_settings", args, 5001, idx) == SubmitDecision::CreatePending);
+	}
+	SECTION("a different map or a different expiry is a different approval; the same map in another key order is the same") {
+		const std::string base = json{{"company", 1}, {"settings", {{"fr_from", 3}, {"fr_to", 7}}}, {"expires_tick", 5000}}.dump();
+		const std::string reordered = json::parse(R"({"settings":{"fr_to":7,"fr_from":3},"expires_tick":5000,"company":1})").dump();
+		const std::string other_value = json{{"company", 1}, {"settings", {{"fr_from", 3}, {"fr_to", 8}}}, {"expires_tick", 5000}}.dump();
+		const std::string subset = json{{"company", 1}, {"settings", {{"fr_from", 3}}}, {"expires_tick", 5000}}.dump();
+		const std::string later = json{{"company", 1}, {"settings", {{"fr_from", 3}, {"fr_to", 7}}}, {"expires_tick", 9000}}.dump();
+		const std::string no_expiry = json{{"company", 1}, {"settings", {{"fr_from", 3}, {"fr_to", 7}}}}.dump();
+		std::vector<ApprovalView> a{{1, "ai.set_settings", base, 5000}};
+		size_t idx = 999;
+		CHECK(ClassifySubmit(a, "ai.set_settings", reordered, 10, idx) == SubmitDecision::Execute);
+		for (const std::string &other : {other_value, subset, later, no_expiry}) {
+			INFO(other);
+			CHECK(ClassifySubmit(a, "ai.set_settings", other, 10, idx) == SubmitDecision::CreatePending);
+		}
+		/* Nor does one of its settings, sent alone to ai.set_setting, spend it. */
+		CHECK(ClassifySubmit(a, "ai.set_setting", base, 10, idx) == SubmitDecision::CreatePending);
+	}
+}
+
 TEST_CASE("PrismaticMCP: game text reaches MCP clients as plain text")
 {
 	using PrismaticMCP::PlainText;

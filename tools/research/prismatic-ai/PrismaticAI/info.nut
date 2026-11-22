@@ -13,6 +13,8 @@ class PrismaticAI extends AIInfo {
 	function GetShortName()   { return "PRIS"; }
 	function GetDescription() { return "Company AI steerable from outside the game via the openttd-prismatic-bridge REST API."; }
 	function GetVersion()     { return 2; }
+	/* Saved data of any version since 1 loads; Restore() rebuilds from the map when it cannot use it. */
+	function MinVersionToLoad() { return 1; }
 	function GetAPIVersion()  { return "16"; }
 	function GetDate()        { return "2026-11-18"; }
 	function CreateInstance() { return "PrismaticAI"; }
@@ -441,6 +443,118 @@ class PrismaticAI extends AIInfo {
 			min_value = 0, max_value = 1,
 			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
 			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
+		AddSetting({
+			name = "rich_growth",
+			description = "1 (default): once the bank holds rich_budgets line budgets (default ten), the caps that ran out are lifted: max_routes at least 30, air_reuse on, more planes per air route while its airports have room, own freight lines without a cap and from poorly served producers too (rich.nut); 0: money above the caps stays in the bank.",
+			min_value = 0, max_value = 1,
+			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
+		AddSetting({
+			name = "modernize",
+			description = "1 (default): once a game month the bot sets the game's autoreplace from every engine it runs to the better one its builders would buy now (same rail type with power, same plane class; modernize.nut); 0: engines are only renewed with the same model.",
+			min_value = 0, max_value = 1,
+			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
+		AddSetting({
+			name = "compete",
+			description = "1 (default): once a game quarter the bot compares its company value with the strongest other company; while it is behind and money sits idle, its fleet limits loosen by how far behind it is (vehicles per route, the earnings a route needs for one more, air routes, twin lines; pressure.nut); 0: the limits stay as set.",
+			min_value = 0, max_value = 1,
+			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
+		AddSetting({
+			name = "upgrade_track",
+			description = "1 (default): once a month, convert one rail network to a better rail type (electrified once an electric locomotive beats the steam and diesel ones) when every train keeps power on it and the bank holds the cost plus track_keep_budgets line budgets (default two); new lines are built in the best type (infra.nut); 0: plain rail all game.",
+			min_value = 0, max_value = 1,
+			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
+		AddSetting({
+			name = "rich_budgets",
+			description = "Rich growth: the bot counts as rich once the bank holds this many line budgets (rich.nut Rich). Default 5 (250k at the default line_budget): below the fitness check's hoards floor (500k), so the bot spends before it hoards; at 10 the planned fitness contestant held 9 vehicles while its money rose from 283k to 697k (2026-11-22).",
+			min_value = 1, max_value = 100,
+			easy_value = 5, medium_value = 5, hard_value = 5, custom_value = 5, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "rich_air_money",
+			description = "Rich growth: one plane more per air route for every this much bank money above the rich threshold, in thousands (rich.nut RichAirCap).",
+			min_value = 10, max_value = 5000,
+			easy_value = 250, medium_value = 250, hard_value = 250, custom_value = 250, step_size = 10,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "rich_invest_rounds",
+			description = "Rich growth: how many times a heartbeat idle money buys one more vehicle for the route that earns most per vehicle (fleet.nut InvestSurplus); 1 when not rich.",
+			min_value = 1, max_value = 20,
+			easy_value = 4, medium_value = 4, hard_value = 4, custom_value = 4, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "rich_air_cap_max",
+			description = "Rich growth: the most planes per air route it raises invest_air_cap to (rich.nut RichAirCap; never lowers invest_air_cap).",
+			min_value = 1, max_value = 30,
+			easy_value = 30, medium_value = 30, hard_value = 30, custom_value = 30, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "rich_served_below",
+			description = "Rich growth: an own freight line may also start at a producer others serve while under this share of its production was transported last month, in percent (rich.nut, read by rail.nut NextOwnFreightLine).",
+			min_value = 0, max_value = 100,
+			easy_value = 60, medium_value = 60, hard_value = 60, custom_value = 60, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "rich_min_tiles",
+			description = "Rich growth: the shortest own freight line, in tiles (the planner's window is 100-260; rich.nut, read by rail.nut NextOwnFreightLine).",
+			min_value = 20, max_value = 400,
+			easy_value = 80, medium_value = 80, hard_value = 80, custom_value = 80, step_size = 10,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "rich_max_tiles",
+			description = "Rich growth: the longest own freight line, in tiles, at least rich_min_tiles (rich.nut, read by rail.nut NextOwnFreightLine).",
+			min_value = 100, max_value = 1000,
+			easy_value = 320, medium_value = 320, hard_value = 320, custom_value = 320, step_size = 10,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "airport_fill",
+			description = "Planes an airport takes before it counts as full, in percent of the planes its type serves (8 small to 24 international; rich.nut AirportPlanesMax, used by AirportHasRoom for every plane added).",
+			min_value = 25, max_value = 200,
+			easy_value = 100, medium_value = 100, hard_value = 100, custom_value = 100, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "pressure_low",
+			description = "Competitive pressure: the strongest rival's company value against ours, in percent, from which the level is low (pressure.nut PressureLevel).",
+			min_value = 100, max_value = 2000,
+			easy_value = 125, medium_value = 125, hard_value = 125, custom_value = 125, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "pressure_mid",
+			description = "Competitive pressure: the leader / ours percent from which the level is mid (twin rail lines from here on); below pressure_low counts as pressure_low (pressure.nut).",
+			min_value = 100, max_value = 2000,
+			easy_value = 200, medium_value = 200, hard_value = 200, custom_value = 200, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "pressure_high",
+			description = "Competitive pressure: the leader / ours percent from which the level is high; below pressure_mid counts as pressure_mid (pressure.nut).",
+			min_value = 100, max_value = 2000,
+			easy_value = 400, medium_value = 400, hard_value = 400, custom_value = 400, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "track_keep_budgets",
+			description = "Track upgrade: a rail network is converted only while the bank holds its cost plus this many line budgets (infra.nut UpgradeTrack).",
+			min_value = 0, max_value = 20,
+			easy_value = 2, medium_value = 2, hard_value = 2, custom_value = 2, step_size = 1,
+			flags = CONFIG_INGAME,
 		});
 		AddSetting({
 			name = "air_planes",

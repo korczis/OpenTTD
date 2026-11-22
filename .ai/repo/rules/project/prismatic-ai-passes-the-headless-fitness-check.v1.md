@@ -36,7 +36,14 @@ tree and one binary, so it can run on every change to the bot.
 - the match did not finish its final year,
 - any PrismaticAI logged a Squirrel error,
 - a contestant held healthy ended below `fitness.rules.fleet_keep` of its fleet peak (when that
-  peak was at least `fleet_min_peak` vehicles).
+  peak was at least `fleet_min_peak` vehicles),
+- a contestant held healthy hoarded: in some window of `hoard_window` quarters its fleet stayed
+  within `hoard_fleet_slack` of the window's start while its money grew `hoard_factor` times to
+  at least `hoard_floor` (`hoards`; the owner's co-play game of 2026-11-22 held 35-37 vehicles
+  from 1955 to 1960 while its bank rose from 0.6M to 3.77M), its stations not growing either.
+  Only the contestants in `fitness.must_not_hoard` fail on it (default: every healthy one);
+  `PrismaticAI planned` is there because only a planned bot reached that state. Do not remove a
+  contestant from `must_not_hoard` to make a change pass.
 
 The gate fails with it.
 

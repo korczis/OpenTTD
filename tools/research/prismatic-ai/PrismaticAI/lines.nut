@@ -114,6 +114,7 @@ function PrismaticAI::CloseLine(slot, line) {
 		if (this.selling.rawin(t)) continue;
 		if (AIVehicle.SendVehicleToDepot(t)) {
 			this.selling[t] <- true;
+			PrismaticAI.ProtectFromReplace(t); /* autoreplace would give it a new id there (modernize.nut) */
 			AILog.Info("PrismaticAI: rail line " + slot + " closing: train " + t + " to the depot to be sold");
 		}
 	}
@@ -124,7 +125,8 @@ function PrismaticAI::CloseLine(slot, line) {
 	/* The stations' own platforms and throats only: a platform of another line joined to the same
 	 * station stays (RemoveRailStation, never DemolishTile on a station tile). */
 	foreach (st in line.stations) PrismaticAI.RemoveRailStation(st, line.len);
-	AITile.DemolishTile(line.depot);
+	/* A line rebuilt from the map (restore.nut) has a guessed depot that may serve another line. */
+	if (line.stations.len() > 0) AITile.DemolishTile(line.depot);
 	line.closed = true;
 	AILog.Info("PrismaticAI: rail line " + slot + " closed: " + line.label + ", " + n + " tiles cleared");
 	AILog.Info(PrismaticAI.LineRecord(slot, line));
@@ -184,6 +186,7 @@ function PrismaticAI::ReconcileLines(reserve) {
 					AILog.Info("PrismaticAI: rail line " + slot + ": train " + t + " resized from " + have + " to " + got + " wagons");
 				} else if (!this.resizing.rawin(t) && AIVehicle.SendVehicleToDepot(t)) {
 					this.resizing[t] <- true;
+					PrismaticAI.ProtectFromReplace(t); /* autoreplace would give it a new id there (modernize.nut) */
 					AILog.Info("PrismaticAI: rail line " + slot + ": train " + t + " to the depot for " + want_wagons + " wagons (has " + have + ")");
 				}
 			}
@@ -203,6 +206,7 @@ function PrismaticAI::ReconcileLines(reserve) {
 				foreach (t in trains) if (!this.selling.rawin(t) && (newest == -1 || AIVehicle.GetAge(t) < AIVehicle.GetAge(newest))) newest = t;
 				if (newest != -1 && AIVehicle.SendVehicleToDepot(newest)) {
 					this.selling[newest] <- true;
+					PrismaticAI.ProtectFromReplace(newest); /* autoreplace would give it a new id there (modernize.nut) */
 					AILog.Info("PrismaticAI: rail line " + slot + ": train " + newest + " to the depot to be sold (" + running + " for " + want_trains + ")");
 				}
 			}

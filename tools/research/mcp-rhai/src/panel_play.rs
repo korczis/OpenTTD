@@ -37,15 +37,6 @@ pub fn is_game_upgrade(stream: &TcpStream) -> bool {
     matches!(stream.peek(&mut head), Ok(n) if head[..n].starts_with(b"GET /ws/game"))
 }
 
-/// Whether an Origin header may open the bridge: none (a non-browser client on loopback) or the
-/// panel's own address, as 127.0.0.1 or localhost.
-pub fn origin_allowed(origin: Option<&str>, panel_port: u16) -> bool {
-    match origin {
-        None => true,
-        Some(o) => o == format!("http://127.0.0.1:{panel_port}") || o == format!("http://localhost:{panel_port}"),
-    }
-}
-
 /// The WASM build's directory: $MCP_PLAY_DIR, else `<repo>/build-wasm`.
 pub fn play_dir(repo: &Path) -> PathBuf {
     std::env::var_os("MCP_PLAY_DIR").map(PathBuf::from).unwrap_or_else(|| repo.join("build-wasm"))
@@ -71,23 +62,22 @@ pub fn play_built(dir: &Path) -> bool {
 
 /// Accept the upgrade and pump bytes between the WebSocket and the game server until either side
 /// closes. Blocks the connection's thread.
-pub fn bridge(stream: TcpStream, panel_port: u16, game_port: u16) {
+pub fn bridge(stream: TcpStream, game_port: u16) {
     if OPEN.fetch_add(1, Ordering::SeqCst) >= MAX_BRIDGES {
         OPEN.fetch_sub(1, Ordering::SeqCst);
         let _ = (&stream).write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         return;
     }
-    run(stream, panel_port, game_port);
+    run(stream, game_port);
     OPEN.fetch_sub(1, Ordering::SeqCst);
 }
 
-fn run(stream: TcpStream, panel_port: u16, game_port: u16) {
+fn run(stream: TcpStream, game_port: u16) {
     let _ = stream.set_nodelay(true);
+    let peer = stream.peer_addr().ok().map(|a| a.ip());
     let check = |req: &Request, mut resp: Response| -> Result<Response, ErrorResponse> {
-        let origin = req.headers().get("Origin").and_then(|v| v.to_str().ok());
-        if !origin_allowed(origin, panel_port) {
-            let mut e = ErrorResponse::new(Some("foreign origin".into()));
-            *e.status_mut() = tungstenite::http::StatusCode::FORBIDDEN;
+        // The one web access policy (src/web_access.rs): the panel's own pages, or a listed origin.
+        if let Err(e) = crate::web_access::ws_gate(req, peer) {
             return Err(e);
         }
         // Emscripten's SOCKFS asks for "binary"; a browser drops a socket whose protocol is not echoed.
@@ -143,16 +133,6 @@ mod tests {
     use std::net::TcpListener;
 
     #[test]
-    fn only_the_panels_own_pages_may_open_the_bridge() {
-        assert!(origin_allowed(None, 8800));
-        assert!(origin_allowed(Some("http://127.0.0.1:8800"), 8800));
-        assert!(origin_allowed(Some("http://localhost:8800"), 8800));
-        assert!(!origin_allowed(Some("http://127.0.0.1:9999"), 8800));
-        assert!(!origin_allowed(Some("https://evil.example"), 8800));
-        assert!(!origin_allowed(Some("http://127.0.0.1:8800.evil.example"), 8800));
-    }
-
-    #[test]
     fn only_the_built_client_is_served() {
         let d = std::env::temp_dir().join(format!("play-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
@@ -185,7 +165,7 @@ mod tests {
         let panel_port = panel.local_addr().unwrap().port();
         std::thread::spawn(move || {
             for s in panel.incoming().flatten() {
-                std::thread::spawn(move || { assert!(is_game_upgrade(&s)); bridge(s, panel_port, game_port) });
+                std::thread::spawn(move || { assert!(is_game_upgrade(&s)); bridge(s, game_port) });
             }
         });
         let url = format!("ws://127.0.0.1:{panel_port}/ws/game");

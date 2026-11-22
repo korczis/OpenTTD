@@ -1,5 +1,13 @@
 blank_issues_enabled: false
 contact_links:
+# Fork: issues labelled `plan` are projected from .ai/repo/project by tools/plan-github; edit the
+# record, not the issue. Upstream's forum link is kept below for game suggestions.
+- name: The fork's plan (milestones and issues with derived status)
+  url: https://github.com/korczis/OpenTTD/blob/master/.ai/repo/project/README.md
+  about: Every plan issue mirrors a record in .ai/repo/project. Use "Proposal for the plan" for anything new.
+- name: How the fork is governed
+  url: https://github.com/korczis/OpenTTD/blob/master/AGENTS.md
+  about: Ground rules, the four kinds of change and the validation tiers of this research fork.
 - name: Suggestions and ideas?
   url: https://www.tt-forums.net/viewforum.php?f=32
   about: Have a suggestion or an idea for a cool new feature? Post them on our forum!

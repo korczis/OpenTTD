@@ -11,7 +11,7 @@
    Keys: Ctrl/Cmd+S saves, Ctrl/Cmd+Enter runs, Escape stops a run, Tab indents.
    The pure parts are exported for node --test (test/scripts.test.mjs). */
 
-import { UI, TONE, $, esc, badge } from './components.js';
+import { UI, TONE, $, esc, api, badge } from './components.js';
 
 /* ---- Rhai, token by token ------------------------------------------------------------------- */
 
@@ -222,11 +222,6 @@ export function editor(host, { onChange, onSave, onRun, onStop } = {}) {
 
 /* ---- the page ------------------------------------------------------------------------------ */
 
-const api = async (path, body) => {
-  const r = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const j = await r.json().catch(() => ({}));
-  return { status: r.status, ...j };
-};
 
 /** The CodeMirror 6 editor (static/rhai-editor.js, through the page's import map), or the plain
     editor above when CodeMirror cannot load (no npm ci in tools/research/mcp-panel). */
@@ -369,6 +364,7 @@ async function boot() {
     $('run').disabled = true; $('run-stop').disabled = false;
     term(out, `== run ${state.name || 'unsaved text'}`, 'text-blue-300');
     try {
+      // raw fetch: the answer is a stream read line by line (r.body) and cancelled by ctl, which api() cannot do.
       const r = await fetch('/api/rhai/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script: ed.value }), signal: ctl.signal });
       const reader = r.body.getReader();
       const dec = new TextDecoder();
@@ -430,7 +426,7 @@ async function boot() {
       if (r.last_seq) state.seq = r.last_seq;
       if ((r.running ?? false) !== !!s.service.running || (r.lines || []).some((l) => /^== (reloaded|exit|started)/.test(l.text))) loadList();
     }
-    const f = await api(`/api/script?name=${encodeURIComponent(state.name)}`);
+    const f = await api(`/api/script?name=${encodeURIComponent(state.name)}`, undefined, { shownIn: 'msg' });
     if (f.status === 200 && f.modified !== state.modified) {
       if (!dirty()) {
         ed.value = f.text; state.saved = f.text; state.modified = f.modified;

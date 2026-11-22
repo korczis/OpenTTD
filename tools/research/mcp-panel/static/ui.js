@@ -4,8 +4,8 @@
    src/window_type.h (/api/ui/classes). A click on a widget presses it in the game through
    openttd.input.* when the owner armed input; otherwise it says what is there (openttd.ui.at). */
 
-const $ = (id) => document.getElementById(id);
-const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/** The shell's page kit (static/shell.js KIT): $, esc, the one API client. */
+const { $, esc, api, image } = globalThis.PanelKit ?? require('./shell.js').KIT;
 const clean = (t) => String(t ?? '').replace(/[-]/g, '').trim(); // the game's private-use control codes
 /** The shell's Pro class sets, one per role (static/shell.js publishes them as PanelUI first). */
 const UI = globalThis.PanelUI;
@@ -56,7 +56,7 @@ const armedBadge = (armed) => `${UI.badge} ${ARMED[!!armed]}`;
 /* ---- the page ------------------------------------------------------------------------------ */
 const state = readState(location.search);
 const save = () => history.replaceState(null, '', `${location.pathname}${stateQuery(state)}`);
-const client = async (name, args) => (await fetch(`/api/client/${name}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args || {}) })).json();
+const client = (name, args, opts) => api(`/api/client/${name}`, args || {}, opts);
 
 let classes = {}; let ui = null; let armed = false;
 
@@ -77,10 +77,8 @@ function draw() {
 
 async function refresh() {
   try {
-    const next = new Image();
-    next.onload = () => { $('screen-img').src = next.src; draw(); };
-    next.src = `/api/view/screenshot?t=${Date.now()}`;
-    const answer = await client('openttd.ui.windows', { widgets: true });
+    image(`/api/view/screenshot?t=${Date.now()}`, 'u-msg', (next) => { if (next) { $('screen-img').src = next.src; draw(); } });
+    const answer = await client('openttd.ui.windows', { widgets: true }, { shownIn: 'u-msg' });
     if (!answer || !Array.isArray(answer.windows)) {
       // Empty cards say nothing: name why there is nothing, and how to get it.
       ui = null;
@@ -131,7 +129,7 @@ document.querySelectorAll('[data-maximize]').forEach((b) => b.addEventListener('
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('[data-frame].fixed [data-maximize]').forEach((b) => b.click()); });
 window.addEventListener('resize', () => setTimeout(draw, 30));
 save();
-fetch('/api/ui/classes').then((r) => r.json()).then((c) => { classes = c; draw(); });
+api('/api/ui/classes').then((c) => { classes = c; draw(); });
 setTimeout(refresh, 30);
 setInterval(refresh, 1500);
 

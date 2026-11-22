@@ -114,6 +114,8 @@ def load_config(path: Path) -> dict:
     for key in ("cache", "results", "hosts_file", "baseset"):
         cfg[key] = expand(cfg[key])
     t = cfg.get("tuning")
+    if t:
+        resolve_genes(cfg)
     if t and t.get("enabled"):
         state = tuning_state(cfg)
         cfg["contestants"] = cfg["contestants"] + state["variants"]
@@ -121,6 +123,264 @@ def load_config(path: Path) -> dict:
 
 
 # ------------------------------------------------------------------------------- self-tuning (GA)
+#
+# The gene space is derived from the bot itself: every gene is an AddSetting of PrismaticAI's
+# info.nut, and its bounds and step are that setting's min_value, max_value and step_size.
+# battle.json's `tuning` declares only the GA's choice of genes (`genes`), a deliberate narrowing
+# of a gene's range (`narrow`: {"gene": [min, max, step]}) and the settings pinned for every
+# variant (`fixed`). An older configuration's hand-listed `space` is still read as it is.
+
+def strip_squirrel_comments(text: str) -> str:
+    """`text` without its /* */, // and # comments; a string literal is kept whole."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in "\"'":
+            j = _string_end(text, i)
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            out.append(" ")
+            i = n if j < 0 else j + 2
+        elif text.startswith("//", i) or c == "#":
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _string_end(text: str, i: int) -> int:
+    """The index of the quote closing the string literal that opens at `i`."""
+    j = i + 1
+    while j < len(text) and text[j] != text[i]:
+        j += 2 if text[j] == "\\" else 1
+    if j >= len(text):
+        raise ValueError(f"unterminated string at offset {i}")
+    return j
+
+
+def _matching(text: str, i: int) -> int:
+    """The index of the bracket closing the one at `i` (comments already stripped)."""
+    pairs, depth, j = {"{": "}", "(": ")", "[": "]"}, 0, i
+    while j < len(text):
+        c = text[j]
+        if c in "\"'":
+            j = _string_end(text, j)
+        elif c in pairs:
+            depth += 1
+        elif c in pairs.values():
+            depth -= 1
+            if depth == 0:
+                return j
+        j += 1
+    raise ValueError(f"unbalanced {text[i]!r} at offset {i}")
+
+
+SQ_TOKEN = re.compile(r'\s*(?:("(?:[^"\\]|\\.)*")|(0[xX][0-9a-fA-F]+|\d+)|([A-Za-z_]\w*)|(\S))')
+SQ_FOR = re.compile(r"\bfor\s*\(\s*local\s+(\w+)\s*=\s*(-?\d+)\s*;\s*(\w+)\s*(<=|<)\s*(-?\d+)\s*;"
+                    r"\s*(\w+)\s*\+\+\s*\)\s*\{")
+SQ_ADD = re.compile(r"\bAddSetting\s*\(\s*\{")
+
+
+def _sq_fields(body: str, env: dict) -> dict:
+    """The fields of one AddSetting table, `key = expression` separated by commas or newlines.
+    An expression joins string literals, integers, loop variables and flag names with + - |;
+    a flag name stands for itself (a frozenset), so `CONFIG_INGAME | CONFIG_BOOLEAN` is a set."""
+    toks = []
+    for m in SQ_TOKEN.finditer(body):
+        s, num, ident, op = m.groups()
+        if s is not None:
+            try:
+                toks.append(("v", json.loads(s)))
+            except ValueError:
+                toks.append(("v", s[1:-1]))
+        elif num is not None:
+            toks.append(("v", int(num, 0)))
+        elif ident is not None:
+            toks.append(("i", ident))
+        elif op is not None:
+            toks.append(("o", op))
+    pos = 0
+
+    def term():
+        nonlocal pos
+        if pos >= len(toks):
+            raise ValueError("AddSetting: expression expected")
+        kind, x = toks[pos]
+        pos += 1
+        if (kind, x) == ("o", "-"):
+            return -term()
+        if kind == "o":
+            raise ValueError(f"AddSetting: unexpected {x!r}")
+        return env.get(x, frozenset([x])) if kind == "i" else x
+
+    out = {}
+    while pos < len(toks):
+        if toks[pos] == ("o", ","):
+            pos += 1
+            continue
+        if toks[pos][0] != "i" or toks[pos + 1:pos + 2] != [("o", "=")]:
+            raise ValueError(f"AddSetting: unexpected {toks[pos][1]!r}")
+        key, pos = toks[pos][1], pos + 2
+        val = term()
+        while pos < len(toks) and toks[pos][0] == "o" and toks[pos][1] in "+-|":
+            op = toks[pos][1]
+            pos += 1
+            val = _sq_apply(val, op, term())
+        out[key] = val
+    return out
+
+
+def _sq_apply(val, op: str, x):
+    if op == "+":
+        return str(val) + str(x) if isinstance(val, str) or isinstance(x, str) else val + x
+    if op == "-":
+        return val - x
+    as_set = (lambda v: v if isinstance(v, frozenset) else frozenset() if v == 0 else None)
+    a, b = as_set(val), as_set(x)
+    return int(val) | int(x) if a is None or b is None else a | b
+
+
+def _sq_settings(text: str, env: dict, out: dict) -> None:
+    pos = 0
+    while True:
+        found = [m for m in (SQ_FOR.search(text, pos), SQ_ADD.search(text, pos)) if m]
+        if not found:
+            return
+        m = min(found, key=lambda x: x.start())
+        end = _matching(text, m.end() - 1)
+        body = text[m.end():end]
+        if m.re is SQ_FOR:
+            var, lo, cond_var, cmp, hi, inc_var = m.groups()
+            if not var == cond_var == inc_var:
+                raise ValueError(f"unsupported loop: {m.group(0)}")
+            for v in range(int(lo), int(hi) + (cmp == "<=")):
+                _sq_settings(body, {**env, var: v}, out)
+        else:
+            f = _sq_fields(body, env)
+            name = f.get("name")
+            if not isinstance(name, str):
+                raise ValueError(f"AddSetting without a literal name: {body[:60].strip()!r}")
+            if name in out:
+                raise ValueError(f"{name}: declared twice")
+            flags = f.get("flags", frozenset())
+            flags = flags if isinstance(flags, frozenset) else frozenset()
+            boolean = "CONFIG_BOOLEAN" in flags
+            try:
+                lo_v = f.get("min_value", 0) if boolean else f["min_value"]
+                hi_v = f.get("max_value", 1) if boolean else f["max_value"]
+            except KeyError as exc:
+                raise ValueError(f"{name}: no {exc.args[0]}") from None
+            out[name] = {"min": lo_v, "max": hi_v, "step": f.get("step_size", 1),
+                         "default": f.get("custom_value", f.get("medium_value", lo_v)),
+                         "boolean": boolean, "ingame": "CONFIG_INGAME" in flags}
+        pos = end + 1
+
+
+def info_settings(path: Path) -> dict:
+    """Every AddSetting({...}) of an AI's info.nut as {name: {min, max, step, default, boolean,
+    ingame}}: step is step_size (1 when absent), default is custom_value, boolean and ingame are
+    CONFIG_BOOLEAN and CONFIG_INGAME in its flags. Settings declared in a counted loop
+    (`for (local i = 2; i <= 16; i++)`) are expanded, so "fr" + i + "_from" gives fr2_from..."""
+    out: dict = {}
+    _sq_settings(strip_squirrel_comments(Path(path).read_text()), {}, out)
+    return out
+
+
+def info_nut_path(cfg: dict) -> Path:
+    # The checkout this file belongs to, not REPO: a check that runs with REPO pointed elsewhere
+    # (the record tests use a scratch directory) still reads the configuration's own bot.
+    bot = cfg.get("prismatic", {}).get("path", "tools/research/prismatic-ai/PrismaticAI")
+    return HERE.parents[2] / bot / "info.nut"
+
+
+def gene_space(t: dict, settings: dict) -> dict:
+    """The GA's effective gene space {gene: [min, max, step]}, in the order of `genes`: info.nut's
+    bounds and step, overridden by `narrow`. A configuration with a hand-listed `space` keeps it."""
+    if "space" in t:
+        return {k: list(v) for k, v in t["space"].items()}
+    narrow = t.get("narrow", {})
+    out = {}
+    for g in t.get("genes", []):
+        if g in narrow:
+            out[g] = list(narrow[g])
+        elif g in settings:
+            s = settings[g]
+            out[g] = [s["min"], s["max"], s["step"]]
+        else:
+            raise ValueError(f"gene {g} is not a setting of info.nut")
+    return out
+
+
+def gene_space_errors(t: dict, settings: dict) -> list[str]:
+    """What makes `tuning` disagree with the bot: a gene, pinned (`fixed`) or `start` setting that
+    info.nut does not declare, a gene that is pinned too (a bug-fix switch is not a gene), a
+    `narrow` for a non-gene, and a narrow (or legacy `space`) range outside info.nut's bounds."""
+    legacy = "space" in t
+    genes = list(t["space"]) if legacy else list(t.get("genes", []))
+    errs = []
+    if legacy and "genes" in t:
+        errs.append("declares both `space` and `genes`")
+    if len(set(genes)) != len(genes):
+        errs.append("a gene is listed twice")
+    for g in genes:
+        if g not in settings:
+            errs.append(f"{g}: gene is not a setting of info.nut")
+    fixed = t.get("fixed", {})
+    for k in fixed:
+        if k not in settings:
+            errs.append(f"{k}: fixed setting is not a setting of info.nut")
+        elif k in genes:
+            errs.append(f"{k}: pinned in `fixed` and a gene as well")
+    for k in t.get("start", {}):
+        if k not in genes:
+            errs.append(f"{k}: `start` value for a setting that is not a gene")
+    label = "space" if legacy else "narrow"
+    for k, b in (t["space"] if legacy else t.get("narrow", {})).items():
+        if not legacy and k not in genes:
+            errs.append(f"{k}: narrow for a setting that is not a gene")
+            continue
+        if k not in settings:
+            continue
+        s = settings[k]
+        ok = (isinstance(b, list) and len(b) == 3 and all(isinstance(x, int) for x in b)
+              and b[2] > 0 and s["min"] <= b[0] <= b[1] <= s["max"])
+        if not ok:
+            errs.append(f"{k}: {label} {b} is not [min, max, step > 0] within info.nut's "
+                        f"[{s['min']}, {s['max']}]")
+    return errs
+
+
+def config_errors(cfg: dict) -> list[str]:
+    """`battle.py check`'s view of battle.json (as read, unexpanded): its GA genes against
+    PrismaticAI's info.nut."""
+    t = cfg.get("tuning")
+    if not t:
+        return []
+    path = info_nut_path(cfg)
+    try:
+        settings = info_settings(path)
+    except (OSError, ValueError) as exc:
+        return [f"{path.relative_to(REPO) if path.is_relative_to(REPO) else path}: {exc}"]
+    return [f"battle.json tuning: {e} (ADR 0036)" for e in gene_space_errors(t, settings)]
+
+
+def resolve_genes(cfg: dict) -> None:
+    """Sets `tuning.space` to the effective gene space and gives a gene without a `start` value
+    info.nut's default. Fails fast on a configuration that `check` refuses."""
+    t = cfg["tuning"]
+    errs = config_errors(cfg)
+    if errs:
+        raise SystemExit("\n".join(errs))
+    settings = info_settings(info_nut_path(cfg))
+    t["space"] = gene_space(t, settings)
+    start = t.setdefault("start", {})
+    for g in t["space"]:
+        if g not in start:
+            start[g] = settings[g]["default"]
 
 def paired_vs(matches: list[dict], base: str) -> list[dict]:
     """Every configuration against `base` on the same seeds (common random numbers): pairs, mean
@@ -2177,7 +2437,9 @@ def cmd_check() -> int:
         if not found and (not md.is_file() or md.read_text() != render_ablation_md(rec)):
             drift.append(f"{md.name}: not derived from {f.name} (run battle.py render)")
     latest = latest_record()
-    cfg_never = json.loads(DEFAULT_CONFIG.read_text()).get("never_last", [])
+    cfg_raw = json.loads(DEFAULT_CONFIG.read_text())
+    errs += config_errors(cfg_raw)  # every GA gene is a setting of info.nut, within its bounds
+    cfg_never = cfg_raw.get("never_last", [])
     if latest and latest["leaderboard"]:
         board = [r for r in latest["leaderboard"] if r["played"]]
         if board and board[-1]["key"] in cfg_never:
@@ -2196,7 +2458,9 @@ def cmd_check() -> int:
         return 11
     n = len(files)
     print(f"battle check: {n} record(s) and {len(ablations)} ablation record(s) valid, every page and "
-          "the README leaderboard derived")
+          "the README leaderboard derived, "
+          f"{len(gene_space(cfg_raw.get('tuning', {}), info_settings(info_nut_path(cfg_raw))))} "
+          "GA gene(s) derived from info.nut")
     return 0
 
 
@@ -2206,9 +2470,35 @@ def fleet_peak_final(series: list[dict]) -> tuple[int, int]:
     return max(counts), counts[-1]
 
 
+def hoarding(series: list[dict], rules: dict) -> str | None:
+    """The first window of `hoard_window` quarterly samples (default 8, two game years) in which the
+    fleet stays flat or shrinks (its maximum is at most `hoard_fleet_slack` above the count at the
+    window's start), and so do its stations (nothing is built), while the bank balance rises at least `hoard_factor`-fold (default 2) and ends
+    at or above `hoard_floor` (default 500000), as "<t0>..<t1>:<money0>-><money1>@<vehicles>v".
+    In the owner's live co-play game (2026-11-22) company 0 kept 35-37 vehicles from 1955 to 1960
+    while its balance grew from 0.6M to 3.77M, and no other anomaly fired. Every window is judged,
+    not only the last, so the fitness check sees a hoard the bot later spent its way out of."""
+    window = rules.get("hoard_window", 8)
+    factor, floor = rules.get("hoard_factor", 2.0), rules.get("hoard_floor", 500_000)
+    slack = rules.get("hoard_fleet_slack", 0.1)
+    for i in range(len(series) - window + 1):
+        w = series[i:i + window]
+        v0, m0, m1 = w[0]["vehicles"], w[0].get("money", 0), w[-1].get("money", 0)
+        # Building is spending: a company whose stations grow while its fleet waits is laying
+        # lines (the planned fitness contestant, 9 vehicles, 283k -> 697k, one rail line a
+        # heartbeat), not hoarding. Samples without a station count judge the fleet alone.
+        st0 = w[0].get("stations")
+        builds = st0 is not None and max(s.get("stations", st0) for s in w) > st0 * (1 + slack)
+        if (max(s["vehicles"] for s in w) <= v0 * (1 + slack) and not builds and m1 >= floor
+                and m1 >= factor * m0):
+            return f"{w[0]['t']}..{w[-1]['t']}:{m0}->{m1}@{v0}v"
+    return None
+
+
 def anomalies(series: list[dict], errors: int, rules: dict) -> list[str]:
     """What looks wrong with one contestant in one match. The orchestrator attaches these to every
-    match and the fitness check fails on them. `rules`: fleet_min_peak, fleet_keep (fraction)."""
+    match and the fitness check fails on them. `rules`: fleet_min_peak, fleet_keep (fraction), and
+    the hoard_* thresholds of `hoarding`."""
     out = []
     if errors:
         out.append(f"squirrel_errors:{errors}")
@@ -2217,6 +2507,9 @@ def anomalies(series: list[dict], errors: int, rules: dict) -> list[str]:
         out.append(f"fleet_drop:{peak}->{final}")
     if series and len(series) >= 8 and series[-1]["vehicles"] == 0:
         out.append("no_vehicles")
+    hoard = hoarding(series, rules)
+    if hoard:
+        out.append(f"hoards:{hoard}")
     return out
 
 
@@ -2229,9 +2522,15 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
         if not c["ai"].startswith("PrismaticAI"):
             continue
         bad = anomalies(m["series"].get(c["key"], []), m["errors"].get(c["key"], 0), fit["rules"])
-        # Every PrismaticAI must not crash; only the ones named healthy must also keep their fleet.
+        # Every PrismaticAI must not crash; only the ones named healthy must also keep their fleet
+        # and spend their money (fleet_drop, no_vehicles, hoards).
         if c["key"] not in fit.get("must_be_healthy", []):
             bad = [b for b in bad if b.startswith("squirrel")]
+        # Hoarding fails only the contestants held to spend (must_not_hoard, default: every healthy
+        # one): the self-steward lineup hoarded on the fitness seed before the check existed, a
+        # finding recorded in research/ai-battle/README.md, not a pass.
+        elif c["key"] not in fit.get("must_not_hoard", fit.get("must_be_healthy", [])):
+            bad = [b for b in bad if not b.startswith("hoards")]
         fails += [f"{c['key']}: {b}" for b in bad]
     # The owner's order (2026-11-19): PrismaticAI is never last. By final value on the fitness seed.
     finals = sorted(((s[-1]["value"] if s else 0), k) for k, s in
