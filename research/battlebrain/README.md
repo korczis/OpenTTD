@@ -278,11 +278,35 @@ are closed here:
 - **Before a live pull,** the shared key `planner.<company>` is set to `battlebrain`, so every
   other proposer of that company's `fr_*` slots stands down (the authority matrix lists them).
   `rail_steward.rhai` and `rail_lib.rhai` set `line<n>_trains`/`line<n>_wagons` only, never `fr_*`.
+- **A slot change names its writer.** `POST /api/bots/setting` sends an `fr_*` setting only when
+  the request names its `writer` and `planner.<company>` is unset or names that writer. A request
+  without a writer is refused with `fr_needs_writer` (422). A writer that is not the planner is
+  refused with `fr_planner_held` (409). Nothing reaches the game in either case, and the refusal
+  is a `panel.ai` event. Other settings pass as before. `build_plan.rhai` (and so `ask_relay` and
+  `replan`) and `prismatic_tune.rhai` name themselves (`ttd::set_bot(company, name, value,
+  writer)`). The rule is `fr_author::change_refusal`, and the check is
+  `panel_bot::slot_refusal`.
+- **The raw MCP routes set no slot.** `POST /api/tools/openttd.ai.set_setting`,
+  `POST /api/tools/openttd.ai.set_settings` and a `POST /api/rpc` `tools/call` of either name no
+  writer. A call that changes an `fr_*` setting is refused with `fr_needs_writer`. The decision
+  executor calls `openttd.ai.set_settings` itself, not through these routes, so it is unaffected.
 
-Still open: the panel's loopback `/api/approve`, `/api/auto-approve` and armed UI input are not
-bound to the owner. That is outside this slice and is the owner's operating rule. A raw
-`POST /api/bots/setting` or `openttd.ai.set_setting` call names no writer, so the planner key
-cannot be checked there; the scripts above are the writers that use it.
+Still open:
+
+- The panel's loopback `/api/approve`, `/api/auto-approve` and armed UI input are not bound to the
+  owner. That is outside this slice and is the owner's operating rule.
+- A client of the game's own MCP endpoint (its bearer token: `mcp-auto`, `mcp-human`, Rhai
+  `mcp_call`) can still call `openttd.ai.set_setting` or `openttd.ai.set_settings` with an `fr_*`
+  name. The owner's approval of that request is the only check there.
+- The C++ side is unchanged, on purpose. The planner key lives in the panel's memory, which the
+  game cannot read. A rule such as "`set_setting` refuses `fr_*`, use `set_settings`" would leave
+  `set_settings` open to the same client, so it would only move the hole. It would also break the
+  writers above, which send one slot at a time while no planner key is set, and the "no stacking"
+  checks of `prismatic_tune` and `replan`, which count pending `openttd.ai.set_setting` requests.
+- A writer names itself: the loopback API authenticates no one. The check keeps the panel's own
+  writers from contradicting the planner. It is not a credential.
+- A new AI started with `fr_*` settings (`openttd.ai.start`, `start_ai`) is not checked. It has no
+  company id until it starts.
 
 ## Cutover thresholds (the Phase 04 gate)
 

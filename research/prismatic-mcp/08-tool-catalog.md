@@ -17,6 +17,16 @@ it. Each instance lists only what it can do (a dedicated server has no window: n
 | `openttd.resources.read_many` | `prismatic_mcp_server.cpp`, `prismatic_mcp_detail.h` | several resources at one game tick, without pausing: `{uris: [...]}` (at most `detail::READ_MANY_MAX_URIS`, 32, `openttd://` only) answers `{ok, game_tick, game_date, resources: [{uri, ok, data | error}]}`; every entry is built by its own resource builder in the same main-thread call, so each `data` (what `resources/read` answers for that uri) carries the same `game_tick`. A uri that is not a string, has another scheme, is not in `resources/list` or repeats one earlier in the call fails its own entry, not the call | none, read-only |
 | `openttd.api.Script<Class>.<Function>` | `prismatic_mcp_api.cpp` | one tool per static function the build publishes to scripts, read back from a private Game Script engine (and an AI engine for what only AIs get); a call goes through the game's own script binding (`../mcp-api.md`) | none without `execute` (runs in `GSTestMode`, changes nothing); with `execute: true` the same approval as `submit`, as action `api.Script<Class>.<Function>` |
 
+The game does not know who plans a company's freight-line slots (`fr_*`, `fr2_*` .. `fr16_*`).
+That is the panel's shared key `planner.<company>`
+([`research/battlebrain/README.md`](../battlebrain/README.md#executor-binding-after-the-red-team-review-i0117)).
+Through the panel, `openttd.ai.set_setting` and `openttd.ai.set_settings` change a slot only from
+`POST /api/bots/setting` with a `writer` that the key allows, or from a live Battlebrain decision
+(`POST /api/decision/pull`). The raw routes (`POST /api/tools/<tool>`, `POST /api/rpc`
+`tools/call`) name no writer, so a call through them that changes a slot is refused
+(`fr_needs_writer`). A client that calls the game's own endpoint directly passes only the owner's
+approval.
+
 Every tool declares `annotations.readOnlyHint`: true for one that changes nothing, false otherwise
 (with `destructiveHint` and `idempotentHint` where they apply). A view tool that declares nothing
 gets the local-GUI default (not read-only, not destructive, idempotent when it sets a state), and a

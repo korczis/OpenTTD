@@ -2175,7 +2175,15 @@ fn h_catalogue(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
 }
 
 fn h_rpc(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
-    ok(g.rpc(i.body["method"].as_str().unwrap_or(""), i.body.get("params").cloned())?)
+    let method = i.body["method"].as_str().unwrap_or("");
+    // A raw tools/call names no writer: it sets no freight-line slot (panel_bot::raw_call_refusal).
+    if method == "tools/call" {
+        let p = &i.body["params"];
+        if let Some(r) = panel_bot::raw_call_refusal(g, &py_str(p.get("name")), &p["arguments"]) {
+            return Ok(r);
+        }
+    }
+    ok(g.rpc(method, i.body.get("params").cloned())?)
 }
 
 fn h_pause(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
@@ -2212,7 +2220,7 @@ fn h_bot_start(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
 }
 
 fn h_bot_setting(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
-    ok(panel_bot::set_bot_setting(g, &i.body["company"], &py_str(i.body.get("name")), &i.body["value"])?)
+    panel_bot::bot_setting(g, &i.body)
 }
 
 fn h_bot_planned(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
@@ -2372,7 +2380,7 @@ pub fn routes() -> Vec<Route> {
         r("GET", "/api/overview/history", "overviewHistory", "The overview's history kept by the panel: one sample per game day (tick, date, vehicles, towns, per company money, value, loan, net); ?since=<tick> for the newer ones", false, None, h_history),
         r("GET", "/api/catalogue", "catalogue", "MCP initialize, resources/list and tools/list", true, None, h_catalogue),
         r("GET", "/api/resource", "readResource", "Read one MCP resource by ?uri=", true, None, h_resource),
-        r("POST", "/api/rpc", "rpc", "Raw MCP JSON-RPC with the panel's token", true,
+        r("POST", "/api/rpc", "rpc", "Raw MCP JSON-RPC with the panel's token; a tools/call of openttd.ai.set_setting or openttd.ai.set_settings that changes a freight-line slot (fr_*) names no writer and is refused (422 fr_needs_writer)", true,
           s(json!({"method": st(), "params": obj()}), &["method"]), h_rpc),
         r("POST", "/api/console", "console", "One OpenTTD console line as the operator; returns its output", false,
           s(json!({"command": st(), "wait": {"type": "number"}}), &["command"]), h_console),
@@ -2396,8 +2404,8 @@ pub fn routes() -> Vec<Route> {
           s(json!({"ai": st(), "start": {"type": "boolean"}, "track": {"type": "integer", "minimum": 0, "maximum": 16}}), &["ai"]), h_bot_planned),
         r("POST", "/api/bots/start", "botStart", "Start the owner's bot: an AI with a settings map", false,
           s(json!({"ai": st(), "settings": obj()}), &["ai"]), h_bot_start),
-        r("POST", "/api/bots/setting", "botSetting", "Change one setting of a running bot (openttd.ai.set_setting, approval-gated)", true,
-          s(json!({"company": {"type": "integer"}, "name": st(), "value": {"type": "integer"}}), &["company", "name", "value"]), h_bot_setting),
+        r("POST", "/api/bots/setting", "botSetting", "Change one setting of a running bot (openttd.ai.set_setting, approval-gated). A freight-line slot (fr_*, fr2_* .. fr16_*) is sent only when `writer` names who sends it and the company's planner key planner.<company> (/api/rhai/shared) is unset or names that writer: else 422 fr_needs_writer (no writer) or 409 fr_planner_held, and nothing reaches the game", true,
+          s(json!({"company": {"type": "integer"}, "name": st(), "value": {"type": "integer"}, "writer": st()}), &["company", "name", "value"]), h_bot_setting),
         r("GET", "/api/bridge/companies", "bridgeCompanies", "Every company as the bridge's GET /companies answers it (CompanyOut: money, loan, income from the vehicles' profit, company value, vehicle counts), so Prismatic decides from this game with OPENTTD_BRIDGE_URL=<panel>/api/bridge (src/panel_decision.rs); each company's `history` (prismatic-history/v1, I0085) names the bus endpoint and the read-only store query of its samples, to fit from on /api/db/query", true,
           None, h_bridge_companies),
         r("GET", "/api/bridge/observation", "bridgeObservation", "The latest answer of GET /api/bridge/companies as the observation a directive is bound to (research/agent-loop.md step 1): its number, game tick and date, the digest of the companies' identities and the age limit in game days; POST /api/decision/pull refuses a directive not decided from a current observation", false, None, h_bridge_observation),
@@ -3069,6 +3077,10 @@ impl Panel {
                     });
                 }
                 if let Some(name) = path.strip_prefix("/api/tools/") {
+                    // A raw tool call names no writer: it sets no freight-line slot (panel_bot.rs).
+                    if let Some(r) = panel_bot::raw_call_refusal(g, name, &body) {
+                        return Ok(r);
+                    }
                     let out = g.tool(name, or_empty(&body))?;
                     return Ok((rpc_status(&out), out));
                 }
@@ -3848,5 +3860,42 @@ mod tests {
         assert_eq!(ev.len(), 1, "the refusal is on the bus");
         let choice = &ev[0]["data"]["choice"];
         assert_eq!((choice["accepted"].clone(), choice["outcome"].clone()), (json!(false), json!("stale")));
+    }
+
+    /// A freight-line slot reaches the game through the panel only from a request that names its
+    /// writer (POST /api/bots/setting {writer}); the raw MCP routes name none, so they set no slot.
+    /// Every refusal is answered before the game is asked and is an event; any other setting, and a
+    /// named writer while no planner key is set, goes on to the game (none here: its own error).
+    #[test]
+    fn a_freight_slot_is_sent_only_by_a_named_writer() {
+        let (g, p) = bare_panel("5");
+        let since = g.bus.seq();
+        let (code, out) = post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_from", "value": 3}));
+        assert_eq!((code, out["outcome"].as_str()), (422, Some("fr_needs_writer")), "{out}");
+        assert!(out["error"].as_str().unwrap().starts_with("fr_from not sent: a change of company 0's freight-line slots names its writer"), "{out}");
+        let ev = g.bus.since(since, &kinds_of("panel.ai"), 10);
+        assert!(ev.iter().any(|e| e["data"]["text"].as_str().unwrap_or("").contains("fr_from not sent")), "the refusal is an event: {ev:?}");
+        assert_eq!(post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_to", "value": 3, "writer": " "})).0, 422, "a blank writer is none");
+        // Named, no planner key set: on to the game, which this panel has none of.
+        let (code, out) = post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_from", "value": 3, "writer": "owner"}));
+        assert_eq!((code, out["fallback"].as_str()), (200, Some("start")), "{out}");
+        let (code, out) = post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "rail_a", "value": 3}));
+        assert_eq!((code, out["fallback"].as_str()), (200, Some("start")), "not a slot: as before, no writer needed: {out}");
+        assert_eq!(post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_from", "value": 3, "writer": 7})).0, 400, "a writer is a string");
+
+        let raw = [("/api/tools/openttd.ai.set_setting", json!({"company": 0, "name": "fr16_cargo", "value": 1})),
+                   ("/api/tools/openttd.ai.set_settings", json!({"company": 0, "settings": {"rail_a": 1, "fr2_to": 9}})),
+                   ("/api/rpc", json!({"method": "tools/call", "params": {"name": "openttd.ai.set_settings",
+                                                                          "arguments": {"company": 0, "settings": {"fr_from": 1}}}}))];
+        for (path, body) in raw {
+            let (code, out) = post_to(&p, path, body);
+            assert_eq!((code, out["outcome"].as_str()), (422, Some("fr_needs_writer")), "{path}: {out}");
+            assert!(out["governed"].as_str().unwrap().contains("POST /api/decision/pull"), "{out}");
+        }
+        // The same routes without a slot go on to the game, as before (no token here: 502).
+        assert_eq!(post_to(&p, "/api/tools/openttd.ai.set_setting", json!({"company": 0, "name": "rail_a", "value": 1})).0, 502);
+        assert_eq!(post_to(&p, "/api/rpc", json!({"method": "tools/call", "params": {"name": "openttd.ai.set_setting",
+                                                                                     "arguments": {"company": 0, "name": "rail_a", "value": 1}}})).0, 502);
+        assert_eq!(post_to(&p, "/api/rpc", json!({"method": "tools/list"})).0, 502);
     }
 }
