@@ -103,6 +103,7 @@ require("steward.nut");
 require("autopilot.nut");
 require("catchment.nut");
 require("statues.nut");
+require("growth.nut");
 
 /* Cheapest buildable road engine that carries a passenger-class cargo. */
 function PrismaticAI::PickPassengerEngine() {
@@ -328,6 +329,8 @@ function PrismaticAI::Behaviour() {
 		invest_borrow = AIController.GetSetting("invest_borrow"),
 		air_add_waiting = AIController.GetSetting("air_add_waiting"),
 		rail_twin_max = AIController.GetSetting("rail_twin_max"),
+		rail_grow_max = AIController.GetSetting("rail_grow_max"),
+		rail_feed = AIController.GetSetting("rail_feed"),
 		rail_double = AIController.GetSetting("rail_double"),
 	};
 	/* Autopilot (default on): a bot nobody gave a plan (no planner line, air or rail pair) grows on
@@ -497,7 +500,7 @@ function PrismaticAI::Start() {
 		 * line, so the bot plans none of its own; the handed-over lines above still get built. */
 		if (!frozen && b.planned_freight_only == 0 && handed_done && !pair_open && this.own_built < own_cap && (b.own_fail_pause == 0 || this.own_failed < b.own_fail_pause) &&
 				money + headroom_own >= b.line_budget) {
-			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried);
+			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried, b.rail_feed);
 			if (own != null) {
 				this.freight_tried[own.from + "-" + own.to + "-" + own.cargo] <- true;
 				this.own_built++;
@@ -509,6 +512,8 @@ function PrismaticAI::Start() {
 				if (PrismaticAI.BuildFreightRailRoute(own.from, own.to, own.cargo, PrismaticAI.RailShape(b, true)) > 0) {
 					this.routes++;
 					this.own_failed = 0;
+					/* Multi-source: the cluster the planner scored joins the new source station (growth.nut). */
+					if (b.rail_feed > 0) this.FeedNewLine(RAIL_LINES.len(), b.rail_feed);
 				} else {
 					this.own_failed++;
 					AICompany.SetLoanAmount(loan_before);
@@ -566,6 +571,8 @@ function PrismaticAI::Start() {
 		if (b.self_steward == 1 && PrismaticAI.MonthKey() != this.month) {
 			this.SelfSteward();
 			if (!frozen) this.TwinLines(b);
+			if (!frozen) this.GrowPlatforms(b);
+			if (!frozen) this.FeedStations(b);
 		}
 		this.ReconcileLines(b.cash_reserve);
 		if (PrismaticAI.MonthKey() != this.month) { this.month = PrismaticAI.MonthKey(); PrismaticAI.LogLines(); }
