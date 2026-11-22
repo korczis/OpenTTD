@@ -118,6 +118,47 @@
     apply();
   });
 
+  // ---------------------------------------------------------------- linked filter
+  // A chart's mark links to the table it summarises: ?col=<header>&filter=<value>#<heading>. The
+  // first table after that heading keeps only the rows whose cell in that column is the value; a
+  // badge above it names the filter and clears it.
+
+  (function linkedFilter() {
+    const col = params.get('col');
+    const value = params.get('filter') || '';
+    if (!col || !params.has('filter')) return;
+    const anchor = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    const column = (t) => [...t.querySelectorAll('thead th')]
+      .map((th) => th.textContent.trim().toLowerCase()).indexOf(col.toLowerCase());
+    // The first table after the heading that has that column (a section may hold other tables).
+    const table = [...document.querySelectorAll('main table')].find((t) => column(t) >= 0
+      && (!anchor || anchor.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING));
+    if (!table) return;
+    const idx = column(table);
+    let shown = 0;
+    table.querySelectorAll('tbody tr').forEach((tr) => {
+      const cell = tr.children[idx];
+      const keep = cell && cell.textContent.trim().toLowerCase() === value.toLowerCase();
+      tr.classList.toggle('hidden', !keep);
+      shown += keep ? 1 : 0;
+    });
+    for (let d = table.parentElement; d; d = d.parentElement) if (d.tagName === 'DETAILS') d.open = true;
+    const badge = document.createElement('div');
+    badge.className = 'not-format mb-2 flex items-center gap-2 text-sm';
+    badge.innerHTML = '<span class="rounded-sm bg-primary-100 px-2.5 py-0.5 font-medium text-primary-800 '
+      + 'dark:bg-primary-900 dark:text-primary-300">' + escapeHtml(col) + ' = ' + escapeHtml(value || '(empty)')
+      + ' · ' + shown + ' row(s)</span><a href="#" class="text-primary-700 hover:underline dark:text-primary-500">Clear</a>';
+    badge.querySelector('a').addEventListener('click', (e) => {
+      e.preventDefault();
+      setParam('col', null); setParam('filter', null);
+      table.querySelectorAll('tbody tr').forEach((tr) => tr.classList.remove('hidden'));
+      badge.remove();
+    });
+    const box = table.closest('.overflow-x-auto') || table;
+    box.parentElement.insertBefore(badge, box);
+    badge.scrollIntoView({ block: 'start' });
+  })();
+
   // ---------------------------------------------------------------- maximize
 
   function maximize(card, on) {
