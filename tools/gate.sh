@@ -97,6 +97,11 @@ Usage: $SELF <smoke|change|research|research-free|full> [options]
             build-fullgate/, configures + builds + tests from scratch.
             For significant changes or an experimental baseline -- not
             required for small or documentation-only changes.
+            Then runs the Rust performance benchmarks of mcp-rhai against
+            the newest committed record of this host (tools/research/
+            rust-bench check, research/rust-bench.md): a median more than
+            25% slower fails; no such record, or no cargo, is NOT RUN, so
+            PARTIAL. Only in this tier: a fresh run takes minutes.
 
   -h, --help   Show this help and exit.
 
@@ -636,8 +641,22 @@ cmd_research() {
   finish_tier research "$status"
 }
 
+# The Rust performance benchmarks against the newest committed record of this host
+# (research/rust-bench.md). 0 PASS, 1 a regression or a failed run, 3 NOT RUN (no record of this
+# host, no cargo), which is PARTIAL here. Only the full tier runs it: change must stay fast.
+rust_bench_check() {
+  local rc=0
+  echo "==> tools/research/rust-bench check (median regression above 25% against this host's newest record)"
+  python3 -B tools/research/rust-bench check || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    3) return "$EXIT_PARTIAL" ;;
+    *) return 1 ;;
+  esac
+}
+
 cmd_full() {
-  local build_dir="build-fullgate" status=0
+  local build_dir="build-fullgate" status=0 rc
 
   diff_check
 
@@ -651,6 +670,8 @@ cmd_full() {
   cmake --build "$build_dir" -j"$JOBS"
 
   run_ctest "$build_dir" || status=$?
+  # A failure outranks a PARTIAL: neither may hide the other's worse result.
+  rust_bench_check || { rc=$?; [[ "$status" -eq 1 ]] || status=$rc; }
 
   finish_tier full "$status"
 }

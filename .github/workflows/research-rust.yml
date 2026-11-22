@@ -4,8 +4,10 @@ name: Research Rust
 # boundaries (rule project.decision-authority-boundaries, B1-B8 in src/authority_boundaries.rs),
 # the decision contract and executor (battlebrain_contract.rs, bin/battlebrain.rs,
 # panel_decision.rs) and the knapsack checks (cargo.rs), so a pull request cannot merge with them
-# failing. The job always reports, so "Research Rust tests" can be a required check: when no path
-# the tests compile or read changed, it succeeds without building (.ai/repo/workflows/delivery.md).
+# failing. It also builds the performance benchmarks and checks their records
+# (research/rust-bench.md). The job always reports, so "Research Rust tests" can be a required
+# check: when no path the tests compile or read changed, it succeeds without building
+# (.ai/repo/workflows/delivery.md).
 
 on:
   push:
@@ -31,6 +33,8 @@ on:
     - 'tools/research/vendor/**'
     - 'tools/research/algoglyph-pin'
     - 'tools/research/test_algoglyph_pin.py'
+    - 'tools/research/rust-bench'
+    - 'tools/research/test_rust_bench.py'
   # Manual runs. No CI job pushes to a pull request's branch any more (surfaces.yml, the note
   # above `pages`), so nothing dispatches this workflow there.
   workflow_dispatch:
@@ -93,7 +97,8 @@ jobs:
           pattern+='|research/(results|battlebrain|prismatic-bridge|mechanisms)/'
           pattern+='|\.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds\.md$'
           pattern+='|src/window_type\.h$|\.github/workflows/research-rust\.yml$'
-          pattern+='|\.gitmodules$|tools/research/vendor/|tools/research/(algoglyph-pin|test_algoglyph_pin\.py)$)'
+          pattern+='|\.gitmodules$|tools/research/vendor/'
+          pattern+='|tools/research/(algoglyph-pin|test_algoglyph_pin\.py|rust-bench|test_rust_bench\.py)$)'
           matched=$(git diff --name-only "$base" HEAD | grep -E "$pattern" || true)
           if [ -n "$matched" ]; then
             echo "Changed since $base:"
@@ -109,6 +114,18 @@ jobs:
         run: |
           tools/research/algoglyph-pin check
           python3 -B -m unittest tools/research/test_algoglyph_pin.py
+
+      # The benchmark records (research/rust-bench.md): the tool's own tests, every committed
+      # record against its schema, and every record's page current. No benchmark runs here:
+      # hosted runners differ run to run, so a regression is checked on a fixed host
+      # (tools/gate.sh full), never in CI.
+      - name: rust-bench (its tests, the committed records and their pages)
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          python3 -B -m unittest tools/research/test_rust_bench.py
+          records=$(git ls-files 'research/results/bench-*.json')
+          if [ -n "$records" ]; then tools/research/rust-bench validate $records; fi
+          tools/research/rust-bench render --check
 
       - name: The pinned DuckDB is the one the locked libduckdb-sys encodes
         if: steps.changes.outputs.run == 'true'
@@ -165,3 +182,9 @@ jobs:
         run: |
           cargo test --release --locked --offline --manifest-path "$MANIFEST" \
             --bin battlebrain --bin mcp-plan --bin mcp-intent --bin mcp-panel
+
+      # The performance benchmarks compile (benches/hot_paths.rs; the bench profile reuses the
+      # release build above). They are run and compared on a fixed host only: tools/gate.sh full.
+      - name: cargo bench --no-run (the benchmarks build)
+        if: steps.changes.outputs.run == 'true'
+        run: cargo bench --no-run --locked --offline --manifest-path "$MANIFEST" --bench hot_paths
