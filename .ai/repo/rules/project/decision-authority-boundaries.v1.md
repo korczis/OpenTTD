@@ -23,7 +23,13 @@ shrinks by being edited.
 
 The tests are in `tools/research/mcp-rhai/src/authority_boundaries.rs`, compiled into the
 `battlebrain` binary's tests. `tools/gate.sh change` runs them (offline) and checks the default
-binary it just built (B8).
+binary it just built (B8). CI runs them too: the job "Research Rust tests"
+(`.github/workflows/research-rust.yml`) runs `cargo test --release` for `battlebrain`, `mcp-plan`,
+`mcp-intent` and `mcp-panel` on every pull request and push to master, so the B1-B8 tests, the
+contract and executor tests and the knapsack checks fail a pull request, not only a local gate.
+The job skips the build when no path the tests compile or read changed. B8's gate steps on a built
+game binary (`default_build_free_of_research`, `tools/gate.sh research`) stay local: CI does not
+build the game.
 
 # Required behaviour
 
@@ -36,7 +42,7 @@ binary it just built (B8).
 | B5 | Every decision record carries provenance, policy identity and its snapshot. | the contract (`validate_record`) | `every_invalid_fixture_is_refused_with_its_code` (`decision-not-derived-from-its-snapshot.json`, `decision-by-the-planner.json`, ...); `b5_a_decision_without_provenance_policy_or_snapshot_is_refused` |
 | B6 | Stale dependencies are revalidated before execution. | the executor (`decision_gate`, `freshness` in `panel_decision.rs`); `battlebrain live` | `a_shadow_or_broken_decision_block_never_passes_the_executor` (`key_mismatch`, `stale_decision`); `a_directive_is_applied_only_against_a_current_observation`; `a_live_decision_passes_only_its_gates_and_carries_one_slot` (`stale_companies`, `incoherent_snapshot`); `b6_the_executor_checks_block_and_freshness_before_any_step` (the order in `pull_with`) |
 | B7 | A fallback solver is never labelled as the kernel. | `tools/research/mcp-rhai/src/cargo.rs` (`BUILTIN_SOLVER`) | `the_builtin_fallback_is_never_labelled_as_the_kernel` (`cargo test --bin mcp-plan`); `b7_the_fallback_label_and_battlebrains_fallback_metric_agree` |
-| B8 | Research-only code is not in a default or release build. | `cmake/Options.cmake`; `tools/gate.sh` | `b8_research_options_default_off`; `tools/gate.sh change` step `default_build_free_of_research` (`strings` on the built default binary finds no `research_status` or `RESEARCH-ONLY`); `tools/gate.sh research` (the research binary does carry `research_status`); rule `project.research-code-is-gated-and-labelled` |
+| B8 | Research-only code is not in a default or release build. | `cmake/Options.cmake`; `tools/gate.sh` | `b8_research_options_default_off`; `tools/gate.sh change` steps `research_code_is_guarded` (every `src/` code line naming `prismatic` or `research` is inside a research guard) and `default_build_free_of_research` (`strings` on the built default binary finds no string naming `prismatic` or `research`, paths, version string and bare StringID names aside); the items a default build still carries, and why, are listed in rule `project.research-code-is-gated-and-labelled`; `tools/gate.sh research` (the research binary does carry `research_status`); rule `project.research-code-is-gated-and-labelled` |
 
 ## The named lists
 
@@ -99,6 +105,11 @@ What is not machine-checked, and why:
 cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-plan
 tools/gate.sh change
 ```
+
+In CI: the "Research Rust tests" check of `.github/workflows/research-rust.yml` on the pull
+request (`gh pr checks <n> -R korczis/OpenTTD`). It blocks a merge once it is a required check of
+`master` (`.ai/repo/workflows/delivery.md`); until the owner adds it, a red run is visible on the
+pull request but does not stop auto-merge.
 
 # Related
 

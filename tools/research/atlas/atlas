@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# RESEARCH-ONLY. Entry point of the Research Atlas projection (tools/research/atlas/README.md).
+# Builds the Rust tool on first use (its own target directory; offline when the crates are cached),
+# then runs it with the arguments given and exits with its exit code.
+#
+#   tools/research/atlas/atlas data             # the research-atlas/v1 contract, on stdout
+#   tools/research/atlas/atlas render           # README atlas region + docs/atlas hero SVGs
+#   tools/research/atlas/atlas render --check   # exit 11 while any of them is stale
+#   tools/research/atlas/atlas --help
+#
+# Exit codes: 0 ok, 2 usage, 10 findings, 11 drift.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIN="$HERE/target/release/atlas"
+if [[ ! -x "$BIN" || -n "$(find "$HERE/src" "$HERE/Cargo.toml" "$HERE/Cargo.lock" -newer "$BIN" 2>/dev/null | head -1)" ]]; then
+  echo "atlas: building (cargo build --release, $HERE/target)" >&2
+  export CARGO_TARGET_DIR="$HERE/target"
+  # RUSTFLAGS replaces a target's rustflags from a global cargo config; a `-C lto` there breaks
+  # build scripts ("options `-C embed-bitcode=no` and `-C lto` are incompatible"), as tools/gate.sh
+  # notes for its own cargo runs (research/live-arena.md). A RUSTFLAGS already set wins.
+  export RUSTFLAGS="${RUSTFLAGS:--C target-cpu=native}"
+  cargo build --release --offline --quiet --manifest-path "$HERE/Cargo.toml" >&2 \
+    || cargo build --release --quiet --manifest-path "$HERE/Cargo.toml" >&2
+fi
+exec "$BIN" "$@"

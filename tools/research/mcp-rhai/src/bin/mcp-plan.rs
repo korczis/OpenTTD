@@ -39,6 +39,9 @@ mod yards;
 #[path = "../calibrate.rs"]
 #[allow(dead_code)]
 mod calibrate;
+#[path = "../store_sql.rs"]
+#[allow(dead_code)]
+mod store_sql;
 #[path = "../hub_algoglyph.rs"]
 #[allow(dead_code)]
 mod hub_algoglyph;

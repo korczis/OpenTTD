@@ -39,6 +39,9 @@
 #                               [--load FILE (start from a savegame instead of a new world: its AI
 #                                companies play on and no new bot is started; with --coplay the
 #                                client joins the bot company the game reports; research/coplay.md)]
+#                               [--env (print the Majordomus environment the stack would run with:
+#                                PRISMATIC_MCP_SUPERVISOR, MAJORDOMUS_URL, MAJORDOMUS_SESSION, each
+#                                derived when unset; then exit, starting nothing; research/mcp-control.md)]
 # Stop with Ctrl-C: the panel stops the server, and the GUI client is closed.
 set -euo pipefail
 
@@ -47,7 +50,7 @@ BIN="$ROOT_DIR/build-gate-research/openttd"
 PANEL_PORT=8800 MCP_PORT=8731 GAME_PORT=3979 SEED="$RANDOM"
 GUI=1 BROWSER=1 AUTO=() WINDOW="" DIRECTOR=1 VIEW_PORT="" INSTANCES=1 EXTRA_PIDS=() ARM_INPUT=0 PLAN=() NULL_CLIENT=0
 PANEL_IMPL="${MCP_PANEL:-rust}"
-ASK_COUNTDOWN=10 GFX=OpenGFX COPLAY=0 LOAD=()
+ASK_COUNTDOWN=10 GFX=OpenGFX COPLAY=0 LOAD=() ENV_ONLY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -72,11 +75,80 @@ while [[ $# -gt 0 ]]; do
     --coplay) COPLAY=1; shift ;;
     --load) [[ -f "${2:?--load needs a savegame file}" ]] || { echo "mcp-e2e: no savegame at $2" >&2; exit 2; }
             LOAD=(--load "$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"); shift 2 ;;
+    --env) ENV_ONLY=1; shift ;;
     -h|--help) sed -n '2,/^# Stop with/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "mcp-e2e: unknown option: $1" >&2; exit 2 ;;
   esac
 done
 [[ "$ASK_COUNTDOWN" =~ ^[0-9]+$ && "$ASK_COUNTDOWN" -le 600 ]] || { echo "mcp-e2e: --ask-countdown takes 0 to 600 seconds" >&2; exit 2; }
+
+# Supervision: every process of the stack names, in its registry record, the Majordomus task the
+# stack runs under (I0041). The servers, clients and panels copy PRISMATIC_MCP_SUPERVISOR, a JSON
+# object, into their record's `supervisor`; the panel's /api/instances and the hub's
+# /hub/instances show it. Taken from `majordomus context --json` in this checkout when a task is
+# active there; a caller's own PRISMATIC_MCP_SUPERVISOR wins.
+#
+# The mesh: the panel's Rhai scripts and services write typed Majordomus mesh records
+# (mesh_record_write, e.g. replan.rhai's plan), and the panel mirrors every directive into them
+# (src/panel_mesh.rs), both only with $MAJORDOMUS_URL and $MAJORDOMUS_SESSION set. Derived here
+# when unset: the URL is the server `majordomus serve ensure` names for this checkout, the session
+# is the active task's mesh session `task-<id>`, under which `majordomus start` claimed the task's
+# scope on that server (prismatic-majordomus docs/MESH.md): a write is admitted only inside the
+# writing session's live claims. A caller's own value wins; an empty one keeps the stack off the
+# mesh. Without a server or an active task the variable stays unset, and this says why.
+MJ=0
+[[ -f "$ROOT_DIR/.ai/manifest.yaml" ]] && command -v majordomus > /dev/null && MJ=1
+MJ_TASK=""   # the active task of this checkout (`majordomus context --json` .task), read once
+if [[ "$MJ" == 1 ]] && [[ -z "${PRISMATIC_MCP_SUPERVISOR:-}" || -z "${MAJORDOMUS_SESSION+set}" ]]; then
+  MJ_TASK="$(cd "$ROOT_DIR" && majordomus context --json 2>/dev/null | jq -c 'select(.task.outcome == "active") | .task' 2>/dev/null || true)"
+fi
+if [[ -z "${PRISMATIC_MCP_SUPERVISOR:-}" && "$MJ" == 1 ]]; then
+  if [[ -n "$MJ_TASK" ]]; then
+    PRISMATIC_MCP_SUPERVISOR="$(jq -c --arg wt "$ROOT_DIR" '{by: "majordomus", task: .id, title: .task, owner: .owner, worktree: $wt}' <<<"$MJ_TASK")"
+    export PRISMATIC_MCP_SUPERVISOR
+  else
+    echo "    no active Majordomus task in $ROOT_DIR: the instances run unsupervised (majordomus start ... first)"
+  fi
+fi
+[[ -n "${PRISMATIC_MCP_SUPERVISOR:-}" ]] && echo "    supervised by: $(jq -r '"\(.by) \(.task) — \(.title)"' <<<"$PRISMATIC_MCP_SUPERVISOR" 2>/dev/null || echo "$PRISMATIC_MCP_SUPERVISOR")"
+MESH_WHY=()
+if [[ -z "${MAJORDOMUS_URL+set}" ]]; then
+  if [[ "$MJ" == 1 ]]; then
+    MAJORDOMUS_URL="$(majordomus serve ensure --format json --repo "$ROOT_DIR" 2>/dev/null | jq -r '.url // empty' 2>/dev/null || true)"
+    if [[ -n "$MAJORDOMUS_URL" ]]; then
+      export MAJORDOMUS_URL
+    else
+      unset MAJORDOMUS_URL
+      MESH_WHY+=("\`majordomus serve ensure\` named no server for $ROOT_DIR")
+    fi
+  else
+    MESH_WHY+=("no majordomus or no .ai/manifest.yaml in $ROOT_DIR, so no server to name")
+  fi
+elif [[ -z "$MAJORDOMUS_URL" ]]; then
+  MESH_WHY+=("MAJORDOMUS_URL is set empty")
+fi
+if [[ -z "${MAJORDOMUS_SESSION+set}" ]]; then
+  if [[ -n "$MJ_TASK" ]]; then
+    MAJORDOMUS_SESSION="task-$(jq -r '.id' <<<"$MJ_TASK")"
+    export MAJORDOMUS_SESSION
+  else
+    MESH_WHY+=("no active Majordomus task in $ROOT_DIR, so no session (majordomus start ... first)")
+  fi
+elif [[ -z "$MAJORDOMUS_SESSION" ]]; then
+  MESH_WHY+=("MAJORDOMUS_SESSION is set empty")
+fi
+if [[ ${#MESH_WHY[@]} -eq 0 ]]; then
+  echo "    mesh records: $MAJORDOMUS_URL as session $MAJORDOMUS_SESSION (Rhai mesh_record_write; the panel mirrors directives)"
+else
+  why="$(printf '%s; ' "${MESH_WHY[@]}")"
+  echo "    mesh records off: ${why%; }"
+fi
+if [[ "$ENV_ONLY" == 1 ]]; then
+  for var in PRISMATIC_MCP_SUPERVISOR MAJORDOMUS_URL MAJORDOMUS_SESSION; do
+    if [[ -n "${!var+set}" ]]; then printf '%s=%s\n' "$var" "${!var}"; else printf '%s unset\n' "$var"; fi
+  done
+  exit 0
+fi
 
 PANEL_DIR="$ROOT_DIR/tools/research/mcp-panel"
 [[ -x "$BIN" ]] || { echo "mcp-e2e: no binary at $BIN; run tools/gate.sh research first" >&2; exit 3; }
@@ -146,22 +218,6 @@ if [[ -z "${MCP_ALGOGLYPH_DIR:-}" ]]; then
   done
 fi
 [[ -n "${MCP_ALGOGLYPH_DIR:-}" ]] && echo "    AlgoGlyph runner: $MCP_ALGOGLYPH_DIR"
-
-# Supervision: every process of the stack names, in its registry record, the Majordomus task the
-# stack runs under (I0041). The servers, clients and panels copy PRISMATIC_MCP_SUPERVISOR, a JSON
-# object, into their record's `supervisor`; the panel's /api/instances and the hub's
-# /hub/instances show it. Taken from `majordomus context --json` in this checkout when a task is
-# active there; a caller's own PRISMATIC_MCP_SUPERVISOR wins.
-if [[ -z "${PRISMATIC_MCP_SUPERVISOR:-}" && -f "$ROOT_DIR/.ai/manifest.yaml" ]] && command -v majordomus > /dev/null; then
-  sup="$(cd "$ROOT_DIR" && majordomus context --json 2>/dev/null | jq -c --arg wt "$ROOT_DIR" \
-    'select(.task.outcome == "active") | {by: "majordomus", task: .task.id, title: .task.task, owner: .task.owner, worktree: $wt}' 2>/dev/null || true)"
-  if [[ -n "$sup" ]]; then
-    export PRISMATIC_MCP_SUPERVISOR="$sup"
-  else
-    echo "    no active Majordomus task in $ROOT_DIR: the instances run unsupervised (majordomus start ... first)"
-  fi
-fi
-[[ -n "${PRISMATIC_MCP_SUPERVISOR:-}" ]] && echo "    supervised by: $(jq -r '"\(.by) \(.task) — \(.title)"' <<<"$PRISMATIC_MCP_SUPERVISOR" 2>/dev/null || echo "$PRISMATIC_MCP_SUPERVISOR")"
 
 # The panel: mcp-panel from tools/research/mcp-rhai (I0035; server.py, its Python predecessor, is
 # gone). One cargo build makes it and mcp-rhai, which runs the director and the other helpers; in a

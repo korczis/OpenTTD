@@ -479,17 +479,124 @@ pub fn company_row(line: &str) -> Option<(i64, i64, i64)> {
     Some((id, money, rest[..l].parse().ok()?))
 }
 
-/// A console line that approves: approvals are the owner's act, through POST /api/approve.
-pub fn is_approval_line(cmd: &str) -> bool {
-    let low = cmd.trim_start().to_ascii_lowercase();
-    let Some(rest) = low.strip_prefix("prismatic_mcp").or_else(|| low.strip_prefix("mcp")) else { return false };
-    if !rest.starts_with(char::is_whitespace) {
-        return false;
+/// A console line split into tokens as the game splits it (`IConsoleCmdExec`, src/console.cpp):
+/// spaces separate, `"` toggles a quoted run and is dropped, `\"` is a literal quote. So a check
+/// reads `"prismatic_mcp" appr""ove 1` as the game does: `prismatic_mcp`, `approve`, `1`.
+pub fn console_tokens(cmd: &str) -> Vec<String> {
+    let (mut tokens, mut buf, mut found, mut quoted) = (Vec::new(), String::new(), false, false);
+    let mut chars = cmd.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            ' ' if !quoted => {
+                if found { tokens.push(std::mem::take(&mut buf)); found = false; }
+            }
+            '"' => { quoted = !quoted; found = true; }
+            '\\' if chars.peek() == Some(&'"') => { chars.next(); buf.push('"'); found = true; }
+            _ => { buf.push(c); found = true; }
+        }
     }
-    let rest = rest.trim_start();
-    ["approve", "auto_approve", "auto-approve"].iter().any(|w| {
-        rest.strip_prefix(w).map_or(false, |after| !after.starts_with(|c: char| c.is_alphanumeric() || c == '_'))
-    })
+    if found { tokens.push(buf); }
+    tokens
+}
+
+/// A console word as the game resolves it: commands ignore underscores (`RemoveUnderscores`) and
+/// a chat-style leading `/` names the same command; case and dashes are dropped as well, so that
+/// every spelling of a word counts.
+fn console_word(token: &str) -> String {
+    token.to_ascii_lowercase().chars().filter(|c| *c != '_' && *c != '-').collect()
+}
+
+/// Why the panel will not send `cmd` to the game's console for a caller, or None. Approval is the
+/// owner's act, so the panel refuses any line that approves, in any spelling the game accepts
+/// (a token `approve` or `auto_approve` anywhere), and the commands that run lines it cannot read
+/// first: `alias` (an alias composes a command from its arguments), `exec` and `schedule` (they
+/// run a script file). Withdrawing (`prismatic_mcp deny <id>`) stays open.
+pub fn console_refusal(cmd: &str) -> Option<String> {
+    if cmd.chars().any(char::is_control) {
+        return Some("one console line without control characters".into());
+    }
+    let tokens = console_tokens(cmd);
+    let first = tokens.first().map(|t| console_word(t.strip_prefix('/').unwrap_or(t))).unwrap_or_default();
+    if ["alias", "exec", "schedule"].contains(&first.as_str()) {
+        return Some(format!("`{first}` runs console lines the panel cannot check first; type it at the game's own console"));
+    }
+    if tokens.iter().any(|t| matches!(console_word(t).as_str(), "approve" | "autoapprove")) {
+        return Some("approval is the owner's act: the panel's Approve with the owner secret (POST /api/approve), \
+                     or `prismatic_mcp approve <id>` at the game's own console, never a console line sent through the panel".into());
+    }
+    None
+}
+
+/// A console line that approves (or could approve unseen: `alias`, `exec`, `schedule`); the panel
+/// refuses it (see [`console_refusal`]).
+pub fn is_approval_line(cmd: &str) -> bool {
+    console_refusal(cmd).is_some()
+}
+
+// ---------------------------------------------------------------------- the owner's approval
+
+/// Tools whose approval belongs to the person at the game's console alone: a Battlebrain live
+/// decision applies through `openttd.ai.set_settings` (one approval, every setting, an expiry). The
+/// panel never approves one, not through POST /api/approve, not by auto-approve (`--auto-approve`
+/// included), not from Rhai; it answers with the console command to type instead.
+pub const OWNER_ONLY_TOOLS: &[&str] = &["openttd.ai.set_settings"];
+
+pub fn owner_only(tool: &str) -> bool {
+    OWNER_ONLY_TOOLS.contains(&tool)
+}
+
+/// The structured refusal of an owner-only approval: what to type, and where.
+pub fn owner_only_refusal(id: i64, tool: &str) -> Value {
+    json!({"error": format!("approval #{id} ({tool}) is the owner's alone: type `prismatic_mcp approve {id}` at the game's console; \
+                             the panel never approves it, auto-approve included"),
+           "refused": "owner_only", "approval_id": id, "tool": tool, "console": format!("prismatic_mcp approve {id}")})
+}
+
+/// The header that carries the owner secret, for a client that is not the page (curl).
+pub const OWNER_HEADER: &str = "X-Panel-Owner";
+
+/// The cookie that carries the owner secret for the page: one per panel port, since cookies ignore ports.
+pub fn owner_cookie_name(port: u16) -> String {
+    format!("mcp_owner_{port}")
+}
+
+/// A fresh owner secret: 32 bytes of /dev/urandom as hex; None (no secret, so the owner's routes
+/// refuse every caller) when the system's randomness cannot be read. Fails closed, never weak.
+pub fn new_owner_secret() -> Option<String> {
+    let mut b = [0u8; 32];
+    let mut f = std::fs::File::open("/dev/urandom").ok()?;
+    f.read_exact(&mut b).ok()?;
+    Some(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+/// Whether a request carries the owner secret, in the header or in the page's cookie, compared in
+/// constant time. A panel without a secret has no owner over HTTP.
+pub fn presents_owner(secret: Option<&str>, port: u16, headers: &[(String, String)]) -> bool {
+    let Some(secret) = secret else { return false };
+    let header = |n: &str| headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(n)).map(|(_, v)| v.trim().to_string());
+    let cookie = owner_cookie_name(port);
+    let from_cookie = header("Cookie").and_then(|c| c.split(';').find_map(|kv| kv.trim().strip_prefix(cookie.as_str())?.strip_prefix('=').map(str::to_string)));
+    [header(OWNER_HEADER), from_cookie].into_iter().flatten().any(|g| crate::web_access::same(secret, &g))
+}
+
+/// The Set-Cookie header that keeps the owner secret for the page, when `given` (?owner=) is it.
+pub fn owner_cookie(secret: Option<&str>, port: u16, given: Option<&str>) -> Option<String> {
+    let (s, g) = (secret?, given?);
+    crate::web_access::same(s, g).then(|| format!("Set-Cookie: {}={s}; HttpOnly; SameSite=Strict; Path=/\r\n", owner_cookie_name(port)))
+}
+
+/// The owner's routes: approving (POST /api/approve) and switching auto-approve on (POST
+/// /api/auto-approve `{on: true}`; switching it off is open to anyone). They need the owner secret
+/// the panel printed once at start; any other request passes. Err is the refusal to answer.
+pub fn owner_gate(secret: Option<&str>, port: u16, method: &str, path: &str, body: &Value, headers: &[(String, String)]) -> Result<(), (u16, Value)> {
+    let owners = method == "POST" && (path == "/api/approve" || (path == "/api/auto-approve" && truthy(body.get("on"))));
+    if !owners || presents_owner(secret, port, headers) {
+        return Ok(());
+    }
+    Err((401, json!({"error": format!(
+        "{path} is the owner's: open the page once as http://127.0.0.1:{port}/?owner=<secret> (the owner secret mcp-panel printed when it started; \
+         it sets an HttpOnly cookie) or send {OWNER_HEADER}: <secret>; or approve at the game's console with prismatic_mcp approve <id>"),
+        "refused": "owner_secret"})))
 }
 
 // ---------------------------------------------------------------------- subprocesses
@@ -693,6 +800,9 @@ pub struct Game {
     events: Mutex<VecDeque<Value>>,
     pub bus: Bus,
     pending: Mutex<BTreeMap<i64, Value>>,
+    /// The owner secret (see [`owner_gate`]): made at start, printed once on the panel's stdout by
+    /// [`Game::start`], never sent to the bus, the store, the event feed or any answer.
+    owner_secret: Option<String>,
     pub auto_approve: AtomicBool,
     pub mcp_up: AtomicBool,
     pub ai_started: AtomicBool,
@@ -721,7 +831,7 @@ impl Game {
             child: Mutex::new(None), running: AtomicBool::new(false),
             console_w: Mutex::new(Console { stdin: None, last: None }),
             token: Mutex::new(None), log: Mutex::new(Log::default()), events: Mutex::new(VecDeque::new()),
-            bus: Bus::new(), pending: Mutex::new(BTreeMap::new()),
+            bus: Bus::new(), pending: Mutex::new(BTreeMap::new()), owner_secret: new_owner_secret(),
             mcp_up: AtomicBool::new(false), ai_started: AtomicBool::new(false), rpc_id: AtomicU64::new(0),
             server_tools: Mutex::new((vec![], None)), client_tools: Mutex::new((vec![], None)),
             owner_q: Mutex::new(None), plans_seen: Mutex::new(HashSet::new()), history: Mutex::new(VecDeque::new()),
@@ -731,6 +841,12 @@ impl Game {
 
     // ------------------------------------------------------------------ process
     pub fn start(self: &Arc<Self>) -> Result<(), String> {
+        // Once, on stdout only: whoever reads it is this panel's owner over HTTP (Approve, auto-approve on).
+        match &self.owner_secret {
+            Some(s) => println!("mcp-panel: owner secret {s}  (Approve: open http://127.0.0.1:{}/?owner={s} once, or send {OWNER_HEADER}: {s})",
+                                self.args.panel_port),
+            None => println!("mcp-panel: no owner secret (/dev/urandom unreadable): approve at the game's console only"),
+        }
         std::fs::create_dir_all(&self.tmp).map_err(|e| format!("{}: {e}", self.tmp.display()))?;
         let cfg = self.tmp.join("openttd.cfg");
         std::fs::write(&cfg, format!(
@@ -823,6 +939,11 @@ impl Game {
     /// in the stream buffer, invisible to select(), until the next write (seen: a plan answer's lines
     /// appeared minutes late). A gap longer than one game-loop pass gives each line its own read.
     pub fn console(&self, command: &str) -> Result<(), String> {
+        // One line, always: a newline inside a value (an AI's settings, a content query) would
+        // otherwise reach the game as a second command nobody checked, an approval included.
+        if command.chars().any(char::is_control) {
+            return Err(format!("refused console line with a control character: {}", head(&command.escape_debug().to_string(), 80)));
+        }
         let mut c = self.console_w.lock().unwrap();
         if let Some(last) = c.last {
             let wait = Duration::from_millis(250).saturating_sub(last.elapsed());
@@ -1137,9 +1258,16 @@ impl Game {
     /// Approve pending request `id` in the game's console and resubmit it. `by` is the channel it
     /// came through (`api`: POST /api/approve, with the approver it declares, if any;
     /// `auto-approve`: the panel's switch, no person), recorded so every directive step can say
-    /// how its approval was given (research/agent-loop.md, Authorize). It is provenance, not
-    /// authentication: the loopback API checks no identity.
+    /// how its approval was given (research/agent-loop.md, Authorize). POST /api/approve checks the
+    /// owner secret before it gets here ([`owner_gate`]); the declared name is still not checked.
+    /// An owner-only tool ([`OWNER_ONLY_TOOLS`]) is never approved here, whoever asks: the answer
+    /// names the console command to type, and the request stays pending.
     pub fn approve(&self, id: i64, by: Value) -> Result<Value, String> {
+        if let Some(refusal) = self.owner_only_pending(id) {
+            self.event("operator", &format!("refused to approve #{id} ({}): the owner approves it at the game's console",
+                                             py_str(refusal.get("tool"))));
+            return Ok(refusal);
+        }
         let Some(info) = self.pending.lock().unwrap().remove(&id) else {
             return Ok(json!({"error": format!("no pending approval #{id} known to the panel")}));
         };
@@ -1163,15 +1291,30 @@ impl Game {
         }).collect()
     }
 
+    /// The refusal for pending approval `id` when its tool is owner-only, else None.
+    fn owner_only_pending(&self, id: i64) -> Option<Value> {
+        let tool = self.pending_json().into_iter().find(|p| p["id"] == json!(id))
+            .and_then(|p| p["tool"].as_str().map(str::to_string))?;
+        owner_only(&tool).then(|| owner_only_refusal(id, &tool))
+    }
+
+    /// One pass of auto-approve: every pending approval except the owner-only ones, which wait for
+    /// the console however auto-approve was switched on. Returns the ids it approved (or tried to).
+    fn auto_approve_once(&self) -> Vec<i64> {
+        if !self.auto_approve.load(Ordering::SeqCst) { return vec![]; }
+        let ids: Vec<i64> = self.pending_json().iter()
+            .filter(|p| !p["tool"].as_str().is_some_and(owner_only))
+            .filter_map(|p| p["id"].as_i64()).collect();
+        for &id in &ids {
+            let _ = self.approve(id, json!({"channel": "auto-approve"}));
+        }
+        ids
+    }
+
     fn auto_loop(self: Arc<Self>) {
         loop {
             thread::sleep(Duration::from_secs(1));
-            if self.auto_approve.load(Ordering::SeqCst) {
-                let ids: Vec<i64> = self.pending.lock().unwrap().keys().copied().collect();
-                for id in ids {
-                    let _ = self.approve(id, json!({"channel": "auto-approve"}));
-                }
-            }
+            self.auto_approve_once();
         }
     }
 
@@ -1764,11 +1907,12 @@ fn h_console(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     if cmd.is_empty() || cmd.contains('\n') {
         return Ok((400, json!({"error": "one non-empty line"})));
     }
-    if is_approval_line(&cmd) {
-        // Approval is the owner's act: through /api/approve (the panel's Approve button), never a
-        // console line any caller (an agent included) could send. Withdrawing (deny) stays open.
+    if let Some(why) = console_refusal(&cmd) {
+        // Approval is the owner's act: the Approve button with the owner secret, or the game's own
+        // console, never a console line any caller (an agent included) could send, in any spelling
+        // the game accepts. Withdrawing (deny) stays open.
         g.event("operator", &format!("refused console line: {cmd}"));
-        return Ok((403, json!({"error": "approvals go through POST /api/approve (the owner's button), not the console"})));
+        return Ok((403, json!({"error": why, "refused": "console_line"})));
     }
     let mark = g.log_seq();
     g.console(&cmd)?;
@@ -1844,8 +1988,8 @@ fn h_action_plan(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     let mut books = books_from_caller(&inp);
     // Cash and loan from the company's newest day in the store (I0086, ADR 0034 point 1), whichever
     // the body left out; the console below fills what the store could not, and the event names which.
-    let stored = books_from_store(&mut inp, &mut books, &format!("panel-{}", g.args.panel_port), |sql| {
-        let (code, v) = panel_store::run_query(sql);
+    let stored = books_from_store(&mut inp, &mut books, &format!("panel-{}", g.args.panel_port), |q| {
+        let (code, v) = panel_store::run_named(q);
         if code == 200 { Ok(v) } else { Err(py_str(v.get("error"))) }
     });
     if !inp.contains_key("cash") || !inp.contains_key("loan") {
@@ -1905,10 +2049,10 @@ pub const ACTION_BOOK_DAYS: usize = 30;
 /// Cash and loan of an action plan, whichever `inp` lacks, from the newest stored day of the asked
 /// company (else the lowest company id) of this instance's latest run, read with `read` (the
 /// panel's own store: `kernel_feed::from_store`). `books` records where each came from. What
-/// plan.action names as its stored input: the statement and its rows, or why the store gave
+/// plan.action names as its stored input: the named query and its rows, or why the store gave
 /// nothing, so the console fills the rest (ADR 0034 point 2).
 pub fn books_from_store(inp: &mut Map<String, Value>, books: &mut Value, instance: &str,
-                        read: impl FnOnce(&str) -> Result<Value, String>) -> panel_events::Stored {
+                        read: impl FnOnce(&crate::store_sql::Named) -> Result<Value, String>) -> panel_events::Stored {
     if inp.contains_key("cash") && inp.contains_key("loan") {
         return panel_events::Stored::Fallback("the caller gave cash and loan".into());
     }
@@ -1996,7 +2140,7 @@ fn h_calibration(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
         other => return Ok((400, json!({"error": format!("scope: all or seed, not {other}")}))),
     };
     let game = calibrate::game_of(g.args.seed, &g.resource("openttd://game/state").unwrap_or(Value::Null));
-    let cal = panel_bot::calibration(&scope, &game, panel_store::query_every_store);
+    let cal = panel_bot::calibration(&scope, &game, panel_store::every_store);
     let mut out = cal.record;
     out["params"] = json!({"calibration": cal.factors.unwrap_or_else(|| json!({}))});
     out["stored"] = cal.stored.to_json();
@@ -2019,7 +2163,7 @@ fn h_calibration_record(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String
     }
     let out: Value = serde_json::from_str(&r.stdout).map_err(|e| e.to_string())?;
     let game = calibrate::game_of(g.args.seed, &g.resource("openttd://game/state").unwrap_or(Value::Null));
-    let before = panel_bot::calibration(&calibrate::Scope::All, &game, panel_store::query_every_store);
+    let before = panel_bot::calibration(&calibrate::Scope::All, &game, panel_store::every_store);
     let e = calibration_event(&out, &game, &before);
     g.event("ai", &format!("calibration recorded in the store ({}): {} reading(s), factors {}", py_str(Some(&panel_store::store_status())),
                            e["choice"]["readings"], e["choice"]["factors"]));
@@ -2175,7 +2319,15 @@ fn h_catalogue(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
 }
 
 fn h_rpc(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
-    ok(g.rpc(i.body["method"].as_str().unwrap_or(""), i.body.get("params").cloned())?)
+    let method = i.body["method"].as_str().unwrap_or("");
+    // A raw tools/call names no writer: it sets no freight-line slot (panel_bot::raw_call_refusal).
+    if method == "tools/call" {
+        let p = &i.body["params"];
+        if let Some(r) = panel_bot::raw_call_refusal(g, &py_str(p.get("name")), &p["arguments"]) {
+            return Ok(r);
+        }
+    }
+    ok(g.rpc(method, i.body.get("params").cloned())?)
 }
 
 fn h_pause(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
@@ -2185,11 +2337,13 @@ fn h_pause(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
 fn h_approve(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     let declared = i.body.get("by").and_then(Value::as_str).map(|b| b.chars().take(64).collect::<String>());
     let id = py_int(&i.body["id"])?;
-    let out = g.approve(id, json!({"channel": "api", "declared": declared}))?;
+    // The owner secret was checked (owner_gate); the name in `by` is declared, not checked.
+    let out = g.approve(id, json!({"channel": "api", "declared": declared, "owner_secret": true}))?;
     // An approval that did not take is an error the owner sees (the page's one API client shows a
     // non-2xx answer), never a 200 with an error inside: unknown here, or forgotten by the game
     // server so that the resubmission only asked again (ADR 0038 replaces resubmission altogether).
     Ok(match out.get("status").and_then(Value::as_str) {
+        _ if out.get("refused").is_some() => (403, out),
         _ if out.get("error").is_some() && out.get("approval_id").is_none() => (404, out),
         Some("pending_approval") => (409, json!({"error": format!(
             "the game server no longer holds approval #{id} (it keeps only the newest); the same change waits again as #{}",
@@ -2212,7 +2366,7 @@ fn h_bot_start(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
 }
 
 fn h_bot_setting(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
-    ok(panel_bot::set_bot_setting(g, &i.body["company"], &py_str(i.body.get("name")), &i.body["value"])?)
+    panel_bot::bot_setting(g, &i.body)
 }
 
 fn h_bot_planned(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
@@ -2364,15 +2518,15 @@ pub fn routes() -> Vec<Route> {
           s(json!({"kind": st(), "data": obj()}), &["kind", "data"]), h_bus_publish),
         r("GET", "/api/db/tables", "dbTables", "The DuckDB store of this instance (ADR 0033): its file and every table (runs, events, samples) with its columns", false, None, panel_store::h_db_tables),
         r("GET", "/api/db/query", "dbQuery", "One read-only statement on the store (?sql=SELECT ...; SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW, one statement, anything else 400; without sql the newest 20 events): {columns, rows, count, capped}, each row a list in column order, at most 5000 rows", false, None, panel_store::h_db_query),
-        r("POST", "/api/db/query", "dbQueryPost", "The same read-only query with the statement in the body ({sql}), for statements too long for an address", false,
-          s(json!({"sql": st()}), &["sql"]), panel_store::h_db_query),
+        r("POST", "/api/db/query", "dbQueryPost", "The same read-only query with the statement in the body ({sql, params?}), for statements too long for an address; `params` binds the statement's named parameters ($company), never pasted, a missing one 400", false,
+          s(json!({"sql": st(), "params": obj()}), &["sql"]), panel_store::h_db_query),
         r("GET", "/api/db/named", "dbNamed", "Every named query of the store (one file each in tools/research/mcp-rhai/sql/queries): name, description, parameters read from the prepared statement, and its sql", false, None, panel_store::h_db_named_list),
         r("POST", "/api/db/named", "dbNamedRun", "Run one named query with its parameters bound, never pasted ({name, params: {company: 0, ...}}): {columns, rows, count, capped}; 404 for an unknown name, 400 for a missing parameter", false,
           s(json!({"name": st(), "params": obj()}), &["name"]), panel_store::h_db_named_run),
         r("GET", "/api/overview/history", "overviewHistory", "The overview's history kept by the panel: one sample per game day (tick, date, vehicles, towns, per company money, value, loan, net); ?since=<tick> for the newer ones", false, None, h_history),
         r("GET", "/api/catalogue", "catalogue", "MCP initialize, resources/list and tools/list", true, None, h_catalogue),
         r("GET", "/api/resource", "readResource", "Read one MCP resource by ?uri=", true, None, h_resource),
-        r("POST", "/api/rpc", "rpc", "Raw MCP JSON-RPC with the panel's token", true,
+        r("POST", "/api/rpc", "rpc", "Raw MCP JSON-RPC with the panel's token; a tools/call of openttd.ai.set_setting or openttd.ai.set_settings that changes a freight-line slot (fr_*) names no writer and is refused (422 fr_needs_writer)", true,
           s(json!({"method": st(), "params": obj()}), &["method"]), h_rpc),
         r("POST", "/api/console", "console", "One OpenTTD console line as the operator; returns its output", false,
           s(json!({"command": st(), "wait": {"type": "number"}}), &["command"]), h_console),
@@ -2382,9 +2536,9 @@ pub fn routes() -> Vec<Route> {
           s(json!({"ids": {"type": "array", "items": {"type": "integer"}}, "wait": {"type": "number"}}), &["ids"]), h_content_download),
         r("POST", "/api/pause", "pause", "Pause or resume through the approval-gated MCP tool", true,
           s(json!({"pause": {"type": "boolean"}}), &["pause"]), h_pause),
-        r("POST", "/api/approve", "approve", "The operator's approval of a pending decision, then its resubmission; `by` names the approver it declares (recorded as the approval's channel and declared name in plan.directive_outcome, not checked: the loopback API authenticates no one)", true,
+        r("POST", "/api/approve", "approve", "The owner's approval of a pending decision, then its resubmission. Needs the owner secret mcp-panel printed at start (the cookie ?owner=<secret> sets, or the X-Panel-Owner header), else 401; an owner-only tool (openttd.ai.set_settings, a Battlebrain live decision) is refused with 403 and the console command to type, whoever asks; `by` names the approver it declares (recorded in plan.directive_outcome, not checked)", true,
           s(json!({"id": {"type": "integer"}, "by": st()}), &["id"]), h_approve),
-        r("POST", "/api/auto-approve", "autoApprove", "The owner's full-auto switch", false,
+        r("POST", "/api/auto-approve", "autoApprove", "The owner's full-auto switch: on needs the owner secret (as /api/approve), off is open to anyone; it never approves an owner-only tool", false,
           s(json!({"on": {"type": "boolean"}}), &["on"]), h_auto),
         r("POST", "/api/start-ai", "startAi", "Start a company AI with an optional settings string", false,
           s(json!({"ai": st(), "settings": st()}), &[]), h_start_ai),
@@ -2396,8 +2550,8 @@ pub fn routes() -> Vec<Route> {
           s(json!({"ai": st(), "start": {"type": "boolean"}, "track": {"type": "integer", "minimum": 0, "maximum": 16}}), &["ai"]), h_bot_planned),
         r("POST", "/api/bots/start", "botStart", "Start the owner's bot: an AI with a settings map", false,
           s(json!({"ai": st(), "settings": obj()}), &["ai"]), h_bot_start),
-        r("POST", "/api/bots/setting", "botSetting", "Change one setting of a running bot (openttd.ai.set_setting, approval-gated)", true,
-          s(json!({"company": {"type": "integer"}, "name": st(), "value": {"type": "integer"}}), &["company", "name", "value"]), h_bot_setting),
+        r("POST", "/api/bots/setting", "botSetting", "Change one setting of a running bot (openttd.ai.set_setting, approval-gated). A freight-line slot (fr_*, fr2_* .. fr16_*) is sent only when `writer` names who sends it and the company's planner key planner.<company> (/api/rhai/shared) is unset or names that writer: else 422 fr_needs_writer (no writer) or 409 fr_planner_held, and nothing reaches the game", true,
+          s(json!({"company": {"type": "integer"}, "name": st(), "value": {"type": "integer"}, "writer": st()}), &["company", "name", "value"]), h_bot_setting),
         r("GET", "/api/bridge/companies", "bridgeCompanies", "Every company as the bridge's GET /companies answers it (CompanyOut: money, loan, income from the vehicles' profit, company value, vehicle counts), so Prismatic decides from this game with OPENTTD_BRIDGE_URL=<panel>/api/bridge (src/panel_decision.rs); each company's `history` (prismatic-history/v1, I0085) names the bus endpoint and the read-only store query of its samples, to fit from on /api/db/query", true,
           None, h_bridge_companies),
         r("GET", "/api/bridge/observation", "bridgeObservation", "The latest answer of GET /api/bridge/companies as the observation a directive is bound to (research/agent-loop.md step 1): its number, game tick and date, the digest of the companies' identities and the age limit in game days; POST /api/decision/pull refuses a directive not decided from a current observation", false, None, h_bridge_observation),
@@ -2418,6 +2572,8 @@ pub fn routes() -> Vec<Route> {
           None, h_instances),
         r("GET", "/api/mesh", "mesh", "The Majordomus mesh this repository's server cooperates with (src/panel_mesh_page.rs, read-only): `mesh` (identity, trust policy, providers, tallies), `peers` (machines, runtimes, sessions, claims) and `nodes` (every discovered node with trust, presence and endpoints), read from the Majordomus server ($MAJORDOMUS_URL, else the one `majordomus serve ensure` names for this checkout) /api/v1/mesh, /peers and /nodes unchanged; 200 also when Majordomus is down (`reachable` false, `errors` per part)", false,
           None, crate::panel_mesh_page::h_mesh),
+        r("GET", "/api/battle/contestants", "battleContestants", "The LAN battle's contestants as tools/research/ai-battle/battle.json declares them (src/panel_battle.rs, read-only, read on every request): `file`, `count` and `contestants` in the file's order, each as the file has it (ai, label, source, group) with `settings` made explicit (\"\" for the AI's defaults); the live arena (rhai/arena.rhai) plays this lineup, so it is written in one place. 404 when the file is missing", false,
+          None, crate::panel_battle::h_contestants),
         r("POST", "/api/instances/call", "instancesCall", "One MCP JSON-RPC call on a named instance of the cluster (a panel's server or a GUI client)", true,
           s(json!({"name": st(), "method": st(), "params": obj()}), &["name", "method"]), h_instances_call),
         r("GET", "/api/news", "news", "The news the owner's game window has shown, newest first (openttd.view.news.list on the GUI client); ?limit=N", true,
@@ -2872,6 +3028,11 @@ impl Panel {
             return if code == 204 { hub::respond(stream, 204, "text/plain", b"") } else { send_json(stream, code, &json!({"error": why})) };
         }
         let g = &self.game;
+        // The page opened once as ?owner=<secret> keeps the secret in an HttpOnly cookie, which its
+        // one API client sends with every request (src/web_access.rs carries the header on).
+        if let Some(c) = owner_cookie(g.owner_secret.as_deref(), g.args.panel_port, req.query.get("owner")) {
+            crate::web_access::set_headers(&format!("{}{c}", crate::web_access::headers()));
+        }
         let file = |stream: TcpStream, f: PathBuf, ctype: &str| match std::fs::read(&f) {
             Ok(b) => hub::respond(stream, 200, ctype, &b),
             Err(_) => send_json(stream, 404, &json!({"error": "not found"})),
@@ -3042,6 +3203,10 @@ impl Panel {
             if !errs.is_empty() {
                 return (400, json!({"error": format!("invalid body: {}", errs.join("; "))}));
             }
+            if let Err(refusal) = owner_gate(g.owner_secret.as_deref(), g.args.panel_port, method, path, &body, &req.headers) {
+                g.event("operator", &format!("refused {path}: no owner secret"));
+                return refusal;
+            }
         } else if hit.is_some() {
             let missing = missing_query(path, &req.query);
             if !missing.is_empty() {
@@ -3069,6 +3234,10 @@ impl Panel {
                     });
                 }
                 if let Some(name) = path.strip_prefix("/api/tools/") {
+                    // A raw tool call names no writer: it sets no freight-line slot (panel_bot.rs).
+                    if let Some(r) = panel_bot::raw_call_refusal(g, name, &body) {
+                        return Ok(r);
+                    }
                     let out = g.tool(name, or_empty(&body))?;
                     return Ok((rpc_status(&out), out));
                 }
@@ -3229,7 +3398,8 @@ mod tests {
         // And the observation a directive is bound to (GET /api/bridge/observation; agent loop step 1).
         // And evidence retrieval (GET /api/evidence; research/agent-loop.md, Retrieve).
         // And the store's named queries (GET and POST /api/db/named; sql/queries).
-        assert_eq!(rs.len(), 76);
+        // And the LAN battle's contestants the live arena plays (GET /api/battle/contestants; panel_battle.rs).
+        assert_eq!(rs.len(), 77);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -3243,7 +3413,8 @@ mod tests {
             "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query", "/api/db/named",
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
             "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
-            "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh"].contains(&r.path)));
+            "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh",
+            "/api/battle/contestants"].contains(&r.path)));
     }
 
     /// A store with two runs of one instance: the older run's days must not feed the books.
@@ -3269,7 +3440,7 @@ mod tests {
         let r = st.reader().unwrap();
         let mut inp = json!({"actions": [{"id": "r", "kind": "repay_loan", "amount": 50000}]}).as_object().cloned().unwrap();
         let mut books = books_from_caller(&inp);
-        let stored = books_from_store(&mut inp, &mut books, "panel-8800", |sql| r.query(sql));
+        let stored = books_from_store(&mut inp, &mut books, "panel-8800", |q| r.run(q));
         assert_eq!((inp["cash"].as_f64(), inp["loan"].as_f64()), (Some(298290.0), Some(300000.0)), "company 0's newest day");
         assert_eq!(books["cash"], json!({"store": "samples", "company": 0, "game_date": "1950-10-14", "game_tick": 22456}));
         assert_eq!(books["loan"]["store"], "samples");
@@ -3277,6 +3448,7 @@ mod tests {
         assert_eq!(books["trailing"]["days"], 2, "the older run's day is not in the window");
         let s = stored.to_json();
         assert!(s["query"].as_str().unwrap().contains("FROM samples"), "{s}");
+        assert_eq!((s["name"].clone(), s["params"].clone()), (json!("kernel_window"), json!({"instance": "panel-8800", "days": ACTION_BOOK_DAYS})));
         assert_eq!(s["rows"], 4, "two days of two companies");
         // The event carries the statement and its row count.
         let e = action_event(&json!({}), &Value::Object(inp.clone()), &books, &Map::new(), &stored);
@@ -3285,7 +3457,7 @@ mod tests {
         // A named company gets its own books; a loan the caller gave stays the caller's.
         let mut inp = json!({"actions": [], "company": 1, "loan": 7}).as_object().cloned().unwrap();
         let mut books = books_from_caller(&inp);
-        books_from_store(&mut inp, &mut books, "panel-8800", |sql| r.query(sql));
+        books_from_store(&mut inp, &mut books, "panel-8800", |q| r.run(q));
         assert_eq!((inp["cash"].as_f64(), inp["loan"].as_i64()), (Some(51000.0), Some(7)));
         assert_eq!((books["cash"]["company"].clone(), books["loan"].clone()), (json!(1), json!("caller")));
     }
@@ -3359,7 +3531,9 @@ mod tests {
         assert_eq!(e["choice"]["readings"], 2, "the stored one and this one");
         assert_eq!(e["choice"]["factors"], json!({"rail": 0.7, "default": 0.7}), "median of 0.6 and 0.8");
         assert_eq!(e["inputs"]["live"]["game"], game, "what the seed scope compares");
-        assert_eq!(e["inputs"]["stored"], json!({"query": calibrate::readings_sql(&calibrate::Scope::All, &game).unwrap(), "rows": 1}));
+        let mut stored = calibrate::readings_query(&calibrate::Scope::All, &game).unwrap().record();
+        stored["rows"] = json!(1);
+        assert_eq!(e["inputs"]["stored"], stored);
         let off = panel_bot::calibration(&calibrate::Scope::All, &game, |_| Err("store off: the store is not open".into()));
         let e = calibration_event(&out, &game, &off);
         assert_eq!(e["choice"]["readings"], 1);
@@ -3771,6 +3945,116 @@ mod tests {
         p.dispatch(&Request { method: "POST".into(), path: path.into(), query: Query::default(), headers: vec![], body: vec![] }, body)
     }
 
+    fn post_as(p: &Panel, path: &str, body: Value, headers: &[(&str, &str)]) -> (u16, Value) {
+        let headers = headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        p.dispatch(&Request { method: "POST".into(), path: path.into(), query: Query::default(), headers, body: vec![] }, body)
+    }
+
+    #[test]
+    fn console_lines_are_read_as_the_game_reads_them_and_no_spelling_approves() {
+        assert_eq!(console_tokens(r#""prismatic_mcp" appr""ove 1"#), ["prismatic_mcp", "approve", "1"]);
+        assert_eq!(console_tokens(r#"  echo "a b"  \"c "#), ["echo", "a b", "\"c"]);
+        assert!(console_tokens("   ").is_empty());
+        // Every spelling the game resolves to an approval, and every command that runs lines unread.
+        for line in [r#""prismatic_mcp" approve 1"#, "/prismatic_mcp approve 1", "prismaticmcp approve 1", "prismatic__mcp approve 1",
+                     r#"prismatic_mcp appr""ove 1"#, "PRISMATIC_MCP APPROVE 1", "p approve 1", r#"alias a "prismatic_mcp %+""#,
+                     "alias a b", "/alias a b", "exec scripts/x.scr", "schedule on-next-calendar-month x.scr", "e_x_e_c x.scr",
+                     "companies\nprismatic_mcp approve 1", "companies\rx", "echo \u{0}"] {
+            assert!(console_refusal(line).is_some(), "{line:?} must be refused");
+            assert!(is_approval_line(line), "{line:?}");
+        }
+        assert!(console_refusal("alias a b").unwrap().contains("cannot check"));
+        assert!(console_refusal("x\ny").unwrap().contains("control"));
+        assert!(console_refusal("prismatic_mcp approve 1").unwrap().contains("game's own console"));
+        for line in ["prismatic_mcp deny 3", "prismatic_mcp status", "companies", r#"echo "hello world""#,
+                     "start_ai PrismaticAI aggressiveness=50", "prismatic_mcp approved", "mcpapprove 1", "content state x"] {
+            assert_eq!(console_refusal(line), None, "{line:?} must pass");
+        }
+    }
+
+    #[test]
+    fn the_console_writer_sends_one_line_only() {
+        let (g, p) = bare_panel("5");
+        let err = g.console("start_ai X a=1\nprismatic_mcp approve 1").unwrap_err();
+        assert!(err.contains("control character"), "{err}");
+        // The check comes before the pipe: a clean line meets the closed console instead.
+        assert!(g.console("companies").unwrap_err().contains("console is closed"));
+        // A value carrying a second line is refused by every route that builds a console line.
+        let (code, out) = post_to(&p, "/api/start-ai", json!({"ai": "X", "settings": "a=1\nprismatic_mcp approve 1"}));
+        assert!(code >= 400 && py_str(out.get("error")).contains("control character"), "{code} {out}");
+        let (code, out) = post_to(&p, "/api/console", json!({"command": r#"alias go "prismatic_mcp %+""#}));
+        assert_eq!((code, out["refused"].clone()), (403, json!("console_line")), "{out}");
+    }
+
+    #[test]
+    fn owner_only_approvals_are_refused_by_every_panel_channel() {
+        let (g, p) = bare_panel("6");
+        let secret = g.owner_secret.clone().expect("a secret from /dev/urandom");
+        let owner = [(OWNER_HEADER, secret.as_str())];
+        let pend = |id: i64, tool: &str| { g.pending.lock().unwrap().insert(id, json!({"tool": tool, "args": {"company": 1}, "created": 0})); };
+        pend(41, "openttd.ai.set_settings");
+        pend(42, "openttd.game.set_pause");
+        assert!(owner_only("openttd.ai.set_settings") && !owner_only("openttd.ai.set_setting") && !owner_only("openttd.game.set_pause"));
+        // The owner's own Approve, secret and all: refused with the console command, still pending.
+        let (code, out) = post_as(&p, "/api/approve", json!({"id": 41}), &owner);
+        assert_eq!((code, out["refused"].clone(), out["console"].clone()), (403, json!("owner_only"), json!("prismatic_mcp approve 41")), "{out}");
+        assert!(py_str(out.get("error")).contains("prismatic_mcp approve 41"));
+        assert!(g.pending.lock().unwrap().contains_key(&41), "a refused approval stays pending for the console");
+        // Any other channel that reaches Game::approve: the same refusal.
+        assert_eq!(g.approve(41, json!({"channel": "auto-approve"})).unwrap()["refused"], "owner_only");
+        // Auto-approve (as --auto-approve sets it) passes the owner-only one over and tries the rest.
+        g.auto_approve.store(true, Ordering::SeqCst);
+        assert_eq!(g.auto_approve_once(), vec![42]);
+        assert!(g.pending.lock().unwrap().contains_key(&41));
+        g.auto_approve.store(false, Ordering::SeqCst);
+        assert!(g.auto_approve_once().is_empty(), "off approves nothing");
+        // An ordinary approval with the secret goes through to the console (closed here).
+        pend(43, "openttd.game.set_pause");
+        let (code, out) = post_as(&p, "/api/approve", json!({"id": 43}), &owner);
+        assert!(code == 502 && py_str(out.get("error")).contains("console is closed"), "{code} {out}");
+    }
+
+    #[test]
+    fn approving_and_auto_approve_on_need_the_owner_secret() {
+        let s = Some("s3cret");
+        let h = |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>();
+        let gate = |path: &str, body: Value, headers: &[(&str, &str)]| owner_gate(s, 8800, "POST", path, &body, &h(headers));
+        let refused = gate("/api/approve", json!({"id": 1}), &[]).unwrap_err();
+        assert_eq!((refused.0, refused.1["refused"].clone()), (401, json!("owner_secret")));
+        assert!(!py_str(refused.1.get("error")).contains("s3cret"), "the refusal never shows the secret");
+        assert!(gate("/api/approve", json!({"id": 1}), &[("X-Panel-Owner", "s3creT")]).is_err());
+        assert!(gate("/api/approve", json!({"id": 1}), &[("X-Panel-Owner", "s3cre")]).is_err(), "a prefix is not the secret");
+        assert!(gate("/api/approve", json!({"id": 1}), &[("x-panel-owner", " s3cret ")]).is_ok());
+        assert!(gate("/api/approve", json!({"id": 1}), &[("Cookie", "a=b; mcp_owner_8800=s3cret")]).is_ok());
+        assert!(gate("/api/approve", json!({"id": 1}), &[("Cookie", "mcp_owner_8801=s3cret")]).is_err(), "another panel's cookie");
+        assert!(gate("/api/approve", json!({"id": 1}), &[("Authorization", "Bearer s3cret")]).is_err(), "the web token is not the owner");
+        assert!(gate("/api/auto-approve", json!({"on": true}), &[]).is_err());
+        assert!(gate("/api/auto-approve", json!({"on": false}), &[]).is_ok(), "switching off is open");
+        assert!(gate("/api/pause", json!({"pause": true}), &[]).is_ok());
+        assert!(owner_gate(s, 8800, "GET", "/api/approve", &Value::Null, &[]).is_ok());
+        // A panel without a secret has no owner over HTTP at all.
+        assert!(owner_gate(None, 8800, "POST", "/api/approve", &json!({"id": 1}), &h(&[("X-Panel-Owner", "")])).is_err());
+        // The page's cookie is set only for the secret itself.
+        let c = owner_cookie(s, 8800, Some("s3cret")).unwrap();
+        assert!(c.starts_with("Set-Cookie: mcp_owner_8800=s3cret;") && c.contains("HttpOnly") && c.contains("SameSite=Strict"), "{c}");
+        assert_eq!(owner_cookie(s, 8800, Some("guess")), None);
+        assert_eq!(owner_cookie(None, 8800, Some("")), None);
+        let (a, b) = (new_owner_secret().unwrap(), new_owner_secret().unwrap());
+        assert!(a.len() == 64 && a.bytes().all(|c| c.is_ascii_hexdigit()) && a != b);
+        // Through the router: the switch stays off without the secret, and the secret reaches no event.
+        let (g, p) = bare_panel("7");
+        let secret = g.owner_secret.clone().unwrap();
+        assert_eq!(post_to(&p, "/api/auto-approve", json!({"on": true})).0, 401);
+        assert!(!g.auto_approve.load(Ordering::SeqCst));
+        assert_eq!(post_to(&p, "/api/approve", json!({"id": 5})).0, 401);
+        assert_eq!(post_as(&p, "/api/auto-approve", json!({"on": true}), &[(OWNER_HEADER, &secret)]).0, 200);
+        assert!(g.auto_approve.load(Ordering::SeqCst));
+        assert_eq!(post_to(&p, "/api/auto-approve", json!({"on": false})).0, 200);
+        assert!(!g.auto_approve.load(Ordering::SeqCst));
+        let seen = format!("{:?} {:?}", g.bus.since(0, &[], 10_000), g.events.lock().unwrap());
+        assert!(seen.contains("refused /api/approve") && !seen.contains(&secret), "{seen}");
+    }
+
     #[test]
     fn a_planner_that_fails_answers_502_and_starts_no_bot() {
         let dir = std::env::temp_dir().join(format!("mcp-panel-planner-{}", std::process::id()));
@@ -3848,5 +4132,42 @@ mod tests {
         assert_eq!(ev.len(), 1, "the refusal is on the bus");
         let choice = &ev[0]["data"]["choice"];
         assert_eq!((choice["accepted"].clone(), choice["outcome"].clone()), (json!(false), json!("stale")));
+    }
+
+    /// A freight-line slot reaches the game through the panel only from a request that names its
+    /// writer (POST /api/bots/setting {writer}); the raw MCP routes name none, so they set no slot.
+    /// Every refusal is answered before the game is asked and is an event; any other setting, and a
+    /// named writer while no planner key is set, goes on to the game (none here: its own error).
+    #[test]
+    fn a_freight_slot_is_sent_only_by_a_named_writer() {
+        let (g, p) = bare_panel("5");
+        let since = g.bus.seq();
+        let (code, out) = post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_from", "value": 3}));
+        assert_eq!((code, out["outcome"].as_str()), (422, Some("fr_needs_writer")), "{out}");
+        assert!(out["error"].as_str().unwrap().starts_with("fr_from not sent: a change of company 0's freight-line slots names its writer"), "{out}");
+        let ev = g.bus.since(since, &kinds_of("panel.ai"), 10);
+        assert!(ev.iter().any(|e| e["data"]["text"].as_str().unwrap_or("").contains("fr_from not sent")), "the refusal is an event: {ev:?}");
+        assert_eq!(post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_to", "value": 3, "writer": " "})).0, 422, "a blank writer is none");
+        // Named, no planner key set: on to the game, which this panel has none of.
+        let (code, out) = post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_from", "value": 3, "writer": "owner"}));
+        assert_eq!((code, out["fallback"].as_str()), (200, Some("start")), "{out}");
+        let (code, out) = post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "rail_a", "value": 3}));
+        assert_eq!((code, out["fallback"].as_str()), (200, Some("start")), "not a slot: as before, no writer needed: {out}");
+        assert_eq!(post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_from", "value": 3, "writer": 7})).0, 400, "a writer is a string");
+
+        let raw = [("/api/tools/openttd.ai.set_setting", json!({"company": 0, "name": "fr16_cargo", "value": 1})),
+                   ("/api/tools/openttd.ai.set_settings", json!({"company": 0, "settings": {"rail_a": 1, "fr2_to": 9}})),
+                   ("/api/rpc", json!({"method": "tools/call", "params": {"name": "openttd.ai.set_settings",
+                                                                          "arguments": {"company": 0, "settings": {"fr_from": 1}}}}))];
+        for (path, body) in raw {
+            let (code, out) = post_to(&p, path, body);
+            assert_eq!((code, out["outcome"].as_str()), (422, Some("fr_needs_writer")), "{path}: {out}");
+            assert!(out["governed"].as_str().unwrap().contains("POST /api/decision/pull"), "{out}");
+        }
+        // The same routes without a slot go on to the game, as before (no token here: 502).
+        assert_eq!(post_to(&p, "/api/tools/openttd.ai.set_setting", json!({"company": 0, "name": "rail_a", "value": 1})).0, 502);
+        assert_eq!(post_to(&p, "/api/rpc", json!({"method": "tools/call", "params": {"name": "openttd.ai.set_setting",
+                                                                                     "arguments": {"company": 0, "name": "rail_a", "value": 1}}})).0, 502);
+        assert_eq!(post_to(&p, "/api/rpc", json!({"method": "tools/list"})).0, 502);
     }
 }

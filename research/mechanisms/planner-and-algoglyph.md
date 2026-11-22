@@ -58,7 +58,10 @@ flowchart TB
   better line's tiles are blocked and the second line is laid from a platform beside it.
 - **Investment** (`invest.rs`). The same facts handed to the kernel that satisfies
   `routes-by-return` (today `transport-investment`). It also considers routes through a hub,
-  ranked by return on investment.
+  ranked by return on investment. The kernel prices routes from the payment formula alone, so the
+  planner's `calibration` is applied to every route it returns: monthly profit scaled by the
+  mode's ratio, the lowest one for a route of several legs, then the kernel's own score and ROI
+  recomputed (`invest.rs calibrated`).
 - **Action plan.** `POST /api/actionplan` turns a set of actions with dependencies into a
   validated DAG and executable steps through `action-plan`, refused if it would overdraw.
 - **Calibration** (`calibrate.rs`). Running lines with a whole year of profit are matched to the
