@@ -1,0 +1,46 @@
+id: I0098
+milestone: prismatic-steers-a-company-through-the-bridge
+title: "Battlebrain chooses its computation from the discovered AlgoGlyph catalogue: typed capabilities, one adapter registry at the protocol boundary, a deterministic matcher that refuses with structured reasons, and a capability-match record per run"
+slug: battlebrain-capabilities
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Declare every computation Battlebrain needs as a typed capability (inputs and outputs with units) in one table, CAPABILITIES in battlebrain_contract.rs. A matcher selects the kernel of the discovered catalogue that satisfies a capability. It uses only the catalogue (id, engine, input shape) and the adapter registry ADAPTERS, which is the one explicit kernel list, with an owner and a retirement criterion. Several compatible kernels are ranked (exact, then a verified shape), and a remaining tie is refused as ambiguous_capability. An unknown capability, one with no adapter, an expired kernel and an incompatible one are each refused with their own code. Each match is written as a capability-match/v1 inference record; battlebrain capabilities prints the match table; shadow and live take --catalogue."
+why: "Phase 05 of the owner-run Battlebrain prompt pack: the policy must not depend on a hand-maintained kernel list, and a run must record which kernel of which catalogue it relied on."
+scope:
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs"
+  - "tools/research/schema/capability-match.v1.schema.json"
+  - "research/battlebrain/**"
+non_scope:
+  - "Any change in algoglyph or prismatic-platform (the AlgoGlyph-side gap is a written proposal only)"
+  - "Routing the planner's own kernel calls (cargo.rs, linecost.rs, mcp-plan.rs) through the matcher"
+depends_on:
+  - I0097
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#a-decision-contract-is-defined"
+acceptance_criteria:
+  - "on the real catalogue fixture (algoglyph 1b8e009, 53 kernels) portfolio-within-budget resolves to knapsack-dp and rail-line-price to track-planning (unit test)"
+  - "unknown_capability, no_adapter, kernel_expired, no_match (engine_mismatch, input_shape_drift, unmapped_field, unknown_field) and ambiguous_capability are each refused on synthetic catalogues or adapters, and a synthetic kernel without an adapter is never chosen (unit tests)"
+  - "a capability-match inference validates, and one whose chosen kernel is not a compatible candidate is refused (unit tests)"
+  - "a live run with --catalogue is refused when a capability has no kernel or the planner used another one; the decision's records are unchanged (unit tests)"
+  - "the committed capability-match schema and the README match table are the generated ones (unit tests)"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-panel --bin mcp-plan"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+started_at: 2026-11-22T12:17:38Z
+started_event: sha256:1264959e2cc848fff16505f9d4b12a09ede71a826b0872a32a50fe44d7c1e356
+updated_at: 2026-11-22T12:18:03Z
+verified_at: 2026-11-22T12:17:45Z
+verified_event: sha256:397c2fc10fe86f6b6e690e2a7c4ecdf31fa90fcadc908f6dfba612a8b5470a9c
+completed_at: 2026-11-22T12:18:03Z
+completed_event: sha256:201341682193e50eeac03d5d1aac5ae49a10ab9f03298cd74920d01dfa4c5a77
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-panel --bin mcp-plan"
+    result: "battlebrain 43 passed, mcp-panel 234 passed, mcp-plan 57 passed, 0 failed"
+    commit: ceef50d19ead93a690a3db556637eb30077d4adb
+    recorded_at: 2026-11-22T12:17:55Z
