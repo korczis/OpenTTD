@@ -4,7 +4,7 @@ This directory is part of this fork's own process scaffolding, not upstream Open
 
 ## Gating model
 
-Six layers: four `tools/gate.sh` tiers of increasing cost, the experiment report, and the published-surfaces check. Match the layer to the size of the change — don't run `full` for a one-line doc fix, and don't call a source change "done" on `smoke` alone.
+Seven layers: four `tools/gate.sh` tiers of increasing cost, the experiment report, the published-surfaces check, and the Research Rust check in CI. Match the layer to the size of the change — don't run `full` for a one-line doc fix, and don't call a source change "done" on `smoke` alone.
 
 | Layer | Entry point | Cost | When |
 |---|---|---|---|
@@ -14,6 +14,7 @@ Six layers: four `tools/gate.sh` tiers of increasing cost, the experiment report
 | Research | `tools/gate.sh research` | standard+ | a change to code behind `OPTION_RESEARCH_INSTRUMENTATION` (or the MCP server option), which the other tiers never compile |
 | Research/evaluation | this directory | n/a | records what was actually done and validated for an experiment |
 | Published surfaces | `tools/surfaces/surfaces check` | seconds | runs inside `change`, the pre-commit hook and CI: Markdown regions current, every relative link and anchor resolving |
+| Research Rust | [`.github/workflows/research-rust.yml`](../.github/workflows/research-rust.yml) | minutes | CI, on every pull request and push to master: `cargo test --release` for `battlebrain`, `mcp-plan`, `mcp-intent` and `mcp-panel` (the decision-authority boundaries B1-B8, the decision contract and executor, the knapsack checks); succeeds without building when no path the tests compile or read changed |
 
 `tools/gate.sh --help` documents the exact commands each layer runs. A tier that had to leave the `regression_*` cases out because no base graphics set is reachable says so, reports them as NOT RUN and exits 3 (PARTIAL), never PASS -- see [baseset-prerequisite-macos.md](./baseset-prerequisite-macos.md). The four `tools/gate.sh` tiers are thin wrappers around this repo's own existing CMake/CTest toolchain (see `CLAUDE.md`) — there is no separate lint/format gate because no such tool (e.g. a `.clang-format` config) currently exists in this codebase; don't fake one.
 
