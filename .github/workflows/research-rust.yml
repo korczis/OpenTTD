@@ -27,6 +27,10 @@ on:
     - '.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds.md'
     - 'src/window_type.h'
     - '.github/workflows/research-rust.yml'
+    - '.gitmodules'
+    - 'tools/research/vendor/**'
+    - 'tools/research/algoglyph-pin'
+    - 'tools/research/test_algoglyph_pin.py'
   # Manual runs. No CI job pushes to a pull request's branch any more (surfaces.yml, the note
   # above `pages`), so nothing dispatches this workflow there.
   workflow_dispatch:
@@ -89,7 +93,7 @@ jobs:
           pattern+='|research/(results|battlebrain|prismatic-bridge|mechanisms)/'
           pattern+='|\.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds\.md$'
           pattern+='|src/window_type\.h$|\.github/workflows/research-rust\.yml$'
-          pattern+='|\.gitmodules$|tools/research/vendor/|tools/research/(test_)?algoglyph[-_]pin(\.py)?$)'
+          pattern+='|\.gitmodules$|tools/research/vendor/|tools/research/(algoglyph-pin|test_algoglyph_pin\.py)$)'
           matched=$(git diff --name-only "$base" HEAD | grep -E "$pattern" || true)
           if [ -n "$matched" ]; then
             echo "Changed since $base:"
