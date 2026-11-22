@@ -97,6 +97,8 @@ REF_FIELD = re.compile(r"(\w+)=(-?\d+)")
 MODES = ("rail", "road", "air", "water")
 # An AI's Squirrel error: "dbg: [script:1] [<company>] [S] <text>".
 SQ_ERROR = re.compile(r"\[script:\d\] \[(\d+)\] \[S\] ")
+# The referee's shared producers: an industry whose output rail stations of several companies catch.
+REF_SHARED = re.compile(r"REF S date=(\d+)-(\d+) ind=(\d+) owners=([\d,]+) name=(.*)$")
 
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
             "-o", "ControlMaster=auto", "-o", "ControlPersist=120",
@@ -1210,6 +1212,37 @@ def parse_log(text: str) -> tuple[dict, dict]:
     for (cid, _y, _mo), s in sorted(by_key.items()):
         series.setdefault(cid, []).append(s)
     return series, errors
+
+
+def parse_shared(text: str) -> dict[int, dict]:
+    """{industry id: {"name", "owners": the company ids, "first": the first quarter seen}} from a
+    match log's REF S lines: every producer whose output rail stations of two or more companies
+    caught in some quarter, the owners of every such quarter together."""
+    shared: dict[int, dict] = {}
+    for line in text.splitlines():
+        m = REF_SHARED.search(line)
+        if not m:
+            continue
+        y, mo, ind, owners, name = m.groups()
+        e = shared.setdefault(int(ind), {"name": name.strip(), "owners": set(),
+                                         "first": f"{y}-{int(mo):02d}"})
+        e["owners"] |= {int(o) for o in owners.split(",") if o}
+    return shared
+
+
+def sibling_producers(m: dict) -> list[str]:
+    """The fitness failures of producers that two or more PrismaticAI companies of one match serve
+    by rail (`m["shared"]` from parse_shared, keyed by company id in start order). Two lines at one
+    mine split its output: the owner's live game of 2026-11-22 had four PrismaticAI companies stall
+    from 1952 on exactly this (research/incident-2026-11-22-sibling-industries.md)."""
+    prismatic = {i: c["key"] for i, c in enumerate(m["lineup"]) if c["ai"].startswith("PrismaticAI")}
+    fails = []
+    for ind, e in sorted(m.get("shared", {}).items()):
+        ours = sorted(prismatic[o] for o in e["owners"] if o in prismatic)
+        if len(ours) >= 2:
+            fails.append(f"shared_producer:{e['name']} (industry {ind}, from {e['first']}): "
+                         + " + ".join(ours))
+    return fails
 
 
 def standings_of(m: dict, rules: dict | None = None) -> list[dict]:
@@ -2536,6 +2569,7 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
         elif c["key"] not in fit.get("must_not_hoard", fit.get("must_be_healthy", [])):
             bad = [b for b in bad if not b.startswith("hoards")]
         fails += [f"{c['key']}: {b}" for b in bad]
+    fails += sibling_producers(m)
     # The owner's order (2026-11-19): PrismaticAI is never last. By final value on the fitness seed.
     finals = sorted(((s[-1]["value"] if s else 0), k) for k, s in
                     ((c["key"], m["series"].get(c["key"], [])) for c in m["lineup"]))
@@ -2602,12 +2636,17 @@ def cmd_fitness(cfg: dict) -> int:
                  "series": {lineup[c]["key"]: s for c, s in series.items() if c < len(lineup)},
                  "errors": {lineup[c]["key"]: n for c, n in errors.items() if c < len(lineup)}}
             m["status"] = match_status(m, proc.returncode)
+            m["shared"] = parse_shared(out)
             for c in lineup:
                 s = m["series"].get(c["key"], [])
                 peak, final = fleet_peak_final(s)
                 print(f"fitness[{i}]: {c['key']:26} value {s[-1]['value'] if s else 0:>12,}  vehicles "
                       f"peak {peak:>4} final {final:>4}  "
                       f"{' '.join(anomalies(s, m['errors'].get(c['key'], 0), fit['rules'])) or 'ok'}")
+            for ind, e in sorted(m["shared"].items()):
+                owners = ", ".join(lineup[o]["key"] if o < len(lineup) else f"company {o}"
+                                   for o in sorted(e["owners"]))
+                print(f"fitness[{i}]: shared producer {e['name']} (industry {ind}) from {e['first']}: {owners}")
             fails += [f"[{i}] {f}" for f in fitness_verdict(m, fit)]
     for f in fails:
         print(f"fitness: FAIL {f}", file=sys.stderr)

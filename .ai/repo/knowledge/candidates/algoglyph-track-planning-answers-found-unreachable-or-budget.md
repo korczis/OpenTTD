@@ -22,7 +22,7 @@ provenance:
 # Fact
 
 AlgoGlyph's kernel types its answer as `status: 'found' | 'unreachable' | 'budget'`
-(algoglyph `src/plates/track-planning/plan.ts:127` at `origin/HEAD` 30a56ef; `found` is returned
+(`algoglyph:src/plates/track-planning/plan.ts:127` at `origin/HEAD` 30a56ef; `found` is returned
 at :363, the other two through `empty()` at :366). There is no `ok`. A `found` plan carries a
 finite cost and its pieces; `unreachable` and `budget` carry cost `Infinity` and no pieces.
 

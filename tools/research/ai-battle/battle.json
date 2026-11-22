@@ -155,6 +155,24 @@
         {
           "ai": "AdmiralAI"
         }
+      ],
+      [
+        {
+          "ai": "PrismaticAI",
+          "label": "PrismaticAI sibling A",
+          "settings": "aggressiveness=100,max_routes=30,intercity=1,own_lines=8,cash_reserve=5000,self_steward=1"
+        },
+        {
+          "ai": "PrismaticAI",
+          "label": "PrismaticAI sibling B",
+          "settings": "aggressiveness=100,max_routes=30,intercity=1,own_lines=8,cash_reserve=5000,self_steward=1"
+        },
+        {
+          "ai": "AAAHogEx"
+        },
+        {
+          "ai": "LuDiAI AfterFix"
+        }
       ]
     ]
   },
