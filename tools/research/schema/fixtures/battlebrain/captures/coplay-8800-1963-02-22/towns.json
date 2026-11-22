@@ -1,0 +1,2292 @@
+{
+  "availability": "available",
+  "data": {
+    "towns": [
+      {
+        "companies": [
+          {
+            "active_stations": 1,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 197,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 413,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 122,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 465,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 3,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 4088,
+        "growth_rate": 5669,
+        "houses": 40,
+        "id": 0,
+        "max_noise": 4,
+        "name": "Sundingham",
+        "noise_reached": 6,
+        "population": 1325,
+        "road_build_months": 0,
+        "tile": 28057,
+        "x": 153,
+        "y": 109
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 163,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -24,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 365,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 465,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -895,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 48,
+        "growth_rate": 7769,
+        "houses": 24,
+        "id": 1,
+        "max_noise": 3,
+        "name": "Nenham",
+        "noise_reached": 6,
+        "population": 440,
+        "road_build_months": 0,
+        "tile": 10871,
+        "x": 119,
+        "y": 42
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 1,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 802,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 7,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 370,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 482,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 468,
+        "growth_rate": 489,
+        "houses": 174,
+        "id": 2,
+        "max_noise": 11,
+        "name": "Fondham",
+        "noise_reached": 5,
+        "population": 6454,
+        "road_build_months": 0,
+        "tile": 59292,
+        "x": 156,
+        "y": 231
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 55,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": -365,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 485,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 465,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 1503,
+        "growth_rate": 3569,
+        "houses": 40,
+        "id": 3,
+        "max_noise": 4,
+        "name": "Brentston",
+        "noise_reached": 7,
+        "population": 1350,
+        "road_build_months": 0,
+        "tile": 58960,
+        "x": 80,
+        "y": 230
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 200,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 5,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 256,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 465,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 3,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -998,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -20,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 20,
+        "growth_rate": 1819,
+        "houses": 80,
+        "id": 4,
+        "max_noise": 6,
+        "name": "Tennville",
+        "noise_reached": 6,
+        "population": 2549,
+        "road_build_months": 0,
+        "tile": 16736,
+        "x": 96,
+        "y": 65
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 1,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 360,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 4,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 95,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 482,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -660,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -635,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 2955,
+        "growth_rate": 3569,
+        "houses": 44,
+        "id": 5,
+        "max_noise": 4,
+        "name": "Flutborough",
+        "noise_reached": 6,
+        "population": 1215,
+        "road_build_months": 0,
+        "tile": 44501,
+        "x": 213,
+        "y": 173
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 1,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 3,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 3,
+            "rating": 910,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": 272,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 179,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 8,
+        "growth_rate": 629,
+        "houses": 140,
+        "id": 6,
+        "max_noise": 9,
+        "name": "Grontston",
+        "noise_reached": 6,
+        "population": 5030,
+        "road_build_months": 0,
+        "tile": 47925,
+        "x": 53,
+        "y": 187
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 25,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 5,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": 436,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 330,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 82,
+        "growth_rate": 1819,
+        "houses": 73,
+        "id": 7,
+        "max_noise": 5,
+        "name": "Denningbury",
+        "noise_reached": 5,
+        "population": 2037,
+        "road_build_months": 0,
+        "tile": 41086,
+        "x": 126,
+        "y": 160
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 465,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 4,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 335,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -996,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 1018,
+        "growth_rate": 3569,
+        "houses": 42,
+        "id": 8,
+        "max_noise": 4,
+        "name": "Grinningwell Ridge",
+        "noise_reached": 6,
+        "population": 1391,
+        "road_build_months": 0,
+        "tile": 55015,
+        "x": 231,
+        "y": 214
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 6,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 455,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 55,
+        "growth_rate": 1819,
+        "houses": 58,
+        "id": 9,
+        "max_noise": 5,
+        "name": "Harnhall",
+        "noise_reached": 6,
+        "population": 1993,
+        "road_build_months": 0,
+        "tile": 9048,
+        "x": 88,
+        "y": 35
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 1,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 235,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 15,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 4,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -229,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 482,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 1,
+            "rating": 467,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 3,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 4,
+            "rating": -139,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 7,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 4,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 1,
+        "growth_rate": 349,
+        "houses": 252,
+        "id": 10,
+        "max_noise": 16,
+        "name": "Slintburg",
+        "noise_reached": 6,
+        "population": 10538,
+        "road_build_months": 0,
+        "tile": 43121,
+        "x": 113,
+        "y": 168
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 200,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 6,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 430,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 173,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 1792,
+        "growth_rate": 1819,
+        "houses": 56,
+        "id": 11,
+        "max_noise": 4,
+        "name": "Wunnington",
+        "noise_reached": 6,
+        "population": 1598,
+        "road_build_months": 0,
+        "tile": 36633,
+        "x": 25,
+        "y": 143
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 290,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": -983,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": -50,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 482,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 3,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 2412,
+        "growth_rate": 3569,
+        "houses": 44,
+        "id": 12,
+        "max_noise": 4,
+        "name": "Druham",
+        "noise_reached": 6,
+        "population": 1222,
+        "road_build_months": 0,
+        "tile": 6848,
+        "x": 192,
+        "y": 26
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 465,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 6,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 470,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -543,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -35,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 9,
+        "growth_rate": 1819,
+        "houses": 67,
+        "id": 13,
+        "max_noise": 5,
+        "name": "Sindingbury",
+        "noise_reached": 6,
+        "population": 1928,
+        "road_build_months": 0,
+        "tile": 7240,
+        "x": 72,
+        "y": 28
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 1,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -858,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 6,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 260,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 465,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 33,
+        "growth_rate": 489,
+        "houses": 183,
+        "id": 14,
+        "max_noise": 9,
+        "name": "Narfinghill",
+        "noise_reached": 5,
+        "population": 5376,
+        "road_build_months": 0,
+        "tile": 25167,
+        "x": 79,
+        "y": 98
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 6,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 456,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 3,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 1361,
+        "growth_rate": 1819,
+        "houses": 87,
+        "id": 15,
+        "max_noise": 6,
+        "name": "Renfingbourne Bridge",
+        "noise_reached": 6,
+        "population": 3198,
+        "road_build_months": 0,
+        "tile": 13846,
+        "x": 22,
+        "y": 54
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 200,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 5,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": 298,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 325,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -996,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -749,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -709,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 1104,
+        "growth_rate": 1819,
+        "houses": 77,
+        "id": 16,
+        "max_noise": 5,
+        "name": "Branwell City",
+        "noise_reached": 6,
+        "population": 2261,
+        "road_build_months": 0,
+        "tile": 29723,
+        "x": 27,
+        "y": 116
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 200,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 3,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 365,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 7652,
+        "growth_rate": 7769,
+        "houses": 21,
+        "id": 17,
+        "max_noise": 3,
+        "name": "Sonfingway",
+        "noise_reached": 3,
+        "population": 350,
+        "road_build_months": 0,
+        "tile": 23696,
+        "x": 144,
+        "y": 92
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 200,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 6,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 485,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 413,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 3,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 3,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 62,
+        "growth_rate": 909,
+        "houses": 90,
+        "id": 18,
+        "max_noise": 6,
+        "name": "Gartston",
+        "noise_reached": 5,
+        "population": 2871,
+        "road_build_months": 0,
+        "tile": 45927,
+        "x": 103,
+        "y": 179
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -630,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 6,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 440,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 465,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": 318,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": 994,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": 637,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 59,
+        "growth_rate": 1819,
+        "houses": 76,
+        "id": 19,
+        "max_noise": 5,
+        "name": "Flenham",
+        "noise_reached": 6,
+        "population": 2280,
+        "road_build_months": 0,
+        "tile": 47703,
+        "x": 87,
+        "y": 186
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 200,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 4,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 455,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 3,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 3231,
+        "growth_rate": 3569,
+        "houses": 43,
+        "id": 20,
+        "max_noise": 4,
+        "name": "Chonnton",
+        "noise_reached": 6,
+        "population": 1334,
+        "road_build_months": 0,
+        "tile": 15269,
+        "x": 165,
+        "y": 59
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 360,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": -63,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 200,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -945,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -885,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -921,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 3626,
+        "growth_rate": 11269,
+        "houses": 6,
+        "id": 21,
+        "max_noise": 3,
+        "name": "Plentbridge",
+        "noise_reached": 3,
+        "population": 106,
+        "road_build_months": 0,
+        "tile": 61570,
+        "x": 130,
+        "y": 240
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -815,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 5,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 315,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 197,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": -709,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 64,
+        "growth_rate": 909,
+        "houses": 93,
+        "id": 22,
+        "max_noise": 7,
+        "name": "New Slutway-on-sea",
+        "noise_reached": 6,
+        "population": 3625,
+        "road_build_months": 0,
+        "tile": 48265,
+        "x": 137,
+        "y": 188
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 0,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 200,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 3,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 200,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 4,
+            "has_rating": false,
+            "idle_stations": 0,
+            "rating": 500,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 3,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 4210,
+        "growth_rate": 7769,
+        "houses": 36,
+        "id": 23,
+        "max_noise": 4,
+        "name": "Budham",
+        "noise_reached": 6,
+        "population": 874,
+        "road_build_months": 0,
+        "tile": 52147,
+        "x": 179,
+        "y": 203
+      },
+      {
+        "companies": [
+          {
+            "active_stations": 1,
+            "company": 0,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 4,
+            "company": 1,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 1000,
+            "statue": true,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 2,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 200,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 3,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 465,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 1,
+            "company": 4,
+            "has_rating": true,
+            "idle_stations": 0,
+            "rating": 384,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 5,
+            "has_rating": true,
+            "idle_stations": 2,
+            "rating": 988,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 0,
+            "company": 6,
+            "has_rating": true,
+            "idle_stations": 3,
+            "rating": -1000,
+            "statue": false,
+            "unwanted_months": 0
+          },
+          {
+            "active_stations": 2,
+            "company": 7,
+            "has_rating": true,
+            "idle_stations": 1,
+            "rating": 1000,
+            "statue": false,
+            "unwanted_months": 0
+          }
+        ],
+        "exclusive_months": 0,
+        "exclusivity": null,
+        "fund_buildings_months": 0,
+        "grow_counter": 1435,
+        "growth_rate": 1819,
+        "houses": 73,
+        "id": 24,
+        "max_noise": 5,
+        "name": "Flartbourne",
+        "noise_reached": 6,
+        "population": 2065,
+        "road_build_months": 0,
+        "tile": 14792,
+        "x": 200,
+        "y": 57
+      }
+    ]
+  },
+  "game_date": "1963-02-22",
+  "game_mode": "normal",
+  "game_tick": 356550,
+  "next_cursor": null,
+  "protocol_version": "2025-11-25",
+  "redactions": [],
+  "schema_version": "1.0",
+  "source": "OpenTTD",
+  "source_revision": "20261122-research-coplay-mf7b71d8b3d",
+  "truncated": false
+}

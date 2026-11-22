@@ -651,10 +651,12 @@ pub fn keyed<F: FnOnce() -> Result<(u16, Value), String>>(key: Option<&str>, now
 /// step is tried and published in plan.directive with the state it reached, also when a call fails;
 /// a failed call then answers 502 with the lines so far.
 /// The key it ran under (step 3, `keyed`) is recorded in plan.directive's `inputs.live.key`.
-/// Whether a directive's `decision` block (battlebrain-decision/v1, I0096) lets it be applied. No
-/// block: yes, as before. A block that breaks its contract: 422. A block in mode shadow: 409, always;
-/// a shadow decision never reaches the game. Pure: the caller records and answers the refusal.
-pub fn decision_gate(raw: &Value) -> Result<(), (u16, &'static str, Vec<String>)> {
+/// Whether a directive's `decision` block (battlebrain-decision/v1, I0096/I0097) lets it be applied.
+/// No block: yes, as before. A block that breaks its contract: 422. A block in mode shadow: 409,
+/// always; a shadow decision never reaches the game. A live block is applied only through a keyed
+/// pull whose key is the block's idempotency key (so it runs once: `keyed`), and only on or before
+/// its stale date in game time (`today`, the game's date now). Pure: the caller records and answers.
+pub fn decision_gate(raw: &Value, key: Option<&str>, today: Option<&str>) -> Result<(), (u16, &'static str, Vec<String>)> {
     let Some(block) = raw.get("decision") else { return Ok(()) };
     if let Err(rs) = crate::battlebrain_contract::validate_decision_block(block) {
         return Err((422, "invalid_decision_block", rs.iter().map(|r| format!("decision.{}: {} ({})", r.path, r.message, r.code)).collect()));
@@ -662,7 +664,15 @@ pub fn decision_gate(raw: &Value) -> Result<(), (u16, &'static str, Vec<String>)
     if block["mode"] != "live" {
         return Err((409, "shadow_refused", vec![format!("decision {} is a {} decision; only live decisions are applied", block["decision"], block["mode"])]));
     }
-    Ok(())
+    let want = block["idempotency_key"].as_str().unwrap_or_default();
+    if key != Some(want) {
+        return Err((409, "key_mismatch", vec![format!("a live decision is applied only by a pull keyed with its idempotency key {want:?}, not {key:?}")]));
+    }
+    match (today, block["valid_until"].as_str()) {
+        (Some(t), Some(until)) if t <= until => Ok(()),
+        (Some(t), Some(until)) => Err((409, "stale_decision", vec![format!("the decision was valid until {until}; the game is at {t}")])),
+        _ => Err((409, "stale_decision", vec!["the game's date cannot be read, so the decision's freshness cannot be checked".into()])),
+    }
 }
 
 pub fn pull_with(g: &Arc<Game>, url: &str, key: Option<&str>) -> Result<(u16, Value), String> {
@@ -687,7 +697,8 @@ pub fn pull_with(g: &Arc<Game>, url: &str, key: Option<&str>) -> Result<(u16, Va
     // The executor boundary of the Battlebrain decision (I0096): a directive carrying a decision
     // block is applied only when the block is valid battlebrain-decision/v1 and its mode is live; a
     // shadow decision is refused here, before any step, whoever submits it.
-    if let Err((status, outcome, errors)) = decision_gate(&raw) {
+    let today = raw.get("decision").and_then(|_| game_time(g).ok()).and_then(|(_, d)| d.as_str().map(str::to_string));
+    if let Err((status, outcome, errors)) = decision_gate(&raw, key, today.as_deref()) {
         g.event("ai", &format!("Prismatic's directive ({url}) is not applied: {}", errors.join("; ")));
         let mut data = directive_event(url, &raw, Err(&errors), &ignored, &[]);
         data["choice"]["outcome"] = json!(outcome);
@@ -769,21 +780,28 @@ mod tests {
     #[test]
     fn a_shadow_or_broken_decision_block_never_passes_the_executor() {
         // I0096: the executor boundary. A directive without a block is unaffected.
-        assert!(decision_gate(&json!({"company_id": 3, "settings": "fr_from=13"})).is_ok());
+        let (k, today) = (Some("i:3:1953-02-09:freight-line"), Some("1953-02-20"));
+        assert!(decision_gate(&json!({"company_id": 3, "settings": "fr_from=13"}), None, None).is_ok());
         let block = |mode: &str| json!({"schema": "battlebrain-decision/v1", "decision": format!("bb:{}", "1".repeat(64)),
             "snapshot_digest": format!("sha256:{}", "2".repeat(64)), "idempotency_key": "i:3:1953-02-09:freight-line",
             "policy": "freight-margin@1", "valid_until": "1953-03-12", "mode": mode});
-        let shadow = decision_gate(&json!({"company_id": 3, "settings": "fr_from=13", "decision": block("shadow")})).unwrap_err();
+        let shadow = decision_gate(&json!({"company_id": 3, "settings": "fr_from=13", "decision": block("shadow")}), k, today).unwrap_err();
         assert_eq!((shadow.0, shadow.1), (409, "shadow_refused"));
-        assert!(decision_gate(&json!({"company_id": 3, "decision": block("live")})).is_ok());
-        let unknown = decision_gate(&json!({"company_id": 3, "decision": block("auto")})).unwrap_err();
+        assert!(decision_gate(&json!({"company_id": 3, "decision": block("live")}), k, today).is_ok());
+        // I0097: a live decision runs only through a pull keyed with its own key, and only while fresh.
+        assert_eq!(decision_gate(&json!({"company_id": 3, "decision": block("live")}), None, today).unwrap_err().1, "key_mismatch");
+        assert_eq!(decision_gate(&json!({"company_id": 3, "decision": block("live")}), Some("other"), today).unwrap_err().1, "key_mismatch");
+        assert_eq!(decision_gate(&json!({"company_id": 3, "decision": block("live")}), k, Some("1953-03-13")).unwrap_err().1, "stale_decision");
+        assert_eq!(decision_gate(&json!({"company_id": 3, "decision": block("live")}), k, None).unwrap_err().1, "stale_decision");
+        assert!(decision_gate(&json!({"company_id": 3, "decision": block("live")}), k, Some("1953-03-12")).is_ok(), "the last valid day");
+        let unknown = decision_gate(&json!({"company_id": 3, "decision": block("auto")}), k, today).unwrap_err();
         assert_eq!((unknown.0, unknown.1), (422, "invalid_decision_block"));
         let mut v2 = block("live");
         v2["schema"] = json!("battlebrain-decision/v2");
-        assert_eq!(decision_gate(&json!({"company_id": 3, "decision": v2})).unwrap_err().0, 422);
+        assert_eq!(decision_gate(&json!({"company_id": 3, "decision": v2}), k, today).unwrap_err().0, 422);
         let mut nokey = block("live");
         nokey.as_object_mut().unwrap().remove("idempotency_key");
-        assert_eq!(decision_gate(&json!({"company_id": 3, "decision": nokey})).unwrap_err().0, 422);
+        assert_eq!(decision_gate(&json!({"company_id": 3, "decision": nokey}), k, today).unwrap_err().0, 422);
     }
 
     use super::*;

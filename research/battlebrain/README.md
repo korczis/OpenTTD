@@ -3,7 +3,8 @@
 RESEARCH-ONLY. Status:
 - **Phase 02 (contracts, I0095):** done.
 - **Phase 03 (shadow mode, I0096):** done, with one shadow run on a real capture.
-- **Cutover (Phase 04):** not built. Nothing here reaches a game.
+- **Live gates (I0097):** built and tested on three real captures.
+- **The live cutover itself:** not run. Nothing here has reached a game.
 
 ## Decided so far (owner, 2026-11-22)
 
@@ -95,7 +96,14 @@ adapters at a protocol boundary, because the runner's outputs carry no schema.
 The shadow run goes in four steps, and nothing in them reaches a game:
 
 1. `mcp-plan --capture <dir>` writes every `openttd://` read with its sha256 and game tick, plus
-   `openttd://companies`. It is one pass of GET requests only.
+   `openttd://companies`. It only reads. When the server lists `openttd.resources.read_many` as
+   read-only, every read comes from one call of that tool, so the capture is one game tick and
+   `window.coherent` is true. The set of resources that call reads is not written down anywhere:
+   the plan runs on what one call returned, and every name it asked for that was missing is added
+   for the next call, until a run asks for nothing outside its set. That run's answer is the one
+   captured. When the tool is absent, not read-only or refused, or the plan reads more resources
+   than one call accepts (at most 32), the capture reads each resource on its own as before.
+   `capture.json`'s `coherence` field then says why, for example `read_many not offered: ...`.
 2. `mcp-plan --snapshot <dir>` replays the capture and refuses any file whose digest changed.
 3. `battlebrain snapshot` turns the capture into a snapshot record. The record carries the tick
    window and states whether the capture is coherent.
@@ -126,6 +134,38 @@ the capture is under
 - Battlebrain picks a line with a better annual return that it can afford, but the line has no
   track-planning price.
 
+## Three real captures with freight-margin@2 (I0097)
+
+The captures come from the owner's co-play game on :8800, company 3: three read-only passes,
+each with the consent of the game's owner session. Every replay and every shadow run gave
+byte-identical output twice. The summaries below are derived from their records by
+`battlebrain report`.
+
+| capture (game date) | divergence | planner v4 | battlebrain (freight-margin@2) |
+|---|---|---|---|
+| [1953-02-09](../results/battlebrain-shadow-20261122T084607Z-coplay-8800-freight-margin-2.md) | `input_model_discrepancy` | 41→1, priced, but over budget once the reserve is kept | 0→1, priced, affordable |
+| [1962-05-29](../results/battlebrain-shadow-20261122T104111Z-coplay-8800-freight-margin-2.md) | `input_model_discrepancy` | 29→34, never priced by track-planning | 41→1, priced |
+| [1963-02-22](../results/battlebrain-shadow-20261122T105052Z-coplay-8800-freight-margin-2.md) | `same` | 41→1, priced | 41→1, priced |
+
+None of the divergences is a `defect`. In each case the planner either ignores the money the
+company has now (it prices its portfolio against `max_loan`) or picks a line it never priced
+(track-planning priced 16 of 40 candidates). None of the three captures is coherent: they span
+28 to 43 ticks while the game runs. `openttd.resources.read_many` (#39) and a coherent
+`mcp-plan --capture` are the fix.
+
+**`battlebrain live`** writes the live directive only after these checks:
+
+- the snapshot window is at most `--max-window-ticks`, which defaults to 0, meaning one tick;
+- the policy requires priced lines;
+- the companies were read after the snapshot.
+
+The directive sets `planned_freight_only=1` and one `fr_*` slot.
+
+- `battlebrain serve --once` hands the directive out to exactly one loopback GET.
+- The executor applies a live block only through a pull keyed with the block's own idempotency
+  key, on or before its stale date in game time.
+- `battlebrain rollback` gives the directive back to the baseline (`planned_freight_only=0`).
+
 ## Cutover thresholds (the Phase 04 gate)
 
 A decision may go live only when all of these hold. Each one is a correctness or safety
@@ -144,7 +184,8 @@ condition, not output equality:
 ## Not yet done
 
 - Cutover (Phase 04): no live decision, no rollback switch, no live run.
-- Only one real capture exists, and it is not coherent.
+- Only one real capture exists, and it is not coherent. A coherent capture through
+  `read_many` is unit-tested against a fake server answer and has not been taken on a live game yet.
 - A planner adapter limitation: the baseline is the portfolio's best-scored freight rail line,
   not the bot's slot order from `settings_from_plan`.
 - AlgoGlyph still has no kernel version, output schema or units. The invocation envelope pins

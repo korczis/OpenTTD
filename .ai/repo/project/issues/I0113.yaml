@@ -1,0 +1,30 @@
+id: I0113
+milestone: records-and-status-tell-the-truth
+title: "The gap record of the agent-channels intent is re-observed on current master: resolved gaps closed with their evidence, live gaps restated"
+slug: agent-channels-gap-reobserved
+priority: p2
+profile: implementation
+parallel_safe: true
+objective: "Re-observe .ai/repo/project/gaps/an-agent-plays-the-game-through-governed-channels.yaml at a current master commit: every observation is either kept with fresh evidence, or marked resolved by the commit, issue or result that resolved it. New gaps that the external review confirmed (for example: no live Battlebrain decision, approver identity not authenticated, live exercise coverage of MCP tools about 2%) are recorded with their evidence."
+why: "External review 2026-11-22 (digest A-12). The gap record was observed at 81b26a6497a on 2026-11-15 and still states that the MCP server lives on research/prismatic-mcp-server with none of it on master, and that the determinism A/B was not run. Both were resolved long ago (M5 is 53/53 done; determinism-ab exists). A gap record that lists resolved gaps hides the real ones."
+scope:
+  - ".ai/repo/project/gaps/**"
+  - ".ai/repo/project/critiques/**"
+non_scope:
+  - "Fixing the gaps themselves; each live gap points to the issue that owns it"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#status-surfaces-match-the-code"
+acceptance_criteria:
+  - "observed_at names a current master commit and recorded_by names who re-observed it"
+  - "Every observation has a source that resolves on that commit (file:, command:, or an issue id)"
+  - "Resolved observations cite the commit or issue that resolved them; none is silently deleted"
+  - "Each live gap names the open issue (I0110+) that owns it, or says no issue owns it yet"
+  - "If the other gap and critique records share the stale observations, they are re-observed the same way"
+validation:
+  - "majordomus intent validate"
+  - "majordomus doctor"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

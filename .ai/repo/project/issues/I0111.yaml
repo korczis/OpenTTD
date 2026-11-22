@@ -1,0 +1,30 @@
+id: I0111
+milestone: records-and-status-tell-the-truth
+title: "No tracked text claims a shipped MCP capability is absent or planned: the server header and research/mcp-control.md describe today's code"
+slug: stale-mcp-capability-text
+priority: p2
+profile: implementation
+parallel_safe: true
+objective: "Rewrite the stale passages so they describe what master implements, and add a cheap check that keeps the known false phrases from returning."
+why: "External review 2026-11-22 (digest C-08, C-09). src/prismatic_mcp/prismatic_mcp_server.cpp:15-18 still says 'Tools, the approval workflow and mutations are staged behind this transport ... It deliberately does NOT expose any mutation yet', while the same file implements approval-bound mutations. research/mcp-control.md:671 lists 'openttd.ai.* tools, client mode' as 'Planned, not yet in the game', although src/prismatic_mcp/prismatic_mcp_ai.cpp defines openttd.ai.* and the server has a client mode; the same document's Limits section already lists openttd.ai.* as approval-gated, so it contradicts itself."
+scope:
+  - "src/prismatic_mcp/prismatic_mcp_server.cpp"
+  - "research/mcp-control.md"
+  - "tools/check-prismatic-docs.sh"
+non_scope:
+  - "Behaviour changes; this issue edits comments and documentation only"
+depends_on:
+  - I0110
+serves:
+  - "openttd-validates-agent-driven-engineering#status-surfaces-match-the-code"
+acceptance_criteria:
+  - "The file header of prismatic_mcp_server.cpp lists what the server implements (reads, approval-gated tools, client mode) and points to the tool catalogue instead of the implementation plan"
+  - "research/mcp-control.md has no 'planned' entry for anything that exists on master; anything still genuinely planned names its branch or issue"
+  - "tools/check-prismatic-docs.sh (or a test it runs) fails when 'does NOT expose any mutation' or a planned-list entry for openttd.ai.* reappears in tracked files"
+validation:
+  - "tools/check-prismatic-docs.sh"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
