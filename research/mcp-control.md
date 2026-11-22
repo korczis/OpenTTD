@@ -492,6 +492,19 @@ each `plan.directive_outcome` as an `outcome` record that cites it (src/panel_me
 on its own thread, and whether it was written is a `panel.mesh` line; a refusal or an unreachable
 server never fails a directive. The bus and the store stay the record of truth.
 
+`mcp-e2e` derives both variables when they are unset, so a stack it starts writes to the mesh:
+the panel's mirror above, and the Rhai scripts and services that call `mesh_record_write` (e.g.
+`replan.rhai`'s `plan` record). `$MAJORDOMUS_URL` is the server `majordomus serve ensure --format
+json --repo <checkout>` names for the checkout `mcp-e2e` runs from. `$MAJORDOMUS_SESSION` is
+`task-<id>` of the task `majordomus context --json` reports active there: `majordomus start` claims
+the task's scope under that mesh session, on that server. Majordomus admits a write only inside the
+writing session's live claims. Without a server or an active task, the variable stays unset and
+`mcp-e2e` prints `mesh records off:` with the reason. The Rhai scripts then answer `mesh:
+configuration: ...` as before. A value the caller sets wins. An empty value keeps the stack off the
+mesh. `tools/research/mcp-e2e --env` prints the three variables a run would get
+(`PRISMATIC_MCP_SUPERVISOR`, `MAJORDOMUS_URL`, `MAJORDOMUS_SESSION`) and exits without starting
+anything. The extra stacks of `--instances N` inherit them.
+
 `POST /api/decision/pull {url, key}` with an idempotency `key` (1-128 letters, digits and `_ . : -`)
 runs once per key (research/agent-loop.md step 3): its first completed answer is kept for a day,
 and a repeat answers it again with `replayed: true`, applying nothing and publishing no second
@@ -1486,6 +1499,7 @@ entry whose owning process is gone is dropped on the next discovery.
 | one binary snapshot per stack | `mcp-e2e` copies the binary next to the original (`openttd-e2e-<pid>`) and runs the server and the client from it. A rebuild of the shared build directory then cannot reach a client the supervisor restarts. Before this, the server, still on the old revision, refused every restarted client with "wrong revision" |
 | `mcp-e2e --instances N` | N-1 more headless stacks, each with its own bot and a windowless client; a port that is taken (Majordomus holds 8741, another stack holds 8800) is replaced by a free one |
 | `mcp-e2e --no-gui --null-client` | a client without a window (null video driver) with its own MCP server joins as a spectator and is attached to the panel, supervised like the GUI client |
+| `mcp-e2e --env` | prints the Majordomus environment a run would get, each value derived when unset: `PRISMATIC_MCP_SUPERVISOR` (the active task), `MAJORDOMUS_URL` (this checkout's server) and `MAJORDOMUS_SESSION` (`task-<id>`); then exits without starting anything |
 
 `mcp-view-check` reads `openttd://game/state` from every live panel through this panel and
 expects a 404 for an unknown instance.
