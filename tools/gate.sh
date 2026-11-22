@@ -15,6 +15,11 @@ BASESET_DOC="research/baseset-prerequisite-macos.md"
 RESEARCH_BUILD_DIR="build-gate-research"
 # Every guard of research-only code, as cmake/Options.cmake defines it.
 GATED_MACROS='OTTD_RESEARCH_INSTRUMENTATION|OTTD_PRISMATIC_MCP_SERVER'
+# The words that name research-only code, matched case-insensitively: the fork's subsystem
+# (PrismaticMCP, prismatic_mcp, WID_TN_PRISMATIC, WindowClass::PrismaticAsk, STR_PRISMATIC_*), its
+# label (RESEARCH-ONLY), its guards (OTTD_RESEARCH_*) and the research console commands and their
+# state (research_status, _research_net_compat, ResearchNetCompat). Upstream code names neither.
+RESEARCH_WORDS='prismatic|research'
 # Extra CMake options for every configure this gate runs, word-split: e.g.
 # GATE_CMAKE_ARGS="-DOPTION_DEDICATED=ON" on a headless Linux host without SDL3 or Allegro, where
 # the default (GUI) configure stops at CMakeLists.txt "SDL3 or Allegro is required".
@@ -22,7 +27,7 @@ read -r -a GATE_CMAKE_EXTRA <<< "${GATE_CMAKE_ARGS:-}"
 
 usage() {
   cat <<EOF
-Usage: $SELF <smoke|change|research|full> [options]
+Usage: $SELF <smoke|change|research|research-free|full> [options]
 
   smoke     Cheapest check, for fast iteration. git diff --check, then an
             incremental build against the existing build/ directory.
@@ -49,9 +54,10 @@ Usage: $SELF <smoke|change|research|full> [options]
             (tools/knowledge/refs coverage src/, informational).
             Always proves the decision-authority boundaries (cargo test
             --bin battlebrain, offline; rule project.decision-authority-
-            boundaries) and, after the build, that the default binary
-            carries no research string (NOT RUN, so PARTIAL, when build/
-            is configured with a research option ON).
+            boundaries), that every source line naming research is inside
+            a research guard, and, after the build, that the default binary
+            carries no string naming research (NOT RUN, so PARTIAL, when
+            build/ is configured with a research option ON).
             When the change touches tools/research/real-world, also runs its
             cargo tests and replays the Brno snapshot against its recorded
             hashes (offline). When it touches the Rhai host's Prismatic client
@@ -66,6 +72,12 @@ Usage: $SELF <smoke|change|research|full> [options]
             once cmake/Options.cmake declares it), builds, runs the full
             ctest suite, proves the research console command is in the
             binary, and runs the [prismatic_mcp] tests when the server is built.
+
+  research-free [build-dir]
+            Only the two checks that a default build is free of research
+            code: the source guards, then 'strings' on build-dir/openttd
+            (default build/; NOT RUN, so PARTIAL, unless it is a default
+            build).
 
   full      Expensive clean-room validation: wipes and recreates
             build-fullgate/, configures + builds + tests from scratch.
@@ -318,11 +330,77 @@ authority_boundaries() {
     --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain
 }
 
+# B8 of that rule in the sources a default build compiles: every line of code that names research
+# (RESEARCH_WORDS) sits inside a research guard (GATED_MACROS), so no default-build path reaches a
+# research symbol or string, a STR_PRISMATIC_* among them (strgen cannot leave a string out of
+# english.txt, so it is the reference that must be guarded). Comments may name research freely.
+# src/prismatic_mcp/ is left out because CMake compiles none of it unless
+# OPTION_PRISMATIC_MCP_SERVER is ON, which is checked here as well.
+research_code_is_guarded() {
+  local list=src/prismatic_mcp/CMakeLists.txt hits
+  echo "==> every source line naming research is inside a research guard (rule project.research-code-is-gated-and-labelled)"
+  if [[ "$(grep -c 'add_files(' "$list")" -ne "$(grep -c 'CONDITION OPTION_PRISMATIC_MCP_SERVER' "$list")" ]]; then
+    echo "error: $list adds files without 'CONDITION OPTION_PRISMATIC_MCP_SERVER'" >&2
+    return 1
+  fi
+  hits="$(git ls-files -z -- 'src/*.cpp' 'src/*.h' 'src/*.hpp' ':!src/prismatic_mcp/' ':!src/3rdparty/' \
+    | xargs -0 awk -v words="$RESEARCH_WORDS" -v macros="$GATED_MACROS" '
+      # The code of a line: comments removed, a block comment carried over from the line before.
+      function code_of(line,    out, i, j) {
+        out = ""
+        while (line != "") {
+          if (in_comment) {
+            i = index(line, "*/")
+            if (i == 0) return out
+            line = substr(line, i + 2); in_comment = 0
+          } else {
+            i = index(line, "/*"); j = index(line, "//")
+            if (j > 0 && (i == 0 || j < i)) return out substr(line, 1, j - 1)
+            if (i == 0) return out line
+            out = out substr(line, 1, i - 1); line = substr(line, i + 2); in_comment = 1
+          }
+        }
+        return out
+      }
+      # 1 when the condition holds only with a research macro defined, 0 otherwise.
+      function positive(cond) { return cond ~ macros && cond !~ "!" }
+      FNR == 1 { depth = 0; in_comment = 0 }
+      {
+        code = code_of($0)
+        if (code ~ /^[ \t]*#[ \t]*if(def)?[ \t(!]/) {
+          depth++; gated[depth] = positive(code); other[depth] = (code ~ macros && !gated[depth])
+          next
+        }
+        if (code ~ /^[ \t]*#[ \t]*ifndef[ \t]/) {
+          depth++; gated[depth] = 0; other[depth] = (code ~ macros)
+          next
+        }
+        if (code ~ /^[ \t]*#[ \t]*elif/) { gated[depth] = positive(code); other[depth] = 0; next }
+        if (code ~ /^[ \t]*#[ \t]*else/) { gated[depth] = other[depth]; other[depth] = 0; next }
+        if (code ~ /^[ \t]*#[ \t]*endif/) { if (depth > 0) depth--; next }
+        if (tolower(code) !~ words) next
+        for (k = 1; k <= depth; k++) if (gated[k]) next
+        printf "%s:%d: %s\n", FILENAME, FNR, $0
+      }')"
+  if [[ -n "$hits" ]]; then
+    echo "error: research-only code outside a research guard ($GATED_MACROS):" >&2
+    printf '%s\n' "$hits" >&2
+    return 1
+  fi
+}
+
 # B8 of that rule on the binary itself: a default build carries no research code. Checked on the
 # build this tier just made when its cache says both research options are OFF; otherwise NOT RUN,
-# so PARTIAL, never PASS.
+# so PARTIAL, never PASS. Every string of the binary naming research (RESEARCH_WORDS) fails it: a
+# symbol, a debug-info name, a script-API constant, a console command or a label. Left out: the
+# paths of this checkout and of the build directory and the version string, which carry the branch
+# name (a worktree or branch may be called research/...), and a string that is only a StringID's
+# name (^STR_...$): GCC's debug info names every constant of the generated table/strings.h, used
+# or not (seen on lundra, 2026-11-22), and strgen cannot leave a string of english.txt out of a
+# build. That a STR_PRISMATIC_* is referenced only under a guard is research_code_is_guarded's job.
 default_build_free_of_research() {
-  local dir="$1" bin="$1/openttd" cache="$1/CMakeCache.txt" n
+  local dir="$1" bin="$1/openttd" cache="$1/CMakeCache.txt" hits rev
+  local -a known
   if [[ ! -f "$cache" ]]; then
     echo "default build free of research code: NOT RUN -- $dir is not configured"
     return "$EXIT_PARTIAL"
@@ -337,13 +415,26 @@ default_build_free_of_research() {
     echo "default build free of research code: NOT RUN -- no $dir/openttd binary"
     return "$EXIT_PARTIAL"
   fi
-  echo "==> strings $bin: a default build must carry no research string (rule project.decision-authority-boundaries, B8)"
-  # grep -c reads all of its input: grep -q would stop early and strings would die of SIGPIPE.
-  n="$(strings "$bin" | grep -cE '^research_status|RESEARCH-ONLY' || true)"
-  if [[ "$n" -ne 0 ]]; then
-    echo "error: $bin is a default build and carries $n research string(s)" >&2
+  known=(-e "$ROOT_DIR" -e "$(cd "$ROOT_DIR" && pwd -P)" -e "$(cd "$dir" && pwd -P)")
+  rev="$(sed -n 's/^const std::string _openttd_revision = "\(.*\)";$/\1/p' "$dir/generated/rev.cpp" 2>/dev/null || true)"
+  [[ -z "$rev" ]] || known+=(-e "$rev")
+  echo "==> strings $bin: a default build must carry no string naming research (rule project.decision-authority-boundaries, B8)"
+  # Each grep reads all of its input: grep -q would stop early and strings would die of SIGPIPE.
+  hits="$(strings "$bin" | grep -iE "$RESEARCH_WORDS" | grep -vF "${known[@]}" \
+    | grep -vE '^STR_[A-Z0-9_]+$' | sort | uniq -c || true)"
+  if [[ -n "$hits" ]]; then
+    echo "error: $bin is a default build and carries research string(s):" >&2
+    printf '%s\n' "$hits" | head -n 40 >&2
     return 1
   fi
+}
+
+# Both B8 checks, on their own: the sources, then the default binary of a build directory.
+cmd_research_free() {
+  local dir="${1:-build}" status=0
+  research_code_is_guarded
+  default_build_free_of_research "$dir" || status=$?
+  finish_tier research-free "$status"
 }
 
 cmd_smoke() {
@@ -398,6 +489,7 @@ cmd_change() {
       --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battle-postmortem -- check
   fi
   authority_boundaries
+  research_code_is_guarded
   echo "==> tools/knowledge/refs check"
   tools/knowledge/refs check
   echo "==> tools/research/e2e-coverage (rule project.web-ui-is-covered-end-to-end: every web UI page has a browser check)"
@@ -508,5 +600,6 @@ case "$1" in
   change) shift; cmd_change "$@" ;;
   research) shift; cmd_research "$@" ;;
   full) shift; cmd_full "$@" ;;
+  research-free) shift; cmd_research_free "$@" ;;
   *) echo "unknown command: $1" >&2; usage; exit 2 ;;
 esac

@@ -13,8 +13,10 @@
 //!   status()                           -> map   panel status: pending approvals, events
 //!   console(command)                   -> array the OpenTTD console output of one command
 //!   pause(on)                          -> map   set_pause through the approval flow
-//!   approve(id)                        -> map   the operator's approval of a pending decision
-//!   auto_approve(on)                   -> map
+//!   approve(id)                        -> error approval is the owner's: never from a script (the
+//!                                               console's `prismatic_mcp approve <id>`, or the panel's
+//!                                               Approve with the owner secret)
+//!   auto_approve(on)                   -> map   off only; switching it on is the owner's, an error here
 //!   events(since)  events(since, "game,company")  -> map  the panel's event feed after a sequence number
 //!   mcp_call(token_file, tool, args)  mcp_read(token_file, uri)  another process's own MCP server
 //!   world_plan(limit)                  -> map   town pairs ranked, each with its mode (bus, rail, air)
@@ -217,11 +219,13 @@ fn engine(panel: Panel) -> Engine {
     });
     let p = panel.clone();
     e.register_fn("pause", move |on: bool| -> R<Dynamic> { p.post("/api/pause", json!({"pause": on})) });
-    let p = panel.clone();
-    e.register_fn("approve", move |id: i64| -> R<Dynamic> { p.post("/api/approve", json!({"id": id})) });
+    // Approval is the owner's act, so a script never gives one: it holds no owner secret, and an
+    // owner-only tool waits for the game's console in any case (panel.rs OWNER_ONLY_TOOLS).
+    e.register_fn("approve", |id: i64| -> R<Dynamic> { Err(script_cannot_approve(&format!("approve({id})")).into()) });
     let p = panel.clone();
     e.register_fn("auto_approve", move |on: bool| -> R<Dynamic> {
-        p.post("/api/auto-approve", json!({"on": on}))
+        if on { return Err(script_cannot_approve("auto_approve(true)").into()); }
+        p.post("/api/auto-approve", json!({"on": false}))
     });
     let p = panel.clone();
     e.register_fn("events", move |since: i64| -> R<Dynamic> { p.get(&format!("/api/events?since={since}")) });
@@ -384,6 +388,12 @@ fn engine(panel: Panel) -> Engine {
         serde_json::to_string_pretty(&from_dyn(d)?).map_err(|e| e.to_string().into())
     });
     e
+}
+
+/// The refusal a script meets when it tries to approve: what the owner does instead.
+fn script_cannot_approve(call: &str) -> String {
+    format!("{call}: approval is the owner's, never a script's: the owner types `prismatic_mcp approve <id>` at the game's \
+             console, or presses Approve in the panel opened with the owner secret; switching auto-approve off stays open")
 }
 
 /// What a kernel answered, as a script reads it: the `result` of `{ok: true, result}`; a refusal
@@ -613,6 +623,18 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_script_cannot_approve_or_switch_auto_approve_on() {
+        // Port 9 (discard) answers nothing: a refusal that needed the panel would be a connection error.
+        let e = super::engine(super::Panel { base: "http://127.0.0.1:9".into() });
+        for call in ["approve(7)", "auto_approve(true)"] {
+            let err = e.eval::<rhai::Dynamic>(call).unwrap_err().to_string();
+            assert!(err.contains("approval is the owner's") && err.contains("prismatic_mcp approve"), "{call}: {err}");
+        }
+        let off = e.eval::<rhai::Dynamic>("auto_approve(false)").unwrap_err().to_string();
+        assert!(!off.contains("approval is the owner's"), "switching off is asked of the panel: {off}");
+    }
+
     #[test]
     fn http_timeout_is_clamped_and_per_thread() {
         use super::{http_timeout, set_http_timeout, HTTP_TIMEOUT_S};

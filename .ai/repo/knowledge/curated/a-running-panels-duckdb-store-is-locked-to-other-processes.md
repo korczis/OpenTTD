@@ -27,8 +27,8 @@ relations:
 - `duckdb -readonly` is refused too. Observed on 2026-11-18 against a test stack on panel port 65045:
   `duckdb -readonly ~/.local/state/prismatic-mcp/store/panel-65045.duckdb` answered "Could not set
   lock ... Conflicting lock is held in .../mcp-panel (PID 57857)".
-- During a run, read through the panel: `GET|POST /api/db/query`
-  (`tools/research/mcp-rhai/src/panel_store.rs:run_query`), Rhai `api_dbQuery(#{sql: "..."})`,
+- During a run, read through the panel: `GET|POST /api/db/query` or `POST /api/db/named`
+  (`tools/research/mcp-rhai/src/panel_store.rs:h_db_query`, `run_named`), Rhai `api_dbQuery(#{sql: "..."})`,
   or the ZeroMQ bus (`GET /api/bus`, `mcp-bus-tail`). `/api/status` and `/api/bus` state the same
   in `store_access` (`tools/research/mcp-rhai/src/bus_sinks.rs:STORE_ACCESS`).
 - The hub's own store (`hub-<port>.duckdb`, I0084) is held the same way by the running `mcp-hub`

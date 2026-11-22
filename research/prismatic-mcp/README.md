@@ -37,10 +37,11 @@ Homebrew LLVM (`CC`/`CXX`), see ADR 0006 and [`../tooling.md`](../tooling.md) "T
 Start OpenTTD (GUI or dedicated), then in the in-game console (backtick `` ` ``):
 
 ```
-prismatic_mcp start          # binds 127.0.0.1:8731, prints the bearer token
+prismatic_mcp start          # binds 127.0.0.1:8731, writes the token to a 0600 file, prints its path
+prismatic_mcp start <port> <file>  # the same on <port>, the token in <file> (what launchers use)
 prismatic_mcp status         # running/endpoint/counters (never prints the token)
-prismatic_mcp token          # prints the bearer token (local operator only)
-prismatic_mcp rotate         # new token, invalidates the old one
+prismatic_mcp token          # prints the token file's path and the token's fingerprint
+prismatic_mcp rotate         # new token, invalidates the old one, rewrites the token file
 prismatic_mcp approvals      # pending approvals; then approve <id> or deny <id>
 prismatic_mcp decisions      # the provenance trace (decisions [n])
 prismatic_mcp stop
@@ -49,7 +50,9 @@ prismatic_mcp stop
 ## Connect (any MCP client, or curl)
 
 ```bash
-TOKEN=<token from 'prismatic_mcp token'>
+# the file 'prismatic_mcp start' named: "Token written to <file> (mode 0600)"
+TOKEN=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["agent_token"])' \
+  ~/Documents/OpenTTD/prismatic_mcp_token_8731.json)
 curl -s http://127.0.0.1:8731/mcp \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
@@ -57,6 +60,13 @@ curl -s http://127.0.0.1:8731/mcp \
 curl -s http://127.0.0.1:8731/mcp -H "Authorization: Bearer $TOKEN" \
   -d '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"openttd://game/state"}}'
 ```
+
+The token is never printed, to the local console or a remote one, and never written to
+`openttd.cfg` or a log: only to the 0600 token file `{"agent_token","endpoint"}` — the one
+`start` is given, else `prismatic_mcp_token_<port>.json` in the personal directory, where
+`openttd.cfg` and `secrets.cfg` live (the directory of `-c <cfg>` when one is given; by default
+`~/Documents/OpenTTD/` on macOS, `~/.local/share/openttd/` on Linux). `prismatic_mcp token` prints that path and a `blake2b:` fingerprint, so
+the operator can tell which token a file holds without seeing it.
 
 Bearer token via a header only — never in the URL. The endpoint refuses any request carrying an
 `Origin` header (anti-DNS-rebinding) and any non-loopback connection.
@@ -80,7 +90,7 @@ Bearer token via a header only — never in the URL. The endpoint refuses any re
    ```bash
    cmake --build build-mcp --target openttd_test -j$(sysctl -n hw.ncpu) && ctest --test-dir build-mcp -R prismatic --output-on-failure
    ```
-6. **Start the server and connect** — In the in-game console: prismatic_mcp start, then prismatic_mcp token to get the bearer token, and prismatic_mcp approve <id> or deny <id> for a pending mutation. Never share the token; it is never logged.
+6. **Start the server and connect** — In the in-game console: prismatic_mcp start writes the bearer token to a 0600 file and prints only its path (prismatic_mcp token prints the path and a fingerprint), then prismatic_mcp approve <id> or deny <id> for a pending mutation. Never share the token; it is never printed or logged.
 7. **Run the local validation gate before proposing a change**
    ```bash
    tools/gate.sh change
@@ -95,18 +105,42 @@ ground rules that apply before any of this.
 
 A research build adds one button to the main toolbar, after the help button: a prism drawn in the
 base set's palette (no sprite of its own). Its dropdown is one table,
-`src/prismatic_mcp/prismatic_mcp_menu.cpp` (`ITEMS`), and every row does one of:
+`src/prismatic_mcp/prismatic_mcp_menu.cpp` (`ITEMS`); an item's group puts it in a submenu.
+
+<!-- ingame-menu:begin -->
+
+Derived from `ITEMS` in `src/prismatic_mcp/prismatic_mcp_menu.cpp` by `tools/research/prismatic-mcp-menu`: 14 items, 4 submenus. The top level lists the items without a submenu and one row per submenu; a submenu opens in place of the list, with `< Back`.
+
+| Where | Item | Action | Target |
+|---|---|---|---|
+| top level | Prismatic control... | `window` | `control` |
+| top level | Ask the planner... | `ask` | `ask` |
+| Requests here > | Serve the towns here | `request` | `serve_here` |
+| Requests here > | Plan a rail line here | `request` | `plan_rail` |
+| Requests here > | Watch my buses | `request` | `watch` |
+| Human player > | Human player: paused | `toggle` | `openttd.input.yield` `{paused}` |
+| MCP server > | MCP server: status | `console` | `prismatic_mcp status` |
+| MCP server > | MCP server: start | `console` | `prismatic_mcp start` |
+| MCP server > | MCP approvals waiting | `console` | `prismatic_mcp approvals` |
+| MCP server > | MCP decisions | `console` | `prismatic_mcp decisions` |
+| Hub and API > | Open the hub | `browse` | `/` |
+| Hub and API > | World view | `browse` | `/viz` |
+| Hub and API > | API (Swagger) | `browse` | `/docs` |
+| Hub and API > | GraphQL schema | `browse` | `/graphql/schema` |
 
 | Action | What a click does |
 |---|---|
-| `console` | runs a console command (`prismatic_mcp status`, `start`, `approvals`, `decisions`) and shows the console |
-| `browse` | opens a hub page: `/`, `/viz` (World view), `/docs` (Swagger), `/graphql/schema`; base `$PRISMATIC_HUB_URL`, else `http://127.0.0.1:8790` |
-| `ask` | "Ask the planner...": the typed sentence becomes a request of kind `ask` |
-| `request` | a request of a fixed kind (`serve_here`, `plan_rail`, `watch`) for the tile under the main view's centre |
-| `toggle` | calls an MCP tool with a boolean it flips (`openttd.input.yield {paused}`), shown checked |
+| `ask` | asks for a sentence; it becomes a request of kind `ask` |
+| `browse` | opens the hub page (base `$PRISMATIC_HUB_URL`, else `http://127.0.0.1:8790`) |
+| `console` | runs the console command and shows the console |
+| `request` | queues a request of that kind for the tile under the main view's centre |
+| `toggle` | calls the MCP tool with the boolean it flips, shown checked |
+| `window` | opens the fork's window of that name |
 
-Over MCP the same table is `openttd://ui/menu` (every row, its action and target, the switches'
-state), `openttd.ui.menu.run {index, text?}` runs a row as a click does, and `openttd://ui/requests`
+<!-- ingame-menu:end -->
+
+Over MCP the same table is `openttd://ui/menu` (every row, its action, target and group, the
+submenus in order, the switches' state), `openttd.ui.menu.run {index, text?}` runs a row as a click does, and `openttd://ui/requests`
 lists every request `{id, kind, text, tile, x, y, date, answered, answer}`. Any client answers
 one with `openttd.ui.requests.answer {id, answer}`; the answer is recorded and shown in the game
 as a news item. `tools/research/mcp-panel/rhai/ask_relay.rhai` answers kind `ask` through the
