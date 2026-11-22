@@ -1,0 +1,31 @@
+id: I0188
+milestone: governed-access-is-authenticated-and-every-capability-reaches-every-surface
+title: "A provider-neutral reasoner adapter proposes intents and plans against the live capability schemas and reports reasoner_unavailable without breaking any deterministic capability"
+slug: reasoner-adapter
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Add one adapter interface with four operations (propose_intent, propose_plan, explain, request_clarification) behind which an LLM or a Claude Code session may sit. Every proposal is validated against the live capability schemas before it becomes an IntentRequest or a PlanArtifact, so a reasoner can only propose what the catalogue accepts; a proposal never approves itself. With no provider configured the adapter answers reasoner_unavailable, and the intent resolver, planner and every deterministic capability keep working."
+why: "External review 2026-11-22 (digest A-30). git grep for reasoner, propose_intent, propose_plan and request_clarification on origin/master finds nothing; the only trace of an LLM session is CLAUDE_CODE_SESSION_ID recorded as provenance (tools/research/mcp-rhai/src/bus_sinks.rs:42). The intent resolver (tools/research/mcp-rhai/src/intent.rs) is deterministic and is the only path from words to a plan."
+scope:
+  - "tools/research/mcp-rhai/src/reasoner.rs"
+  - "tools/research/schema/reasoner.v1.schema.json"
+  - "research/agent-loop.md"
+non_scope:
+  - "Naming or shipping an API key or a provider; the adapter is configured from the environment and absent by default"
+  - "Letting a reasoner approve, apply or bypass the approval core"
+depends_on:
+  - I0187
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#governed-access-is-authenticated-and-exercised"
+acceptance_criteria:
+  - "The four operations are reachable on every surface through the existing derivation and listed in the parity matrix"
+  - "A proposal that fails the live schema is refused with the failing path; a valid one becomes an IntentRequest or PlanArtifact with the reasoner named in its provenance"
+  - "With no provider every operation answers reasoner_unavailable and the full cargo test suite, mcp-decision-check and mcp-parity-check pass unchanged"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-parity-check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

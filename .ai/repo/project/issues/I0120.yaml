@@ -1,0 +1,30 @@
+id: I0120
+milestone: every-battle-match-explains-itself
+title: "A battle record states the game settings the match really ran under, read back from the game: max_loan, vehicle-slot limits, difficulty and the build id"
+slug: battle-records-effective-settings
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "At match start, read the effective settings from the running game (through the referee GameScript or the admin port) and store them in the match record: max_loan, max_roadveh/max_trains/max_aircraft/max_ships, the difficulty block, breakdowns, the game build id and the AI versions. Fail the match record (not the match) when the read-back differs from what battle.py configured, so a silently ignored setting is visible."
+why: "External review 2026-11-22 (digest C-24). The record's match_cfg holds only years, start_year, landscape, map_x, map_y and breakdowns; battle.py:1094 writes max_loan = 300000 into the generated config but never records it, and no vehicle limit is recorded, so whether AAAHogEx's late cash pile-up comes from its vehicle-slot thresholds cannot be checked. The curated knowledge record 'a loaded game takes missing settings from the loader's config' shows the configured value and the effective value can differ."
+scope:
+  - "tools/research/ai-battle/battle.py"
+  - "tools/research/ai-battle/referee/**"
+  - "tools/research/test_ai_battle.py"
+  - "tools/research/schema/**"
+non_scope:
+  - "Changing the tournament's chosen settings"
+depends_on:
+  - I0119
+serves:
+  - "internal-state-is-observable-reproducibly#a-battle-explains-itself"
+acceptance_criteria:
+  - "A new record has an `effective_settings` block read from the game, including max_loan, the four vehicle limits, the difficulty settings and the build id"
+  - "A mismatch between configured and effective values is flagged in the record and its rendered page"
+  - "Tests cover the parse and the mismatch flag on fixtures"
+validation:
+  - "python3 -m unittest tools/research/test_ai_battle.py"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

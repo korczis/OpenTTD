@@ -1,0 +1,40 @@
+id: I0183
+milestone: governed-access-is-authenticated-and-every-capability-reaches-every-surface
+title: "MCP exercise coverage counts validated outcomes, not arrivals, and a gate tier holds a floor over a live probe of openttd.api.* and openttd.cmd.*"
+slug: mcp-exercise-coverage-floor
+priority: p1
+profile: deep-work
+parallel_safe: false
+objective: "Make exercise coverage mean something and raise it: count a tool or resource as covered only when its call passed argument validation (and, for a test-mode call, the game's own check); annotate openttd.api.* tools so the probe may call them in test mode; count decision.validate against the tool it stands for; derive real ids for x-kind id arguments from the matching resource; run mcp-coverage-check --probe at the end of every mcp-e2e on a disposable stack; and fail a gate tier when the exercised share drops below a declared floor. Update README.md and the knowledge record with the measured figure."
+why: "External review 2026-11-22 (digest C-14). README.md:291: 'live scenarios had called about 2% of the tools and resources, and none of openttd.api.* or openttd.cmd.*'. src/prismatic_mcp/prismatic_mcp_coverage.cpp:34 Count() runs when a request arrives, before any argument check, so a wrong call counts as covered (.ai/repo/knowledge/curated/mcp-exercise-coverage-is-two-percent.md, 'How to apply it' steps 1-3 and 5 still open; step 4's offline argument derivation landed in tools/research/mcp-coverage-check). The probe runs only from tools/research/mcp-human-e2e:222, never from plain mcp-e2e stacks or tools/gate.sh."
+scope:
+  - "src/prismatic_mcp/prismatic_mcp_coverage.cpp"
+  - "src/prismatic_mcp/prismatic_mcp_api.cpp"
+  - "src/prismatic_mcp/prismatic_mcp_server.cpp"
+  - "src/tests/test_prismatic_mcp.cpp"
+  - "tools/research/mcp-coverage-check"
+  - "tools/research/test_mcp_coverage_check.py"
+  - "tools/research/mcp-e2e"
+  - "tools/gate.sh"
+  - "README.md"
+  - ".ai/repo/knowledge/curated/mcp-exercise-coverage-is-two-percent.md"
+non_scope:
+  - "Approving or executing a mutation in the probe; decision.submit stays on the throwaway --exercise path"
+  - "Tools with effects outside the command system (ScriptAdmin.Send, ScriptWindow.*, ScriptController.Sleep/Break/Import), which stay excluded and are listed as such"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#governed-access-is-authenticated-and-exercised"
+acceptance_criteria:
+  - "openttd://mcp/coverage reports called, answered without isError and validated per entry; a call with wrong arguments is not validated (unit-tested)"
+  - "Every openttd.api.* tool is called in test mode by the probe with arguments that pass its schema, ids taken from the live resources"
+  - "mcp-e2e runs mcp-coverage-check --probe --report at its end and writes the figures into its record"
+  - "A gate tier fails when the validated share is below the floor declared next to the check; README.md and the knowledge record quote the measured figure with the run that produced it"
+  - "The change is announced on the peer board before landing, because prismatic_mcp_server.cpp is in the approval-core peer's scope"
+validation:
+  - "python3 -m unittest tools/research/test_mcp_coverage_check.py"
+  - "tools/gate.sh research"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

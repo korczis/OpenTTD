@@ -1,0 +1,32 @@
+id: I0154
+milestone: battlebrain-decides-live-with-rollback
+title: "Battlebrain is measured against a fixed baseline: provenance share, stale-plan rejections and shadow agreement are reported, and held-start duel pairs on three seeds compare it with planner v4"
+slug: battlebrain-against-fixed-baseline
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Define the fixed baseline (planner v4 slots, planned_freight_only=0, a pinned commit), add `battlebrain metrics` that derives from records the share of decisions with full provenance, stale-plan and gate rejections by code, and shadow agreement, and run held-start mcp-duel pairs on seeds 4242, 31337 and 20208 with Battlebrain live against that baseline. A default changes only beyond the rival's spread."
+why: "External review 2026-11-22 (digest C-49, Phase 06). research/results on origin/master holds only battlebrain-shadow records; there is no Battlebrain duel or metric. The fork's held-start rule (criterion history-tuning-is-held-start-proven, I0087) is the yardstick."
+scope:
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs"
+  - "tools/research/mcp-duel"
+  - "tools/research/test_mcp_duel.py"
+  - "research/results/**"
+  - "research/battlebrain/README.md"
+non_scope:
+  - "Tuning policy parameters with the GA (offline, separate)"
+depends_on:
+  - I0152
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "battlebrain metrics derives its three figures from committed records (test on fixtures)"
+  - "Three held-start pairs are recorded under research/results/ with the baseline commit named"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain"
+  - "python3 -m unittest tools/research/test_mcp_duel.py"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

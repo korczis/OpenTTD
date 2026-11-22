@@ -1,0 +1,26 @@
+id: I0122
+milestone: every-battle-match-explains-itself
+title: "tools/research/mcp-ab binds every observation to the company the tested agent holds, never to the first company in the dump"
+slug: mcp-ab-company-identity
+priority: p2
+profile: implementation
+parallel_safe: true
+objective: "Replace the first-row assumption in tools/research/mcp-ab with an explicit company binding: the arm declares which company its agent controls (or mcp-ab learns it from the agent's own report), every observation is filtered by that company id, and a run with an extra company or a changed roster still attributes correctly."
+why: "External review 2026-11-22 (digest A-17, judged UNKNOWN): tools/research/mcp-ab parses the companies dump and returns rows[0] (now at line 116). That is correct only while each arm is a single-company game; any A/B with a rival, an observer company or a takeover would silently report the wrong company."
+scope:
+  - "tools/research/mcp-ab"
+  - "tools/research/test_mcp_ab.py"
+non_scope:
+  - "Changing the A/B protocol itself"
+depends_on: []
+serves:
+  - "internal-state-is-observable-reproducibly#a-battle-explains-itself"
+acceptance_criteria:
+  - "mcp-ab takes or derives the tested company id and refuses to report when it cannot determine it"
+  - "test_mcp_ab.py covers a dump with two companies where the tested one is not first, and a roster change mid-run"
+validation:
+  - "python3 -m unittest tools/research/test_mcp_ab.py"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

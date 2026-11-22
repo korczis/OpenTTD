@@ -1,0 +1,36 @@
+id: I0166
+milestone: evaluations-are-fair-pre-registered-and-paired
+title: "PrismaticAI's gap to AAAHogEx is measured to narrow: one change from the gap report raises the paired value ratio beyond the baseline's interval, or the record says it did not"
+slug: aaahogex-gap-narrows
+priority: p1
+profile: deep-work
+parallel_safe: false
+objective: "Take the cause that the gap report (I0123) and the post-mortem proposal (I0124) rank first. Implement the change it names as a default-off PrismaticAI setting. Run I0165's protocol with the setting on, and measure the change against the baseline ratio of that protocol. The default changes only when the new ratio's interval lies wholly above the baseline's (rule project.a-tuning-claim-needs-held-start-pairs). The leaderboard section of research/ai-battle/README.md states the measured ratio before and after, whatever the result."
+why: "External review 2026-11-22 (digest B-42). research/ai-battle/README.md:56-57: AAAHogEx won 41 of 41, with an average final value of 104.4 M against 16.5 M for the best PrismaticAI (GA g347.3). research/battle-postmortem.md and research/results/postmortem-155d18ea50071e72.md explain losses, but no change has been measured against AAAHogEx on a paired design. The M12 issues produce the hypothesis: I0123 (gap report) and I0124 (one proposal on held starts against a named opponent). The fleet and loan fixes of milestone prismatic-ai-grows-its-fleet-and-survives-its-own-failures are candidates for it. This issue measures whether any of them closes part of the gap."
+scope:
+  - "tools/research/prismatic-ai/**"
+  - "research/results/**"
+  - "research/experiments/**"
+  - "research/ai-battle/README.md"
+non_scope:
+  - "AAAHogEx itself, and any change to the tournament's settings"
+  - "Tuning on unregistered matches; GA editions are exploration, not this measurement"
+depends_on:
+  - I0165
+  - I0123
+  - I0124
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#evaluations-are-pre-registered-and-paired"
+acceptance_criteria:
+  - "The change ships as a default-off setting, with the gap-report finding it answers cited in its commit"
+  - "A registered run of I0165's protocol with the setting on is committed beside the baseline, with both ratios and intervals"
+  - "The default changes only if the interval rule holds; otherwise the README and a curated knowledge record say the change did not narrow the gap"
+validation:
+  - "tools/research/preregistration check research/experiments"
+  - "python3 tools/research/ai-battle/battle.py paired --protocol research/experiments/<id>.yaml"
+  - "python3 -m unittest tools/research/test_ai_battle.py"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
