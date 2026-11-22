@@ -217,6 +217,13 @@ function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, fro
 				if (bridge == -1) continue;
 				local ok = false;
 				{
+					/* The probe's own accounting. The game adds a test-mode estimate to the costs an
+					 * AIAccounting counts (ScriptObject::DoCommand), and a nested one restores its
+					 * caller's count on exit. Without it every probe of a re-plan while track A was
+					 * laid counted as track A's cost: on the fitness seed 930967890 a 229-tile line
+					 * "cost about 1630003" with funds of 157584, so the second track was refused and
+					 * the line ran single track with two trains. */
+					local probe = AIAccounting();
 					local test = AITestMode();
 					ok = AIBridge.BuildBridge(AIVehicle.VT_RAIL, bridge, ahead, h2);
 				}
@@ -243,6 +250,7 @@ function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, fro
 					(PrismaticAI.RailStepCost(far + in_dir) >= 0 || far + in_dir == to)) {
 				local ok = false;
 				{
+					local probe = AIAccounting();   /* as the bridge probe above */
 					local test = AITestMode();
 					ok = AITunnel.BuildTunnel(AIVehicle.VT_RAIL, ahead);
 				}
