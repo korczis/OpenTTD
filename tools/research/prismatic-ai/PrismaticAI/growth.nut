@@ -211,20 +211,20 @@ function PrismaticAI::FeedStations(b) {
 	reach += AIStation.GetCoverageRadius(AIStation.STATION_TRAIN);
 	foreach (i, line in RAIL_LINES) {
 		if (line.closed || !("from" in line)) continue;
-		if (!("fed" in line)) line.fed <- [];
+		if (!("fed" in line)) line.fed <- {};
 		if (line.fed.len() >= b.rail_feed) continue;
 		local s = this.LineStats(line);
 		if (s.trains == 0 || s.profit_last <= 0) continue;
 		local best = null, best_prod = 0;
 		foreach (p, _ in AIIndustryList_CargoProducing(line.cargo)) {
-			if (p == line.from || line.fed.find(p) != null || AIIndustry.IsBuiltOnWater(p)) continue;
+			if (p == line.from || line.fed.rawin(p) || AIIndustry.IsBuiltOnWater(p)) continue;
 			if (AIIndustry.GetDistanceManhattanToTile(p, line.a) > reach) continue;
 			if (AIIndustry.GetLastMonthTransported(p, line.cargo) > 0) continue;
 			local prod = AIIndustry.GetLastMonthProduction(p, line.cargo);
 			if (prod > best_prod) { best_prod = prod; best = p; }
 		}
 		if (best == null) continue;
-		line.fed.push(best);
+		line.fed[best] <- true;
 		local t = PrismaticAI.JoinSourceToStation(line.a, best, line.cargo);
 		if (t != null) {
 			AILog.Info("PrismaticAI: rail line " + (i + 1) + " (" + line.label + ") now also takes " + AICargo.GetCargoLabel(line.cargo) +
