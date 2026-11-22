@@ -4,7 +4,7 @@
 // become an SVG without Mermaid's "Syntax error" or "Parse error" in it. GitHub renders the same
 // Markdown blocks, so a diagram that fails here fails for every reader of the repository too.
 // A generated chart (a Mermaid pie or xychart) is drawn on the site by ECharts instead, and every
-// such chart must end up with a canvas.
+// such chart must end up with a canvas, and its Mermaid source (what GitHub draws) must parse.
 //
 // Usage: tools/surfaces/diagrams-check [SITE_DIR] [--shots DIR]
 //   SITE_DIR  a built site (tools/surfaces/surfaces site; default target/web/site)
@@ -59,6 +59,18 @@ try {
     found.push(...await page.$$eval('[data-chart="inline"]', (cs) => cs.map((c, i) => ({
       i, error: c.querySelector('canvas') ? '' : 'no ECharts canvas', head: 'chart ' + c.id,
     }))));
+    // GitHub draws the same chart from its Mermaid source: that source must parse in Mermaid too.
+    if (await page.$('pre.chart-source')) {
+      if (!(await page.evaluate(() => !!window.mermaid))) await page.addScriptTag({ url: `${base}/js/mermaid.min.js` });
+      found.push(...await page.$$eval('pre.chart-source', async (ps) => {
+        const out = [];
+        for (const [i, p] of ps.entries()) {
+          try { await window.mermaid.parse(p.textContent); out.push({ i, error: '', head: 'chart source ' + (i + 1) }); }
+          catch (e) { out.push({ i, error: 'Mermaid: ' + String(e).slice(0, 100), head: 'chart source ' + (i + 1) }); }
+        }
+        return out;
+      }));
+    }
     for (const d of found) {
       total++;
       if (d.error) { bad++; console.log(`FAIL ${rel} diagram ${d.i + 1} (${d.head}): ${d.error}`); }

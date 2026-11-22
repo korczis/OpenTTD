@@ -225,6 +225,8 @@ config:
 xychart-beta
     title "Seed 31337, 36 months: final company value per bot revision"
     x-axis ["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23", "r24"]
+    %% series: Planned | Unplanned
+    %% links: research/results/duel-20261116T120701-seed31337.md | research/results/duel-20261116T130634-seed31337.md | research/results/duel-20261116T235622-seed31337.md | research/results/duel-20261117T003624-seed31337.md | research/results/duel-20261117T012840-seed31337.md | research/results/duel-20261117T024703-seed31337.md | research/results/duel-20261117T032759-seed31337.md | research/results/duel-20261117T041705-seed31337.md | research/results/duel-20261117T045857-seed31337.md | research/results/duel-20261117T053732-seed31337.md | research/results/duel-20261117T061717-seed31337.md | research/results/duel-20261117T100202-seed31337.md | research/results/duel-20261117T112500-seed31337.md | research/results/duel-20261117T123222-seed31337.md | research/results/duel-20261117T131347-seed31337.md | research/results/duel-20261117T183356-seed31337.md | research/results/duel-20261117T183400-seed31337.md | research/results/duel-20261117T193812-seed31337.md | research/results/duel-20261117T193920-seed31337.md | research/results/duel-20261117T223206-seed31337.md | research/results/duel-20261117T223211-seed31337.md | research/results/duel-20261119T085551-seed31337.md | research/results/duel-20261120T030925-seed31337.md | research/results/duel-20261120T054204-seed31337.md
     y-axis "Company value" 0 --> 1500000
     bar [68229, 204356, 206995, 250716, 454403, 518138, 505369, 558331, 468228, 290634, 552182, 597075, 995647, 265599, 794015, 1023810, 1050432, 794737, 950946, 905692, 941478, 1095101, 1468025, 1441319]
     line [28293, 28129, 27716, 27768, 27228, 27849, 27943, 27408, 28331, 27853, 27247, 29139, 27870, 368425, 24469, 28440, 28286, 19132, 29102, 26945, 22413, 698884, 47923, 49526]
@@ -1518,8 +1520,9 @@ config:
 xychart-beta
     title "Issues done (bar) and planned (line) per milestone, in plan order"
     x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"]
-    %% series: Issues | Planned
-    y-axis "Issues" 0 --> 58.3
+    %% series: Issues done | Issues planned
+    %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml
+    y-axis "Issues done" 0 --> 58.3
     bar [2, 4, 8, 5, 53, 7, 1, 7, 6]
     line [2, 4, 8, 5, 53, 7, 1, 7, 6]
 ```

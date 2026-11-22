@@ -119,6 +119,8 @@ def render(runs):
         "xychart-beta",
         f'    title "Seed {SEED}, {MONTHS} months: final company value per bot revision"',
         "    x-axis [" + ", ".join(f'"r{i + 1}"' for i in range(len(series))) + "]",
+        "    %% series: Planned | Unplanned",
+        "    %% links: " + " | ".join(rel(r["path"].with_suffix(".md")) for r in series),
         f'    y-axis "Company value" 0 --> {((top // 100000) + 1) * 100000}',
         "    bar [" + ", ".join(str(r["a"]) for r in series) + "]",
         "    line [" + ", ".join(str(r["b"]) for r in series) + "]",

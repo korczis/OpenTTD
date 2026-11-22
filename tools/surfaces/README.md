@@ -126,8 +126,11 @@ render Mermaid natively, so a reader of the repository sees the chart without a 
 The site reads the same block back (`mermaid_chart_spec`) and draws it with Apache ECharts in the
 site's palette: a tooltip per value, zoom when there are many categories, a switch between bars and
 lines, the data as a table, an image export, and a card that maximizes to the viewport until
-Escape. The Mermaid source stays under the chart. `diagrams-check` fails when a page's chart has
-no ECharts canvas, as it fails on a Mermaid diagram that does not render.
+Escape. Two Mermaid comments carry what Mermaid cannot say and GitHub ignores: `%% series: a | b`
+names the bar and line series, and `%% links: t1 | t2 ...` gives every bar or slice a link target,
+in order, so a click opens that mark's page (a milestone, a duel's write-up). The Mermaid source
+stays under the chart. `diagrams-check` fails when a page's chart has no ECharts canvas or its
+Mermaid source does not parse, as it fails on a Mermaid diagram that does not render.
 
 `check` enforces both halves:
 
