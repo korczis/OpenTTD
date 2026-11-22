@@ -407,6 +407,65 @@ pub fn set_bot_setting(g: &Arc<Game>, company: &Value, name: &str, value: &Value
     g.tool("openttd.ai.set_setting", json!({"company": py_int(company)?, "name": name, "value": py_int(value)?}))
 }
 
+/// Where a freight-line slot is sent from, named in every refusal of one.
+pub const GOVERNED_PATHS: &str = "a freight-line slot is sent by the company's planner as POST /api/bots/setting \
+    {company, name, value, writer}, or as a live Battlebrain decision through POST /api/decision/pull";
+
+/// The refusal of a request that changes freight-line slots (fr_*, fr2_* .. fr16_*) of `company`
+/// on behalf of `writer` (None: it names none). `names` are the settings it changes, the others
+/// no concern here; `holder` reads a company's planner key (rhai_shared::planner_of). None when it
+/// names no slot, or names a writer that may send them (fr_author::change_refusal). Else
+/// (422 fr_needs_writer or 409 fr_planner_held, the answer). A company that is no integer reaches
+/// no AI, and the game refuses that call itself (AiCompany), so it is let through to it.
+pub fn slot_refusal(company: &Value, names: &[String], writer: Option<&str>, holder: &dyn Fn(i64) -> Option<Value>) -> Option<(u16, Value)> {
+    let slots: Vec<&str> = names.iter().map(String::as_str).filter(|n| crate::panel_decision::is_freight_slot_setting(n)).collect();
+    if slots.is_empty() {
+        return None;
+    }
+    let c = company.as_i64()?;
+    let r = crate::rhai_shared::fr_author::change_refusal(holder(c).as_ref(), c, writer)?;
+    let status = if r["code"] == crate::rhai_shared::fr_author::NO_WRITER { 422 } else { 409 };
+    Some((status, json!({"error": format!("{} not sent: {}", slots.join(", "), py_str(r.get("why"))),
+                         "outcome": r["code"], "refusal": r, "settings": slots, "governed": GOVERNED_PATHS})))
+}
+
+/// Answer a refusal from slot_refusal and say it as an event, so the owner sees what was not asked.
+fn refused(g: &Arc<Game>, (status, answer): (u16, Value)) -> (u16, Value) {
+    g.event("ai", &format!("{} ({})", py_str(answer.get("error")), py_str(answer.get("outcome"))));
+    (status, answer)
+}
+
+/// POST /api/bots/setting {company, name, value, writer?}: set_bot_setting, except that a
+/// freight-line slot is refused before the game is asked unless the request names its `writer`
+/// and the company's planner key is unset or names that writer (slot_refusal). Every other
+/// setting is sent as before, with or without a writer.
+pub fn bot_setting(g: &Arc<Game>, body: &Value) -> Result<(u16, Value), String> {
+    let name = py_str(body.get("name"));
+    let writer = body.get("writer").and_then(Value::as_str);
+    if let Some(r) = slot_refusal(&body["company"], std::slice::from_ref(&name), writer, &crate::rhai_shared::planner_of) {
+        return Ok(refused(g, r));
+    }
+    Ok((200, set_bot_setting(g, &body["company"], &name, &body["value"])?))
+}
+
+/// The settings of a company's AI that an MCP call changes: `name` of openttd.ai.set_setting, the
+/// keys of openttd.ai.set_settings' `settings`; none for any other tool.
+pub fn settings_of_call(tool: &str, args: &Value) -> Vec<String> {
+    match tool {
+        "openttd.ai.set_setting" => vec![py_str(args.get("name"))],
+        "openttd.ai.set_settings" => args["settings"].as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// A raw MCP call through the panel (POST /api/tools/<tool>, POST /api/rpc tools/call) names no
+/// writer, so it changes no freight-line slot: refused as a writer-less /api/bots/setting is.
+/// None for every other call. The decision executor (src/panel_decision.rs) and set_bot_setting
+/// call the game themselves (Game::tool), never through these routes.
+pub fn raw_call_refusal(g: &Arc<Game>, tool: &str, args: &Value) -> Option<(u16, Value)> {
+    slot_refusal(&args["company"], &settings_of_call(tool, args), None, &crate::rhai_shared::planner_of).map(|r| refused(g, r))
+}
+
 /// Settings in the order they were set, a key set again keeping its place (a Python dict).
 #[derive(Default)]
 pub struct Settings(pub Vec<(String, Value)>);
@@ -1306,6 +1365,37 @@ mod tests {
         assert_eq!(choice["held"]["withheld"].as_array().unwrap().len(), 6);
         assert_eq!(choice["held"]["by"][0]["holder"], "battlebrain");
         assert!(choice["held"]["by"][0]["why"].as_str().unwrap().contains("planner.0"));
+    }
+
+    /// The panel's check of a change that names its slots: none named, or a company that is no
+    /// integer, lets it through; a writer-less one is 422, one whose writer is not the planner 409,
+    /// and the planner itself (or anyone while the key is unset) passes.
+    #[test]
+    fn a_slot_change_needs_a_writer_that_holds_the_planner_key() {
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let held = |c: i64| (c == 2).then(|| json!("battlebrain"));
+        assert!(slot_refusal(&json!(2), &names(&["rail_a", "own_lines"]), None, &held).is_none(), "no slot: no concern");
+        assert!(slot_refusal(&json!("2"), &names(&["fr_from"]), None, &held).is_none(), "no integer company: the game refuses it");
+        let (status, out) = slot_refusal(&json!(2), &names(&["rail_a", "fr_from", "fr3_to"]), None, &held).unwrap();
+        assert_eq!((status, out["outcome"].as_str(), out["settings"].clone()), (422, Some("fr_needs_writer"), json!(["fr_from", "fr3_to"])));
+        assert_eq!(out["refusal"]["holder"], "battlebrain");
+        let (status, out) = slot_refusal(&json!(2), &names(&["fr_from"]), Some("owner"), &held).unwrap();
+        assert_eq!((status, out["outcome"].as_str()), (409, Some("fr_planner_held")));
+        assert!(out["error"].as_str().unwrap().starts_with("fr_from not sent: company 2's freight-line slots are planned by battlebrain"), "{out}");
+        assert_eq!(out["governed"], GOVERNED_PATHS);
+        assert!(slot_refusal(&json!(2), &names(&["fr_from"]), Some("battlebrain"), &held).is_none(), "the planner itself");
+        assert!(slot_refusal(&json!(1), &names(&["fr_from"]), Some("owner"), &held).is_none(), "unset: any named writer");
+    }
+
+    /// What an MCP call changes on a company's AI, by tool: one name, every key, or nothing.
+    #[test]
+    fn the_settings_an_mcp_call_changes() {
+        assert_eq!(settings_of_call("openttd.ai.set_setting", &json!({"company": 0, "name": "fr_to", "value": 1})), ["fr_to"]);
+        let mut every = settings_of_call("openttd.ai.set_settings", &json!({"settings": {"rail_a": 1, "fr_to": 2}}));
+        every.sort();
+        assert_eq!(every, ["fr_to", "rail_a"]);
+        assert!(settings_of_call("openttd.ai.set_settings", &json!({"settings": 3})).is_empty());
+        assert!(settings_of_call("openttd.ai.start", &json!({"settings": {"fr_to": 2}})).is_empty(), "a new AI company is no running bot's slot");
     }
 
     /// The plan is for the panel's AI: a held company that runs another AI does not hold it, one
