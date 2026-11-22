@@ -11,7 +11,9 @@
 #   - '/mcp', 'ask <request>', '/do <request>' and '/ai' reach mcp, plan and bot, and an unknown
 #     command says what the console offers;
 #   - the gated mutation runs end to end from the console: `mcp set_pause pause=true` is pending,
-#     `prismatic_mcp approve <id>` approves it, the same call executes and is verified.
+#     `prismatic_mcp approve <id>` executes it at once (ADR 0038; nothing resubmits): the approval
+#     is consumed, openttd://decisions records it under that approval_id with a verdict, the game is
+#     paused, and the same call again asks for a fresh approval.
 #
 # The dedicated server holds its console stdout in a buffer that is flushed at shutdown, so this
 # check does not scrape output live: it sends a batch of commands, quits, then parses the whole
@@ -154,14 +156,39 @@ for l in sys.stdin.read().splitlines():
     if d.get("status") == "pending_approval": print(d["approval_id"])' <<<"$pending")"
 check "the gated mutation from the console waits for approval" "$([[ -n "$approval" ]] && echo 1 || echo 0)"
 if [[ -n "$approval" ]]; then
-  drive "$WORK/approve.log" "mcp set_pause pause=true --compact" "prismatic_mcp approve 1" "mcp set_pause pause=true --compact"
-  # A fresh server starts a fresh approval id at 1; the first call creates it, approve 1, replay
-  # executes. On a dedicated (networked) server the Pause command is queued and executes on a later
-  # frame, so the replay reports status=executed, command_result=succeeded with the verdict
-  # EXECUTED_UNVERIFIED (the effect is not observable in the same tick); that is the success here.
-  replay="$(block "$WORK/approve.log" 3)"
-  check "after 'prismatic_mcp approve', the same console call executes through the command system" \
-    "$(grep -qF '"status":"executed"' <<<"$replay" && grep -qE '"command_result":"(queued|succeeded)"' <<<"$replay" && echo 1 || echo 0)"
+  # A fresh server starts a fresh approval id at 1: the first call creates it and approving it
+  # executes it on the server (ADR 0038). On a dedicated (networked) server the Pause command is
+  # queued and runs on a later frame; the console reads one line per frame, so the padding lines
+  # give it those frames before the queue, the game state and the decision trace are read.
+  drive "$WORK/approve.log" "mcp set_pause pause=true --compact" "prismatic_mcp approve 1" \
+    "echo pad" "echo pad" "echo pad" "echo pad" \
+    "mcp read openttd://approvals --compact --all" "mcp read openttd://game/state --compact --all" \
+    "mcp read openttd://decisions --compact --all" "mcp set_pause pause=true --compact"
+  # first_json <block>: the first line of the block that parses as JSON, through <python expr over d>
+  first_json() {
+    python3 -I -c 'import json,sys
+for l in sys.stdin.read().splitlines():
+    try: d = json.loads(l)
+    except Exception: continue
+    try: v = eval(sys.argv[1], {"d": d})
+    except Exception: v = None
+    print("" if v is None else v); break' "$1"
+  }
+  approved="$(block "$WORK/approve.log" 2)"
+  check "'prismatic_mcp approve 1' executes the approval at once" \
+    "$(grep -qF '1 approved, 0 refused.' <<<"$approved" && echo 1 || echo 0)"
+  astate="$(first_json "next((a['state'] for a in d['data']['approvals'] if a['id'] == 1), '')" <<<"$(block "$WORK/approve.log" 7)")"
+  check "approval #1 is consumed in openttd://approvals (state=${astate:-?})" "$([[ "$astate" == consumed ]] && echo 1 || echo 0)"
+  paused="$(first_json "d['data']['paused']" <<<"$(block "$WORK/approve.log" 8)")"
+  check "the effect is observed: the game is paused (paused=${paused:-?})" "$([[ "$paused" == True ]] && echo 1 || echo 0)"
+  rec="$(first_json "next(('%s %s' % (x['command_result'], x['verdict']) for x in d['data']['decisions'] if x['approval_id'] == 1), '')" <<<"$(block "$WORK/approve.log" 9)")"
+  # The verdict is VERIFIED_SUCCESS once read back, or EXECUTED_UNVERIFIED when the effect was not
+  # observable in the tick it ran in; both say the command ran.
+  check "openttd://decisions records approval #1 with its result and verdict (${rec:-none})" \
+    "$(grep -qE '^(queued|succeeded) (VERIFIED_SUCCESS|EXECUTED_UNVERIFIED)$' <<<"$rec" && echo 1 || echo 0)"
+  again="$(first_json "'%s %s' % (d.get('status'), d.get('approval_id'))" <<<"$(block "$WORK/approve.log" 10)")"
+  check "the same call after the approval asks for a fresh approval, it does not run again (${again:-?})" \
+    "$(grep -qE '^pending_approval [0-9]+$' <<<"$again" && [[ "$again" != "pending_approval 1" ]] && echo 1 || echo 0)"
 fi
 
 # The words a player reaches for: a leading '/' is optional, ask/do hand a request to the planner

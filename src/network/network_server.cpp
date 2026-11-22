@@ -1457,8 +1457,10 @@ NetworkRecvStatus ServerNetworkGameSocketHandler::ReceiveClientChat(Packet &p)
 	/* RESEARCH-ONLY: '!approvals', '!approve <id>' and '!deny <id>' are the approval channel from
 	 * inside the game, the client console's 'prismatic_mcp approve' included (ADR 0038). The one
 	 * approval core decides; the answer goes to the asker alone and the line is never broadcast. */
-	if (std::string reply; PrismaticMCP::ChatApproval(ci->client_playas.base(), msg, reply)) {
-		NetworkServerSendChat(NetworkAction::ChatClient, NetworkChatDestinationType::Client, to_underlying(this->client_id), reply, ClientID::Server);
+	if (std::vector<std::string> replies; PrismaticMCP::ChatApproval(to_underlying(this->client_id), ci->client_playas.base(), ci->public_key, false, msg, replies)) {
+		for (const auto &reply : replies) {
+			NetworkServerSendChat(NetworkAction::ChatClient, NetworkChatDestinationType::Client, to_underlying(this->client_id), reply, ClientID::Server);
+		}
 		return NetworkRecvStatus::Okay;
 	}
 #endif

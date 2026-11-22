@@ -44,6 +44,20 @@ tools"). Snapshot-staleness checks are staged.
   the panel's Approve (which gives that console line), and a client's chat `!approve <id>` (which
   the client console's `prismatic_mcp approve` sends). Nothing has to resubmit the call. The queue
   is `openttd://approvals`, which the panel reads instead of keeping its own copy.
+- **Approving from inside the game** (ADR 0038, "Who may approve"):
+  - On the server, `!approvals [page]`, `!approve <id>` and `!deny <id>` in the chat are decided
+    by `PrismaticMCP::ChatApproval` through the pure `detail::DecideChat`. A network client's
+    console `prismatic_mcp approvals|approve|deny` sends the same line.
+  - Approving needs all of these:
+    - the approval names the client's company;
+    - the action acts on one company (`ai.set_setting`/`ai.set_settings`, or a command without
+      the Server, Offline or Deity flag, outside the `server_setting` and `cheat` categories);
+    - the client's key is a registered approver (`prismatic_mcp approvers add <client id>`) or
+      in the allow list of that human company, when it does not admit anyone;
+    - the client is not armed for MCP input (`PRISMATIC_MCP_INPUT=1`).
+  - Every refusal names the condition that failed.
+  - One id per line. `!approvals` answers one `[approvals] {json}` line per approval and a count
+    line. Each decision records `approved_via`.
 - **A full queue refuses**: at `MAX_APPROVALS`, decided and expired approvals are dropped. A new
   request that still does not fit is refused with `status: refused` and the reason. A pending
   approval is never pushed out.

@@ -12,6 +12,9 @@ const status = {
   endpoint: 'http://127.0.0.1:9000/mcp',
   game_port: 3979,
   auto_approve: false,
+  // This browser holds the approver secret (the cookie GET /approver sets); a test below takes it away.
+  approver: true,
+  approver_file: '/tmp/fictional-state/approver-8800.secret',
   pending: [{ id: 3, tool: 'openttd.cmd.BuildRoad', args: { tile: 7 } }],
   events: [{ t: '12:00:01', kind: 'ai.log', text: 'built a <bus> route' }],
 };
@@ -153,6 +156,20 @@ test('the markup builders draw approvals, events, companies and decisions from t
   assert.ok(p.includes(UI.primary), "Approve is the shell's primary button");
   assert.match(p, /openttd\.cmd\.BuildRoad\(\{&quot;tile&quot;:7\}\)/);
   assert.equal(app.pendingHtml([]), '<li>none</li>');
+  // With the approver secret: Approve is live and no note is shown.
+  // (UI.primary carries the disabled: variant, so the attribute is matched with its spaces.)
+  assert.ok(!/ disabled /.test(app.pendingHtml(status.pending, status)));
+  assert.equal(app.approverNoteHtml(status), '');
+  assert.equal(app.approverNoteHtml({}), '', 'an older panel that does not say keeps Approve as it was');
+  // Without it: Approve stays, disabled, its title says where the link is; the note says it too.
+  const off = { approver: false, approver_file: '/tmp/<x>/approver-8800.secret' };
+  const q = app.pendingHtml(status.pending, off);
+  assert.match(q, /data-approve="3" type="button" disabled title="Approve needs the approver link[^"]*\/tmp\/&lt;x&gt;\/approver-8800\.secret/);
+  assert.ok(q.includes(UI.primary));
+  const note = app.approverNoteHtml(off);
+  assert.match(note, /role="alert"/);
+  assert.ok(note.includes('bg-yellow-100 text-yellow-800'), "the note takes the shell's yellow tone");
+  assert.match(note, /approver link[\s\S]*\/tmp\/&lt;x&gt;\/approver-8800\.secret[\s\S]*once in this browser/);
   assert.match(
     app.eventsHtml(status.events),
     /12:00:01 · ai\.log<\/time>[\s\S]*built a &lt;bus&gt; route/,
@@ -330,6 +347,26 @@ test('buttons call their routes: approve, pause, resume, AI, auto-approve', asyn
     'a read link opens the resource page',
   );
   await env.document.dispatch('click', { target: env.document.createElement('div') });
+});
+
+test('a browser without the approver secret sees why Approve and the switch are off', async () => {
+  await env.settle();
+  assert.equal($('approver-note').innerHTML, '', 'no note while this browser is the approver');
+  assert.ok(!$('auto').disabled);
+  status.approver = false;
+  try {
+    await $('btn-pause').onclick();
+    await env.settle();
+    assert.match($('approver-note').textContent, /Approve needs the approver link[\s\S]*approver-8800\.secret/);
+    assert.match($('pending').innerHTML, /data-approve="3" type="button" disabled title=/);
+    assert.ok($('auto').disabled, 'the full-auto switch needs the secret too');
+  } finally {
+    status.approver = true;
+  }
+  await $('btn-pause').onclick();
+  await env.settle();
+  assert.equal($('approver-note').innerHTML, '');
+  assert.ok(!$('auto').disabled);
 });
 
 test('the console runs panel commands, MCP, Rhai and the console of the game', async () => {

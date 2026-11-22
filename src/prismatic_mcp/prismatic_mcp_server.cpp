@@ -42,6 +42,10 @@
 #include "../3rdparty/nlohmann/json.hpp"
 #include "../core/random_func.hpp"
 #include "../core/string_consumer.hpp"
+#include "../fileio_func.h"
+#include "../settings_type.h"
+#include "../network/core/config.h"
+#include "../network/network_base.h"
 #include "../debug.h"
 #include "../rev.h"
 #include "../openttd.h"
@@ -62,6 +66,11 @@
 #include "../misc_cmd.h"
 
 #include <array>
+#include <filesystem>
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 #include <deque>
 #include <functional>
 #include <charconv>
@@ -553,6 +562,7 @@ struct PendingApproval {
 	std::string args_summary;    ///< Human-readable, shown in the console approval prompt.
 	std::string mcp_tool;        ///< the MCP tool as it was called (openttd.ai.set_setting), for openttd://approvals
 	std::string mcp_args;        ///< its arguments as called, serialized
+	uint64_t superseded_by = 0;  ///< the newer approval that withdrew this one (state Denied), else 0
 	uint64_t created_tick = 0;
 	uint64_t expiry_tick = 0;
 	ApprovalState state = ApprovalState::Pending;
@@ -567,6 +577,7 @@ struct ProvenanceRecord {
 	std::string command_result;   ///< "queued", then "succeeded"/"failed"; "rejected" when never queued
 	std::string verdict;          ///< PENDING_OBSERVATION until the command has run, then VERIFIED_* / EXECUTED_UNVERIFIED
 	std::string verification;     ///< what the verdict rests on: "observed_state" or "command_result"
+	std::string approved_via;     ///< the channel that gave the approval: "console", "chat client <id> company <n>" (ADR 0038)
 	std::string error;            ///< the command's error text, when it failed
 	int64_t cost = 0;             ///< the executed command's cost (internal currency)
 	std::string actor;            ///< "server", "deity" or the company id
@@ -631,7 +642,7 @@ json ResourceDecisions()
 			{"decision_id", p.decision_id}, {"approval_id", p.approval_id},
 			{"action_type", p.action_type}, {"arg_digest", p.arg_digest},
 			{"command_result", p.command_result}, {"verdict", p.verdict},
-			{"verification", p.verification}, {"error", p.error}, {"cost", p.cost}, {"actor", p.actor},
+			{"verification", p.verification}, {"approved_via", p.approved_via}, {"error", p.error}, {"cost", p.cost}, {"actor", p.actor},
 			{"requested_tick", p.requested_tick}, {"observed_tick", p.observed_tick},
 		});
 	}
@@ -653,7 +664,7 @@ json ResourceApprovals()
 				: a.state == ApprovalState::Denied ? "denied" : "consumed";
 			arr.push_back({{"id", a.id}, {"action", a.tool}, {"tool", a.mcp_tool},
 				{"args", json::parse(a.mcp_args.empty() ? a.canonical_args : a.mcp_args, nullptr, false)},
-				{"state", st}, {"expired", a.state == ApprovalState::Pending && now > a.expiry_tick},
+				{"state", a.superseded_by != 0 ? "superseded" : st}, {"superseded_by", a.superseded_by}, {"expired", a.state == ApprovalState::Pending && now > a.expiry_tick},
 				{"created_tick", a.created_tick}, {"expires_tick", a.expiry_tick}});
 		}
 	}
@@ -668,9 +679,10 @@ bool ExecuteAction(std::string_view type, const json &args, ProvenanceRecord &pr
  * approved it (the console, the panel, a client's chat; ADR 0038). Main thread. The approval is
  * consumed (a replay needs a fresh one) and its decision recorded; the command runs through the
  * normal command path, its verdict taken when it has run.
+ * @param via the channel that gave it, recorded with its decision (approved_via).
  * @return the answer: {status executed|rejected, approval_id, decision_id, command_result, verdict[, error]}.
  */
-json ExecuteApproval(PendingApproval &a)
+json ExecuteApproval(PendingApproval &a, std::string_view via)
 {
 	uint64_t now = (uint64_t)TimerGameTick::counter;
 	a.state = ApprovalState::Consumed;
@@ -678,6 +690,7 @@ json ExecuteApproval(PendingApproval &a)
 	ProvenanceRecord &pr = _provenance.emplace_back();
 	pr.decision_id = _next_decision_id++;
 	pr.approval_id = a.id;
+	pr.approved_via = std::string(via);
 	pr.action_type = a.tool;
 	pr.arg_digest = a.arg_digest;
 	pr.command_result = "queued";
@@ -1078,7 +1091,7 @@ json HandleToolsCall(const json &id, const json &params)
 		if (decision == detail::SubmitDecision::Execute) {
 			/* An approval now executes when it is given (ApproveById), so one is approved and unspent
 			 * only for the instant between; the one execution path serves this case too. */
-			json out = ExecuteApproval(_approvals[matched]);
+			json out = ExecuteApproval(_approvals[matched], "resubmit");
 			return RpcResult(id, json{{"content", json::array({{{"type", "text"}, {"text", out.dump()}}})}, {"isError", out["status"] != "executed"}});
 		}
 
@@ -1089,6 +1102,16 @@ json HandleToolsCall(const json &id, const json &params)
 			return RpcResult(id, json{{"content", json::array({{{"type", "text"}, {"text", out.dump()}}})}});
 		}
 
+		/* A newer change of an AI setting of the same company withdraws the older pending one, before
+		 * the queue is measured: approving the older afterwards would undo the newer for that setting
+		 * (detail::Supersedes). */
+		uint64_t new_id = _next_approval_id;
+		for (auto &old : _approvals) {
+			if (old.state != ApprovalState::Pending || !detail::Supersedes(type, aargs, old.tool, json::parse(old.canonical_args, nullptr, false))) continue;
+			old.state = ApprovalState::Denied;
+			old.superseded_by = new_id;
+			Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approval #{} superseded by #{} ({})", old.id, new_id, type);
+		}
 		/* A full queue drops what is decided or expired, never a pending approval: a new request that
 		 * still does not fit is refused, with the reason, rather than silently pushing out one the
 		 * operator has not answered (ADR 0038). */
@@ -1214,8 +1237,9 @@ std::optional<json> DispatchOne(const json &req)
 			 "Every game command whose parameters convert from JSON is a tool openttd.cmd.<name> (catalogue: "
 			 "openttd://commands), plus openttd.game.set_pause. Each mutation is validated by a side-effect-free "
 			 "test run (openttd.decision.validate), then requires operator approval ('prismatic_mcp approve <id>' "
-			 "in the OpenTTD console) before a resubmitted, argument-identical call posts it through the normal "
-			 "command path. The verdict is taken after the command has run: read it with openttd.decision.get."},
+			 "in the OpenTTD console, the panel's Approve, or an approver's '!approve <id>' in the game's chat), "
+			 "which posts it through the normal command path at once: do not resubmit it (a resubmit asks for a "
+			 "fresh approval). The queue is openttd://approvals. The verdict is taken after the command has run: read it with openttd.decision.get."},
 		};
 		return RpcResult(id, result);
 	}
@@ -1677,7 +1701,7 @@ std::vector<PendingApprovalInfo> PendingApprovals()
 	return out;
 }
 
-bool ApproveById(uint64_t id, std::string &message)
+bool ApproveById(uint64_t id, std::string &message, std::string_view via)
 {
 	PendingApproval *a = FindApproval(id);
 	if (a == nullptr) { message = fmt::format("no approval #{}", id); return false; }
@@ -1685,56 +1709,185 @@ bool ApproveById(uint64_t id, std::string &message)
 	if (a->state != ApprovalState::Pending) { message = fmt::format("approval #{} is not pending", id); return false; }
 	if (now > a->expiry_tick) { message = fmt::format("approval #{} expired", id); return false; }
 	a->state = ApprovalState::Approved;
-	Debug(Facility::Net, Severity::Error, "[prismatic-mcp] operator approved #{} ({})", id, a->tool);
+	Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approved #{} ({}) via {}", id, a->tool, via);
 	/* Approving carries it out, here and now: no channel has to resubmit the call (ADR 0038). */
-	json out = ExecuteApproval(*a);
+	json out = ExecuteApproval(*a, via);
 	bool executed = out["status"] == "executed";
 	message = fmt::format("approved #{} ({}): {} {}{}", id, a->tool, out["status"].get<std::string>(),
 		out["command_result"].get<std::string>(), out.contains("error") ? " -- " + out["error"].get<std::string>() : "");
 	return executed;
 }
 
-bool ChatApproval(int company, std::string_view line, std::string &reply)
+bool HoldsPending(uint64_t id)
 {
-	std::vector<std::string_view> words;
-	for (size_t i = 0; i < line.size();) {
-		size_t j = line.find(' ', i);
-		if (j == std::string_view::npos) j = line.size();
-		if (j > i) words.push_back(line.substr(i, j - i));
-		i = j + 1;
+	const PendingApproval *a = FindApproval(id);
+	return a != nullptr && a->state == ApprovalState::Pending;
+}
+
+/* ---- approvers: who may approve from inside the game (ADR 0038) --------------------------- *
+ * Declared: the keys the server's operator registered ('prismatic_mcp approvers add <client id>'),
+ * kept one per line in the personal directory so they survive a restart. Derived: the allow list of
+ * the company an approval names, which is OpenTTD's own access control for that company. */
+static std::vector<std::string> _approver_keys;
+static std::string _approvers_loaded_from; ///< the file the list was read from; another port's file is read afresh
+
+/** One file per server port: every instance on this machine keeps its own approvers. */
+static std::string ApproversFile() { return fmt::format("{}prismatic_mcp_approvers.{}.txt", _personal_dir, _settings_client.network.server_port); }
+
+static void LoadApprovers()
+{
+	if (_approvers_loaded_from == ApproversFile()) return;
+	_approvers_loaded_from = ApproversFile();
+	_approver_keys.clear();
+	auto f = FileHandle::Open(ApproversFile(), "r");
+	if (!f.has_value()) return;
+	char buf[512];
+	while (fgets(buf, sizeof(buf), *f) != nullptr) {
+		std::string line = buf;
+		while (!line.empty() && (line.back() == '\n' || line.back() == '\r' || line.back() == ' ')) line.pop_back();
+		if (!line.empty() && line[0] != '#') _approver_keys.push_back(line);
 	}
-	if (words.empty() || (words[0] != "!approve" && words[0] != "!deny" && words[0] != "!approvals")) return false;
-	/* The company an approval acts on, from the arguments it binds to; -1 when it names none. */
-	auto company_of = [](const PendingApproval &a) {
-		json args = json::parse(a.canonical_args, nullptr, false);
-		return args.is_object() && args.contains("company") && args["company"].is_number_integer() ? args["company"].get<int>() : -1;
-	};
-	if (words[0] == "!approvals") {
-		uint64_t now = (uint64_t)TimerGameTick::counter;
-		std::string list;
+}
+
+/** Write the list through a temporary file renamed over the old one, readable by its owner only. */
+static bool SaveApprovers()
+{
+	std::string tmp = ApproversFile() + ".tmp";
+	std::error_code ec;
+	std::filesystem::remove(tmp, ec);
+	{
+#if !defined(_WIN32)
+		/* Created readable by its owner only, before anything is written into it. */
+		int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+		if (fd < 0) return false;
+		close(fd);
+#endif
+		auto f = FileHandle::Open(tmp, "w");
+		if (!f.has_value()) return false;
+		fmt::print(*f, "# Prismatic MCP approvers (RESEARCH-ONLY, ADR 0038): one client public key per line.\n");
+		for (const auto &k : _approver_keys) fmt::print(*f, "{}\n", k);
+		if (fflush(*f) != 0) return false;
+	}
+	std::filesystem::rename(tmp, ApproversFile(), ec);
+	return !ec;
+}
+
+std::vector<std::string> Approvers() { LoadApprovers(); return _approver_keys; }
+
+bool AddApprover(std::string_view key)
+{
+	LoadApprovers();
+	if (key.empty() || std::find(_approver_keys.begin(), _approver_keys.end(), key) != _approver_keys.end()) return false;
+	_approver_keys.emplace_back(key);
+	if (SaveApprovers()) return true;
+	_approver_keys.pop_back();
+	return false;
+}
+
+std::string RemoveApprover(std::string_view key_or_prefix)
+{
+	LoadApprovers();
+	if (key_or_prefix.size() < 8) return {};
+	auto match = [&](const std::string &k) { return k.starts_with(key_or_prefix); };
+	if (std::count_if(_approver_keys.begin(), _approver_keys.end(), match) != 1) return {};
+	auto it = std::find_if(_approver_keys.begin(), _approver_keys.end(), match);
+	std::string removed = *it;
+	size_t at = static_cast<size_t>(it - _approver_keys.begin());
+	_approver_keys.erase(it);
+	if (SaveApprovers()) return removed;
+	_approver_keys.insert(_approver_keys.begin() + at, removed); // not saved: still an approver
+	return {};
+}
+
+/** Whether a chat line may decide this approval's action at all: one company's own AI or a command
+ * that is neither a server nor an offline command; anything wider stays with the server's operator. */
+static bool ChatDecidable(const PendingApproval &a)
+{
+	json d = json::object();
+	if (a.tool.starts_with("command.")) {
+		if (auto cmd = cmds::Find(std::string_view(a.tool).substr(8)); cmd.has_value()) d = cmds::Describe(*cmd);
+	}
+	return detail::ChatScoped(a.tool, d.value("flags", json::array()), d.value("category", ""));
+}
+
+/** The company an approval acts on, from the arguments it binds to; -1 when it names none. */
+static int CompanyOf(const PendingApproval &a)
+{
+	json args = json::parse(a.canonical_args, nullptr, false);
+	if (!args.is_object() || !args.contains("company") || !args["company"].is_number_integer()) return -1;
+	int64_t c = args["company"].get<int64_t>();
+	return c >= 0 && c < MAX_COMPANIES ? static_cast<int>(c) : -1;
+}
+
+bool ChatApproval(uint32_t client_id, int company, std::string_view key, bool injecting, std::string_view line, std::vector<std::string> &replies)
+{
+	detail::ChatRequest req = detail::ParseChatApproval(line);
+	if (req.verb == detail::ChatRequest::Verb::None) return false;
+	const size_t max = NETWORK_CHAT_LENGTH - 1;
+	if (req.verb == detail::ChatRequest::Verb::Bad) { replies.push_back(detail::CapLine(req.error, max)); return true; }
+	bool valid_company = company >= 0 && company < MAX_COMPANIES && Company::IsValidID(CompanyID(company));
+	uint64_t now = (uint64_t)TimerGameTick::counter;
+	if (req.verb == detail::ChatRequest::Verb::List) {
+		/* Machine-readable, one approval per line, so a client can show the server's queue: each line
+		 * starts "[approvals] " with a JSON object, the last one is the count and page. */
+		constexpr size_t PAGE = 10;
+		std::vector<const PendingApproval *> mine;
 		for (const auto &a : _approvals) {
-			if (a.state != ApprovalState::Pending || now > a.expiry_tick || company_of(a) != company) continue;
-			list += fmt::format("{}#{} {} {}", list.empty() ? "" : "; ", a.id, a.tool, a.args_summary);
+			if (a.state == ApprovalState::Pending && now <= a.expiry_tick && valid_company && CompanyOf(a) == company) mine.push_back(&a);
 		}
-		reply = list.empty() ? "nothing waits for your company's approval" : "waiting: " + list + " -- answer with !approve <id> or !deny <id>";
+		size_t pages = std::max<size_t>(1, (mine.size() + PAGE - 1) / PAGE);
+		size_t from = static_cast<size_t>(req.page - 1) * PAGE;
+		for (size_t i = from; i < std::min(mine.size(), from + PAGE); i++) {
+			const PendingApproval &a = *mine[i];
+			/* A line is whole JSON or it says the arguments did not fit; a cut line would not parse. */
+			json row = {{"id", a.id}, {"tool", a.tool}, {"args", a.args_summary}, {"state", "pending"},
+				{"expires_tick", a.expiry_tick}, {"chat_decidable", ChatDecidable(a)}};
+			std::string line = "[approvals] " + row.dump();
+			for (size_t keep = a.args_summary.size(); line.size() > max && keep > 0; ) {
+				keep = keep > 64 ? keep / 2 : 0;
+				row["args"] = detail::CapLine(a.args_summary, keep);
+				row["args_truncated"] = true;
+				line = "[approvals] " + row.dump();
+			}
+			if (line.size() > max) { row.erase("args"); row["args_truncated"] = true; line = "[approvals] " + row.dump(); }
+			replies.push_back(std::move(line));
+		}
+		replies.push_back(json({{"count", mine.size()}, {"page", req.page}, {"pages", pages}}).dump().insert(0, "[approvals] "));
 		return true;
 	}
-	if (words.size() < 2) {
-		reply = fmt::format("usage: {} <id> [<id> ...] (!approvals lists them)", words[0]);
+	PendingApproval *a = FindApproval(req.id);
+	LoadApprovers();
+	detail::ChatFacts f;
+	f.exists = a != nullptr;
+	f.pending = f.exists && a->state == ApprovalState::Pending;
+	f.expired = f.exists && now > a->expiry_tick;
+	f.chat_decidable = f.exists && ChatDecidable(*a);
+	f.valid_company = valid_company;
+	f.same_company = f.exists && valid_company && CompanyOf(*a) == company;
+	f.key_registered = !key.empty() && std::find(_approver_keys.begin(), _approver_keys.end(), key) != _approver_keys.end();
+	/* Derived only from a human company's own allow list: an AI or co-play-opened company admits
+	 * anyone, who could then add their own key to it. */
+	if (!key.empty() && valid_company && Company::IsValidHumanID(CompanyID(company))) {
+		const Company *c = Company::Get(CompanyID(company));
+		f.key_in_allow_list = !c->allow_any && c->allow_list.Contains(key);
+	}
+	f.injecting = injecting;
+	bool approving = req.verb == detail::ChatRequest::Verb::Approve;
+	detail::ChatVerdict v = detail::DecideChat(f, approving);
+	if (v != detail::ChatVerdict::Allow) {
+		Debug(Facility::Net, Severity::Error, "[prismatic-mcp] chat {} #{} from client {} refused: {}", approving ? "approve" : "deny", req.id, client_id, detail::ChatVerdictText(v));
+		replies.push_back(detail::CapLine(fmt::format("#{}: {}", req.id, detail::ChatVerdictText(v)), max));
 		return true;
 	}
-	std::string out;
-	for (size_t i = 1; i < words.size(); i++) {
-		std::string m;
-		auto id = ParseInteger<uint64_t>(words[i]);
-		PendingApproval *a = id.has_value() ? FindApproval(*id) : nullptr;
-		if (a == nullptr) m = fmt::format("no approval #{}", words[i]);
-		else if (company_of(*a) != company || company < 0) m = fmt::format("#{} is not your company's to decide; the server's operator decides it", *id);
-		else if (words[0] == "!approve") ApproveById(*id, m);
-		else DenyById(*id, m);
-		out += (out.empty() ? "" : "; ") + m;
+	std::string m;
+	std::string via = fmt::format("chat client {} company {} key {} ({})", client_id, company, detail::KeyFingerprint(key),
+		f.key_registered ? "registered approver" : "company allow list");
+	if (approving) {
+		ApproveById(req.id, m, via);
+	} else if (DenyById(req.id, m)) {
+		Debug(Facility::Net, Severity::Error, "[prismatic-mcp] denied #{} via {}", req.id, via);
 	}
-	reply = out;
+	replies.push_back(detail::CapLine(m, max));
 	return true;
 }
 
@@ -1742,6 +1895,9 @@ bool DenyById(uint64_t id, std::string &message)
 {
 	PendingApproval *a = FindApproval(id);
 	if (a == nullptr) { message = fmt::format("no approval #{}", id); return false; }
+	/* A decided approval stays as it was decided: denying a consumed one would relabel an action
+	 * that ran. */
+	if (a->state != ApprovalState::Pending) { message = fmt::format("approval #{} is not pending", id); return false; }
 	a->state = ApprovalState::Denied;
 	message = fmt::format("denied #{}", id);
 	return true;

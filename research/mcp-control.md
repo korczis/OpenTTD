@@ -44,7 +44,7 @@ and OpenMSX for sound and music), and `PrismaticAI` in `~/Documents/OpenTTD/ai/`
 |---|---|
 | Stat cards, companies, decisions | `openttd://game/state`, `openttd://companies`, `openttd://decisions`, every second |
 | Pause / Resume | `openttd.game.set_pause` through the approval flow; pending approvals get an Approve button |
-| Auto-approve (full auto) | the operator's switch: the panel approves its own pending decisions; off by default |
+| Auto-approve (full auto) | the operator's switch: the panel approves the pending decisions it submitted itself, never those of another MCP client; off by default, and like Approve it needs the approver secret |
 | MCP catalogue | `resources/list` and `tools/list`; click a resource to read it |
 | Scripts (`/scripts`, `/scripts/<name>`) | The Rhai library as a workspace: every script with its header comment, imports and importers; an editor with Rhai highlighting, line numbers, an outline and a live parse check; Save (only text that parses), Run once (streamed), and Start/Stop as a service whose log streams and which reloads within a second when its file or a library it imports changes ([`research/rail-steward.md`](rail-steward.md), `src/panel_scripts.rs`) |
 | Towns (`/towns`) | The [town-authority model](mechanisms/town-authority.md) derived from the engine sources (likes and dislikes, gates with removal thresholds by tolerance, town actions, links, relations, each rule with its source `path:line`) and, with a game connected, the live towns with one company's rating, band and `town_lib.rhai` advice; a company selector kept in the address (`src/panel_town.rs`, `tools/research/mcp-towns-check`) |
@@ -54,15 +54,16 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 
 | Endpoint | Body | Answer |
 |---|---|---|
-| `GET /api/status` | | server and MCP up, pending approvals, auto-approve, events |
+| `GET /api/status` | | server and MCP up, pending approvals, auto-approve, events; `approver` (whether this request carries the approver secret, never the secret) and `approver_file` |
+| `GET /approver?secret=` | | the approver link the panel prints at start: with this run's secret, a 303 to `/` that sets this browser's approver cookie; 403 for any other secret |
 | `GET /api/overview` | | state, companies, decisions |
 | `GET /api/catalogue` | | `initialize`, `resources/list`, `tools/list` |
 | `GET /api/resource?uri=<uri>` | | one resource's payload |
 | `POST /api/rpc` | `{"method", "params"}` | raw MCP JSON-RPC with the panel's token |
 | `POST /api/console` | `{"command"}` | one OpenTTD console line and its output |
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
-| `POST /api/approve` | `{"id"}` | the operator's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it |
-| `POST /api/auto-approve` | `{"on": bool}` | |
+| `POST /api/approve` | `{"id"}` | the operator's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 403 without the approver secret, 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it |
+| `POST /api/auto-approve` | `{"on": bool}` | the full-auto switch; 403 without the approver secret |
 | `POST /api/rhai` | `{"script"}` | a Rhai script's output |
 | `POST /api/rhai/stream` | `{"script"}` | the same, streamed line by line (SSE `out`, `err`, `exit`) |
 | `GET /api/scripts`, `GET /api/script?name=` | | the library ($MCP_RHAI_PATH, else `tools/research/mcp-panel/rhai`), one script with its parse verdict |
@@ -88,6 +89,27 @@ POST guard and both WebSocket upgrades call that one function.
 `MCP_WEB_TOKEN`) a wide bind gets a random token, and the start line prints the URL to open once.
 Example: `mcp-panel ... --bind 0.0.0.0 --token "$T" --allow-origin https://dash.example`. The
 embedded MCP server of the game stays loopback-only; only the panel and the hub widen.
+
+Approving needs more than the address: a per-run approver secret (owner decision 2026-11-22,
+"Approver secret"). Every process of the owner's account reaches loopback, an agent included, so
+the loopback rule above would let any of them press Approve. At start the panel makes a 32-hex
+secret from `/dev/urandom`, writes it to `$PRISMATIC_STATE_DIR/approver-<port>.secret` (default
+`~/.local/state/prismatic-mcp`; the directory is created 0700, the file is 0600 and replaced each
+run) and prints one line:
+
+```
+mcp-panel: approver link (opens Approve for this browser): http://127.0.0.1:8800/approver?secret=<s>  (also in <file>)
+```
+
+Opening that link once answers a 303 to `/` and sets the cookie `mcp_approver_<port>` (HttpOnly,
+SameSite=Strict). `POST /api/approve` and `POST /api/auto-approve` then need that cookie or an
+`X-Approver-Secret` header, compared in constant time; without it they answer 403 with
+`approving needs the approver secret: open the approver link the panel printed at start (also in
+<file>) once in this browser`. `GET /api/status` says `approver: true|false` for the request it
+answers, so the page shows a browser without the secret why its Approve buttons are disabled.
+The secret never reaches the bus, the event log or the status. The panel's own auto-approve loop
+and `--auto-approve` at start approve inside the process and need no secret; Rhai's `approve` and
+`auto_approve` go over HTTP without it and are refused.
 
 Every page talks to the panel through the shell's one API client (`static/shell.js` `api`), which
 shows each non-2xx answer as a toast. Before, a refused POST was invisible: on a page opened as
@@ -302,8 +324,9 @@ breadcrumb steps back, a leaf opens the item's page. Its pure parts are tested i
 
 `static/tool.js` builds the rest from `/openapi.json`. A tool's form comes from its input schema
 (numbers with their bounds, enums as selects, booleans, objects as JSON). The call goes to the tool's
-derived route. A `pending_approval` answer names the approval, says where to approve it, and asks
-for the same call again. Each page shows the same call as REST, MCP JSON-RPC, the in-game console
+derived route. A `pending_approval` answer names the approval and says where to approve it;
+approving it executes the call on the game server, so it is not sent again (a second call would
+ask for a fresh approval, ADR 0038). Each page shows the same call as REST, MCP JSON-RPC, the in-game console
 (`mcp <tool> key=value`, `mcp read <uri>`) and its OpenAPI operation. A resource page reads on demand
 or live, every 2 s. The form's values, the live switch and the catalogue's search stay in the
 address, so a configured call is a link. `mcp-panel-check` requires every catalogue item to answer
@@ -480,9 +503,11 @@ step waits any more the panel publishes `plan.directive_outcome` (`inputs.live.d
 the `plan.directive`). A denied approval leaves no decision record, so a directive with no verdict
 after an hour is closed as `expired`, never as applied. Each settled step says how its approval was
 given (`approved_by`): `{channel: "api", declared}` for `POST /api/approve` (`by` names the approver
-the caller declares; nothing checks it, the loopback API authenticates no one), `{channel:
-"auto-approve"}` for the panel's switch, where no person approved, or `{channel: "outside the
-panel"}` for one approved elsewhere, as in the game's console.
+the caller declares; nothing checks the name, only that the caller holds the approver secret),
+`{channel: "auto-approve"}` for the panel's switch, where no person approved, or, for one approved
+elsewhere, the channel the game server recorded in the decision's `approved_via` (`{channel:
+"console"}`, `{channel: "chat client 3 company 0"}`), and `{channel: "outside the panel"}` from a
+server that does not record it.
 
 With `$MAJORDOMUS_URL` (this checkout's Majordomus server, loopback) and `$MAJORDOMUS_SESSION` set,
 the panel also mirrors each `plan.directive` as a typed `decision` record of the Majordomus mesh and
@@ -706,7 +731,8 @@ and that is the owner's call (knowledge `auto-approve-is-the-owners-switch`).
 `mcp-rhai [--panel URL] [--hub URL] (<file.rhai> | -e '<script>')`, or `/rhai ...` in the developer console.
 
 - Built-in: `rpc`, `read`, `overview`, `status`, `console`, `pause`, `approve`, `auto_approve`,
-  `events`, `sleep`, `to_json`, `tools`, `commands`, `help`.
+  `events`, `sleep`, `to_json`, `tools`, `commands`, `help`. `approve` and `auto_approve` answer
+  403: the approver secret is held by the owner's browser, not by scripts.
 - Derived at start-up, never listed by hand: one function per MCP tool in `tools/list` (dots
   become underscores: `openttd_game_set_pause(#{pause: true})`), and one per OpenTTD console
   command in `list_cmds` (`con_companies()`, `con_newgame("42")`; `list_cmds` counts them), and one per operation
@@ -1340,12 +1366,15 @@ already approved call needs a fresh approval, and the digest binds the approval 
 So no sentence, script, Rhai program or agent can make the game execute a mutation that an operator
 did not approve. The panel's `auto_approve` is a different thing living outside the game: operator
 automation that answers the queue on the operator's behalf. It is set by `POST /api/auto-approve
-{on}` (`panel.rs` `h_auto`), by the panel's own toggle "Auto-approve (full auto)", by
-`--auto-approve` at startup, or from Rhai as `auto_approve(on)`.
+{on}` (`panel.rs` `h_auto`, with the approver secret), by the panel's own toggle "Auto-approve
+(full auto)", or by `--auto-approve` at startup. Rhai's `auto_approve(on)` reaches the same route
+without the secret and is refused.
 
 Two properties of that switch are easy to get wrong, and both were measured on 2026-11-17.
-**It is not "approve what comes next": `auto_loop` (`panel.rs:1043`) walks the entire pending queue
-once a second** and approves everything in it. A queue holding ten decisions from four different
+**It is not "approve what comes next": `auto_loop` (`panel.rs`) walks the pending queue once a
+second** and approves every request in it that the panel itself submitted and announced (the
+server's queue also holds requests of MCP clients that never went through the panel, and the switch
+leaves those to the owner). A queue holding ten decisions from four different
 route proposals therefore applies all four, and the last write of `fr_from`/`fr_to` wins in whatever
 order the map iterates -- a line nobody chose. Before turning it on, clear the queue: `deny` enacts
 nothing, so denying the stale decisions and leaving only the ones belonging to the sentence you
@@ -1522,9 +1551,12 @@ the video buffer was unlocked under the drawing thread. `tools/research/mcp-view
 [panel-url]` checks all of this against a running stack: five screenshots in a row, with the client
 still alive afterwards, the proxied view tools, the map, stations and graph, and the OpenAPI entries.
 
-Approvals stay the owner's act: `POST /api/console` refuses `prismatic_mcp approve`, `mcp approve`
-and the auto-approve lines (HTTP 403) and records the refusal as an operator event. Approvals go
-through `POST /api/approve`, which is the panel's Approve button. Withdrawing your own request
+Approvals stay the owner's act: `POST /api/console` refuses (HTTP 403, recorded as an operator
+event) any line with the word `approve` anywhere (`auto_approve` and `auto-approve` included, quotes
+dropped first) and any line whose first word is `alias`, `exec` or `schedule`. A prefix match on
+`prismatic_mcp approve` was bypassed by `"prismatic_mcp" approve 5`, by `alias a "prismatic_mcp
+approve %A"` followed by `a 5`, and by `exec <file>`. Approvals go through `POST /api/approve`, which
+is the panel's Approve button in a browser that holds the approver secret. Withdrawing your own request
 (`deny`) is still allowed. `mcp-panel-check` tests both cases.
 
 ## The world as data: map, stations, road graph

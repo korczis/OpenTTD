@@ -541,6 +541,15 @@ pub fn approval_label(by: &Value) -> String {
     }
 }
 
+/// The channel of an approval the panel did not give: the decision record's `approved_via` when
+/// the game server names one, else "outside the panel" (a server that predates the field).
+fn outside_channel(decision: &Value) -> Value {
+    match decision.get("approved_via").and_then(Value::as_str).filter(|v| !v.is_empty()) {
+        Some(via) => json!({"channel": via}),
+        None => json!({"channel": "outside the panel"}),
+    }
+}
+
 /// Apply one decision record of openttd://decisions to the open steps it belongs to (by its
 /// approval_id): the step takes the decision's id and, once final, its verdict's state.
 pub fn settle(open: &mut Open, decision: &Value) {
@@ -548,8 +557,10 @@ pub fn settle(open: &mut Open, decision: &Value) {
     for s in open.steps.iter_mut() {
         if s.get("approval_id").and_then(Value::as_u64) != Some(approval) { continue; }
         s["decision_id"] = decision.get("decision_id").cloned().unwrap_or(Value::Null);
-        // How its approval was given: by the panel (api or auto-approve), else outside it (the game's console).
-        s["approved_by"] = approver(approval as i64).unwrap_or_else(|| json!({"channel": "outside the panel"}));
+        // How its approval was given: by the panel (api or auto-approve), else outside it. The game
+        // server names that channel itself (`approved_via`: "console", "chat client 3 company 0"),
+        // so a step approved in the game's chat says so rather than a vague "outside the panel".
+        s["approved_by"] = approver(approval as i64).unwrap_or_else(|| outside_channel(decision));
         if let Some(state) = decision.get("verdict").and_then(Value::as_str).and_then(verdict_state) {
             s["state"] = json!(state);
             s["verdict"] = decision["verdict"].clone();
@@ -565,7 +576,7 @@ pub fn outcome_event(open: &Open, expired: bool) -> Value {
     panel_events::plan("prismatic.directive_outcome", json!({"directive_seq": open.seq}),
                        json!({"url": open.url, "directive_seq": open.seq}), &panel_events::Stored::Fallback(String::new()),
                        json!({"outcome": result, "steps": open.steps,
-                              "why": if expired { "no verdict within an hour: denied, expired or never resubmitted" } else { "every step has the game's verdict" }}))
+                              "why": if expired { "no verdict within an hour: the approval expired or was denied before the game carried it out" } else { "every step has the game's verdict" }}))
 }
 
 /// A decision record seen (decision.recorded or decision.updated): the outcome of every open
@@ -993,11 +1004,19 @@ mod tests {
         record_approval(4401, json!({"channel": "auto-approve"}));
         record_approval(4402, json!({"channel": "api", "declared": "korczis"}));
         let pending = |id: u64| step(format!("company 1 s{id}=1"), Ok(json!({"status": "pending_approval", "approval_id": id})));
-        let mut d = Open { seq: 9, url: "u".into(), opened: std::time::Instant::now(), steps: vec![pending(4401), pending(4402), pending(4403)] };
+        let steps = vec![pending(4401), pending(4402), pending(4403), pending(4404), pending(4405)];
+        let mut d = Open { seq: 9, url: "u".into(), opened: std::time::Instant::now(), steps };
         for id in [4401, 4402, 4403] { settle(&mut d, &json!({"approval_id": id, "decision_id": 1, "verdict": "VERIFIED_SUCCESS"})); }
+        // Approved outside the panel: the game server names the channel in `approved_via`.
+        settle(&mut d, &json!({"approval_id": 4404, "decision_id": 2, "verdict": "VERIFIED_SUCCESS", "approved_via": "chat client 3 company 0"}));
+        settle(&mut d, &json!({"approval_id": 4405, "decision_id": 3, "verdict": "VERIFIED_SUCCESS", "approved_via": ""}));
         assert_eq!(d.steps[0]["approved_by"]["channel"], "auto-approve");
         assert_eq!(d.steps[1]["approved_by"], json!({"channel": "api", "declared": "korczis"}));
-        assert_eq!(d.steps[2]["approved_by"]["channel"], "outside the panel");
+        assert_eq!(d.steps[2]["approved_by"]["channel"], "outside the panel", "a server without approved_via");
+        assert_eq!(d.steps[3]["approved_by"], json!({"channel": "chat client 3 company 0"}));
+        assert_eq!(d.steps[4]["approved_by"]["channel"], "outside the panel", "an empty approved_via names nothing");
+        assert!(outcome_event(&d, true)["choice"]["why"].as_str().unwrap().contains("expired"));
+        assert!(!outcome_event(&d, true)["choice"]["why"].as_str().unwrap().contains("resubmitted"));
         assert_eq!(approval_label(&json!({"channel": "auto-approve"})), "auto-approve, no person");
         assert_eq!(approval_label(&json!({"channel": "api", "declared": "k"})), "api, declared by k");
         assert_eq!(approval_label(&json!({"channel": "api", "declared": null})), "api, no approver declared");

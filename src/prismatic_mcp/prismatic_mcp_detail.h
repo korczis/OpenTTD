@@ -345,6 +345,168 @@ inline nlohmann::json ReadManyTool()
 		{"annotations", {{"readOnlyHint", true}, {"idempotentHint", true}, {"openWorldHint", false}}}};
 }
 
+/* ---- the in-game approval channel (ADR 0038): pure, so every branch is unit-tested ---------- */
+
+/** One chat line of the in-game approval channel, parsed: '!approvals [page]', '!approve <id>',
+ * '!deny <id>'. One id per line, never a list: a list approved decisions nobody read one by one,
+ * and a long line is cut by the network, which could leave an id nobody typed. */
+struct ChatRequest {
+	enum class Verb : uint8_t { None, List, Approve, Deny, Bad };
+	Verb verb = Verb::None;
+	uint64_t id = 0;     ///< the approval, for Approve/Deny
+	uint32_t page = 1;   ///< the page, for List (1-based)
+	std::string error;   ///< why the line is Bad
+};
+
+inline ChatRequest ParseChatApproval(std::string_view line)
+{
+	std::vector<std::string_view> w;
+	for (size_t i = 0; i < line.size();) {
+		size_t j = line.find(' ', i);
+		if (j == std::string_view::npos) j = line.size();
+		if (j > i) w.push_back(line.substr(i, j - i));
+		i = j + 1;
+	}
+	ChatRequest r;
+	if (w.empty() || (w[0] != "!approvals" && w[0] != "!approve" && w[0] != "!deny")) return r;
+	auto number = [](std::string_view t) -> std::optional<uint64_t> {
+		if (t.empty() || t.size() > 18) return std::nullopt;
+		uint64_t v = 0;
+		for (char c : t) { if (c < '0' || c > '9') return std::nullopt; v = v * 10 + static_cast<uint64_t>(c - '0'); }
+		return v;
+	};
+	if (w[0] == "!approvals") {
+		r.verb = ChatRequest::Verb::List;
+		if (w.size() > 2) { r.verb = ChatRequest::Verb::Bad; r.error = "usage: !approvals [page]"; return r; }
+		if (w.size() == 2) {
+			auto n = number(w[1]);
+			if (!n || *n == 0 || *n > 100000) { r.verb = ChatRequest::Verb::Bad; r.error = "usage: !approvals [page]"; return r; }
+			r.page = static_cast<uint32_t>(*n);
+		}
+		return r;
+	}
+	r.verb = w[0] == "!approve" ? ChatRequest::Verb::Approve : ChatRequest::Verb::Deny;
+	if (w.size() != 2) {
+		r.verb = ChatRequest::Verb::Bad;
+		r.error = fmt::format("usage: {} <id> -- one id per line (!approvals lists them)", w[0]);
+		return r;
+	}
+	auto n = number(w[1]);
+	if (!n) { r.verb = ChatRequest::Verb::Bad; r.error = fmt::format("not an approval id: '{}'", w[1]); return r; }
+	r.id = *n;
+	return r;
+}
+
+/** What the in-game sink knows when a client asks to decide an approval. */
+struct ChatFacts {
+	bool exists = false;           ///< the server holds the approval
+	bool pending = false;          ///< it is still pending
+	bool expired = false;          ///< past its expiry
+	bool chat_decidable = false;   ///< its action is company-scoped (ai.* or a command without the Server/Offline flags)
+	bool valid_company = false;    ///< the client plays a company (a spectator does not)
+	bool same_company = false;     ///< the approval's arguments name the client's company
+	bool key_registered = false;   ///< the client's key is in the server's approver list (declared)
+	bool key_in_allow_list = false; ///< the client's key is in that company's allow list (derived from the game)
+	bool injecting = false;        ///< the line came from injected UI input, not the person
+};
+
+/** The verdict on one chat decision, with the condition that failed. */
+enum class ChatVerdict : uint8_t { Allow, NoSuchApproval, NotPending, Expired, ServerOnly, Spectator, NotYourCompany, NotAnApprover, Injected };
+
+/**
+ * Decide whether a client may approve (or deny) an approval from inside the game. A deny withdraws
+ * and executes nothing, so it needs only the approval's own company; an approval executes, so it
+ * also needs an approver -- a key the server operator registered (declared) or a key of the
+ * company's own allow list (derived) -- and the person's own input (never injected UI input).
+ */
+inline ChatVerdict DecideChat(const ChatFacts &f, bool approving)
+{
+	if (!f.exists) return ChatVerdict::NoSuchApproval;
+	if (!f.pending) return ChatVerdict::NotPending;
+	if (f.expired) return ChatVerdict::Expired;
+	if (!f.chat_decidable) return ChatVerdict::ServerOnly;
+	if (!f.valid_company) return ChatVerdict::Spectator;
+	if (!f.same_company) return ChatVerdict::NotYourCompany;
+	if (!approving) return ChatVerdict::Allow;
+	if (f.injecting) return ChatVerdict::Injected;
+	if (!f.key_registered && !f.key_in_allow_list) return ChatVerdict::NotAnApprover;
+	return ChatVerdict::Allow;
+}
+
+/** The reason a verdict gives the asker, naming the condition that failed. */
+inline std::string_view ChatVerdictText(ChatVerdict v)
+{
+	switch (v) {
+		case ChatVerdict::Allow: return "allowed";
+		case ChatVerdict::NoSuchApproval: return "the server holds no such approval";
+		case ChatVerdict::NotPending: return "it is not pending any more";
+		case ChatVerdict::Expired: return "it expired";
+		case ChatVerdict::ServerOnly: return "it acts beyond one company, so only the server's operator decides it (the panel or the server console)";
+		case ChatVerdict::Spectator: return "a spectator decides nothing; join the company it names";
+		case ChatVerdict::NotYourCompany: return "it is not your company's to decide";
+		case ChatVerdict::NotAnApprover: return "you are not an approver: the server's operator registers you with 'prismatic_mcp approvers add <your client id>' (declared), or your key must be in the company's allow list (derived)";
+		case ChatVerdict::Injected: return "it came from injected input, not your own keyboard or mouse";
+	}
+	return "refused";
+}
+
+/** A line of at most `max` bytes, cut at a UTF-8 boundary with an ellipsis when it was longer. */
+inline std::string CapLine(std::string s, size_t max)
+{
+	if (s.size() <= max) return s;
+	bool mark = max >= 3; // room for the ellipsis; below that the cut text alone, never over max
+	size_t cut = mark ? max - 3 : max;
+	while (cut > 0 && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80) cut--;
+	s.resize(cut);
+	return mark ? s + "..." : s;
+}
+
+/** The AI setting names an ai.set_setting or ai.set_settings action changes (empty for any other). */
+inline std::vector<std::string> SettingKeys(std::string_view type, const nlohmann::json &args)
+{
+	std::vector<std::string> keys;
+	if (!args.is_object()) return keys;
+	if (type == "ai.set_setting" && args.contains("name") && args["name"].is_string()) keys.push_back(args["name"].get<std::string>());
+	if (type == "ai.set_settings" && args.contains("settings") && args["settings"].is_object()) {
+		for (const auto &[k, v] : args["settings"].items()) keys.push_back(k);
+	}
+	return keys;
+}
+
+/**
+ * Whether a new pending approval supersedes an older pending one: both change AI settings
+ * (ai.set_setting or ai.set_settings) of the same company and share a setting. Approving the older
+ * one afterwards would undo the newer plan for that setting, so it is withdrawn when the newer
+ * one arrives.
+ */
+inline bool Supersedes(std::string_view new_type, const nlohmann::json &new_args, std::string_view old_type, const nlohmann::json &old_args)
+{
+	if (!new_args.is_object() || !old_args.is_object() || !new_args.contains("company") || new_args["company"] != old_args.value("company", nlohmann::json())) return false;
+	std::vector<std::string> a = SettingKeys(new_type, new_args), b = SettingKeys(old_type, old_args);
+	return std::any_of(a.begin(), a.end(), [&](const std::string &k) { return std::find(b.begin(), b.end(), k) != b.end(); });
+}
+
+/**
+ * Whether a chat line may decide an action at all (ADR 0038): only what acts on one company. That
+ * is a change of one company's AI settings, or a game command that is neither a server, an offline
+ * nor a deity command and not of the server-setting category (CompanyControl, which creates and
+ * deletes companies, is one: OpenTTD makes it server-only in the network layer, not by its flag).
+ * Everything else -- pausing, starting or stopping an AI, script API calls -- is the server
+ * operator's. `flags` and `category` are the command's own, as cmds::Describe gives them.
+ */
+inline bool ChatScoped(std::string_view type, const nlohmann::json &flags, std::string_view category)
+{
+	if (type == "ai.set_setting" || type == "ai.set_settings") return true;
+	if (!type.starts_with("command.") || !flags.is_array()) return false;
+	for (const auto &f : flags) {
+		if (f == "server" || f == "offline" || f == "deity") return false;
+	}
+	return category != "server_setting" && category != "cheat" && !category.empty();
+}
+
+/** An approver's key as the log and the audit trail show it: its first 12 characters. */
+inline std::string KeyFingerprint(std::string_view key) { return std::string(key.substr(0, 12)); }
+
 } // namespace PrismaticMCP::detail
 
 #endif /* OTTD_PRISMATIC_MCP_SERVER */

@@ -243,13 +243,17 @@ fn tech_of(company, vehicles, engines, railtypes) {
     #{ types: types, railtypes: #{ available: open, used: used_rt, best_engine: best_rt } }
 }
 
-// The names of the company's pending set_setting requests: name -> approval id.
+// The names of the company's pending setting requests: name -> approval id. A plan of settings
+// (openttd.ai.set_settings, args.settings) names each of its settings.
 fn pending_of(st, company) {
     let out = #{};
     for r in st.pending ?? [] {
         let c = r.args?.company;
-        if r.tool != "openttd.ai.set_setting" || c == () || lib::as_int(c) != company { continue; }
-        out[r.args.name] = r.id;
+        if c == () || lib::as_int(c) != company { continue; }
+        if r.tool == "openttd.ai.set_setting" { out[r.args.name] = r.id; }
+        else if r.tool == "openttd.ai.set_settings" && type_of(r.args.settings) == "map" {
+            for name in r.args.settings.keys() { out[name] = r.id; }
+        }
     }
     out
 }

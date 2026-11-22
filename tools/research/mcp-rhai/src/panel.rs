@@ -386,7 +386,6 @@ pub fn redact(line: &str, token: Option<&str>) -> (String, Option<String>) {
     (out, found)
 }
 
-/// "denied #<n>" at the start of a line: an approval withdrawn or refused in the game.
 /// The ~ console's plan verb: "[prismatic-plan] <n> <text>".
 pub fn plan_request(line: &str) -> Option<(i64, String)> {
     let mut from = 0;
@@ -469,17 +468,115 @@ pub fn company_row(line: &str) -> Option<(i64, i64, i64)> {
     Some((id, money, rest[..l].parse().ok()?))
 }
 
-/// A console line that approves: approvals are the owner's act, through POST /api/approve.
+/// A console line /api/console refuses because it could approve: approvals are the owner's act,
+/// through POST /api/approve with the approver secret. A prefix match on `prismatic_mcp approve`
+/// was bypassed three ways: quoting the command (`"prismatic_mcp" approve 5`), an alias (`alias a
+/// "prismatic_mcp approve %A"`, then `a 5`) and `exec <file>` of a script that approves. So the
+/// test is broad and errs towards refusing: any line with the word approve anywhere (auto_approve
+/// and auto-approve included; quotes and backslashes are dropped first, since the game's tokenizer
+/// joins `"appr"ove` into one word), and any line whose first word (read as the game reads it: quotes
+/// joined, a chat-style leading `/` dropped) runs other console lines: `alias`, `exec`, or
+/// `schedule`, which execs a script file at the next month. Withdrawing (`prismatic_mcp deny 3`)
+/// and every ordinary line stay open.
 pub fn is_approval_line(cmd: &str) -> bool {
-    let low = cmd.trim_start().to_ascii_lowercase();
-    let Some(rest) = low.strip_prefix("prismatic_mcp").or_else(|| low.strip_prefix("mcp")) else { return false };
-    if !rest.starts_with(char::is_whitespace) {
-        return false;
+    let low = cmd.to_ascii_lowercase();
+    let flat: String = low.chars().filter(|c| *c != '"' && *c != '\\').collect();
+    if flat.contains("approve") {
+        return true;
     }
-    let rest = rest.trim_start();
-    ["approve", "auto_approve", "auto-approve"].iter().any(|w| {
-        rest.strip_prefix(w).map_or(false, |after| !after.starts_with(|c: char| c.is_alphanumeric() || c == '_'))
-    })
+    // The first token as src/console.cpp splits it: spaces separate, quotes group and vanish.
+    let mut first = String::new();
+    let mut in_quotes = false;
+    for c in low.trim_start_matches(' ').chars() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            ' ' if !in_quotes => break,
+            _ => first.push(c),
+        }
+    }
+    let first = first.trim();
+    let first = first.strip_prefix('/').unwrap_or(first);
+    matches!(first, "alias" | "exec" | "schedule")
+}
+
+// ---------------------------------------------------------------------- the approver secret
+
+/// The directory of the panel's per-user state: `$PRISMATIC_STATE_DIR` when set and not empty, else
+/// ~/.local/state/prismatic-mcp (where the instance registry and the store live too).
+pub fn state_dir_from(var: Option<std::ffi::OsString>) -> PathBuf {
+    match var.filter(|v| !v.is_empty()) {
+        Some(d) => PathBuf::from(d),
+        None => PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/state/prismatic-mcp"),
+    }
+}
+
+/// Where the approver secret of the panel on `port` is written, one file per port so two panels
+/// never read each other's.
+pub fn approver_file(port: u16) -> PathBuf {
+    state_dir_from(std::env::var_os("PRISMATIC_STATE_DIR")).join(format!("approver-{port}.secret"))
+}
+
+/// The cookie that carries the approver secret: named for the port, since cookies ignore ports.
+pub fn approver_cookie(port: u16) -> String {
+    format!("mcp_approver_{port}")
+}
+
+/// Write `secret` to `file`, replacing the last run's: the directory is created 0700 when missing,
+/// the file is created anew with 0600 (removed first, so an old file's wider mode or a symlink
+/// planted in its place is never written through).
+pub fn write_approver_secret(file: &Path, secret: &str) -> Result<(), String> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let shown = |e: std::io::Error| format!("{}: {e}", file.display());
+    if let Some(dir) = file.parent() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).map_err(shown)?;
+    }
+    match std::fs::remove_file(file) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(shown(e)),
+    }
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(file).map_err(shown)?;
+    f.write_all(format!("{secret}\n").as_bytes()).map_err(shown)
+}
+
+/// Whether request `headers` carry `secret`, in the cookie `cookie_name` or the header
+/// `X-Approver-Secret`, compared in constant time. No secret held means nobody carries it.
+pub fn carries_secret(secret: Option<&str>, headers: &[(String, String)], cookie_name: &str) -> bool {
+    let Some(secret) = secret.filter(|s| !s.is_empty()) else { return false };
+    let header = |n: &str| headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(n)).map(|(_, v)| v.clone());
+    [crate::web_access::cookie(&header, cookie_name), header("X-Approver-Secret").map(|v| v.trim().to_string())]
+        .into_iter().flatten().any(|given| crate::web_access::same(secret, &given))
+}
+
+/// The refusal of an approving request without the secret, naming where the link is.
+fn approver_needed(port: u16) -> Value {
+    json!({"error": format!("approving needs the approver secret: open the approver link the panel printed at start (also in {}) once in this browser",
+                            approver_file(port).display())})
+}
+
+/// The pending approvals the auto-approve switch may approve: only those the panel itself submitted
+/// and announced. The game server's queue also holds requests of MCP clients that never went
+/// through the panel; the owner's switch covers the panel's own requests, not theirs.
+pub fn auto_approvable(pending: &[Value], announced: &HashSet<i64>) -> Vec<i64> {
+    pending.iter().filter_map(|a| a["id"].as_i64()).filter(|id| announced.contains(id)).collect()
+}
+
+/// The HTTP status of POST /api/approve's answer. The decision record the server wrote carries
+/// `"error": ""` when nothing went wrong, so the status the panel derived (executed or rejected)
+/// decides first, and only a non-empty error string counts as an error: testing `error` for
+/// presence answered 404 for every successful approval.
+pub fn approve_status(out: &Value) -> u16 {
+    let has_error = out.get("error").and_then(Value::as_str).is_some_and(|e| !e.is_empty())
+        || out.get("error").is_some_and(|e| !e.is_null() && !e.is_string());
+    match out.get("status").and_then(Value::as_str) {
+        Some("executed") => 200,
+        Some("rejected") => 422,
+        _ if out.get("pending_decision").is_some() => 504,
+        _ if out.get("approval").is_some() => 409,
+        _ if has_error => 404,
+        // Neither a decision nor a reason: nothing shows the approval took.
+        _ => 502,
+    }
 }
 
 // ---------------------------------------------------------------------- subprocesses
@@ -699,6 +796,9 @@ pub struct Game {
     view_token: Mutex<Option<String>>,
     /// The overview's history: one sample per game day, newest last (see `sample_of`).
     history: Mutex<VecDeque<Value>>,
+    /// This run's approver secret (made at start): POST /api/approve and /api/auto-approve need it.
+    /// None before start, or when no secret could be made: then no web request can approve.
+    approver: Mutex<Option<String>>,
 }
 
 pub const NO_CLIENT: &str = "no GUI client attached (POST /api/view/attach {token_file})";
@@ -717,12 +817,14 @@ impl Game {
             server_tools: Mutex::new((vec![], None)), client_tools: Mutex::new((vec![], None)),
             owner_q: Mutex::new(None), plans_seen: Mutex::new(HashSet::new()), history: Mutex::new(VecDeque::new()),
             asks_reported: Mutex::new(HashSet::new()), view_token: Mutex::new(None),
+            approver: Mutex::new(None),
         })
     }
 
     // ------------------------------------------------------------------ process
     pub fn start(self: &Arc<Self>) -> Result<(), String> {
         std::fs::create_dir_all(&self.tmp).map_err(|e| format!("{}: {e}", self.tmp.display()))?;
+        self.make_approver();
         let cfg = self.tmp.join("openttd.cfg");
         std::fs::write(&cfg, format!(
             "[network]\nserver_name = OpenTTD MCP research server\nserver_game_type = local\n\
@@ -765,6 +867,34 @@ impl Game {
 
     pub fn server_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
+    }
+
+    /// A new approver secret for this run, written where only the owner's account can read it and
+    /// printed as a link the owner opens once (owner decision 2026-11-22, "Approver secret"). An
+    /// agent on the same loopback could otherwise POST /api/approve like the page does; only a
+    /// browser that opened the link holds the cookie. The secret never goes to the bus or the log.
+    fn make_approver(&self) {
+        let port = self.args.panel_port;
+        let file = approver_file(port);
+        let secret = crate::web_access::random_token();
+        // random_token leaves zeros when /dev/urandom cannot be read: a guessable secret is worse
+        // than none, so the panel then keeps none and approving from the web stays refused.
+        if secret.bytes().all(|b| b == b'0') {
+            println!("mcp-panel: no approver secret (/dev/urandom unreadable): Approve is refused this run");
+            return;
+        }
+        if let Err(e) = write_approver_secret(&file, &secret) {
+            println!("mcp-panel: approver secret not written ({e}); the link below still works this run");
+        }
+        *self.approver.lock().unwrap() = Some(secret.clone());
+        println!("mcp-panel: approver link (opens Approve for this browser): http://127.0.0.1:{port}/approver?secret={secret}  (also in {})",
+                 file.display());
+    }
+
+    /// Whether a request carries this run's approver secret: the cookie GET /approver sets, or an
+    /// `X-Approver-Secret` header.
+    pub fn is_approver(&self, headers: &[(String, String)]) -> bool {
+        carries_secret(self.approver.lock().unwrap().as_deref(), headers, &approver_cookie(self.args.panel_port))
     }
 
     fn read_log(self: Arc<Self>, stdout: std::process::ChildStdout) {
@@ -1055,6 +1185,11 @@ impl Game {
                 }
             }
         }
+        // The server refuses a request when its approval queue is full: that is an answer the owner
+        // must see on the page and the bus, not only a line in the server's log.
+        if out.get("status").and_then(Value::as_str) == Some("refused") {
+            self.event("mcp", &format!("{name}({}) -> refused: {}", py_json(&arguments), py_str(out.get("error"))));
+        }
         Ok(out)
     }
 
@@ -1168,8 +1303,8 @@ impl Game {
         loop {
             thread::sleep(Duration::from_secs(1));
             if self.auto_approve.load(Ordering::SeqCst) {
-                let ids: Vec<i64> = self.pending_json().iter().filter_map(|a| a["id"].as_i64()).collect();
-                for id in ids {
+                let announced = self.announced.lock().unwrap().clone();
+                for id in auto_approvable(&self.pending_json(), &announced) {
                     let _ = self.approve(id, json!({"channel": "auto-approve"}));
                 }
             }
@@ -1633,6 +1768,8 @@ pub fn window_classes(header: &str) -> Result<Value, String> {
 pub struct Input {
     pub query: Query,
     pub body: Value,
+    /// The request's headers, for the routes that read a cookie or the approver header.
+    pub headers: Vec<(String, String)>,
 }
 
 pub type Handler = fn(&Arc<Game>, &Input) -> Result<(u16, Value), String>;
@@ -1808,6 +1945,10 @@ fn h_rhai(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
 }
 
 fn h_auto(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
+    // The switch approves on the owner's behalf, so it needs the approver as an approval does.
+    if !g.is_approver(&i.headers) {
+        return Ok((403, approver_needed(g.args.panel_port)));
+    }
     let on = truthy(i.body.get("on"));
     g.auto_approve.store(on, Ordering::SeqCst);
     g.event("operator", &format!("auto-approve {}", if on { "ON" } else { "OFF" }));
@@ -2139,10 +2280,12 @@ fn h_graph(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
     ok(serde_json::from_str(&r.stdout).map_err(|e| e.to_string())?)
 }
 
-fn h_status(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
+fn h_status(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     ok(json!({
         "server_running": g.server_running(), "mcp_up": g.mcp_up.load(Ordering::SeqCst), "endpoint": g.endpoint(),
         "ai": g.args.ai, "ai_started": g.ai_started.load(Ordering::SeqCst), "auto_approve": g.auto_approve.load(Ordering::SeqCst),
+        // Whether this request carries the approver secret (never the secret), and where it is.
+        "approver": g.is_approver(&i.headers), "approver_file": approver_file(g.args.panel_port).display().to_string(),
         "pending": g.pending_json(), "game_port": g.args.game_port, "events": g.events_json(), "event_seq": g.bus.seq(),
         "bus": panel_store::endpoint(), "store": panel_store::store_status(), "store_access": panel_store::store_access()}))
 }
@@ -2184,18 +2327,34 @@ fn h_pause(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
 }
 
 fn h_approve(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
+    if !g.is_approver(&i.headers) {
+        return Ok((403, approver_needed(g.args.panel_port)));
+    }
     let declared = i.body.get("by").and_then(Value::as_str).map(|b| b.chars().take(64).collect::<String>());
     let id = py_int(&i.body["id"])?;
     let out = g.approve(id, json!({"channel": "api", "declared": declared}))?;
     // An approval that did not take is an error the owner sees (the page's one API client shows a
     // non-2xx answer), never a 200 with an error inside.
-    Ok(match out.get("status").and_then(Value::as_str) {
-        _ if out.get("pending_decision").is_some() => (504, out),
-        _ if out.get("approval").is_some() => (409, out),
-        _ if out.get("error").is_some() => (404, out),
-        Some("rejected") => (422, out),
-        _ => (200, out),
-    })
+    Ok((approve_status(&out), out))
+}
+
+/// The approver link: with this run's secret, a cookie for this browser and a redirect to the
+/// panel, whose Approve buttons then work; anything else is refused.
+fn h_approver(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
+    let port = g.args.panel_port;
+    let held = g.approver.lock().unwrap().clone();
+    match held {
+        Some(s) if crate::web_access::same(&s, i.query.get("secret").unwrap_or("")) => {
+            // Strict: the cookie is never sent with a request another site starts, so a foreign
+            // page cannot ride on it; Secure when a TLS proxy forwards the page.
+            let secure = i.headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("X-Forwarded-Proto") && v.eq_ignore_ascii_case("https"));
+            crate::web_access::set_headers(&format!("{}Location: /\r\nSet-Cookie: {}={s}; HttpOnly; SameSite=Strict; Path=/{}\r\n",
+                crate::web_access::headers(), approver_cookie(port), if secure { "; Secure" } else { "" }));
+            Ok((303, json!({"approver": true, "location": "/"})))
+        }
+        _ => Ok((403, json!({"error": format!("not this run's approver secret: open the approver link the panel printed at start (also in {})",
+                                               approver_file(port).display())}))),
+    }
 }
 
 fn h_bots(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
@@ -2378,9 +2537,11 @@ pub fn routes() -> Vec<Route> {
           s(json!({"ids": {"type": "array", "items": {"type": "integer"}}, "wait": {"type": "number"}}), &["ids"]), h_content_download),
         r("POST", "/api/pause", "pause", "Pause or resume through the approval-gated MCP tool", true,
           s(json!({"pause": {"type": "boolean"}}), &["pause"]), h_pause),
-        r("POST", "/api/approve", "approve", "The operator's approval of a pending decision, which the game server carries out at once (ADR 0038): the decision it recorded, 404 for an approval it does not hold, 409 for one not pending, 422 when the game rejected it; `by` names the approver it declares (recorded as the approval's channel and declared name in plan.directive_outcome, not checked: the loopback API authenticates no one)", true,
+        r("POST", "/api/approve", "approve", "The operator's approval of a pending decision, which the game server carries out at once (ADR 0038): the decision it recorded, 403 without this run's approver secret (the cookie GET /approver sets, or an X-Approver-Secret header), 404 for an approval it does not hold, 409 for one not pending, 422 when the game rejected it; `by` names the approver it declares (recorded as the approval's channel and declared name in plan.directive_outcome, not checked)", true,
           s(json!({"id": {"type": "integer"}, "by": st()}), &["id"]), h_approve),
-        r("POST", "/api/auto-approve", "autoApprove", "The owner's full-auto switch", false,
+        r("GET", "/approver", "approver", "The approver link the panel prints at start (and writes to $PRISMATIC_STATE_DIR/approver-<port>.secret): with this run's ?secret=, a 303 to / that sets this browser's approver cookie; 403 for any other secret", false,
+          None, h_approver),
+        r("POST", "/api/auto-approve", "autoApprove", "The owner's full-auto switch over the requests the panel itself submitted; 403 without the approver secret, as POST /api/approve", false,
           s(json!({"on": {"type": "boolean"}}), &["on"]), h_auto),
         r("POST", "/api/start-ai", "startAi", "Start a company AI with an optional settings string", false,
           s(json!({"ai": st(), "settings": st()}), &[]), h_start_ai),
@@ -2537,6 +2698,7 @@ fn query_params(path: &str) -> &'static [(&'static str, bool)] {
         "/api/rhai/shared" => &[("key", false), ("prefix", false)],
         "/api/rhai/debug" => &[("id", false)],
         "/api/evidence" => &[("q", true), ("k", false)],
+        "/approver" => &[("secret", true)],
         _ => &[],
     }
 }
@@ -3051,7 +3213,7 @@ impl Panel {
                 if r.needs_mcp && !up {
                     return Ok((503, json!({"error": "MCP server not up yet"})));
                 }
-                let input = Input { query: req.query.clone(), body: if method == "POST" { body.clone() } else { json!({}) } };
+                let input = Input { query: req.query.clone(), body: if method == "POST" { body.clone() } else { json!({}) }, headers: req.headers.clone() };
                 return (r.handler)(g, &input);
             }
             if !up {
@@ -3199,7 +3361,8 @@ mod tests {
         let mut seen = HashSet::new();
         for r in &rs {
             assert!(seen.insert((r.method, r.path)), "{} {} declared twice", r.method, r.path);
-            assert!(r.path.starts_with("/api/"));
+            // Every route is under /api/ but the approver link, a page address the owner opens.
+            assert!(r.path.starts_with("/api/") || r.path == "/approver", "{}", r.path);
             assert!(!r.op_id.is_empty() && !r.summary.is_empty());
             if r.method == "POST" && r.path != "/api/news/close" {
                 assert!(r.schema.is_some(), "{} has no body schema", r.path);
@@ -3224,7 +3387,8 @@ mod tests {
         // And the debugger (POST /api/rhai/debug, GET /api/rhai/debug, POST /api/rhai/debug/command; I0090).
         // And the observation a directive is bound to (GET /api/bridge/observation; agent loop step 1).
         // And evidence retrieval (GET /api/evidence; research/agent-loop.md, Retrieve).
-        assert_eq!(rs.len(), 74);
+        // And the approver link (GET /approver; owner decision 2026-11-22, "Approver secret").
+        assert_eq!(rs.len(), 75);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -3238,7 +3402,7 @@ mod tests {
             "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query",
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
             "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
-            "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh"].contains(&r.path)));
+            "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh", "/approver"].contains(&r.path)));
     }
 
     /// A store with two runs of one instance: the older run's days must not feed the books.
@@ -3538,10 +3702,22 @@ mod tests {
         assert!(is_approval_line("prismatic_mcp approve 999999"));
         assert!(is_approval_line("  MCP   Auto-Approve on"));
         assert!(is_approval_line("mcp auto_approve"));
-        assert!(!is_approval_line("prismatic_mcp approved"));
+        // The word anywhere, whatever surrounds it: a near miss is refused rather than reasoned about.
+        assert!(is_approval_line("prismatic_mcp approved"));
+        assert!(is_approval_line("mcpapprove 1"));
+        // The three bypasses of the old prefix match: a quoted command, an alias, a script file.
+        assert!(is_approval_line("\"prismatic_mcp\" approve 5"));
+        assert!(is_approval_line("alias a \"prismatic_mcp approve %A\""));
+        assert!(is_approval_line("alias a \"prismatic_mcp st%Aus\""), "any alias, since its expansion is built later");
+        assert!(is_approval_line("exec approvals.txt") && is_approval_line("exec scripts/x.txt"));
+        // The game's tokenizer joins quoted pieces and takes a chat-style leading '/'.
+        assert!(is_approval_line("prismatic_mcp \"appr\"ove 5"));
+        assert!(is_approval_line("\"ex\"ec x.txt") && is_approval_line("/exec x.txt") && is_approval_line("ALIAS b c"));
+        assert!(is_approval_line("schedule on-next-calendar-month x.txt"));
         assert!(!is_approval_line("prismatic_mcp status"));
-        assert!(!is_approval_line("mcpapprove 1"));
         assert!(!is_approval_line("prismatic_mcp deny 3"));
+        assert!(!is_approval_line("companies") && !is_approval_line("start_ai PrismaticAI") && !is_approval_line("say \"execute the plan\""));
+        assert!(!is_approval_line("setting difficulty.max_loan") && !is_approval_line("list_aliases"));
     }
 
     #[test]
@@ -3840,5 +4016,98 @@ mod tests {
         assert_eq!(ev.len(), 1, "the refusal is on the bus");
         let choice = &ev[0]["data"]["choice"];
         assert_eq!((choice["accepted"].clone(), choice["outcome"].clone()), (json!(false), json!("stale")));
+    }
+
+    #[test]
+    fn an_approval_answers_by_its_status_before_any_error_field() {
+        // The decision record of a success carries "error": "" (the 404 the review found).
+        assert_eq!(approve_status(&json!({"status": "executed", "error": "", "command_result": "succeeded"})), 200);
+        assert_eq!(approve_status(&json!({"status": "rejected", "error": "", "command_result": "rejected"})), 422);
+        assert_eq!(approve_status(&json!({"status": "rejected", "error": "not enough cash"})), 422);
+        assert_eq!(approve_status(&json!({"error": "approved #3 in the console, but ...", "pending_decision": true})), 504);
+        assert_eq!(approve_status(&json!({"error": "approval #3 is denied, not pending", "approval": {}})), 409);
+        assert_eq!(approve_status(&json!({"error": "the game server holds no approval #3"})), 404);
+        assert_eq!(approve_status(&json!({"error": {"code": -32000}})), 404);
+        assert_eq!(approve_status(&json!({"error": ""})), 502, "no decision and no reason is not a success");
+    }
+
+    #[test]
+    fn auto_approve_covers_only_what_the_panel_announced() {
+        let pending = vec![json!({"id": 1}), json!({"id": 2}), json!({"id": 3}), json!({"id": "x"})];
+        let announced: HashSet<i64> = [2, 3, 9].into_iter().collect();
+        assert_eq!(auto_approvable(&pending, &announced), vec![2, 3], "1 came from an MCP client the panel never saw");
+        assert!(auto_approvable(&pending, &HashSet::new()).is_empty());
+    }
+
+    #[test]
+    fn approving_needs_this_runs_approver_secret() {
+        let (g, p) = bare_panel("8");
+        let secret = "0123456789abcdef0123456789abcdef";
+        let get = |path: &str, qs: &str, headers: Vec<(String, String)>| p.dispatch(&Request { method: "GET".into(), path: path.into(),
+            query: Query::parse(qs), headers, body: vec![] }, Value::Null);
+        let post = |path: &str, body: Value, headers: Vec<(String, String)>| p.dispatch(&Request { method: "POST".into(), path: path.into(),
+            query: Query::default(), headers, body: vec![] }, body);
+        let cookie = |v: &str| vec![("Cookie".to_string(), format!("a=b; mcp_approver_7=x; mcp_approver_8={v}"))];
+        let header = |v: &str| vec![("X-Approver-Secret".to_string(), v.to_string())];
+
+        // Before start there is no secret: nothing carries it, so nothing approves from the web.
+        assert!(!g.is_approver(&cookie("")));
+        let (code, out) = post("/api/approve", json!({"id": 1}), vec![]);
+        assert_eq!(code, 403, "{out}");
+        assert!(out["error"].as_str().unwrap().contains("approver link") && out["error"].as_str().unwrap().contains("approver-8.secret"), "{out}");
+
+        *g.approver.lock().unwrap() = Some(secret.into());
+        for (path, body) in [("/api/approve", json!({"id": 1})), ("/api/auto-approve", json!({"on": true}))] {
+            assert_eq!(post(path, body.clone(), vec![]).0, 403, "{path} without the secret");
+            assert_eq!(post(path, body.clone(), cookie("wrong")).0, 403, "{path} with a wrong cookie");
+            assert_eq!(post(path, body.clone(), header("0123456789abcdef0123456789abcdee")).0, 403, "{path} with a wrong header");
+            assert_eq!(post(path, body.clone(), vec![("Cookie".into(), format!("mcp_approver_9={secret}"))]).0, 403, "another port's cookie");
+        }
+        assert!(!g.auto_approve.load(Ordering::SeqCst), "a refused switch changed nothing");
+        let (code, out) = post("/api/auto-approve", json!({"on": true}), cookie(secret));
+        assert_eq!((code, out), (200, json!({"auto_approve": true})));
+        assert_eq!(post("/api/auto-approve", json!({"on": false}), header(secret)).0, 200);
+        // With the secret an approval reaches the game's queue; this panel has no game (and no MCP
+        // token, so nothing leaves the process), so it holds no approval #1.
+        assert_eq!(post("/api/approve", json!({"id": 1}), cookie(secret)).0, 404);
+
+        // The status says whether this browser holds it, never the secret itself.
+        let (_, st) = get("/api/status", "", cookie(secret));
+        assert_eq!(st["approver"], true);
+        assert!(st["approver_file"].as_str().unwrap().ends_with("approver-8.secret"));
+        assert!(!py_json(&st).contains(secret), "the secret is never in the status");
+        assert_eq!(get("/api/status", "", vec![]).1["approver"], false);
+
+        // The link: the right secret sets the cookie and redirects; any other is refused.
+        crate::web_access::set_headers("");
+        let (code, out) = get("/approver", &format!("secret={secret}"), vec![]);
+        assert_eq!((code, out["location"].clone()), (303, json!("/")));
+        let h = crate::web_access::headers();
+        assert!(h.contains("Location: /\r\n") && h.contains(&format!("Set-Cookie: mcp_approver_8={secret}; HttpOnly; SameSite=Strict; Path=/\r\n")), "{h}");
+        crate::web_access::set_headers("");
+        let (code, out) = get("/approver", "secret=nope", vec![]);
+        assert_eq!(code, 403, "{out}");
+        assert!(!crate::web_access::headers().contains("Set-Cookie"));
+        assert_eq!(get("/approver", "", vec![]).0, 400, "the secret is a required query parameter");
+    }
+
+    #[test]
+    fn the_approver_secret_file_is_private_and_replaced_each_run() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mcp-panel-approver-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("state/approver-8800.secret");
+        write_approver_secret(&file, "first").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_approver_secret(&file, "second").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "second\n");
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::metadata(file.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(state_dir_from(Some(dir.clone().into_os_string())), dir);
+        assert!(state_dir_from(Some("".into())).ends_with(".local/state/prismatic-mcp"));
+        assert_eq!(approver_cookie(8800), "mcp_approver_8800");
+        assert!(!carries_secret(None, &[("X-Approver-Secret".into(), "".into())], "c"));
+        assert!(!carries_secret(Some(""), &[("X-Approver-Secret".into(), "".into())], "c"), "an empty secret is none");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

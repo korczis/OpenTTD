@@ -175,16 +175,18 @@ fn bearer(header: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     header("Authorization").and_then(|v| v.strip_prefix("Bearer ").map(|t| t.trim().to_string()))
 }
 
-fn cookie(header: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> {
+/// The value of cookie `name` in the request's `Cookie` header.
+pub fn cookie(header: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> {
     header("Cookie")?.split(';').find_map(|c| c.trim().strip_prefix(name)?.strip_prefix('=').map(str::to_string))
 }
 
 /// Equal without an early exit on the first differing byte.
-fn same(a: &str, b: &str) -> bool {
+pub fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn random_token() -> String {
+/// 32 hex characters from /dev/urandom: the generated web token, and the panel's approver secret.
+pub fn random_token() -> String {
     let mut b = [0u8; 16];
     if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
         let _ = std::io::Read::read_exact(&mut f, &mut b);

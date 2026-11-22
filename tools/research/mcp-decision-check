@@ -225,7 +225,10 @@ if [[ -z "${PRISMATIC_DECISION_URL:-}" ]]; then
   echo observe > "$TMP/mode"
 fi
 SEQ0="$(directive_seq)"
-curl -s -m 10 -X POST -H 'Content-Type: application/json' -d '{"on": true}' "$URL/api/auto-approve" > /dev/null
+# The auto-approve switch needs this run's approver secret (ADR 0038), which the panel writes
+# for its port; the check is this stack's operator.
+APPROVER_SECRET="$(cat "${PRISMATIC_STATE_DIR:-$HOME/.local/state/prismatic-mcp}/approver-${URL##*:}.secret" 2>/dev/null)"
+curl -s -m 10 -X POST -H 'Content-Type: application/json' -H "X-Approver-Secret: $APPROVER_SECRET" -d '{"on": true}' "$URL/api/auto-approve" > /dev/null
 curl -s -m 90 -X POST -H 'Content-Type: application/json' -d "{\"url\": \"$SRC\"}" "$URL/api/decision/pull" > "$TMP/pull.json"
 shape="$(jq -r '(has("called_url") and has("raw_response") and (.applied_rcon.lines | type == "array"))' "$TMP/pull.json" 2>/dev/null || echo false)"
 [[ "$shape" == true ]] \

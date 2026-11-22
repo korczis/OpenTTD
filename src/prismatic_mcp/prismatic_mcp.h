@@ -78,16 +78,30 @@ struct PendingApprovalInfo {
  * there is deliberately no bulk approval anywhere in this build.
  */
 std::vector<PendingApprovalInfo> PendingApprovals();
-/** Approve a pending mutation by id and carry it out at once; false if not found, expired or not executed. */
-bool ApproveById(uint64_t id, std::string &message);
+/** Approve a pending mutation by id and carry it out at once; false if not found, expired or not
+ * executed. `via` names the channel, recorded with its decision (approved_via). */
+bool ApproveById(uint64_t id, std::string &message, std::string_view via = "console");
+/** Whether this process's own MCP server holds a pending approval with this id. */
+bool HoldsPending(uint64_t id);
 /**
- * The approval channel from inside the game (ADR 0038): a chat line from a client playing company
- * `company` (its index; a spectator's is not a company). '!approvals' lists what waits for that
- * company; '!approve <id> [<id> ...]' and '!deny <id> [...]' decide through ApproveById/DenyById, for
- * approvals whose arguments name that company only. `reply` is the answer for the asker alone.
+ * The approval channel from inside the game (ADR 0038), on the server: a chat line from client
+ * `client_id` playing `company` (a spectator's is no company) with public key `key`.
+ * '!approvals [page]' answers the company's pending approvals, one machine-readable line each
+ * ("[approvals] {json}") and a last count line; '!approve <id>' and '!deny <id>' (one id per line)
+ * decide through ApproveById/DenyById when detail::DecideChat allows it: an approval naming the
+ * client's company, of a company-scoped action, approved by a registered approver or a key of that
+ * company's allow list, and not from injected input. `replies` go to the asker alone, each within
+ * the chat length.
  * @return false when the line is not one of these (it is chat as usual).
  */
-bool ChatApproval(int company, std::string_view line, std::string &reply);
+bool ChatApproval(uint32_t client_id, int company, std::string_view key, bool injecting, std::string_view line, std::vector<std::string> &replies);
+/** The approvers the server's operator registered (client public keys), persisted in the personal directory. */
+std::vector<std::string> Approvers();
+/** Register an approver's key; false when it is empty or already there. */
+bool AddApprover(std::string_view key);
+/** Remove the one approver whose key starts with this (at least 8 characters, matching exactly one
+ * key); the key removed, or empty when none or several match. */
+std::string RemoveApprover(std::string_view key_or_prefix);
 /** Deny a pending mutation by id. */
 bool DenyById(uint64_t id, std::string &message);
 /** Machine-readable summary of the decision/provenance trace for the console. */

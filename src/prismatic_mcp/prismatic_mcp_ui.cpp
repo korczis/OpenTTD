@@ -800,6 +800,8 @@ std::optional<json> Call(const std::string &name, const json &args)
 	return Error("unknown UI tool");
 }
 
+bool InputArmed() { return Armed(); }
+
 } // namespace PrismaticMCP::UI
 
 #endif /* OTTD_PRISMATIC_MCP_SERVER */
