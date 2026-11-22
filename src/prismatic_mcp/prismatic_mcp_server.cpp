@@ -344,7 +344,7 @@ const auto RESOURCES = std::to_array<ResourceEntry>({
 	{"openttd://game/state", "Game state", "Mode, pause, map size and object counts", &ResourceGameState},
 	{"openttd://companies", "Companies", "All companies with basic finances (server-visible)", &ResourceCompanies},
 	{"openttd://commands", "Commands", "Every game command, derived from the command table: category, flags, parameter schemas", &ResourceCommands},
-	{"openttd://ai", "AIs", "Every company's AI with its settings as declared by its info.nut and their live values; the AIs that can be started", &ResourceAi},
+	{"openttd://ai", "AIs", "Every company's AI with its settings as declared by its info.nut, their live values and the control a form edits each with; the AIs that can be started", &ResourceAi},
 	{"openttd://ai/status", "AI status", "Every AI company's latest heartbeat line from its own script log (`<Name> heartbeat: key=value ...`), split into fields: an integer when the value is one, else its text; no field is named by the server; lines_since counts the lines logged after it", &ResourceAiStatus},
 	{"openttd://decisions", "Decisions", "Provenance trace: decision -> approval -> command -> observed verdict", &ResourceDecisions},
 	{"openttd://approvals", "Approvals", "The one approval queue (ADR 0038): every approval this server holds, pending first, with its tool, arguments, state and expiry; approving one executes it here", &ResourceApprovals},

@@ -22,9 +22,9 @@ recorded experiment, build through the research CLI's `research-mcp` profile ins
 mkfifo /tmp/mcp_fifo
 ( sleep 900 > /tmp/mcp_fifo & )
 ./build-mcp/openttd -D -c <cfg> -g <save.sav> < /tmp/mcp_fifo > ottd.log 2>&1 &
-echo "prismatic_mcp start" > /tmp/mcp_fifo     # -> http://127.0.0.1:8731/mcp
-echo "prismatic_mcp token" > /tmp/mcp_fifo     # -> 64-hex token in ottd.log (operator only)
-TOKEN=$(grep -oE '[0-9a-f]{64}' ottd.log | tail -1)
+echo "prismatic_mcp start 8731 $PWD/token.json" > /tmp/mcp_fifo  # -> http://127.0.0.1:8731/mcp
+# the token is in the 0600 file only, never in ottd.log
+TOKEN=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["agent_token"])' token.json)
 ```
 
 ## Decision-contract vertical

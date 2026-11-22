@@ -159,6 +159,14 @@ TOKEN="$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["ag
 check "the server writes the operator a bearer token file" "$([[ "$TOKEN" =~ ^[0-9a-fA-F]{32,}$ ]] && echo 1 || echo 0)"
 mode="$(stat -f %Lp "$TMP/token.json" 2>/dev/null || stat -c %a "$TMP/token.json" 2>/dev/null || true)"
 check "the token file is readable by its owner only (mode $mode)" "$([[ "$mode" == 600 ]] && echo 1 || echo 0)"
+# The token is never printed (red-team finding 8): 'prismatic_mcp token' names the file and a
+# fingerprint, and no console line carries the secret.
+console "prismatic_mcp token"
+wait_for "Token file: $TMP/token.json" 5 || true
+check "prismatic_mcp token names the token file and a fingerprint, not the token" \
+  "$(grep -qF "Token file: $TMP/token.json (mode 0600, fingerprint blake2b:" "$LOG" && echo 1 || echo 0)"
+check "the bearer token appears nowhere in the console log" \
+  "$([[ -n "$TOKEN" ]] && ! grep -qF -- "$TOKEN" "$LOG" && echo 1 || echo 0)"
 
 PING='{"jsonrpc":"2.0","id":1,"method":"ping"}'
 out="$(rpc "" "$PING")"
@@ -307,6 +315,21 @@ out="$(rpc "$TOKEN" "$GET")"
 result="$(tool_field "${out#* }" command_result)"
 check "the news command runs once approved (decision #${decision:-?}, command_result=${result:-?})" \
   "$([[ -n "$decision" && "$result" == succeeded ]] && echo 1 || echo 0)"
+
+# Rotation rewrites the token file, so its readers pick up the token in force; neither token is
+# printed.
+console "prismatic_mcp rotate"
+wait_for "Bearer token rotated" 5 || true
+sleep 0.5
+ROTATED="$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["agent_token"])' "$TMP/token.json" 2>/dev/null || true)"
+check "prismatic_mcp rotate rewrites the token file with a new token" \
+  "$([[ "$ROTATED" =~ ^[0-9a-fA-F]{32,}$ && "$ROTATED" != "$TOKEN" ]] && echo 1 || echo 0)"
+out="$(rpc "$TOKEN" "$PING")"
+check "the token before the rotation is refused with 401" "$([[ "${out%% *}" == 401 ]] && echo 1 || echo 0)"
+out="$(rpc "$ROTATED" "$PING")"
+check "the rotated token from the file is accepted (http=${out%% *})" "$([[ "${out%% *}" == 200 ]] && echo 1 || echo 0)"
+check "neither token appears in the console log" \
+  "$([[ -n "$ROTATED" ]] && ! grep -qF -- "$TOKEN" "$LOG" && ! grep -qF -- "$ROTATED" "$LOG" && echo 1 || echo 0)"
 
 console "prismatic_mcp stop"
 sleep 1
