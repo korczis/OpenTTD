@@ -18,6 +18,8 @@
  * runs as typed, a URL opens in the browser, a request and its answer are local to this process.
  */
 
+/** @file prismatic_mcp_menu.cpp The fork's own main-toolbar menu and its submenus, from one table (research-only). */
+
 #include "../stdafx.h"
 
 #ifdef OTTD_PRISMATIC_MCP_SERVER
