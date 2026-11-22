@@ -775,16 +775,37 @@ mod tests {
         assert_eq!(q("SELECT count(*) FROM news"), json!([[2]]));
         assert_eq!(q("SELECT decision, choice->>'k' FROM plan_decisions"), json!([["bot.portfolio", "1"]]));
         assert_eq!(q("SELECT kind, n FROM kind_month ORDER BY kind"), json!([["news.shown", 2], ["plan.portfolio", 1]]));
-        // The store documents itself: every table, view and base-table column has its comment.
-        let undocumented = q("SELECT name, column_name FROM schema_doc WHERE (comment IS NULL OR comment = '')
-                              AND (kind <> 'column' OR name IN ('runs', 'events', 'samples'))");
+        // The store documents itself: every table, view and column, a view's columns too, has its comment.
+        let undocumented = q("SELECT name, column_name FROM schema_doc WHERE comment IS NULL OR comment = ''");
         assert_eq!(undocumented, json!([]), "schema_doc rows without a comment");
+        assert_eq!(q("SELECT comment FROM schema_doc WHERE kind = 'column' AND name = 'company_latest' AND column_name = 'rank'"),
+                   json!([["the company's rank by value among the run's companies, each at its latest month: 1 is the highest, ties share a rank"]]));
         assert_eq!(q("SELECT count(*) FROM schema_doc WHERE kind = 'view'"), json!([[sql::VIEW_FILES.len()]]));
         assert_eq!(q("SELECT comment FROM schema_doc WHERE kind = 'column' AND name = 'samples' AND column_name = 'company'"),
                    json!([["the company id, 0-based (company 1 in the game is 0)"]]));
         // Reopening recreates them: a changed definition reaches old files.
         assert!(r.query("SELECT comment FROM duckdb_views() WHERE view_name = 'company_latest'").unwrap()["rows"][0][0]
                 .as_str().is_some_and(|c| c.contains("rank")));
+    }
+
+    #[cfg(feature = "store")]
+    #[test]
+    fn every_view_file_comments_each_column_the_store_gives_its_view() {
+        // The columns come from the store, not from reading the SELECT: a view's columns are what
+        // DuckDB derives from its definition, `*` and joins included.
+        let st = db::Store::open_in_memory("panel-c").unwrap();
+        let cols = st.query("SELECT c.table_name, c.column_name FROM duckdb_columns() c
+                             JOIN duckdb_views() v ON v.schema_name = c.schema_name AND v.view_name = c.table_name
+                             WHERE c.schema_name = 'main' AND NOT c.internal ORDER BY c.table_name, c.column_index").unwrap();
+        let rows = cols["rows"].as_array().unwrap();
+        for (name, text) in sql::VIEW_FILES {
+            let mine: Vec<&str> = rows.iter().filter(|r| r[0] == *name).filter_map(|r| r[1].as_str()).collect();
+            assert!(!mine.is_empty(), "the store has no columns for the view {name}");
+            for column in mine {
+                assert!(text.contains(&format!("COMMENT ON COLUMN {name}.{column} IS '")), "views/*_{name}.sql must comment {column}");
+            }
+        }
+        assert!(rows.iter().all(|r| sql::VIEW_FILES.iter().any(|(n, _)| r[0] == *n)), "a view without its file: {rows:?}");
     }
 
     #[test]
