@@ -55,6 +55,59 @@ function PrismaticAI::RouteEarns(k) {
 	return judged == 0 || profit > 0;
 }
 
+/* The setting air_add_full: how full, in percent, the planes calling at an airport of ours must fly
+ * before one more plane calls there (0: off). Read here, not in Behaviour (main.nut), because the
+ * static fleet and pair-search helpers that use it have no `b`.
+ *
+ * Why (the owner's co-play game, 2026-11-22, seed 20261122, 1979, read from openttd://vehicles):
+ * PrismaticAI's 50 planes flew 35 routes between 9 airports, a full mesh with 7-8 routes and 7-13
+ * planes at each airport; they flew 56% full over 171 tiles on average, 9 of them stood broken
+ * down, and they earned 22.5k a plane. AAAHogEx's 42 planes flew from 22 airports, one route at
+ * each, 89% full over 217 tiles, none broken down, and earned 85k a plane, on the same engine
+ * (Bakewell Luckett LB-9). The bot added planes by what a route's planes earned on average
+ * (InvestSurplus) and by a fixed 20 passengers waiting (air_add_waiting), and new routes from an
+ * airport it had (air_reuse, on once rich); each shared the same airport's passengers. A plane
+ * where the planes already fly half empty carries nobody new and pays its running cost. In a
+ * headless match (OpenTTD seed 31337, 1960-1970, against AAAHogEx and AdmiralAI) the default
+ * bot's air profit was 389k a year with 10 planes in 1963 and 250k with 49 planes on 19 routes
+ * in 1968. Waiting passengers were tried first as the measure (a full plane load at every
+ * airport of the route): it held that bot at 4 planes, because a station's rating keeps fewer
+ * passengers waiting than one 200-seat plane takes, and cost 40% of company value. */
+function PrismaticAI::AirAddFull() {
+	return max(0, AIController.GetSetting("air_add_full"));
+}
+
+/* How full, in percent of their passenger capacity, the planes among `vehicles` (vehicle ids as
+ * list keys) fly now; -1 when none of them is flying. Only a running plane counts (not one
+ * loading at a station, in a hangar or broken down): it holds the load of the leg it flies. */
+function PrismaticAI::AirLoadPercent(vehicles) {
+	local pax = PrismaticAI.PassengerCargo();
+	if (pax == -1) return -1;
+	local load = 0, cap = 0;
+	foreach (v, _ in vehicles) {
+		if (AIVehicle.GetVehicleType(v) != AIVehicle.VT_AIR || AIVehicle.GetState(v) != AIVehicle.VS_RUNNING) continue;
+		local c = AIVehicle.GetCapacity(v, pax);
+		if (c <= 0) continue;
+		cap += c;
+		load += AIVehicle.GetCargoLoad(v, pax);
+	}
+	return cap > 0 ? load * 100 / cap : -1;
+}
+
+/* Whether air route `v` (a plane on it) fills one plane more: its flying planes are at least
+ * air_add_full percent full (AirAddFull; 0, or no plane of the route flying now: yes). */
+function PrismaticAI::AirRouteHasDemand(v) {
+	local full = PrismaticAI.AirAddFull();
+	if (full == 0) return true;
+	local k = PrismaticAI.RouteKey(v);
+	local planes = AIList();
+	foreach (u, _ in AIVehicleList_Station(AIStation.GetStationID(AIOrder.GetOrderDestination(v, 0)))) {
+		if (PrismaticAI.RouteKey(u) == k) planes.AddItem(u, 0);
+	}
+	local pct = PrismaticAI.AirLoadPercent(planes);
+	return pct < 0 || pct >= full;
+}
+
 /* Surplus to put to work (steward on): money above this many reserves, and above the setting
  * invest_min, funds more vehicles. */
 const INVEST_SURPLUS_RESERVES = 20;
@@ -87,6 +140,8 @@ function PrismaticAI::InvestSurplus(b) {
 		if (r.judged == 0 || r.count >= ((r.type == AIVehicle.VT_AIR) ? b.invest_air_cap : b.invest_road_cap)) continue;
 		/* A rich cap (rich.nut) above what the airports hold would only jam them. */
 		if (r.type == AIVehicle.VT_AIR && !PrismaticAI.RouteHasAirRoom(r.sample)) continue;
+		/* Nor where its planes already fly part empty (air_add_full, AirRouteHasDemand). */
+		if (r.type == AIVehicle.VT_AIR && !PrismaticAI.AirRouteHasDemand(r.sample)) continue;
 		/* At most as many unjudged vehicles (under a year old) as judged ones: the profit per vehicle
 		 * counts only the judged, so it does not fall as vehicles are added, and without this GA
 		 * g276.brainSafe1 (OpenTTD seed 1878134858, slot 0) put 50 buses on one route at 1810 a year
@@ -114,7 +169,63 @@ function PrismaticAI::InvestSurplus(b) {
 	}
 }
 
+/* The game year AirReport last logged. */
+AIR_REPORT_YEAR <- -1;
+
+/* Once a game year, the air fleet's yield in the log: per air route its planes, the distance
+ * between its airports, the airport types, the engines and last year's profit per plane a year
+ * old, then the company's total. RESEARCH-ONLY observability: it reads and logs, never acts, so
+ * the battle's logs (battle.py ablate --log-dir) measure air income per aircraft, the gap the
+ * owner's co-play game showed (2026-11-22, seed 20261122, 1979: 17,393 a plane for PrismaticAI's
+ * 52 aircraft, 90,050 for AAAHogEx's). */
+function PrismaticAI::AirReport() {
+	local year = AIDate.GetYear(AIDate.GetCurrentDate());
+	if (year == AIR_REPORT_YEAR) return;
+	AIR_REPORT_YEAR = year;
+	local routes = {}, planes = 0, judged = 0, profit = 0, losing = 0, all = AIList();
+	foreach (v, _ in AIVehicleList()) {
+		if (AIVehicle.GetVehicleType(v) != AIVehicle.VT_AIR) continue;
+		local k = PrismaticAI.RouteKey(v);
+		if (!routes.rawin(k)) routes[k] <- {sample = v, n = 0, judged = 0, profit = 0, engines = {}, planes = AIList()};
+		local r = routes[k];
+		r.n++;
+		r.planes.AddItem(v, 0);
+		all.AddItem(v, 0);
+		planes++;
+		r.engines[AIEngine.GetName(AIVehicle.GetEngineType(v))] <- true;
+		if (AIVehicle.GetAge(v) < 365) continue;
+		local p = AIVehicle.GetProfitLastYear(v);
+		r.judged++;
+		r.profit += p;
+		judged++;
+		profit += p;
+		if (p < 0) losing++;
+	}
+	if (planes == 0) return;
+	foreach (k, r in routes) {
+		local v = r.sample, ports = "", tiles = [];
+		for (local i = 0; i < AIOrder.GetOrderCount(v); i++) {
+			/* An order's destination tile need not be an airport tile: take one of the station's. */
+			local st = AIStation.GetStationID(AIOrder.GetOrderDestination(v, i));
+			if (!AIStation.IsValidStation(st)) continue;
+			local at = AITileList_StationType(st, AIStation.STATION_AIRPORT);
+			if (at.IsEmpty()) continue;
+			tiles.push(AIStation.GetLocation(st));
+			ports += (ports == "" ? "" : "/") + AIAirport.GetAirportType(at.Begin()) + "@" + PrismaticAI.AirRoutesAt(st);
+		}
+		local dist = tiles.len() >= 2 ? AIMap.DistanceManhattan(tiles[0], tiles[1]) : 0;
+		local engines = "";
+		foreach (e, _ in r.engines) engines += (engines == "" ? "" : ",") + e;
+		AILog.Info("PrismaticAI: air report " + year + ": route " + k + " " + dist + " tiles, airports (type@routes) " + ports +
+			", " + r.n + " plane(s) flying " + PrismaticAI.AirLoadPercent(r.planes) + "% full, " + r.judged + " a year old, " + (r.judged > 0 ? r.profit / r.judged : 0) +
+			" a plane last year (" + engines + ")");
+	}
+	AILog.Info("PrismaticAI: air report " + year + ": " + planes + " plane(s) on " + routes.len() + " route(s) flying " + PrismaticAI.AirLoadPercent(all) + "% full, " + judged +
+		" a year old earned " + profit + " last year, " + (judged > 0 ? profit / judged : 0) + " a plane, " + losing + " lost money");
+}
+
 function PrismaticAI::ManageFleet(reserve) {
+	PrismaticAI.AirReport();
 	local routes = {};
 	local list = AIVehicleList();
 	/* Planes per air route that are not on their way to be sold. With air_keep_last on (AIR_KEEP_LAST,
@@ -240,6 +351,7 @@ function PrismaticAI::ManageFleet(reserve) {
 			if (flow > 0 && r.count >= (flow + monthly - 1) / monthly + 1) continue;
 		}
 		if (type == AIVehicle.VT_AIR && !PrismaticAI.RouteHasAirRoom(v)) continue;
+		if (type == AIVehicle.VT_AIR && !PrismaticAI.AirRouteHasDemand(v)) continue;
 		/* Never a vehicle more on a route whose year-old vehicles lost money last year, whatever the
 		 * waiting cargo says. With air_full_load and a low air_add_waiting, GA g276.brainSafe1 (OpenTTD
 		 * seed 1878134858, slot 0) put 17 planes on 3 routes that lost 42.7k a year between them, and
