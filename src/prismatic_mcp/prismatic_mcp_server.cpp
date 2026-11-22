@@ -331,7 +331,7 @@ const auto RESOURCES = std::to_array<ResourceEntry>({
 	{"openttd://game/state", "Game state", "Mode, pause, map size and object counts", &ResourceGameState},
 	{"openttd://companies", "Companies", "All companies with basic finances (server-visible)", &ResourceCompanies},
 	{"openttd://commands", "Commands", "Every game command, derived from the command table: category, flags, parameter schemas", &ResourceCommands},
-	{"openttd://ai", "AIs", "Every company's AI with its settings as declared by its info.nut and their live values; the AIs that can be started", &ResourceAi},
+	{"openttd://ai", "AIs", "Every company's AI with its settings as declared by its info.nut, their live values and the control a form edits each with; the AIs that can be started", &ResourceAi},
 	{"openttd://decisions", "Decisions", "Provenance trace: decision -> approval -> command -> observed verdict", &ResourceDecisions},
 	{"openttd://towns", "Towns", "Every town: id, name, tile, x/y, population, growth, exclusivity, noise, and per company its exact rating, statue, months unwanted and active/idle stations near the town (scroll_to a town by id; research/mechanisms/town-authority.md)", &ResourceTowns},
 	{"openttd://map", "Map", "The whole map: tile types, heights and owners, one string per row, encoding included", &ResourceMap},

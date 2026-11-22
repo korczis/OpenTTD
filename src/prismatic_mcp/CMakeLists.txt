@@ -6,6 +6,7 @@ add_files(
     prismatic_mcp.h
     prismatic_mcp_ai.cpp
     prismatic_mcp_ai.h
+    prismatic_mcp_ai_control.h
     prismatic_mcp_api.cpp
     prismatic_mcp_api.h
     prismatic_mcp_commands.cpp
