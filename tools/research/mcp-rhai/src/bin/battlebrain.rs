@@ -692,7 +692,7 @@ fn main() {
                     if let Err(rs) = bb::validate_record(&snap).and_then(|k| if k == "snapshot" { Ok(()) } else { Err(vec![bb::Refusal::new("not_a_snapshot", "type", format!("--snapshot is a {k} record"))]) }) {
                         std::process::exit(refused(&rs));
                     }
-                    let until = add_days(snap["at"]["date"].as_str().unwrap_or_default(), snap["body"]["max_age_days"].as_i64().unwrap_or(1)).unwrap_or_default();
+                    let until = bb::add_days(snap["at"]["date"].as_str().unwrap_or_default(), snap["body"]["max_age_days"].as_i64().unwrap_or(1)).unwrap_or_default();
                     let recs: Vec<Value> = matches.iter().map(|m| bb::match_record(m, &snap["scope"], &snap["at"], &[snap["id"].clone()], &until)).collect();
                     let errs: Vec<bb::Refusal> = recs.iter().filter_map(|r| bb::validate_record(r).err()).flatten().collect();
                     if !errs.is_empty() {
