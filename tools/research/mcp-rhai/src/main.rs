@@ -63,7 +63,7 @@ use std::time::Duration;
 #[allow(dead_code)]
 mod algoglyph;
 #[allow(dead_code)]
-mod board;
+pub mod board;
 mod graph;
 mod plan;
 pub mod mesh_records;
