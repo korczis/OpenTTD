@@ -464,6 +464,14 @@ the caller declares; nothing checks it, the loopback API authenticates no one), 
 "auto-approve"}` for the panel's switch, where no person approved, or `{channel: "outside the
 panel"}` for one approved elsewhere, as in the game's console.
 
+With `$MAJORDOMUS_URL` (this checkout's Majordomus server, loopback) and `$MAJORDOMUS_SESSION` set,
+the panel also mirrors each `plan.directive` as a typed `decision` record of the Majordomus mesh and
+each `plan.directive_outcome` as an `outcome` record that cites it (src/panel_mesh.rs, I4665): task
+`openttd:panel-<port>:directive-<seq>`, the panel event as a tool source (so the record is
+`evidenced`), a retry key per event. It is research-only, opt-in and off the game's path: the write runs
+on its own thread, and whether it was written is a `panel.mesh` line; a refusal or an unreachable
+server never fails a directive. The bus and the store stay the record of truth.
+
 `POST /api/decision/pull {url, key}` with an idempotency `key` (1-128 letters, digits and `_ . : -`)
 runs once per key (research/agent-loop.md step 3): its first completed answer is kept for a day,
 and a repeat answers it again with `replayed: true`, applying nothing and publishing no second
@@ -513,7 +521,8 @@ derived rule wins held-start pairs on three seeds (rule `project.a-tuning-claim-
   planner sentences). A record whose verdict is in a store already is skipped, and so is one imported
   before.
 - **The rule** (`own-lines-by-handed-v1`, `duel_outcomes.rs:RULE`). The pairs are compared within
-  one seed, length and `h`. Each `own_lines` value is set against the smallest, with gain = A / A_smallest - 1,
+  one seed, length, `h` and rival (B's recorded settings; verdicts without them are their own
+  unknown rival, so a spread never spans two rivals). Each `own_lines` value is set against the smallest, with gain = A / A_smallest - 1,
   and read against that group's rival spread ((max B - min B) / min B). A pair *pays* above the spread,
   *costs* below minus the spread, and is *inside* otherwise. Near pairs have an `h` within 1 of this plan's;
   with none, every pair is read. If some near pair pays and none costs, `own_lines` is twice the largest
@@ -897,10 +906,14 @@ by the query cap (5000 rows) so that no read is cut:
 The record names `store` `{file, instance, run, window_ms, queries}`, with each statement and its row
 count, so the same rows can be read again from the file once the panel has stopped. The verdict is
 published as `plan.duel` through `POST /api/bus/publish` and so stored: `{decision: "duel.verdict",
-version, inputs, choice: {seed, months, held_start_tick, a, b, rival_spread, winner}}`.
+version, inputs, choice: {seed, months, held_start_tick, a, b, rival_spread, rival, winner}}`.
+`rival` is B's live settings (`{name: value}`, null when the panel could not say), the same
+as the record's `rival.settings`.
 `rival_spread` is the spread (max - min) / min of the rival's final value over the recorded duels of
-the same seed, length, opponent and start (held or not), this one included: the yardstick ADR 0034
-point 6 reads a pair against. The record keeps what the publish answered (`verdict_event`: its
+the same seed, length, opponent, start (held or not) and rival settings, this one included: the
+yardstick ADR 0034 point 6 reads a pair against. The rival's settings are B's live settings, read
+from `GET /api/bots` before the first month and kept in the record as `rival`; a record without
+them (every record before 2026-11-19) groups only with others without them. The record keeps what the publish answered (`verdict_event`: its
 `seq` and whether it was found in the store).
 
 Without a store (a panel without `GET /api/bus`, `store: off`, or a store that stops answering)

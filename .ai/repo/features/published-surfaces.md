@@ -26,9 +26,15 @@ tags: [site, wiki, pages, documentation, derivation]
 - **Wiki.** `tools/surfaces/surfaces wiki` turns the same documents into wiki pages, and
   the workflow pushes them to the GitHub wiki.
 - **Markdown regions.** `tools/surfaces/surfaces sync` regenerates the tables between
-  `surfaces:begin` and `surfaces:end` markers inside the documents.
-- **Gate.** `tools/surfaces/surfaces check` fails on a stale region or on a relative link
-  or anchor to nothing. It runs in the pre-commit hook, in `tools/gate.sh change` and in CI.
+  `surfaces:begin` and `surfaces:end` markers inside the documents: indexes, facts, a table of
+  contents from the headings that follow it, and a region of another document included with its
+  links rewritten.
+- **Generators.** The same `sync` first runs every other generator `surfaces.toml` declares (the
+  README scoreboard, the MCP contributor docs, the town model), so one command updates every
+  derived document.
+- **Gate.** `tools/surfaces/surfaces check` fails on a stale region, on a declared generator
+  whose check fails, or on a relative link or anchor to nothing. It runs in the pre-commit hook,
+  in `tools/gate.sh change` and in CI.
 
 ## What it does not do
 

@@ -1043,6 +1043,8 @@ function PrismaticAI::BuildTrain(line) {
 	}
 	AIOrder.AppendOrder(train, line.a, line.flags);
 	AIOrder.AppendOrder(train, line.b, AIOrder.OF_NONE);
+	/* The line's trains are this one and its clones (shared orders, lines.nut TrainsOf). */
+	line.first <- train;
 	AIVehicle.StartStopVehicle(train);
 	return train;
 }
@@ -1105,15 +1107,9 @@ function PrismaticAI::KeepLinesServed(reserve) {
 		if (line.restored >= 2 || line.closed || PrismaticAI.LineTarget(i + 1, "trains") == 0) continue;
 		/* A train of this line: a rail vehicle with orders to both of its stations (two lines may
 		 * share a station since a second platform joins it). */
-		local served = false;
-		local st_b = AIStation.GetStationID(line.b);
-		local list = AIVehicleList_Station(AIStation.GetStationID(line.a));
-		for (local v = list.Begin(); !list.IsEnd() && !served; v = list.Next()) {
-			if (AIVehicle.GetVehicleType(v) != AIVehicle.VT_RAIL) continue;
-			for (local i = 0; i < AIOrder.GetOrderCount(v); i++) {
-				if (AIStation.GetStationID(AIOrder.GetOrderDestination(v, i)) == st_b) { served = true; break; }
-			}
-		}
+		/* Its own trains only (lines.nut TrainsOf): a line sharing both stations with another is not
+		 * served by the other's trains. */
+		local served = PrismaticAI.TrainsOf(line).len() > 0;
 		if (served) continue;
 		if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) < reserve) return;
 		local train = PrismaticAI.BuildTrain(line);

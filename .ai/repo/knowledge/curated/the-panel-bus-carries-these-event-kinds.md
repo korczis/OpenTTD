@@ -84,6 +84,7 @@ be the panel's and the hub's both (`game.month`), as two rows with their own pro
 | `panel.rhai` | panel | `panel.rs:Game::event` | `{text}` | a Rhai script ran |
 | `panel.view` | panel | `panel.rs:Game::event` | `{text}` | a GUI client attached |
 | `panel.ai` | panel | `panel.rs:Game::event` | `{text}` | the bot's `planner:` lines, its start, the held start, calibration, Prismatic's directive |
+| `panel.mesh` | panel | `panel.rs:Game::event` | `{text}` | a plan.directive or plan.directive_outcome was mirrored to the Majordomus mesh as a typed record, or not (src/panel_mesh.rs; only with $MAJORDOMUS_URL and $MAJORDOMUS_SESSION) |
 | `panel.plan` | panel | `panel.rs:Game::event` | `{text}` | an action plan or an investment was decided |
 | `panel.intent` | panel | `panel.rs:Game::event` | `{text}` | a sentence was answered (`POST /api/intent`, `~ plan` in the console) |
 | `panel.duel` | panel | `panel_results.rs` | `{text}` | a duel started from the panel; the README scoreboard was regenerated |
@@ -157,7 +158,7 @@ Each planning decision publishes one `plan.*` event beside its `panel.*` sentenc
 --publish` and `tools/research/mcp-duel` (once a duel's months are played) post them to
 `POST /api/bus/publish`, which accepts only kinds the table marks external and only with the four
 fields. A duel's `plan.duel` carries its verdict as `choice` (`{seed, months, held_start_tick, a, b,
-rival_spread, winner}`) and in `inputs.stored` the store queries its plan, AI log and months came
+rival_spread, rival, winner}`, `rival` being B's live settings or null) and in `inputs.stored` the store queries its plan, AI log and months came
 from, with their row counts, or the fallback it took without a store (I0083).
 
 **Calibration reads the store (I0082).** `plan.calibration` (`POST /api/calibration`) carries the
