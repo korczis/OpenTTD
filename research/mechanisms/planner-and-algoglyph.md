@@ -39,19 +39,29 @@ flowchart TB
   `openttd://towns` and `openttd://world/graph`, priced with the cargo payment formula cited from
   `src/economy.cpp` and vehicle speeds from `openttd://engines`. Every number is a parameter with a
   default; `?params=JSON` overrides any of them and the answer echoes the effective set.
-- **Portfolio.** A 0/1 knapsack over the best option of every candidate. AlgoGlyph's `knapsack-dp`
-  solves it when its runner is available, otherwise the same dynamic programme built in; the
-  answer names the solver.
-- **Line cost on the map** (`linecost.rs`). For the best rail candidates, AlgoGlyph's
-  `track-planning` lays the route on the game's map, ways, terrain, prices and bridges. Its money
+- **Kernels by capability** (`cargo.rs` `Kernels`, I0221). The planner never calls a kernel by
+  name. It names a capability (`portfolio-within-budget`, `rail-line-price`, `routes-by-return`),
+  and Battlebrain's matcher picks the kernel from the catalogue the runner reports
+  (`flow -- kernels` at the checkout's commit, or `mcp-plan --catalogue <file>`). The input and
+  the answer go through that kernel's adapter, and the answer must pass the adapter's domain
+  check. Each answer names its kernel and catalogue, and the plan's `kernels` keeps every match
+  decision. With no match the call is not made, and the refusal is recorded. See
+  [Battlebrain](../battlebrain/README.md#capabilities-i0098).
+- **Portfolio.** A 0/1 knapsack over the best option of every candidate. The kernel that
+  satisfies `portfolio-within-budget` (today `knapsack-dp`) solves it when there is a match and
+  its answer passes its check. Otherwise the same dynamic programme built in decides. The answer
+  names the solver, and `fallback` says why the built-in decided.
+- **Line cost on the map** (`linecost.rs`). For the best rail candidates, the kernel that
+  satisfies `rail-line-price` (today `track-planning`) lays the route on the game's map, ways, terrain, prices and bridges. Its money
   replaces the straight-line estimate; a candidate with no route loses its rail option.
 - **Transfer yards** (`yards.rs`). Before any bot builds one, the yard is proven offline: the
   better line's tiles are blocked and the second line is laid from a platform beside it.
-- **Investment** (`invest.rs`). The same facts handed to `transport-investment`, which also
-  considers routes through a hub, ranked by return on investment. The kernel prices routes from
-  the payment formula alone, so the planner's `calibration` is applied to every route it returns:
-  monthly profit scaled by the mode's ratio, the lowest one for a route of several legs, then the
-  kernel's own score and ROI recomputed (`invest.rs calibrated`).
+- **Investment** (`invest.rs`). The same facts handed to the kernel that satisfies
+  `routes-by-return` (today `transport-investment`). It also considers routes through a hub,
+  ranked by return on investment. The kernel prices routes from the payment formula alone, so the
+  planner's `calibration` is applied to every route it returns: monthly profit scaled by the
+  mode's ratio, the lowest one for a route of several legs, then the kernel's own score and ROI
+  recomputed (`invest.rs calibrated`).
 - **Action plan.** `POST /api/actionplan` turns a set of actions with dependencies into a
   validated DAG and executable steps through `action-plan`, refused if it would overdraw.
 - **Calibration** (`calibrate.rs`). Running lines with a whole year of profit are matched to the
@@ -61,8 +71,21 @@ flowchart TB
 - **Sentences** (`intent.rs`). "find the most productive coal mine" or a Czech sentence becomes a
   query: nouns from the game's own language files, orderings nearest, most productive, most
   profitable; `POST /api/intent`, the console's `plan` verb.
-- **How AlgoGlyph is reached** (`hub_algoglyph.rs`). Through its flow CLI
-  (`npm run flow -- kernel <id> -`), found at `$MCP_ALGOGLYPH_DIR` or two default checkouts.
+- **How AlgoGlyph is reached** (`hub_algoglyph.rs`; I0227, ADR 0039). AlgoGlyph is the git
+  submodule [`tools/research/vendor/algoglyph`](../../tools/research/vendor/algoglyph), pinned at one
+  commit. Its record [`algoglyph.pin.json`](../../tools/research/vendor/algoglyph.pin.json) holds the
+  commit, the kernels the stack needs and the runner's catalogue there. The pin is the only
+  AlgoGlyph version the fork trusts, and
+  [`tools/research/algoglyph-pin`](../../tools/research/algoglyph-pin) installs it (`install`),
+  checks it (`check`) and moves it (`bump [REF]`, which stages the gitlink and the record). The
+  planner's kernels run through the flow CLI (`npm run flow -- kernel <id> -`). The checkout is
+  `$MCP_ALGOGLYPH_DIR` when it is set. Otherwise it is the first installed checkout cleanly at the
+  pin: the submodule, else `~/dev/algoglyph-wt/main` or `~/dev/algoglyph`. mcp-e2e takes the same
+  one (`algoglyph-pin runner`). The submodule's crate `algoglyph-kernels` is linked into mcp-rhai.
+  Every sorting kernel of its registry that the runner does not list is a catalogue entry with
+  engine `native-rust`, after the runner's entries (`algoglyph.kernels`, Rhai `kernels()`). It is
+  answered in-process, not through npm (`algoglyph_native.rs`). The planner's own kernels have no
+  Rust port, so they stay on the runner.
   `flow_serve.rs` keeps one long-lived `flow serve` per process when `MCP_ALGOGLYPH_SERVE` is on.
   `kernel_feed.rs` and `mcp-kernel-feed` complete a kernel's input from the store's trailing
   samples (only `action-plan` has a feed today).

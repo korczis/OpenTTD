@@ -11,6 +11,7 @@
 
 #include "../3rdparty/catch2/catch.hpp"
 #include "../core/format.hpp"
+#include "../prismatic_mcp/prismatic_mcp.h"
 #include "../prismatic_mcp/prismatic_mcp_detail.h"
 #include "../prismatic_mcp/prismatic_mcp_menu.h"
 #include "../prismatic_mcp/prismatic_mcp.h"
@@ -390,6 +391,55 @@ TEST_CASE("The control window is a snapshot of what the console and the menu alr
 	CHECK(tool->value("ok", false));
 	CHECK((*tool)["approvals"] == P::Snapshot()["approvals"]);
 	CHECK(P::Tool()["annotations"]["readOnlyHint"] == true);
+}
+
+TEST_CASE("The control window lists every line from its snapshot alone", "[prismatic_mcp]")
+{
+	namespace P = PrismaticMCP::Panel;
+	using K = P::Row::Kind;
+	const json s = {
+		{"status", "listening on 127.0.0.1:9000"},
+		{"approvals", json::array({{{"id", 7}, {"tool", "openttd.game.set_pause"}, {"args", "{\"pause\":true}"}, {"expired", false}},
+			{{"id", 9}, {"tool", "openttd.ai.stop"}, {"args", "{}"}, {"expired", true}}})},
+		{"decisions", json::array({"decision #1 approval #3 pause result=succeeded verdict=VERIFIED_SUCCESS"})},
+		{"requests", json::array({{{"id", 2}, {"kind", "ask"}, {"text", "nearest forest"}, {"answered", true}, {"answer", "Forest at 12x40"}},
+			{{"id", 3}, {"kind", "watch"}, {"text", ""}, {"answered", false}, {"answer", nullptr}}})},
+		{"switches", json::array({{{"index", 6}, {"label", "Human player: paused"}, {"on", true}}})},
+	};
+	auto rows = P::Rows(s);
+	std::vector<K> kinds;
+	for (const auto &r : rows) kinds.push_back(r.kind);
+	CHECK(kinds == std::vector<K>{K::Heading, K::Text, K::Heading, K::Approval, K::Approval, K::Heading, K::Text,
+		K::Heading, K::Text, K::Text, K::Heading, K::Switch});
+	CHECK(rows[1].text == "listening on 127.0.0.1:9000");
+	CHECK(rows[2].text == "Waiting for your approval (2)");
+	/* An approval row carries its id for Approve and Deny, and whether it expired. */
+	CHECK((rows[3].id == 7 && !rows[3].flag && rows[3].text == "#7  openttd.game.set_pause  {\"pause\":true}"));
+	CHECK((rows[4].id == 9 && rows[4].flag));
+	CHECK(rows[6].text.find("VERIFIED_SUCCESS") != std::string::npos);
+	CHECK(rows[8].text == "#2 ask: nearest forest - Forest at 12x40");
+	CHECK(rows[9].text == "#3 watch - waiting for an answer"); // an unanswered request with a null answer
+	CHECK((rows[11].id == 6 && rows[11].flag && rows[11].text == "Human player: paused"));
+
+	/* Nothing waits, nothing ran, nothing asked, no switch: each section says so, no switch heading. */
+	auto quiet = P::Rows({{"status", "stopped"}, {"approvals", json::array()}, {"decisions", json::array()},
+		{"requests", json::array()}, {"switches", json::array()}});
+	REQUIRE(quiet.size() == 8);
+	CHECK(quiet[2].text == "Waiting for your approval (0)");
+	CHECK(quiet[3].kind == K::Text);
+	CHECK(quiet.back().kind == K::Text);
+
+	/* A partial or malformed snapshot (a client's cached copy of a server's queue) never throws. */
+	CHECK_NOTHROW(P::Rows(json::object()));
+	CHECK_NOTHROW(P::Rows(json(nullptr)));
+	CHECK_NOTHROW(P::Rows({{"approvals", "not a list"}, {"decisions", json::array({42})},
+		{"requests", json::array({{{"id", -1}, {"answered", true}, {"answer", nullptr}}})}}));
+	auto partial = P::Rows({{"approvals", json::array({{{"id", "x"}}})}, {"decisions", json::array({42})}});
+	CHECK(partial[1].text == "status unknown");
+	CHECK((partial[3].kind == K::Approval && partial[3].id == 0)); // an id that is not a number selects nothing real
+	CHECK(partial[5].text == "42");
+	/* The snapshot the server builds lists the same way. */
+	CHECK_FALSE(P::Rows(P::Snapshot()).empty());
 }
 
 TEST_CASE("Only the owner's own click consents in the control window", "[prismatic_mcp]")
@@ -804,6 +854,100 @@ TEST_CASE("Every client tool says whether it changes anything", "[prismatic_mcp]
 		CHECK(t["annotations"].contains("readOnlyHint"));
 		CHECK(t["annotations"]["readOnlyHint"].is_boolean());
 	}
+}
+
+TEST_CASE("Status capabilities are derived from the tool registry and the process's arming", "[prismatic_mcp]")
+{
+	const json reader = {{"readOnlyHint", true}};
+	const json mutator = {{"readOnlyHint", false}};
+	auto field = [](std::string_view f) {
+		for (size_t i = 0; i < MUTATING_CAPABILITIES.size(); i++) if (MUTATING_CAPABILITIES[i].field == f) return i;
+		FAIL("no capability " << f);
+		return size_t{0};
+	};
+
+	/* A registry with a tool of every mutating kind: not read-only, and each kind is named. */
+	json mutating = json::array({
+		{{"name", "openttd.cmd.Pause"}}, // no annotations: counts as mutating, as the server's own pass would annotate it
+		{{"name", "openttd.api.ScriptCompany.SetLoanAmount"}, {"annotations", mutator}},
+		{{"name", "openttd.ai.list"}, {"annotations", reader}}, // a reader under a mutating prefix makes nothing
+		{{"name", "openttd.ai.stop"}, {"annotations", mutator}},
+		{{"name", "openttd.game.set_pause"}, {"annotations", mutator}},
+		{{"name", "openttd.ui.menu.run"}, {"annotations", mutator}}, // the toolbar menu, not interface input
+		{{"name", "openttd.input.pointer"}, {"annotations", mutator}},
+		{{"name", "openttd.view.zoom"}, {"annotations", mutator}}, // the local viewport: no capability
+	});
+	Capabilities all = CapabilitiesOf(mutating, 0, true);
+	CHECK(all.reads);
+	CHECK_FALSE(all.ReadOnly());
+	for (const auto &r : MUTATING_CAPABILITIES) {
+		INFO(r.field);
+		CHECK(all.mutating[field(r.field)]);
+	}
+	json j = CapabilitiesJson(all);
+	CHECK(j.size() == MUTATING_CAPABILITIES.size() + 1);
+	CHECK(j["reads"] == true);
+	CHECK(j["approval_gated_commands"] == true);
+	CHECK(j["interface_input"] == true);
+	CHECK(CapabilitiesLine(all) == "read_only=false capabilities=reads,approval_gated_commands,script_api,ai_tools,pause,toolbar_menu,interface_input input_armed=true");
+
+	/* The same registry in an unarmed process: the input tools are there but cannot run. */
+	Capabilities unarmed_all = CapabilitiesOf(mutating, 0, false);
+	CHECK_FALSE(unarmed_all.mutating[field("interface_input")]);
+	CHECK(unarmed_all.mutating[field("approval_gated_commands")]);
+	CHECK_FALSE(unarmed_all.ReadOnly());
+
+	/* A registry with no mutating tool is read-only; reads come from a reader tool or a resource. */
+	json readers = json::array({
+		{{"name", "openttd.decision.validate"}, {"annotations", reader}},
+		{{"name", "openttd.ui.windows"}, {"annotations", reader}},
+	});
+	Capabilities ro = CapabilitiesOf(readers, 0, false);
+	CHECK(ro.ReadOnly());
+	CHECK(ro.reads);
+	CHECK(CapabilitiesJson(ro)["approval_gated_commands"] == false);
+	CHECK(CapabilitiesLine(ro) == "read_only=true capabilities=reads input_armed=false");
+	CHECK(CapabilitiesOf(json::array(), 3, false).reads);
+	CHECK(CapabilitiesLine(CapabilitiesOf(json::array(), 0, false)) == "read_only=true capabilities=none input_armed=false");
+
+	/* The real interface tools in an unarmed process (this test binary is not started with
+	 * PRISMATIC_MCP_INPUT=1): no interface input, so read-only; armed, they are interface input. */
+	REQUIRE_FALSE(PrismaticMCP::UI::InputArmed());
+	json ui = json::array();
+	for (const auto &t : PrismaticMCP::View::Tools()) ui.push_back(t);
+	for (const auto &t : PrismaticMCP::UI::Tools()) ui.push_back(t);
+	REQUIRE_FALSE(ui.empty());
+	Capabilities unarmed = CapabilitiesOf(ui, 0, PrismaticMCP::UI::InputArmed());
+	CHECK(unarmed.ReadOnly());
+	CHECK_FALSE(unarmed.input_armed);
+	CHECK_FALSE(unarmed.mutating[field("interface_input")]);
+	Capabilities armed = CapabilitiesOf(ui, 0, true);
+	CHECK(armed.mutating[field("interface_input")]);
+	CHECK_FALSE(armed.ReadOnly());
+}
+
+TEST_CASE("openttd://mcp/status and the status line report the capabilities the server registers", "[prismatic_mcp]")
+{
+	json status = PrismaticMCP::Dispatch({{"jsonrpc", "2.0"}, {"id", 1}, {"method", "resources/read"}, {"params", {{"uri", "openttd://mcp/status"}}}});
+	REQUIRE(status.contains("result"));
+	json d = json::parse(status["result"]["contents"][0]["text"].get<std::string>())["data"];
+	json tools = PrismaticMCP::Dispatch({{"jsonrpc", "2.0"}, {"id", 2}, {"method", "tools/list"}})["result"]["tools"];
+	json resources = PrismaticMCP::Dispatch({{"jsonrpc", "2.0"}, {"id", 3}, {"method", "resources/list"}})["result"]["resources"];
+	Capabilities expected = CapabilitiesOf(tools, resources.size(), PrismaticMCP::UI::InputArmed());
+
+	/* The literal is gone: this build registers approval-gated command tools, so it is not read-only. */
+	CHECK(d["capabilities"] == CapabilitiesJson(expected));
+	CHECK(d["capabilities"]["reads"] == true);
+	CHECK(d["capabilities"]["approval_gated_commands"] == true);
+	CHECK(d["capabilities"]["pause"] == true);
+	CHECK(d["capabilities"]["interface_input"] == false);
+	CHECK(d["read_only"] == false);
+	CHECK(d["read_only"] == expected.ReadOnly());
+	CHECK(d["input_armed"] == false);
+
+	/* The console prints the same derived values, whether or not the server runs. */
+	REQUIRE_FALSE(PrismaticMCP::IsRunning());
+	CHECK(PrismaticMCP::GetStatusLine() == "prismatic_mcp stopped " + CapabilitiesLine(expected));
 }
 
 TEST_CASE("Several resources at one tick: the call is bounded, and a bad uri fails only its own entry", "[prismatic_mcp]")

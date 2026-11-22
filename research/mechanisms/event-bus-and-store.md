@@ -65,6 +65,7 @@ flowchart LR
   | `advice` | the news of type advice: a lost or stuck vehicle, one that loses money, an old one, a failed order or renewal |
   | `plan_decisions` | every `plan.*` decision with its choice and version |
   | `kind_month` | how many events of each kind each game month raised |
+  | `build_audit` | each company's construction audit of each game month: depots by type and whether a vehicle can drive out, duplicate depots and stations, drive-through and bay stops, defects and new defects (from `build_audit.rhai`'s `audit.<company>` writes) |
   | `schema_doc` | the store describing itself: every table, view and column with its comment |
 
 - **The store documents itself.** Every table file comments its table and each column next to
@@ -101,7 +102,12 @@ flowchart LR
   the store ([Duels](duels.md)).
 - **Board bridge.** `mcp-bus-blackboard` subscribes to each panel's bus and announces one line per
   game month and the rare events as named claims `openttd:<instance>:month` and
-  `openttd:<instance>:events`. It is off unless started.
+  `openttd:<instance>:events`. It is off unless started, and never outlives what it serves: every
+  subscription runs on one runtime and a panel gone from the registry is unsubscribed (ZeroMQ
+  retries a dead panel forever); a Majordomus server that stops answering is retried with a
+  growing wait, looked up again, and given up on after `--give-up` seconds (exit 4); `--idle-exit`,
+  `--exit-with-parent` and `--pidfile` cover the rest
+  ([`daemon.rs`](../../tools/research/mcp-rhai/src/daemon.rs)).
 - **The hub** publishes the events it raises itself through the same sinks into a bus and store of
   its own ([Hub](hub.md)).
 
@@ -122,6 +128,7 @@ the Majordomus blackboard"). The feature record is
 | [`tools/research/mcp-rhai/src/bin/mcp-bus-tail.rs`](../../tools/research/mcp-rhai/src/bin/mcp-bus-tail.rs) | a SUB client that prints envelopes |
 | [`tools/research/mcp-rhai/src/bin/mcp-bus-blackboard.rs`](../../tools/research/mcp-rhai/src/bin/mcp-bus-blackboard.rs) | the digest to the Majordomus board |
 | [`tools/research/mcp-rhai/src/board.rs`](../../tools/research/mcp-rhai/src/board.rs) | the board client it shares with Rhai's `board_post` |
+| [`tools/research/mcp-rhai/src/daemon.rs`](../../tools/research/mcp-rhai/src/daemon.rs) | the pidfile, the watch (parent, working directory, registry), the idle clock and the backoff the bridge and the hub share |
 | [`tools/research/mcp-rhai/build.rs`](../../tools/research/mcp-rhai/build.rs) | finds libduckdb, stamps the git revision, embeds `sql/` |
 | [`tools/research/mcp-panel/static/data.html`](../../tools/research/mcp-panel/static/data.html), [`data.js`](../../tools/research/mcp-panel/static/data.js) | the Data page: a query, its rows, a chart |
 
@@ -134,7 +141,9 @@ the Majordomus blackboard"). The feature record is
   names its object and says what it does, an insert names each column of its table, a value is
   bound and never pasted), `panel_store.rs` (a named query across stores, a locked one through
   its panel's `/api/db/named`), `battle-postmortem` (its SQLite reads and DuckDB writes) and
-  `mcp-bus-blackboard.rs`.
+  `mcp-bus-blackboard.rs`; `tests/daemons.rs` runs the real bridge and hub binaries until each
+  stops on its own: a server that stopped, a server moved, a parent gone, a working directory or a
+  registry deleted, a panel record removed, a dead panel, and a pidfile held by a live copy.
 - `tools/research/mcp-panel-check` on a running panel: the endpoint, an envelope received by
   `mcp-bus-tail`, events in the store, INSERT and a second statement refused, `plan.portfolio` and
   `plan.bot_settings` found on the bus and in the store.

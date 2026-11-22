@@ -22,13 +22,13 @@ provenance:
 
 # Fact
 
-Rhai picks its default limits by `debug_assertions` (rhai v1.27.0 `src/api/limits.rs`,
+Rhai picks its default limits by `debug_assertions` (rhai v1.27.0, its own `rhai/src/api/limits.rs`,
 `default_limits`): in a debug build `MAX_EXPR_DEPTH` 32, `MAX_FUNCTION_EXPR_DEPTH` 16,
 `MAX_CALL_STACK_DEPTH` 8; in a release build 64, 32 and 64. `tools/research/mcp-rhai` locks rhai
 1.27.0 (`Cargo.lock`) and, at 194552a5fa, sets no limit of its own (no `set_max_expr_depths`
 or `set_max_call_levels` anywhere under `tools/research/mcp-rhai/src`). A script that nests
 deeper than 32 expressions or 16 inside a function — the rail steward and `rail_lib` the tests
-in `src/main.rs` import (fixture at :703, the steward at :844) — is therefore refused by the parser (`ExprTooDeep`) only in a
+in `tools/research/mcp-rhai/src/main.rs` import (fixture at :703, the steward at :844) — is therefore refused by the parser (`ExprTooDeep`) only in a
 debug build.
 
 The failure itself is not recorded on origin/master; the mechanism is read from the source, so
