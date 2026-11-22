@@ -11,13 +11,18 @@ What counts as a reference, in a scanned Markdown file outside fenced code block
 
   - an inline code span whose first path segment is a top-level entry git tracks, of the form
     `path`, `path/` (a directory), `path:Symbol` (`A::B::name` checks the last component,
-    and `name()` is the same as `name`) or `path:123` (only the file is checked: a line
-    number cannot be verified and rots on every rebase, so cite a symbol instead);
+    and `name()` is the same as `name`), `path:123` or `path:12-14` (only the file is checked:
+    a bare line number cannot be verified and rots on every rebase, so cite a symbol instead),
+    or `path:123:Symbol` / `path:12-14:Symbol`, a line anchored to a symbol: the lines must
+    exist and the symbol must occur, as a whole word, on one of them;
   - each pathspec in the front matter's `tracks:` list.
 
 A file reference must name a tracked file, a directory reference a directory holding tracked
-files, a symbol must occur as a whole word in the file it is cited in, and a `tracks` pathspec
-must match at least one tracked file.
+files, a symbol must occur as a whole word in the file it is cited in, an anchored line must
+hold its symbol, and a `tracks` pathspec must match at least one tracked file. With
+`--strict-lines` a bare line number fails too: a document that promises `path:line` citations
+(a capability matrix) cites every one anchored, so each is checked. An anchored line that moved
+is named with the line its symbol is on now; `--fix-lines` rewrites it to the nearest one.
 
 What is not judged, because it is not a claim about this tree: a span that resolves to nothing
 and has no file extension, no trailing `/` and no symbol (a branch such as `research/x`, a
@@ -26,9 +31,11 @@ span of a record whose front matter `status` is `superseded` or `deprecated` (hi
 what was true then).
 
 Commands:
-  check  [--pathspec P]... [--file F]...
+  check  [--pathspec P]... [--file F]... [--strict-lines] [--fix-lines]
                                      every reference resolves; exit 1 naming each that does not
-                                     (--file: any file, such as a model's answer, judged the same)
+                                     (--file: any file, such as a model's answer, judged the same;
+                                     --strict-lines: a line number must be anchored; --fix-lines:
+                                     move each anchored line whose symbol moved, in place)
   index  [--pathspec P]... [--out F] the reverse index (cited file -> records) as JSON
   impact <rev-range> [--pathspec P]... [--json]
                                      the records that cite or track a file the range changes,
@@ -55,7 +62,8 @@ DEFAULT_PATHSPECS = [":(glob).ai/**/*.md",
 
 SPAN = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 REF = re.compile(r"^(?P<path>[A-Za-z0-9_.][A-Za-z0-9_./-]*)"
-                 r"(?::(?:(?P<symbol>[A-Za-z_~][A-Za-z0-9_:~<>,* ]*(?:\(\))?)|(?P<line>[0-9]+(?:-[0-9]+)?)))?$")
+                 r"(?::(?:(?P<symbol>[A-Za-z_~][A-Za-z0-9_:~<>,* ]*(?:\(\))?)"
+                 r"|(?P<line>[0-9]+(?:-[0-9]+)?)(?::(?P<anchor>[A-Za-z_~][A-Za-z0-9_:~]*(?:\(\))?))?))?$")
 FENCE = re.compile(r"^\s*(```|~~~)")
 HISTORY = re.compile(r"^status:\s*['\"]?(superseded|deprecated)\b", re.M)
 
@@ -67,10 +75,16 @@ class Ref:
     path: str
     symbol: str | None
     kind: str  # file | dir | tracks
+    lines: tuple[int, int] | None = None  # a cited line or range, `path:12-14`
+    anchor: str | None = None             # the symbol a cited line must hold, `path:12:Name`
 
     def label(self) -> str:
         if self.kind == "tracks":
             return f"tracks '{self.path}'"
+        if self.lines:
+            a, b = self.lines
+            cited = f"{self.path}:{a}" + (f"-{b}" if b != a else "")
+            return cited + (f":{self.anchor}" if self.anchor else "")
         return f"{self.path}:{self.symbol}" if self.symbol else self.path
 
 
@@ -198,8 +212,41 @@ def scan(repo: Repo, record: str, text: str | None = None) -> list[Ref]:
             if path.endswith("/") or (not symbol and bare in repo.dirs):
                 refs.append(Ref(record, n, bare, None, "dir"))
             elif symbol or "." in bare.rsplit("/", 1)[-1] or bare in repo.files:
-                refs.append(Ref(record, n, bare, symbol.strip() if symbol else None, "file"))
+                refs.append(Ref(record, n, bare, symbol.strip() if symbol else None, "file",
+                                line_range(m.group("line")), m.group("anchor")))
     return refs
+
+
+def line_range(text: str | None) -> tuple[int, int] | None:
+    if not text:
+        return None
+    a, _, b = text.partition("-")
+    return int(a), int(b or a)
+
+
+def word_rx(symbol: str) -> re.Pattern[str]:
+    return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(symbol_word(symbol)) + r"(?![A-Za-z0-9_])")
+
+
+def anchor_lines(repo: Repo, ref: Ref) -> list[int]:
+    """The lines of the cited file that hold the anchor's symbol."""
+    rx = word_rx(ref.anchor or "")
+    return [n for n, line in enumerate(repo.text(ref.path).splitlines(), start=1) if rx.search(line)]
+
+
+def moved(repo: Repo, ref: Ref) -> Ref | None:
+    """An anchored line whose symbol is no longer on it, cited again at the occurrence nearest
+    the old line (ties: the earlier line), its range shifted with it and cut at the file's end;
+    None when it cannot move."""
+    if not (ref.lines and ref.anchor) or ref.path not in repo.files:
+        return None
+    found = anchor_lines(repo, ref)
+    a, b = ref.lines
+    if not found or any(a <= n <= b for n in found):
+        return None
+    to = min(found, key=lambda n: (abs(n - a), n))
+    end = min(to + b - a, len(repo.text(ref.path).splitlines()))
+    return Ref(ref.record, ref.line, ref.path, None, "file", (to, end), ref.anchor)
 
 
 def symbol_word(symbol: str) -> str:
@@ -219,14 +266,14 @@ def ignored(repo: Repo, path: str) -> bool:
     return False
 
 
-def problem(repo: Repo, ref: Ref) -> str | None:
-    found = problem_of(repo, ref)
+def problem(repo: Repo, ref: Ref, strict_lines: bool = False) -> str | None:
+    found = problem_of(repo, ref, strict_lines)
     if found and ref.kind != "tracks" and ref.path not in repo.files and ignored(repo, ref.path):
         return None
     return found
 
 
-def problem_of(repo: Repo, ref: Ref) -> str | None:
+def problem_of(repo: Repo, ref: Ref, strict_lines: bool = False) -> str | None:
     if ref.kind == "tracks":
         rx = glob_regex(ref.path)
         return None if any(rx.match(f) for f in repo.files) else "matches no tracked file"
@@ -234,12 +281,49 @@ def problem_of(repo: Repo, ref: Ref) -> str | None:
         return None if ref.path in repo.dirs else "is not a directory git tracks files in"
     if ref.path not in repo.files:
         return "is not a tracked file"
+    if ref.lines:
+        return line_problem(repo, ref, strict_lines)
     if ref.symbol:
         word = symbol_word(ref.symbol)
         if not word or not re.search(r"(?<![A-Za-z0-9_])" + re.escape(word) + r"(?![A-Za-z0-9_])",
                                      repo.text(ref.path)):
             return f"does not contain '{word}'"
     return None
+
+
+def line_problem(repo: Repo, ref: Ref, strict_lines: bool) -> str | None:
+    a, b = ref.lines or (0, 0)
+    count = len(repo.text(ref.path).splitlines())
+    exists = 1 <= a <= b <= count
+    if ref.anchor:
+        word = symbol_word(ref.anchor)
+        found = anchor_lines(repo, ref)
+        if exists and any(a <= n <= b for n in found):
+            return None
+        if not found:
+            return f"does not contain '{word}'"
+        at = ", ".join(str(n) for n in found[:5]) + (" ..." if len(found) > 5 else "")
+        return f"does not hold '{word}' there; it is on line {at} (--fix-lines moves the citation)"
+    if not strict_lines:
+        return None  # a bare line number: only the file is checked
+    if not exists:
+        return f"has {count} line(s), so line {a if a == b else f'{a}-{b}'} does not exist"
+    return "cites a line with no anchor, which no check can verify: cite it as path:line:Symbol"
+
+
+def fix_lines(repo: Repo, refs: list[Ref]) -> list[tuple[Ref, Ref]]:
+    """Rewrite, in each record, every anchored line whose symbol moved; the moves made."""
+    moves = [(r, to) for r in refs if (to := moved(repo, r))]
+    by_record: dict[str, list[tuple[Ref, Ref]]] = {}
+    for old, new in moves:
+        by_record.setdefault(old.record, []).append((old, new))
+    for record, todo in by_record.items():
+        path = repo.root / record
+        lines = path.read_text(encoding="utf-8").split("\n")
+        for old, new in todo:
+            lines[old.line - 1] = lines[old.line - 1].replace(f"`{old.label()}`", f"`{new.label()}`", 1)
+        path.write_text("\n".join(lines), encoding="utf-8")
+    return moves
 
 
 def records(repo: Repo, pathspecs: list[str]) -> list[str]:
@@ -251,12 +335,19 @@ def all_refs(repo: Repo, pathspecs: list[str]) -> list[Ref]:
     return [r for rec in records(repo, pathspecs) for r in scan(repo, rec)]
 
 
-def cmd_check(repo: Repo, pathspecs: list[str], files: list[str] | None = None) -> int:
+def cmd_check(repo: Repo, pathspecs: list[str], files: list[str] | None = None,
+              strict_lines: bool = False, fix: bool = False) -> int:
     if files:
         refs = [r for f in files for r in scan(repo, f, Path(f).read_text(encoding="utf-8"))]
     else:
         refs = all_refs(repo, pathspecs)
-    bad = [(r, p) for r in refs if (p := problem(repo, r))]
+    if fix:
+        moves = fix_lines(repo, refs)
+        for old, new in moves:
+            print(f"MOVED {old.record}:{old.line}: {old.label()} -> {new.label()}")
+        done = {id(old): new for old, new in moves}
+        refs = [done.get(id(r), r) for r in refs]
+    bad = [(r, p) for r in refs if (p := problem(repo, r, strict_lines))]
     for r, p in bad:
         print(f"FAIL {r.record}:{r.line}: {r.label()} {p}")
     recs = len({r.record for r in refs})
@@ -387,6 +478,10 @@ def main(argv: list[str] | None = None) -> int:
         if name == "check":
             p.add_argument("--file", action="append",
                            help="check these files instead, tracked or not (an external answer)")
+            p.add_argument("--strict-lines", action="store_true",
+                           help="a line number must be anchored (path:line:Symbol) and exist")
+            p.add_argument("--fix-lines", action="store_true",
+                           help="move every anchored line whose symbol moved, in its record")
         if name == "index":
             p.add_argument("--out")
         if name == "impact":
@@ -403,7 +498,9 @@ def main(argv: list[str] | None = None) -> int:
     repo = Repo.load(root)
     specs = args.pathspec or DEFAULT_PATHSPECS
     if args.cmd == "check":
-        return cmd_check(repo, specs, args.file)
+        if args.fix_lines and args.file:
+            ap.error("--fix-lines rewrites records found by --pathspec, not --file")
+        return cmd_check(repo, specs, args.file, args.strict_lines, args.fix_lines)
     if args.cmd == "index":
         return cmd_index(repo, specs, args.out)
     if args.cmd == "coverage":

@@ -180,8 +180,108 @@ class RefsTest(unittest.TestCase):
         self.write(".ai/repo/lines/README.md", "`src/net/server.cpp:999` and `src/net/gone.cpp:12-14`\n")
         code, out = self.run_cli("check")
         self.assertEqual(code, 1)
-        self.assertIn("src/net/gone.cpp is not a tracked file", out)
+        self.assertIn("src/net/gone.cpp:12-14 is not a tracked file", out)
         self.assertNotIn("server.cpp", out)
+
+    MATRIX = ("| row | code |\n|---|---|\n"
+              "| accept | `src/net/server.cpp:2:Accept` |\n"
+              "| range | `src/net/server.cpp:1-3:Server::Reject` |\n")
+
+    def write_server(self) -> None:
+        self.write("src/net/server.cpp", "// header\nvoid Server::Accept() {}\nvoid Server::Reject() {}\n")
+
+    def test_an_anchored_line_must_hold_its_symbol(self) -> None:
+        self.write_server()
+        self.write("research/matrix.md", self.MATRIX)
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md", "--strict-lines")
+        self.assertEqual(code, 0, out)
+        self.assertIn("2 reference(s) in 1 record(s), 0 failure(s)", out)
+        # The symbol moved down a line: named with where it is now.
+        self.write("src/net/server.cpp", "// header\n// moved\nvoid Server::Accept() {}\nvoid Server::Reject() {}\n")
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md")
+        self.assertEqual(code, 1, out)
+        self.assertIn("src/net/server.cpp:2:Accept does not hold 'Accept' there; it is on line 3", out)
+        self.assertIn("src/net/server.cpp:1-3:Server::Reject does not hold 'Reject' there; it is on line 4", out)
+        self.assertIn("2 failure(s)", out)
+        # Gone altogether: no line to move to.
+        self.write("src/net/server.cpp", "// header\nvoid Server::Join() {}\n")
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md")
+        self.assertEqual(code, 1)
+        self.assertIn("src/net/server.cpp:2:Accept does not contain 'Accept'", out)
+        self.assertIn("src/net/server.cpp:1-3:Server::Reject does not contain 'Reject'", out)
+
+    def test_an_anchored_line_past_the_end_is_named_with_its_symbol(self) -> None:
+        self.write_server()
+        self.write("research/matrix.md", "`src/net/server.cpp:40:Accept` and `src/net/server.cpp:9:Gone`\n")
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md")
+        self.assertEqual(code, 1)
+        self.assertIn("src/net/server.cpp:40:Accept does not hold 'Accept' there; it is on line 2", out)
+        self.assertIn("src/net/server.cpp:9:Gone does not contain 'Gone'", out)
+
+    def test_many_occurrences_are_listed_five_at_most(self) -> None:
+        self.write("src/net/server.cpp", "x\n" + "Accept\n" * 7)
+        self.write("research/matrix.md", "`src/net/server.cpp:1:Accept`\n")
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md")
+        self.assertEqual(code, 1)
+        self.assertIn("it is on line 2, 3, 4, 5, 6 ...", out)
+
+    def test_strict_lines_refuses_a_bare_line_number(self) -> None:
+        self.write_server()
+        self.write("research/matrix.md", "`src/net/server.cpp:2` and `src/net/server.cpp:7-9`\n")
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md")
+        self.assertEqual(code, 0, out)  # without the flag only the file is checked, as before
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md", "--strict-lines")
+        self.assertEqual(code, 1)
+        self.assertIn("src/net/server.cpp:2 cites a line with no anchor", out)
+        self.assertIn("src/net/server.cpp:7-9 has 3 line(s), so line 7-9 does not exist", out)
+        self.write("research/matrix.md", "`src/net/server.cpp:5`\n")
+        _, out = self.run_cli("check", "--pathspec", "research/matrix.md", "--strict-lines")
+        self.assertIn("so line 5 does not exist", out)
+
+    def test_fix_lines_moves_each_citation_to_its_symbol_and_keeps_the_rest(self) -> None:
+        self.write_server()
+        self.write("research/matrix.md", self.MATRIX + "`src/net/server.cpp:2:Accept` again, `src/net/x.cpp:1:Nope`\n")
+        self.write("src/net/server.cpp", "// a\n// b\n// c\nvoid Server::Accept() {}\n// d\nvoid Server::Reject() {}\n")
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md", "--strict-lines", "--fix-lines")
+        self.assertEqual(code, 1, out)  # x.cpp is not tracked: nothing can move it
+        self.assertIn("MOVED research/matrix.md:3: src/net/server.cpp:2:Accept -> src/net/server.cpp:4:Accept", out)
+        # The range keeps its length but is cut at the file's end.
+        self.assertIn("src/net/server.cpp:1-3:Server::Reject -> src/net/server.cpp:6:Server::Reject", out)
+        self.assertIn("MOVED research/matrix.md:5: src/net/server.cpp:2:Accept -> src/net/server.cpp:4:Accept", out)
+        self.assertIn("src/net/x.cpp:1:Nope is not a tracked file", out)
+        self.assertIn("1 failure(s)", out)
+        text = (self.root / "research/matrix.md").read_text(encoding="utf-8")
+        self.assertIn("| accept | `src/net/server.cpp:4:Accept` |", text)
+        self.assertIn("`src/net/server.cpp:6:Server::Reject`", text)
+        self.assertTrue(text.endswith("`src/net/x.cpp:1:Nope`\n"), "the rest of the record is kept")
+        # Checked again, only the untracked file is left.
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md", "--strict-lines")
+        self.assertEqual(code, 1)
+        self.assertIn("4 reference(s) in 1 record(s), 1 failure(s)", out)
+        # A range whose symbol moved inside it stays as it is.
+        self.write("research/matrix.md", "`src/net/server.cpp:3-6:Reject`\n")
+        _, out = self.run_cli("check", "--pathspec", "research/matrix.md", "--fix-lines")
+        self.assertNotIn("MOVED", out)
+        # Nearest occurrence wins, and an earlier line breaks a tie.
+        self.write("src/net/server.cpp", "Accept\nx\nx\nAccept\nx\nx\nAccept\n")
+        self.write("research/matrix.md", "`src/net/server.cpp:5:Accept` and `src/net/server.cpp:2:Accept`\n")
+        self.run_cli("check", "--pathspec", "research/matrix.md", "--fix-lines")
+        self.assertEqual((self.root / "research/matrix.md").read_text(encoding="utf-8"),
+                         "`src/net/server.cpp:4:Accept` and `src/net/server.cpp:1:Accept`\n")
+
+    def test_fix_lines_needs_records_not_files(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.run_cli("check", "--file", "research/notes.md", "--fix-lines")
+
+    def test_anchored_label_and_moved_edge_cases(self) -> None:
+        repo = refs.Repo.load(self.root)
+        plain = refs.Ref("r.md", 1, "src/net/server.cpp", None, "file", (3, 3), None)
+        self.assertEqual(plain.label(), "src/net/server.cpp:3")
+        self.assertIsNone(refs.moved(repo, plain), "a bare line has nothing to follow")
+        gone = refs.Ref("r.md", 1, "src/net/gone.cpp", None, "file", (1, 1), "Accept")
+        self.assertIsNone(refs.moved(repo, gone))
+        self.assertIsNone(refs.line_range(None))
+        self.assertEqual(refs.line_range("4-9"), (4, 9))
 
     def test_coverage_names_files_no_record_tracks_and_ignores_umbrellas(self) -> None:
         self.write(".ai/repo/umbrella/README.md", "---\nid: u\ntracks:\n  - 'src/**'\n---\n")

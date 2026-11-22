@@ -1276,6 +1276,7 @@ itself (generated):
 | [Experiment report: baseset-prerequisite-macos](research/baseset-prerequisite-macos.md) | The four regression ctest cases (regression_regression, regression_stationlist, regression_gs, regression_gs_compat) require a base graphics set to be installed, even though they run headless (-vnull -snull -mnull).... |
 | [Battle brain and live tuner](research/battle-brain.md) | RESEARCH-ONLY. Self-improvement in two loops, both fed from the LAN battle's recorded data: |
 | [Battle post-mortem](research/battle-postmortem.md) | RESEARCH-ONLY. After each round of the LAN AI battle, the post-mortem answers where each contestant loses, and PrismaticAI above all. battle.py already writes a post-mortem per match into its machine store.... |
+| [Capability matrix: what every capability runs on today](research/capability-matrix.md) | RESEARCH-ONLY. One row per capability of this fork: who owns it, the code that does it (cited as path:line:Symbol), what it reads from a live game, what happens when that input or its engine is missing, where its... |
 | [Co-play: the owner and the bot in one company](research/coplay.md) | RESEARCH-ONLY, UNSTABLE. A server-side join policy behind OPTION_RESEARCH_INSTRUMENTATION. Default off. |
 | [Duel evidence audit and a frozen duel set](research/duel-evidence-audit.md) | RESEARCH-ONLY. What the recorded duels (research/results/duel-.json) hold constant and what they let vary, and one set of duels run with every input frozen and named. Tool: tools/research/mcp-duel; scoreboard:... |
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |
@@ -1532,6 +1533,10 @@ remains for a freeform note.
   one setting chosen by one Monte Carlo model.
 
 ### 0.13) Where the work stands
+
+What every capability runs on today, one row each: its owner, its code path cited by line, its
+live input and fallback, its tests and whether it has run end to end, with the record that proves
+it: [`research/capability-matrix.md`](./research/capability-matrix.md).
 
 Milestones of the plan with the issues done and still open, derived from the issue records in
 [`.ai/repo/project/`](./.ai/repo/project/README.md) (generated):

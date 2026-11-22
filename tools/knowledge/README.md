@@ -7,7 +7,7 @@ renamed file or a removed function left a record that still sent the next worker
 
 | command | answers | exit |
 |---|---|---|
-| `tools/knowledge/refs check` | does every file, directory, symbol and `tracks` pathspec cited by a record still exist? | 1 naming each one that does not |
+| `tools/knowledge/refs check [--strict-lines] [--fix-lines]` | does every file, directory, symbol, anchored line and `tracks` pathspec cited by a record still exist? | 1 naming each one that does not |
 | `tools/knowledge/refs impact <rev-range>` | which records cite or track a file this range changes, and which symbols to re-read? | 0 |
 | `tools/knowledge/refs index [--out <file>]` | the reverse index: cited file → records → symbols, as JSON | 0 |
 | `tools/knowledge/refs coverage <dir>... [--strict]` | which tracked files under the directories no record's `tracks` attaches to? A `<dir>/**` umbrella is not counted | 0 (1 with `--strict` and a gap) |
@@ -30,8 +30,16 @@ never into a tracked file.
 In a scanned Markdown file, outside fenced code blocks: an inline code span whose first segment is
 a top-level entry git tracks — `path`, `path/` (a directory) or `path:Symbol` — and each pathspec in
 the front matter's `tracks:` list. For `A::B::name` the last component must occur as a whole word in
-the cited file, so cite a symbol in the file that defines or declares it. Line numbers are never
-cited: they rot on every upstream rebase, and symbols do not.
+the cited file, so cite a symbol in the file that defines or declares it. A bare line number
+(`path:123`) is not verified, only its file: it rots on every upstream rebase, and symbols do not.
+
+A document that must cite lines, such as [`research/capability-matrix.md`](../../research/capability-matrix.md),
+cites each one anchored: `path:123:Symbol` (or `path:12-14:Symbol`) passes only while that line
+holds the symbol as a whole word. `check --strict-lines` also refuses a bare line number there, and
+a failure names the line the symbol is on now. `check --fix-lines` rewrites each anchored line whose
+symbol moved to its nearest occurrence (ties: the earlier line), in the record itself; a symbol that
+is gone still fails. `surfaces.toml` declares both for the matrix, so `tools/surfaces/surfaces sync`
+moves its lines and `surfaces check` (commit hook, gate, CI) fails on a dead one.
 
 Not judged, because they are not claims about this tree: a span with no extension, no trailing `/`
 and no symbol that resolves to nothing (a branch such as `research/x`, a method such as

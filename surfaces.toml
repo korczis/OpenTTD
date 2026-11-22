@@ -152,3 +152,12 @@ id = "ab-charts"
 outputs = ["research/results"]
 sync = ["tools/research/mcp-ab", "--render"]
 check = ["tools/research/mcp-ab", "--render", "--check"]
+
+# The capability matrix promises a `path:line` for every code path: each is cited anchored
+# (`path:line:Symbol`) and must still hold its symbol on master. `sync` moves a line whose symbol
+# moved to its nearest occurrence; a symbol that is gone fails until a person edits the row.
+[[generators.items]]
+id = "capability-matrix-refs"
+outputs = ["research/capability-matrix.md"]
+sync = ["tools/knowledge/refs", "check", "--pathspec", "research/capability-matrix.md", "--strict-lines", "--fix-lines"]
+check = ["tools/knowledge/refs", "check", "--pathspec", "research/capability-matrix.md", "--strict-lines"]
