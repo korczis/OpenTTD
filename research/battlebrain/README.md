@@ -174,6 +174,25 @@ condition, not output equality:
 - every divergence across at least three captures (seeds, maps or companies) is classified, and
   none is `defect`.
 
+## Architecture boundaries (Phase 07)
+
+The rule [`project.decision-authority-boundaries`](../../.ai/repo/rules/project/decision-authority-boundaries.v1.md)
+keeps a second decision authority from coming back. It has eight boundaries, B1 to B8. Each
+names its owner and its test, and `tools/gate.sh change` runs them offline
+(`tools/research/mcp-rhai/src/authority_boundaries.rs`, in `cargo test --bin battlebrain`):
+
+- B1: only battlebrain builds a decision record or a decision block.
+- B2: kernel output is only ever a candidate.
+- B3: the blackboard has no command path.
+- B4: no catalogue is copied by hand; the domain checks are the one adapter registry.
+- B5: a decision carries its provenance, policy and snapshot.
+- B6: stale inputs are checked again before acting.
+- B7: the built-in knapsack is named as a fallback.
+- B8: a default build carries no research code.
+
+The two legacy freight-slot writers in the authority matrix, `panel_bot.rs` `settings_from_plan`
+and `intent.rs`, are named gaps there. They stay until the cutover.
+
 ## Not yet done
 
 - Cutover (Phase 04): no live decision, no rollback switch, no live run.
