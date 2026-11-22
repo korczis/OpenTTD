@@ -1,7 +1,9 @@
 # Battlebrain: one authority for the freight-line decision
 
-RESEARCH-ONLY. Status: **Phase 02 (contracts) in progress** under issue I0095. Nothing here
-decides or reaches a game yet; shadow mode (Phase 03) and cutover (Phase 04) are not built.
+RESEARCH-ONLY. Status:
+- **Phase 02 (contracts, I0095):** done.
+- **Phase 03 (shadow mode, I0096):** done, with one shadow run on a real capture.
+- **Cutover (Phase 04):** not built. Nothing here reaches a game.
 
 ## Decided so far (owner, 2026-11-22)
 
@@ -88,12 +90,62 @@ fixture under `tools/research/schema/fixtures/battlebrain/`:
 kernel list. Per-kernel domain checks exist only for `knapsack-dp` and `track-planning`: they are
 adapters at a protocol boundary, because the runner's outputs carry no schema.
 
+## Shadow mode (I0096)
+
+The shadow run goes in four steps, and nothing in them reaches a game:
+
+1. `mcp-plan --capture <dir>` writes every `openttd://` read with its sha256 and game tick, plus
+   `openttd://companies`. It is one pass of GET requests only.
+2. `mcp-plan --snapshot <dir>` replays the capture and refuses any file whose digest changed.
+3. `battlebrain snapshot` turns the capture into a snapshot record. The record carries the tick
+   window and states whether the capture is coherent.
+4. `battlebrain shadow` applies `freight-margin@1` (`battlebrain_policy.rs`). It writes three
+   records: the planner's candidate, battlebrain's own candidate, and a decision in mode
+   `shadow`. It also writes a comparison that classifies any divergence as one of `same`,
+   `intended_policy_difference`, `input_model_discrepancy` or `tie_order`. The comparison's
+   metrics report a fallback solver, a missing kernel, unpriced and unroutable lines, and
+   whether the snapshot was coherent.
+
+The policy is a pure function with a documented tie-break: higher annual return, then lower
+investment, then lower cargo, producer and acceptor ids.
+
+The executor refuses any directive whose decision block is invalid (422) or in mode `shadow`
+(409). It refuses before any step, whoever submits it (`panel_decision.rs` `decision_gate`).
+
+**Evidence on one real capture**
+([`battlebrain-shadow-20261122T084607Z-coplay-8800`](../results/battlebrain-shadow-20261122T084607Z-coplay-8800.md);
+the capture is under
+`tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1953-02-09/`):
+
+- The capture is the owner's co-play game, read in one pass with its owner session's consent.
+  It is not coherent: ticks 85325 to 85368.
+- Two replays gave byte-identical output, and so did the shadow run on each of them.
+- The planner's line costs 127,603. That is more than company 3 can spend while keeping its
+  reserve (125,011), so the divergence is `input_model_discrepancy`: the planner prices
+  against `max_loan`.
+- Battlebrain picks a line with a better annual return that it can afford, but the line has no
+  track-planning price.
+
+## Cutover thresholds (the Phase 04 gate)
+
+A decision may go live only when all of these hold. Each one is a correctness or safety
+condition, not output equality:
+
+- the snapshot is coherent (one tick), or the game was paused while it was read;
+- the selected line has `track: found` from track-planning, so an unpriced or unroutable line
+  never goes live;
+- the investment fits money plus loan headroom minus the reserve, re-read just before submission;
+- the decision block validates, its mode is `live`, its idempotency key has not been used, and
+  its stale date has not passed;
+- PrismaticAI runs with `planned_freight_only=1`, so the line has one author;
+- every divergence across at least three captures (seeds, maps or companies) is classified, and
+  none is `defect`.
+
 ## Not yet done
 
-The panel, `mcp-plan` and PrismaticAI do not use these contracts yet. There is no shadow mode,
-no cutover and no live run. Known gaps that the contracts only make visible:
-
-- AlgoGlyph has no kernel version, output schema or units. The envelope pins the catalogue digest
-  and checkout instead.
-- MCP resources are read at different moments. Phase 03 needs one coherent snapshot.
-- The approval is not yet bound to a decision id.
+- Cutover (Phase 04): no live decision, no rollback switch, no live run.
+- Only one real capture exists, and it is not coherent.
+- A planner adapter limitation: the baseline is the portfolio's best-scored freight rail line,
+  not the bot's slot order from `settings_from_plan`.
+- AlgoGlyph still has no kernel version, output schema or units. The invocation envelope pins
+  the catalogue digest and checkout instead.

@@ -35,3 +35,18 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
+started_at: 2026-11-22T10:03:24Z
+started_event: sha256:866f56c68add1d66652c854a7017d784316978a4d8d7a81ea754dbb39aa3b305
+updated_at: 2026-11-22T10:03:42Z
+verified_at: 2026-11-22T10:03:31Z
+verified_event: sha256:a9ad989fd5d57e06d48216927c327bae660adbdf247ab5ed104d0f268e68b7a2
+completed_at: 2026-11-22T10:03:42Z
+completed_event: sha256:3df207fd0320eae553b201f0f9b2e158ae0403b84dc46d4cd7e3f5b233ff0a95
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-plan --bin mcp-panel; mcp-plan --capture (one read-only pass of :8800) and --snapshot twice; battlebrain snapshot + shadow on the capture, company 3"
+    result: "release tests on the tree with origin/master and feature/prismatic-ai-planned-freight-only merged: battlebrain 26/26, mcp-panel 221/221 (incl. decision_gate refuses shadow 409 / invalid 422 before any step), mcp-plan 45/45 (incl. capture replay refuses a changed file). Real capture: two replays byte-identical, tampered towns.json refused; shadow on both replays byte-identical, records valid battlebrain-record/v1, block mode shadow; divergence input_model_discrepancy (planner line 127603 > budget 125011). Finding: the selected line is unpriced (24 unpriced lines) -> cutover threshold requires track found. NOT RUN: any live decision (shadow only); coherent capture (game running)."
+    artifact: "research/results/battlebrain-shadow-20261122T084607Z-coplay-8800.json"
+    commit: e3d666890aa2825600b15d6c2dbd801ec6e5257e
+    recorded_at: 2026-11-22T10:03:37Z
