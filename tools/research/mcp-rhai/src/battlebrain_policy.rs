@@ -1,4 +1,4 @@
-//! RESEARCH-ONLY: policy freight-margin@1 of the Battlebrain freight-line decision (I0096,
+//! RESEARCH-ONLY: policy freight-margin@2 of the Battlebrain freight-line decision (I0096,
 //! research/battlebrain/README.md). A pure function: the planner's output, one company's money and
 //! loan, and the parameters in; the chosen freight rail line or HOLD, every rejected line with its
 //! reason, and the planner's own choice beside it out. No I/O, no clock, no game.
@@ -7,7 +7,9 @@
 //! the planner rates best. Only freight_rail options are eligible, because the decision fills one
 //! `fr_*` slot. A line is adopted when all of these hold:
 //! - it is profitable: monthly profit > 0 and investment > 0;
-//! - track-planning did not refuse it: no `track` answer, or one whose status is `found`;
+//! - track-planning priced it: its `track` answer has status `found` (with `require_priced`, the
+//!   default since @2); with `require_priced` off, a line track-planning never priced is judged on
+//!   the planner's estimate alone, as @1 did, and one it could not route is still refused;
 //! - its annual return 12 x monthly_profit / investment is at least `margin`;
 //! - the company can pay for it and keep `reserve`: investment <= money + (max_loan - loan) - reserve.
 //!
@@ -22,7 +24,9 @@
 use serde_json::{json, Value};
 
 pub const POLICY_ID: &str = "freight-margin";
-pub const POLICY_VERSION: &str = "1";
+/// 2: `require_priced` (I0096 finding: the shadow run on a real capture adopted an unpriced line).
+/// With `require_priced: false` the rule is exactly @1's.
+pub const POLICY_VERSION: &str = "2";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Params {
@@ -30,11 +34,13 @@ pub struct Params {
     pub margin: f64,
     /// The money that must remain after paying for the line, loan headroom included.
     pub reserve: i64,
+    /// Adopt only a line track-planning priced on the real map (status `found`).
+    pub require_priced: bool,
 }
 
 impl Params {
     pub fn to_json(&self) -> Value {
-        json!({"margin": self.margin, "reserve": self.reserve})
+        json!({"margin": self.margin, "reserve": self.reserve, "require_priced": self.require_priced})
     }
 }
 
@@ -114,10 +120,10 @@ pub fn refusal(l: &Line, budget: i64, p: &Params) -> Option<String> {
     if l.monthly_profit <= 0.0 || l.investment <= 0.0 {
         return Some(format!("not profitable (monthly profit {}, investment {})", l.monthly_profit, l.investment));
     }
-    if let Some(t) = &l.track {
-        if t != "found" {
-            return Some(format!("track-planning did not find a route ({t})"));
-        }
+    match &l.track {
+        Some(t) if t != "found" => return Some(format!("track-planning did not find a route ({t})")),
+        None if p.require_priced => return Some("track-planning did not price this line on the map".to_string()),
+        _ => {}
     }
     if l.annual_return() < p.margin {
         return Some(format!("annual return {:.4} is below the margin {}", l.annual_return(), p.margin));
@@ -141,7 +147,7 @@ pub struct Choice {
     pub budget: i64,
 }
 
-/// Apply freight-margin@1 to the planner's freight candidates for one company.
+/// Apply the policy (POLICY_ID@POLICY_VERSION) to the planner's freight candidates for one company.
 pub fn decide(freight: &Value, company: &Value, p: &Params) -> Result<Choice, String> {
     let budget = budget(company, p).ok_or("the company record has no money, loan or max_loan")?;
     let mut adoptable = Vec::new();
@@ -180,7 +186,7 @@ pub fn divergence(base: Option<&Line>, ours: Option<&Line>, budget: i64, p: &Par
         (Some(b), Some(o)) if b.key() == o.key() => ("same", "both pick the same line".into()),
         (Some(b), _) if refusal(b, budget, p).is_some() => (
             "input_model_discrepancy",
-            format!("the planner's line fails freight-margin@1 on the same snapshot: {}", refusal(b, budget, p).unwrap_or_default()),
+            format!("the planner's line fails {POLICY_ID}@{POLICY_VERSION} on the same snapshot: {}", refusal(b, budget, p).unwrap_or_default()),
         ),
         (Some(_), None) => ("intended_policy_difference", "battlebrain holds: no line clears the margin and the reserve".into()),
         (None, Some(_)) => ("intended_policy_difference", "the planner's portfolio holds no freight rail line; battlebrain adopts one".into()),
@@ -210,7 +216,20 @@ mod tests {
     fn company(money: i64, loan: i64, max_loan: i64) -> Value {
         json!({"id": 1, "money": money, "loan": loan, "max_loan": max_loan})
     }
-    const P: Params = Params { margin: 0.2, reserve: 25_000 };
+    const P: Params = Params { margin: 0.2, reserve: 25_000, require_priced: false };
+    const PRICED: Params = Params { margin: 0.2, reserve: 25_000, require_priced: true };
+
+    #[test]
+    fn with_require_priced_an_unpriced_line_is_never_adopted() {
+        let f = json!([cand(1, 10, 20, 50_000.0, 5_000.0, 9.0, None), cand(1, 11, 21, 60_000.0, 3_000.0, 1.0, Some("found"))]);
+        let off = decide(&f, &company(500_000, 0, 0), &P).unwrap();
+        assert_eq!(off.selected.unwrap().key(), (1, 10, 20), "@1 behaviour: the better unpriced line");
+        let on = decide(&f, &company(500_000, 0, 0), &PRICED).unwrap();
+        assert_eq!(on.selected.unwrap().key(), (1, 11, 21), "only the priced line");
+        assert!(on.rejected.iter().any(|(l, r)| l.key() == (1, 10, 20) && r.contains("did not price")));
+        let none = decide(&json!([cand(1, 10, 20, 50_000.0, 5_000.0, 9.0, None)]), &company(500_000, 0, 0), &PRICED).unwrap();
+        assert!(none.selected.is_none(), "nothing priced: HOLD");
+    }
 
     #[test]
     fn the_best_annual_return_within_budget_is_adopted() {

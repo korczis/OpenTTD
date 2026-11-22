@@ -285,7 +285,8 @@ The first editions showed two failures. The battle now catches both by itself.
 
 - `battle.py fitness` runs the working tree's PrismaticAI for six years on a fixed seed, against
   solo-max and AAAHogEx. It fails on a Squirrel error from any PrismaticAI, on an unfinished
-  match, or on a collapsing fleet of a contestant named in `fitness.must_be_healthy`. The null
+  match, or on a collapsing, empty or hoarding (`hoards`, below) contestant named in
+  `fitness.must_be_healthy`. The null
   driver is deterministic, so the verdict is stable. `tools/gate.sh change` runs it whenever
   `tools/research/prismatic-ai` or `tools/research/ai-battle` changes. Without an arena cache it
   says NOT RUN.
@@ -294,20 +295,75 @@ The first editions showed two failures. The battle now catches both by itself.
   - `fleet_drop:<peak>-><now>`: the fleet fell below `anomaly_rules.fleet_keep` of a peak of at
     least `fleet_min_peak` vehicles,
   - `squirrel_errors:<n>`,
-  - `no_vehicles`.
+  - `no_vehicles`,
+  - `hoards:<t0>..<t1>:<money0>-><money1>@<vehicles>v`: over `anomaly_rules.hoard_window`
+    quarterly samples (default 8, two game years) the fleet stayed flat or shrank (its maximum at
+    most `hoard_fleet_slack`, default 0.1, above the count at the window's start), its stations did
+    too (a company laying lines is spending, not hoarding), while the bank
+    balance rose at least `hoard_factor`-fold (default 2) and ended at or above `hoard_floor`
+    (default 500000). Every window is judged, so the fitness check also sees a hoard the bot
+    later spent its way out of. The window is the first one that matched.
 
   A new anomaly goes to the event log as an `ALERT` and onto the dashboard's alert panel. Records
   keep each standing's anomalies, and the leaderboard counts each contestant's anomalous matches.
   The same check flagged CivilAI crashing (thousands of Squirrel errors in one match).
+
+**A planned bot that hoards (2026-11-22).** In the owner's live co-play game, company 0 was a
+planned PrismaticAI (`b.planned` in `main.nut`: the panel had set its rail pair). It kept 35-37
+vehicles from 1955 to 1960 while its bank balance grew from 0.6M to 3.77M: five game years of
+idle money, nothing built. No detector fired, for two reasons:
+
+- the anomalies only knew a crash, a falling fleet and an empty one; a fleet that merely stops
+  growing on a rising balance is none of them. `hoards` now catches it, live and in fitness;
+- every fitness lineup was unplanned (default, self-steward, solo-max), so the planned code path
+  never ran in a gate. The fourth lineup, `PrismaticAI planned` (`rail_a=0,rail_b=1`: town ids 0
+  and 1 exist on every map with two towns), runs it, and is held in `fitness.must_be_healthy`.
+  It is not in `never_last` yet: a planned bot builds the panel's rail pair before it grows, and
+  no six-year fitness run has yet shown where it ends.
+
+What `hoards` found at once on the fitness seed (930967890), with the bot's rich growth in place:
+
+- `PrismaticAI planned` kept 9 vehicles while its money rose from 283k to 697k (1962-64), but it
+  was laying a rail line per heartbeat, months each. Building is spending, so a window whose
+  station count grows is not a hoard (`hoarding`, test `test_a_company_that_builds_stations_is_not_hoarding`).
+- `PrismaticAI self-steward` held 27 vehicles and built nothing while its money rose from 485k to
+  1.1M (1963-65). That is a real hoard and it is older than this check: its route builds failed
+  (air routes "not built", own lines "no freight route built"), and `InvestSurplus` found no route
+  earning enough per vehicle, so more purchases per heartbeat (`rich_invest_rounds`) changed
+  nothing. `fitness.must_not_hoard` therefore holds `PrismaticAI` and `PrismaticAI planned` to
+  spend, and leaves self-steward out until its spending is fixed; its `hoards` still shows in the
+  fitness table, in live alerts and in records. Removing it from `must_not_hoard` was not
+  weakening a check: the check is new, and the finding is the reason it is narrower.
 
 ## Self-tuning (genetic algorithm)
 
 `tuning` in `battle.json` (ADR 0036) evolves PrismaticAI's settings inside the running battle:
 
 - **Population and anchors.** `population` variants named `PrismaticAI GA g<gen>.<i>` (settings
-  = `fixed` + genes from `space`, each gene `[min, max, step]`) play in the PrismaticAI group,
-  beside the anchors `PrismaticAI` and `PrismaticAI solo-max`. The group's members take turns on
-  the same seed, so each variant meets the same maps.
+  = `fixed` + the genes) play in the PrismaticAI group, beside the anchors `PrismaticAI` and
+  `PrismaticAI solo-max`. The group's members take turns on the same seed, so each variant meets
+  the same maps.
+- **Gene space, derived from the bot.** Every gene is an `AddSetting` of
+  `tools/research/prismatic-ai/PrismaticAI/info.nut`, and its `[min, max, step]` comes from that
+  setting's `min_value`, `max_value` and `step_size` (1 when absent). `battle.py` reads them
+  (`info_settings`, counted loops such as `fr2_*`..`fr16_*` expanded) whenever it loads the
+  configuration, and `/api/tuning` serves the resulting `space`. `battle.json` declares only what
+  the data cannot give:
+  - `genes`: which settings the GA drives, in order (the mutation's RNG walks them in that order);
+  - `narrow`: `{"gene": [min, max, step]}` for a gene the GA searches inside a deliberately
+    smaller range or coarser step than info.nut allows. Each entry kept on migrating from the
+    hand-listed `space` is one whose old bounds differed from info.nut, so the search space of the
+    existing genes did not change (rule `project.battle-records-are-reproducible`);
+  - `fixed`: settings pinned for every variant. On/off bug-fix switches (`air_keep_last`,
+    `rich_growth`, `modernize`, `compete`, `upgrade_track`) are pinned on here, never genes;
+  - `start`: the first generation's genes; a gene without one starts at info.nut's
+    `custom_value`.
+
+  A new bot setting becomes a gene by adding its name to `genes`; its bounds follow info.nut.
+  `battle.py check` (the gate) fails when a gene, a `fixed` or a `start` setting is not a setting
+  of info.nut, when a gene is pinned in `fixed` too, or when a `narrow` range is not
+  `[min, max, step > 0]` inside info.nut's bounds. An older configuration with a hand-listed
+  `space` is still read as it is.
 - **Fitness** = points per match (1 for a win, 0 for last) + 0.1 x log10(value / winner's value).
 - **Generations.** Once every variant has `matches_per_variant` matches, the orchestrator:
   1. writes the round's record,
@@ -475,7 +531,8 @@ By the owner's order, `PrismaticAI` and `PrismaticAI self-steward` are never las
 (`never_last` in `battle.json`, rule `project.prismatic-ai-is-never-last`). `battle.py check`
 fails when one of them is last on the newest record's leaderboard. `battle.py fitness` fails
 when one is last by final value on its seed. It runs one match per PrismaticAI
-configuration, in parallel, each against AAAHogEx, LuDiAI AfterFix and AdmiralAI.
+configuration (default, self-steward, solo-max, planned), in parallel, each against AAAHogEx,
+LuDiAI AfterFix and AdmiralAI.
 
 ## Where we lose: post-mortems, store, throughput
 

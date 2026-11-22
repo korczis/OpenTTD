@@ -1,0 +1,32 @@
+id: I0115
+milestone: records-and-status-tell-the-truth
+title: "The research/prismatic-mcp contributor catalogue takes each document's title and kind from the document itself; nothing is written by hand"
+slug: mcp-docs-catalogue-derived
+priority: p3
+profile: implementation
+parallel_safe: true
+objective: "The generated README region listing research/prismatic-mcp documents reads each document's title and kind from the document (front matter or first heading), so adding a document needs no hand edit of contributor-catalog.json; the check fails when a document lacks the metadata or the catalogue drifts."
+why: "External review 2026-11-22 (digest C-18). README.md:1219 states that the generator and tools/check-prismatic-docs.sh fail on a missing document, but 'A new document's title and kind are still written here by hand.' Hand-written entries are exactly the drift the fork's derived-surfaces rule (ADR 0012) forbids."
+scope:
+  - "research/prismatic-mcp/**"
+  - "tools/check-prismatic-docs.sh"
+  - "tools/surfaces/**"
+  - "README.md"
+non_scope:
+  - "Rewriting the documents' content"
+depends_on:
+  - I0111
+serves:
+  - "openttd-validates-agent-driven-engineering#status-surfaces-match-the-code"
+acceptance_criteria:
+  - "Every document in research/prismatic-mcp/ declares its title and kind in itself"
+  - "contributor-catalog.json no longer holds hand-written titles or kinds, or is generated"
+  - "The README sentence about hand-written entries is gone because it is no longer true"
+  - "tools/check-prismatic-docs.sh fails on a document with no metadata, and passes on master"
+validation:
+  - "tools/check-prismatic-docs.sh"
+  - "tools/surfaces/surfaces sync && tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

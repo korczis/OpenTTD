@@ -646,6 +646,9 @@
   "snapshot_digest": "sha256:7683d924549b7721d92d2731b3e216dc82f3d311d03fd3a8cd2210e08b182967",
   "valid_until": "1953-03-12"
  },
+ "findings": [
+  "battlebrain's line has no track-planning price; freight-margin@2 (I0097) adopts only priced lines, and the cutover gate requires `track: found`."
+ ],
  "id": "battlebrain-shadow-20261122T084607Z-coplay-8800",
  "mode": "shadow",
  "provenance": {

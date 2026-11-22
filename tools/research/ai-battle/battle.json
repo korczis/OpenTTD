@@ -72,11 +72,20 @@
     "timeout_s": 600,
     "rules": {
       "fleet_min_peak": 10,
-      "fleet_keep": 0.7
+      "fleet_keep": 0.7,
+      "hoard_window": 8,
+      "hoard_factor": 2.0,
+      "hoard_floor": 500000,
+      "hoard_fleet_slack": 0.1
     },
     "must_be_healthy": [
       "PrismaticAI",
-      "PrismaticAI self-steward"
+      "PrismaticAI self-steward",
+      "PrismaticAI planned"
+    ],
+    "must_not_hoard": [
+      "PrismaticAI",
+      "PrismaticAI planned"
     ],
     "never_last": [
       "PrismaticAI",
@@ -129,12 +138,32 @@
         {
           "ai": "AdmiralAI"
         }
+      ],
+      [
+        {
+          "ai": "PrismaticAI",
+          "label": "PrismaticAI planned",
+          "settings": "rail_a=0,rail_b=1"
+        },
+        {
+          "ai": "AAAHogEx"
+        },
+        {
+          "ai": "LuDiAI AfterFix"
+        },
+        {
+          "ai": "AdmiralAI"
+        }
       ]
     ]
   },
   "anomaly_rules": {
     "fleet_min_peak": 10,
-    "fleet_keep": 0.7
+    "fleet_keep": 0.7,
+    "hoard_window": 8,
+    "hoard_factor": 2.0,
+    "hoard_floor": 500000,
+    "hoard_fleet_slack": 0.1
   },
   "never_last": [
     "PrismaticAI",
@@ -156,7 +185,11 @@
     "fixed": {
       "intercity": 1,
       "self_steward": 1,
-      "air_keep_last": 1
+      "air_keep_last": 1,
+      "rich_growth": 1,
+      "modernize": 1,
+      "compete": 1,
+      "upgrade_track": 1
     },
     "start": {
       "aggressiveness": 30,
@@ -185,7 +218,44 @@
       "own_fail_pause": 6,
       "air_level_step": 8
     },
-    "space": {
+    "genes": [
+      "aggressiveness",
+      "max_routes",
+      "own_lines",
+      "cash_reserve",
+      "line_budget",
+      "air_planes",
+      "air_routes_max",
+      "air_towns",
+      "air_level_max",
+      "air_max_tiles",
+      "invest_min",
+      "invest_ppv_div",
+      "invest_road_cap",
+      "invest_air_cap",
+      "catchment_stops",
+      "statue_money",
+      "air_full_load",
+      "invest_borrow",
+      "air_add_waiting",
+      "rail_twin_max",
+      "air_reuse",
+      "air_grow_money",
+      "air_level_once",
+      "own_fail_pause",
+      "air_level_step",
+      "rich_budgets",
+      "rich_air_money",
+      "rich_served_below",
+      "rich_min_tiles",
+      "rich_max_tiles",
+      "airport_fill",
+      "pressure_low",
+      "pressure_mid",
+      "pressure_high",
+      "rich_invest_rounds"
+    ],
+    "narrow": {
       "aggressiveness": [
         20,
         100,
@@ -266,16 +336,6 @@
         0,
         200
       ],
-      "air_full_load": [
-        0,
-        1,
-        1
-      ],
-      "invest_borrow": [
-        0,
-        1,
-        1
-      ],
       "air_add_waiting": [
         0,
         100,
@@ -286,29 +346,14 @@
         16,
         2
       ],
-      "air_reuse": [
-        0,
-        1,
-        1
-      ],
       "air_grow_money": [
         0,
         4000,
         500
       ],
-      "air_level_once": [
-        0,
-        1,
-        1
-      ],
       "own_fail_pause": [
         1,
         6,
-        1
-      ],
-      "air_level_step": [
-        0,
-        8,
         1
       ]
     },
