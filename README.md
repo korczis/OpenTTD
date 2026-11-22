@@ -1338,8 +1338,8 @@ choices, with its status (generated from [`.ai/repo/adrs/`](./.ai/repo/adrs/READ
 ```mermaid
 pie showData title Decisions by status
     %% links: README.md?col=Status&filter=proposed#071-architecture-decisions | README.md?col=Status&filter=accepted#071-architecture-decisions | README.md?col=Status&filter=superseded#071-architecture-decisions
-    "proposed" : 31
-    "accepted" : 3
+    "proposed" : 27
+    "accepted" : 7
     "superseded" : 1
 ```
 <!-- surfaces:end ai-adrs -->
@@ -1363,7 +1363,7 @@ pie showData title Decisions by status
 | [adr-0012](.ai/repo/adrs/0012-every-published-surface-is-derived-from-tracked-markdown-git.md) | proposed | Every published surface is derived from tracked Markdown, git and the .ai layer by one generic generator |
 | [adr-0013](.ai/repo/adrs/0013-every-openttd-process-may-run-its-own-mcp-server-and-its-vie.md) | proposed | Every OpenTTD process may run its own MCP server, and its view tools act on the local viewport only, with no command and no approval |
 | [adr-0014](.ai/repo/adrs/0014-interface-input-from-an-agent-is-armed-per-process-by-the-ow.md) | proposed | Interface input from an agent is armed per process by the owner and yields to the owner's mouse, and every action it causes is an ordinary client command |
-| [adr-0015](.ai/repo/adrs/0015-the-fork-does-not-run-upstream-s-ci-workflows-on-push-pages-.md) | proposed | The fork does not run upstream's CI workflows on push; Pages deploys from Surfaces alone |
+| [adr-0015](.ai/repo/adrs/0015-the-fork-does-not-run-upstream-s-ci-workflows-on-push-pages-.md) | accepted | The fork does not run upstream's CI workflows on push; Pages deploys from Surfaces alone |
 | [adr-0016](.ai/repo/adrs/0016-multiplayer-is-deterministic-lockstep-every-peer-runs-the-sa.md) | proposed | Multiplayer is deterministic lockstep: every peer runs the same command stream and only commands cross the wire |
 | [adr-0017](.ai/repo/adrs/0017-game-objects-live-in-typed-pools-addressed-by-strong-ids-nev.md) | proposed | Game objects live in typed pools addressed by strong IDs, never by persistent pointers |
 | [adr-0018](.ai/repo/adrs/0018-every-savegame-ever-written-stays-loadable-saved-fields-are-.md) | proposed | Every savegame ever written stays loadable: saved fields are gated by SaveLoadVersion and old layouts are converted after load |
@@ -1377,11 +1377,11 @@ pie showData title Decisions by status
 | [adr-0026](.ai/repo/adrs/0026-pathfinding-is-yapf-an-a-framework-composed-at-compile-time-.md) | proposed | Pathfinding is YAPF, an A* framework composed at compile time from policy templates and specialised per vehicle type |
 | [adr-0027](.ai/repo/adrs/0027-cmake-is-the-only-build-system-and-every-directory-declares-.md) | proposed | CMake is the only build system, and every directory declares its sources with add_files under explicit conditions |
 | [adr-0028](.ai/repo/adrs/0028-graphics-sounds-and-music-come-from-replaceable-base-sets-an.md) | proposed | Graphics, sounds and music come from replaceable base sets and NewGRFs, and the engine ships no proprietary data |
-| [adr-0029](.ai/repo/adrs/0029-a-research-gated-local-only-override-accepts-a-mismatched-pee.md) | proposed | A research-gated, local-only override accepts a mismatched peer revision for a loopback R&D game, without spoofing the build's own revision |
+| [adr-0029](.ai/repo/adrs/0029-a-research-gated-local-only-override-accepts-a-mismatched-pee.md) | accepted | A research-gated, local-only override accepts a mismatched peer revision for a loopback R&D game, without spoofing the build's own revision |
 | [adr-0030](.ai/repo/adrs/0030-public-servers-are-played-with-an-unmodified-official-client.md) | proposed | Public servers are played with an unmodified official client; fork features run only on the owner's own servers, on a client built on the same release |
-| [adr-0032](.ai/repo/adrs/0032-the-bridge-s-admin-protocol-client-is-a-native-rust-service-.md) | proposed | The bridge's admin-protocol client is a native Rust service (axum + tokio), not the Python/FastAPI bridge |
+| [adr-0032](.ai/repo/adrs/0032-the-bridge-s-admin-protocol-client-is-a-native-rust-service-.md) | accepted | The bridge's admin-protocol client is a native Rust service (axum + tokio), not the Python/FastAPI bridge |
 | [adr-0033](.ai/repo/adrs/0033-every-panel-event-goes-out-on-zeromq-and-into-a-duckdb-store.md) | accepted | Every panel event goes out on a ZeroMQ PUB socket and into a DuckDB store, per instance, from one tap on the bus |
-| [adr-0034](.ai/repo/adrs/0034-planning-decisions-read-recorded-history-and-emit-structured.md) | proposed | Planning decisions read recorded history from the store and publish each choice as a structured event |
+| [adr-0034](.ai/repo/adrs/0034-planning-decisions-read-recorded-history-and-emit-structured.md) | accepted | Planning decisions read recorded history from the store and publish each choice as a structured event |
 | [adr-0035](.ai/repo/adrs/0035-company-ais-are-ranked-in-headless-null-driver-matches-on-ever.md) | accepted | Company AIs are ranked in headless null-driver matches on every reachable LAN machine, and the ranking is a derived record |
 | [adr-0036](.ai/repo/adrs/0036-prismatic-ai-settings-are-tuned-by-a-deterministic-genetic-algorith.md) | accepted | PrismaticAI's settings are tuned by a deterministic genetic algorithm over the LAN battle, and a tuned setting reaches a default only through held-start duels |
 <!-- surfaces:end ai-adrs -->

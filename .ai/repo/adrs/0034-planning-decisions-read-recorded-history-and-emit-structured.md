@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0034
 kind: adr
 title: Planning decisions read recorded history from the store and publish each choice as a structured event
-status: proposed
+status: accepted
 date: 2026-11-18
 tags:
   - panel
