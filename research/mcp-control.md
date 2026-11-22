@@ -1544,8 +1544,9 @@ fork's state where the owner plays, in one resizable list that refreshes every s
 Its buttons: **Approve** and **Deny** act on the selected approval, **Ask the planner...** queues a
 question like the menu item, **Open the hub** and **Console**. Approve and Deny run the console's
 own `prismatic_mcp approve|deny <id>`, so a click consents exactly as the typed command does and
-follows that command wherever it leads. An Approve click injected through `openttd.input.*`
-(`UI::InjectingInput`, set around every input tool) is refused and said so in the console: the
+follows that command wherever it leads. An Approve click injected by a UI tool (`openttd.input.*`,
+and `openttd.ui.press`, `choose`, `type`, `close`, `click_tile`, which click and type through the
+same entry points; `UI::InjectingInput`, set around every UI tool) is refused and said so in the console: the
 window answers the owner's own hand, and `mcp-human` or any MCP client cannot approve its own
 request by moving the owner's mouse. Deny, which only withdraws a request, stays open, as in the
 panel.

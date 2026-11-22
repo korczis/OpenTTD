@@ -35,7 +35,7 @@ nlohmann::json Snapshot();
 
 /**
  * Why a click on Approve (\p approve true) or Deny in the control window is refused, or nullopt
- * when it may run: input injected by an openttd.input.* tool never approves for the owner. Denying,
+ * when it may run: input injected by a UI tool (openttd.input.*, openttd.ui.press, ...) never approves for the owner. Denying,
  * which withdraws a request and changes nothing, stays open to anyone, as in the panel.
  */
 std::optional<std::string> ConsentRefusal(bool approve);
