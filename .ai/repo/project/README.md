@@ -54,7 +54,7 @@ issues, the same derivation `majordomus plan` makes.
 | M8 | [Planning decisions read recorded history from the store and publish what they chose as data](milestones/planning-is-generated-from-recorded-history.yaml) | 7/7 | — |
 | M9 | [Rhai is a live IDE: edited, run, debugged and inspected in the panel, and it reaches Prismatic's models and blackboard](milestones/rhai-is-a-live-ide.yaml) | 6/6 | — |
 | M10 | [Every status surface and record says what the code does today, and a capability matrix proves it](milestones/records-and-status-tell-the-truth.yaml) | 0/7 | I0110, I0111, I0112, I0113, I0114, I0115, I0116 |
-| M11 | [The fork's own toolchain carries no open dependency vulnerability, and new alerts are seen and triaged](milestones/the-toolchain-carries-no-known-vulnerability.yaml) | 0/1 | I0117 |
+| M11 | [The fork's own toolchain carries no open dependency vulnerability, and new alerts are seen and triaged](milestones/the-toolchain-carries-no-known-vulnerability.yaml) | 1/1 | — |
 | M12 | [Every changed line is run by a test, and a coverage gate refuses a change whose new lines no test ran](milestones/every-changed-line-is-tested.yaml) | 0/4 | I0180, I0181, I0189, I0190 |
 | M13 | [Every AI battle match records why each company won or lost, with the settings it actually ran under, and replays identically on another arena](milestones/every-battle-match-explains-itself.yaml) | 0/7 | I0118, I0119, I0120, I0121, I0122, I0123, I0124 |
 | M14 | [PrismaticAI grows its fleet and survives its own failures](milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml) | 0/13 | I0125, I0126, I0127, I0128, I0129, I0130, I0131, I0132, I0133, I0134, I0135, I0136, I0137 |
@@ -88,7 +88,7 @@ xychart-beta
     %% series: Issues done | Issues planned
     %% links: milestones/the-fork-is-a-governed-research-target.yaml | milestones/a-change-is-validated-in-cost-tiers.yaml | milestones/internals-are-observable-with-recorded-provenance.yaml | milestones/prismatic-steers-a-company-through-the-bridge.yaml | milestones/an-agent-reaches-the-game-over-mcp.yaml | milestones/the-fork-is-published-supervised-and-current.yaml | milestones/the-game-wears-the-owners-noir-style.yaml | milestones/planning-is-generated-from-recorded-history.yaml | milestones/rhai-is-a-live-ide.yaml | milestones/records-and-status-tell-the-truth.yaml | milestones/the-toolchain-carries-no-known-vulnerability.yaml | milestones/every-changed-line-is-tested.yaml | milestones/every-battle-match-explains-itself.yaml | milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml | milestones/the-planner-reads-one-coherent-priced-world.yaml | milestones/battlebrain-decides-live-with-rollback.yaml | milestones/evaluations-are-fair-pre-registered-and-paired.yaml | milestones/prismatic-closes-one-real-loop.yaml | milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml | milestones/the-live-agent-workbench.yaml | milestones/the-panel-has-integrity.yaml | milestones/algoglyph-is-accountable.yaml | milestones/a-remote-human-plays-the-bot.yaml
     y-axis "Issues done" 0 --> 58.3
-    bar [2, 4, 8, 9, 53, 7, 1, 7, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    bar [2, 4, 8, 9, 53, 7, 1, 7, 6, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     line [2, 4, 8, 9, 53, 7, 1, 7, 6, 7, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 6, 2]
 ```
 <!-- surfaces:end ai-plan -->
