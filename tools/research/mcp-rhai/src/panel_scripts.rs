@@ -12,7 +12,9 @@
 //!   lines kept (the newest SERVICE_LINES) and readable after a sequence number;
 //! - hot reload: a watcher looks at the library's files every RELOAD_EVERY; a running service whose
 //!   own file, or any library it imports, changed (by the page's Save or by an editor outside) is
-//!   stopped and started again on the new text, and says so in its log.
+//!   stopped and started again on the new text, and says so in its log. A library may live in a
+//!   subdirectory (`import "policy/lib"`), and a template import (`` import `policy/${name}` ``)
+//!   depends on every script under the directory its literal prefix names.
 //! Stopping a service sets its abort flag, which ends it at its next operation (spawn_script).
 
 use serde_json::{json, Value};
@@ -37,9 +39,35 @@ pub fn valid_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 64 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Whether `name` names a script of the library or of a subdirectory of it (`policy/lib`): every
+/// `/`-separated part a valid_name, so no part is `..` and the path stays inside the library.
+pub fn valid_path(name: &str) -> bool {
+    name.split('/').all(valid_name)
+}
+
 fn path_of(dir: &Path, name: &str) -> Result<PathBuf, String> {
-    if !valid_name(name) { return Err(format!("{name:?} is not a script name (letters, digits, _)")); }
+    if !valid_path(name) { return Err(format!("{name:?} is not a script name (letters, digits, _, / between parts)")); }
     Ok(dir.join(format!("{name}.rhai")))
+}
+
+/// Every script under `dir`, its subdirectories included, by its name relative to `dir`
+/// (`policy/lib` for dir/policy/lib.rhai), sorted. The tree decides what is there: no subdirectory
+/// is named here. A symbolic link to a directory is not followed, so a loop cannot be walked.
+pub fn scripts_under(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = entry.path();
+        let part = |s: Option<&std::ffi::OsStr>| s.and_then(|s| s.to_str()).filter(|s| valid_name(s)).map(str::to_string);
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            let Some(sub) = part(p.file_name()) else { continue };
+            out.extend(scripts_under(&p).into_iter().map(|n| format!("{sub}/{n}")));
+        } else if p.extension().and_then(|e| e.to_str()) == Some("rhai") {
+            let Some(stem) = part(p.file_stem()) else { continue };
+            out.push(stem);
+        }
+    }
+    out.sort();
+    out
 }
 
 /// The header comment of a script: its leading `//` lines, the comment marks taken off.
@@ -90,6 +118,27 @@ pub fn imports_of(text: &str) -> Vec<String> {
             } else {
                 break;
             }
+        }
+    }
+    out
+}
+
+/// The directories a script imports from by a template (`` import `policy/${name}` ``): the
+/// literal prefix's directory (`policy`, or "" for the library itself), in the order named. Which
+/// file the template names is known only when it runs, so each script under that directory is one
+/// it may load.
+pub fn template_dirs_of(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut rest = code_of(line);
+        while let Some(i) = rest.find("import `") {
+            let after = &rest[i + 8..];
+            let Some(end) = after.find('`') else { break };
+            if let Some(var) = after[..end].find("${") {
+                let dir = after[..var].rsplit_once('/').map_or("", |(d, _)| d);
+                if (dir.is_empty() || valid_path(dir)) && !out.iter().any(|n| n == dir) { out.push(dir.to_string()); }
+            }
+            rest = &after[end + 1..];
         }
     }
     out
@@ -164,7 +213,8 @@ fn push(lines: &Mutex<VecDeque<(u64, String)>>, seq: &Mutex<u64>, text: String) 
     while l.len() > SERVICE_LINES { l.pop_front(); }
 }
 
-/// The files a service depends on: its own and, transitively, every library it imports.
+/// The files a service depends on: its own and, transitively, every library it imports, by name
+/// (a subdirectory's too) or by a template (every script under the template's directory).
 fn stamps(dir: &Path, name: &str) -> Vec<(PathBuf, Option<SystemTime>)> {
     let mut seen = BTreeSet::new();
     let mut todo = vec![name.to_string()];
@@ -174,6 +224,10 @@ fn stamps(dir: &Path, name: &str) -> Vec<(PathBuf, Option<SystemTime>)> {
         let Ok(p) = path_of(dir, &n) else { continue };
         let text = std::fs::read_to_string(&p).unwrap_or_default();
         todo.extend(imports_of(&text));
+        for sub in template_dirs_of(&text) {
+            let prefix = if sub.is_empty() { String::new() } else { format!("{sub}/") };
+            todo.extend(scripts_under(&dir.join(&sub)).into_iter().map(|s| format!("{prefix}{s}")));
+        }
         out.push((p.clone(), modified(&p)));
     }
     out
@@ -388,6 +442,10 @@ pub fn h_service_log(_: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
 mod tests {
     use super::*;
 
+    /// MCP_RHAI_PATH is process-wide and a service resolves its imports against it: a test that
+    /// sets it and runs a service holds this lock, so another one never moves its library.
+    static LIBRARY: Mutex<()> = Mutex::new(());
+
     fn tmp(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("panel-scripts-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -400,6 +458,33 @@ mod tests {
         assert!(valid_name("rail_lib"));
         for bad in ["", "../x", "a/b", "a.rhai", "a b", &"x".repeat(65)] { assert!(!valid_name(bad), "{bad}"); }
         assert!(path_of(Path::new("/l"), "../etc").is_err());
+        assert!(valid_path("policy/lib") && valid_path("rail_lib"));
+        for bad in ["policy/", "/policy", "policy/../x", "policy//lib", "a.b/c"] { assert!(!valid_path(bad), "{bad}"); }
+        assert_eq!(path_of(Path::new("/l"), "policy/lib").unwrap(), Path::new("/l/policy/lib.rhai"));
+    }
+
+    #[test]
+    fn a_template_import_names_the_directory_of_its_prefix() {
+        let t = "fn s(n) { import `policy/${n}` as st; st::f() }
+import `${x}` as a; import `deep/er/${y}` as b;
+                 import `plain` as c;
+// import `commented/${z}` as d;
+import `../up/${n}` as e;
+import `policy/x_${n}` as f;
+import `open";
+        assert_eq!(template_dirs_of(t), vec!["policy", "", "deep/er"]);
+    }
+
+    #[test]
+    fn the_tree_gives_every_script_under_the_library() {
+        let d = tmp("tree");
+        std::fs::create_dir_all(d.join("sub/deeper")).unwrap();
+        std::fs::create_dir_all(d.join("bad.dir")).unwrap();
+        for f in ["top.rhai", "sub/x.rhai", "sub/deeper/y.rhai", "bad.dir/z.rhai", "sub/bad-name.rhai", "notes.txt"] {
+            std::fs::write(d.join(f), "1").unwrap();
+        }
+        assert_eq!(scripts_under(&d), vec!["sub/deeper/y", "sub/x", "top"]);
+        assert!(scripts_under(&d.join("missing")).is_empty());
     }
 
     #[test]
@@ -420,13 +505,15 @@ mod tests {
     /// Every script of the library parses: a script that does not is caught here, before a panel
     /// refuses to start it as a service.
     #[test]
+    /// Its subdirectories included (policy/ and any other), walked from the tree.
     fn every_script_of_the_library_parses() {
         let dir = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai"));
-        let scripts = list(&dir);
+        let scripts = scripts_under(&dir);
         assert!(scripts.len() >= 10, "the library is read from {}", dir.display());
-        for s in scripts {
-            let name = s["name"].as_str().unwrap();
-            let text = std::fs::read_to_string(dir.join(format!("{name}.rhai"))).unwrap();
+        assert!(scripts.iter().any(|n| n.contains('/')), "a subdirectory of {} is walked", dir.display());
+        assert!(list(&dir).iter().all(|s| scripts.iter().any(|n| s["name"] == n.as_str())), "every listed script is parsed");
+        for name in scripts {
+            let text = std::fs::read_to_string(path_of(&dir, &name).unwrap()).unwrap();
             assert!(check(&text).is_null(), "{name}.rhai: {}", check(&text));
         }
     }
@@ -455,6 +542,7 @@ mod tests {
         let d = tmp("svc");
         std::fs::write(d.join("svc_lib.rhai"), "fn word() { \"one\" }\n").unwrap();
         std::fs::write(d.join("svc_main.rhai"), "import \"svc_lib\" as l;\nprint(l::word());\nloop { sleep(20); }\n").unwrap();
+        let _library = LIBRARY.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("MCP_RHAI_PATH", &d);
         let base = "http://127.0.0.1:9";
         start(base, &d, "svc_main").unwrap();
@@ -475,7 +563,7 @@ mod tests {
         std::fs::write(d.join("svc_lib.rhai"), "fn word( { \"three\" }\n").unwrap();
         assert!(reload_changed(base, &d).is_empty());
         assert!(wait("not reloaded"));
-        assert_eq!(status()[0]["reloads"], json!(1));
+        assert_eq!(status().iter().find(|s| s["name"] == "svc_main").unwrap()["reloads"], json!(1));
         stop("svc_main").unwrap();
         // An edit while it stops must not bring it back (reload skips a service asked to stop).
         thread::sleep(Duration::from_millis(1100));
@@ -484,5 +572,45 @@ mod tests {
         for _ in 0..200 { if !log("svc_main", 0).unwrap()["running"].as_bool().unwrap() { break; } thread::sleep(Duration::from_millis(25)); }
         assert_eq!(log("svc_main", 0).unwrap()["running"], false);
         assert!(start(base, &d, "nope_missing").is_err());
+    }
+
+    /// A library in a subdirectory (`import "nest/lib"`) and a stage loaded by a template
+    /// (`` import `nest/${n}` ``) are watched: an edit of either reloads the service, and the tree
+    /// decides which files those are (a stage added later is watched from the next start).
+    #[test]
+    fn a_service_reloads_when_a_script_of_a_subdirectory_changes() {
+        let d = tmp("nest");
+        std::fs::create_dir_all(d.join("nest")).unwrap();
+        std::fs::write(d.join("nest/lib.rhai"), "fn word() { \"one\" }\n").unwrap();
+        std::fs::write(d.join("nest/stage_a.rhai"), "fn word() { \"alpha\" }\n").unwrap();
+        std::fs::write(d.join("tree_main.rhai"),
+            "import \"nest/lib\" as l;\nfn stage(n) { import `nest/${n}` as s; s::word() }\n\
+             print(\"said \" + l::word() + \"-\" + stage(\"stage_a\"));\nloop { sleep(20); }\n").unwrap();
+        let watched: Vec<PathBuf> = stamps(&d, "tree_main").into_iter().map(|(p, _)| p).collect();
+        for f in ["tree_main.rhai", "nest/lib.rhai", "nest/stage_a.rhai"] { assert!(watched.contains(&d.join(f)), "{f}: {watched:?}"); }
+        let _library = LIBRARY.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("MCP_RHAI_PATH", &d);
+        let base = "http://127.0.0.1:9";
+        start(base, &d, "tree_main").unwrap();
+        // Up to 200 looks, 25 ms apart; true at the first log holding `needle`.
+        let wait = |needle: &str| (0..200).any(|_| {
+            let l = log("tree_main", 0).unwrap();
+            let hit = l["lines"].as_array().unwrap().iter().any(|x| x["text"].as_str().unwrap_or("").contains(needle));
+            if !hit { thread::sleep(Duration::from_millis(25)); }
+            hit
+        });
+        assert!(wait("said one-alpha"), "{}", log("tree_main", 0).unwrap());
+        thread::sleep(Duration::from_millis(1100)); // a new modification time on coarse file systems
+        std::fs::write(d.join("nest/stage_a.rhai"), "fn word() { \"beta\" }\n").unwrap();
+        assert_eq!(reload_changed(base, &d), vec!["tree_main".to_string()], "a template's stage is watched");
+        assert!(wait("said one-beta"), "{}", log("tree_main", 0).unwrap());
+        thread::sleep(Duration::from_millis(1100));
+        std::fs::write(d.join("nest/lib.rhai"), "fn word() { \"two\" }\n").unwrap();
+        assert_eq!(reload_changed(base, &d), vec!["tree_main".to_string()], "a subdirectory's library is watched");
+        assert!(wait("said two-beta"), "{}", log("tree_main", 0).unwrap());
+        assert_eq!(status().iter().find(|s| s["name"] == "tree_main").unwrap()["reloads"], json!(2));
+        stop("tree_main").unwrap();
+        for _ in 0..200 { if !log("tree_main", 0).unwrap()["running"].as_bool().unwrap() { break; } thread::sleep(Duration::from_millis(25)); }
+        assert_eq!(log("tree_main", 0).unwrap()["running"], false);
     }
 }
