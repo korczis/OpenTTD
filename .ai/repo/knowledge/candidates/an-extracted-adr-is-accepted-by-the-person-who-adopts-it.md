@@ -29,7 +29,7 @@ So acceptance is written by the person who adopts the record, not by flipping it
 ff4b687c53 (PR #22) each of the 27 extracted ADRs 0001-0030 the owner accepted became
 `origin: authored`, kept its `derived_from` as the evidence it was extracted from, and gained a
 note in its Decision section naming who accepted it, when and in which words
-(`.ai/repo/adrs/0001-this-fork-is-a-private-research-target-and-never-interacts-w.md:6`, :18, :40).
+(`.ai/repo/adrs/0001-this-fork-is-a-private-research-target-and-never-interacts-w.md`, lines 6, 18 and 40).
 
 # How to apply
 

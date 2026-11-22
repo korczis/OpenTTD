@@ -22,7 +22,7 @@ provenance:
 
 # Fact
 
-Rhai picks its default limits by `debug_assertions` (rhai v1.27.0 `rhai:src/api/limits.rs`,
+Rhai picks its default limits by `debug_assertions` (rhai v1.27.0, its own `rhai/src/api/limits.rs`,
 `default_limits`): in a debug build `MAX_EXPR_DEPTH` 32, `MAX_FUNCTION_EXPR_DEPTH` 16,
 `MAX_CALL_STACK_DEPTH` 8; in a release build 64, 32 and 64. `tools/research/mcp-rhai` locks rhai
 1.27.0 (`Cargo.lock`) and, at 194552a5fa, sets no limit of its own (no `set_max_expr_depths`

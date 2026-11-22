@@ -44,6 +44,11 @@ flowchart TB
   cannot succeed stops instead of trying every tile it can reach. The laid line is walked (`VerifyRailLine`) before a
   train is bought. The depot stands
   behind a platform. Platform length and wagons follow demand (`PlatformPlan`).
+- **Road stops and depots a bus can always use** (`roadstop.nut`). A stop is drive-through on a
+  straight road first, and a bay only where no such road is near. A road depot is reused when it
+  lies on the road network of the stop it serves. A new depot faces only a road piece reachable
+  from that stop (one `RoadReach` walk answers every candidate) and never stands beside another
+  depot (`DepotBeside`), so its exit leads onto the route.
 - **Lines as desired state** (`lines.nut`). Each line has a slot and logs a record
   (`PrismaticAI: rail line <slot>: label=...|a=...|...|state=...`) when built and every game month.
   The settings `line<N>_trains` and `line<N>_wagons` are targets; the bot clones, resizes, sells, or

@@ -1,4 +1,6 @@
-//! RESEARCH-ONLY: what to build, decided by AlgoGlyph's transport-investment kernel over the live game.
+//! RESEARCH-ONLY: what to build, decided over the live game by the AlgoGlyph kernel that satisfies
+//! the capability `routes-by-return` in the discovered catalogue (`Kernels`; on the catalogue of
+//! today, transport-investment).
 //!
 //! The planner (plan.rs, cargo.rs) already derives every candidate from the game: town pairs with
 //! their passenger supply, freight pairs with each cargo's production, payment rate and transit
@@ -10,11 +12,19 @@
 //! kernel its vehicles keyed by cargo (`vehicles: {cargo: vehicle}`) and a mode carries only the
 //! cargos it has a vehicle for. One run covers every cargo, so a two-leg route through a hub is open
 //! to freight as well. The routes the kernel ranks then go through the planner's portfolio (one
-//! knapsack within the budget), exactly like the planner's own candidates.
+//! knapsack within the budget), exactly like the planner's own candidates. An answer that fails
+//! its adapter's domain check is refused like a failed run, and the run names the kernel and the
+//! catalogue it rests on, or why no kernel answered.
 use serde_json::{json, Value};
 
-use crate::cargo::{algoglyph, freight_vehicle, portfolio};
+use crate::cargo::{freight_vehicle, portfolio, Kernels};
 use crate::plan::{calibration, pick_vehicle};
+
+/// The capability the investment run is (battlebrain_contract.rs CAPABILITIES).
+pub const ROUTES_BY_RETURN: &str = "routes-by-return";
+
+/// The requirement fields of `ROUTES_BY_RETURN` that `input` builds; its `params` ride along.
+const FIELDS: [&str; 4] = ["places", "demands", "modes", "prebuilt"];
 
 fn num(v: &Value, k: &str) -> f64 { v.get(k).and_then(Value::as_f64).unwrap_or(0.0) }
 
@@ -146,30 +156,39 @@ pub fn calibrated(route: &Value, p: &Value) -> Value {
 }
 
 /// Run the kernel once over every cargo and choose the portfolio over the routes it ranks.
-pub fn decide(plan: &Value, engines: &Value, towns: &Value) -> Value {
+pub fn decide(plan: &Value, engines: &Value, towns: &Value, kernels: &Kernels) -> Value {
     let Some(input) = input(plan, engines, towns) else {
         return json!({"solver": "none", "note": "no demand the game has a vehicle for", "runs": [], "candidates": 0,
-                      "portfolio": portfolio(&[], plan["params"]["budget"].as_f64())});
+                      "portfolio": portfolio(&[], plan["params"]["budget"].as_f64(), kernels)});
     };
     let demand = |d: &Value| input["demands"].as_array().into_iter().flatten().find(|x| x["id"] == *d).cloned().unwrap_or(Value::Null);
     let mut runs = Vec::new();
     let mut candidates = Vec::new();
-    match algoglyph("transport-investment", &input) {
-        Ok(v) => {
-            let r = &v["result"];
+    let called = kernels.call(ROUTES_BY_RETURN, |a| {
+        let mut i = a.input(&FIELDS.map(|f| (f, input[f].clone())))?;
+        i["params"] = input["params"].clone();
+        Ok(i)
+    }).and_then(|c| c.check().map(|_| c));
+    let solver = match &called {
+        Ok(c) => format!("{} over every cargo at once, then the portfolio knapsack", c.solver()),
+        Err(_) => "none: no kernel answered routes-by-return (runs says why), so only the portfolio ran".to_string(),
+    };
+    match called {
+        Ok(c) => {
+            let (routes, picked, whys) = (c.get("routes"), c.get("chosen"), c.get("why"));
             // The kernel ranks each demand's routes by ROI; the portfolio maximises score (profit
             // over the payback period less investment). So each demand enters the portfolio with
             // its highest-score route among all the kernel's options (each with its best-score
             // fleet), and the kernel's ROI pick stays in `why`.
-            for c in r["chosen"].as_array().into_iter().flatten() {
-                let all: Vec<Value> = r["options"].as_array().into_iter().flatten()
+            for c in picked.as_array().into_iter().flatten() {
+                let all: Vec<Value> = routes.as_array().into_iter().flatten()
                     .flat_map(|o| o.as_array().into_iter().flatten()).filter(|o| o["demand"] == c["demand"])
                     .map(|o| calibrated(o, &plan["params"])).collect();
                 let fallback = calibrated(&c["option"], &plan["params"]);
                 let route = all.iter().max_by(|a, b| num(a, "score").total_cmp(&num(b, "score"))).unwrap_or(&fallback);
                 if num(route, "score") <= 0.0 { continue; }
                 let label = route_mode(route);
-                let mut why = r["why"].as_array().into_iter().flatten().find(|w| w["demand"] == c["demand"]).cloned().unwrap_or(Value::Null);
+                let mut why = whys.as_array().into_iter().flatten().find(|w| w["demand"] == c["demand"]).cloned().unwrap_or(Value::Null);
                 if why.is_object() { why["by_score"] = json!({"mode": label, "roi": route["roi"], "score": num(route, "score").round()}); }
                 let dm = demand(&c["demand"]);
                 // `from` names the producer, so the portfolio counts a producer's cargo once;
@@ -183,36 +202,115 @@ pub fn decide(plan: &Value, engines: &Value, towns: &Value) -> Value {
             }
             runs.push(json!({"ok": true, "demands": input["demands"].as_array().map_or(0, Vec::len),
                              "modes": input["modes"].as_array().map_or(0, Vec::len),
-                             "routes_considered": r["routes_considered"], "chosen": r["chosen"].as_array().map_or(0, Vec::len),
-                             "kernel": v["kernel"]}));
+                             "routes_considered": c.answer.pointer("/result/routes_considered"), "chosen": picked.as_array().map_or(0, Vec::len),
+                             "kernel": c.kernel()}));
         }
-        Err(e) => runs.push(json!({"ok": false, "error": e})),
+        Err(f) => runs.push(json!({"ok": false, "error": f.message(ROUTES_BY_RETURN), "refused": f.to_json(ROUTES_BY_RETURN)})),
     }
     candidates.sort_by(|a, b| num(b, "score").total_cmp(&num(a, "score")));
     let multi = candidates.iter().filter(|c| c["mode"].as_str().is_some_and(|m| m.contains('+'))).count();
-    json!({"solver": "algoglyph transport-investment over every cargo at once, then the portfolio knapsack",
-           "runs": runs, "candidates": candidates.len(), "multi_leg": multi,
-           "portfolio": portfolio(&candidates, plan["params"]["budget"].as_f64())})
+    json!({"solver": solver, "runs": runs, "candidates": candidates.len(), "multi_leg": multi,
+           "portfolio": portfolio(&candidates, plan["params"]["budget"].as_f64(), kernels)})
 }
 
 #[cfg(test)]
 mod tests {
-    use super::input;
-    use serde_json::json;
+    use super::{decide, input, ROUTES_BY_RETURN};
+    use crate::cargo::{testing, KernelFailure};
+    use serde_json::{json, Value};
 
-    #[test]
-    fn a_plan_becomes_one_kernel_input_with_vehicles_keyed_by_cargo() {
-        let engines = json!({
+    fn engines() -> Value {
+        json!({
             "cargos": [{"name": "Passengers", "passengers": true, "payment": 3185, "transit_periods": [0, 24]},
                        {"name": "Coal", "payment": 5916, "transit_periods": [7, 255]}],
             "engines": [
                 {"name": "Bus", "type": "road", "cargo": "Passengers", "capacity": 31, "effective_speed_kmh": 56, "price": 8000, "running_cost_per_year": 1500},
-                {"name": "Coal Truck", "type": "road", "cargo": "Coal", "capacity": 20, "effective_speed_kmh": 48, "price": 9000, "running_cost_per_year": 1600}]});
-        let plan = json!({
-            "params": {"modes": ["bus", "truck"], "supply_factor": 0.1, "bands": {"bus": [12, 70]}, "freight": {"bands": [20, 250]}},
+                {"name": "Coal Truck", "type": "road", "cargo": "Coal", "capacity": 20, "effective_speed_kmh": 48, "price": 9000, "running_cost_per_year": 1600}]})
+    }
+    fn plan() -> Value {
+        json!({
+            "params": {"modes": ["bus", "truck"], "supply_factor": 0.1, "bands": {"bus": [12, 70]}, "freight": {"bands": [20, 250]}, "budget": 100000},
             "by_mode": {"bus": [{"a": {"id": 1}, "b": {"id": 2}, "supply": 500, "road_connected": true}]},
-            "freight": [{"cargo": "Coal", "supply_per_month": 90, "producer": {"id": "industry:7", "x": 1, "y": 1}, "acceptor": {"id": 9, "x": 40, "y": 1}}]});
-        let towns = json!({"towns": [{"id": 1, "x": 5, "y": 5}, {"id": 2, "x": 40, "y": 5}]});
+            "freight": [{"cargo": "Coal", "supply_per_month": 90, "producer": {"id": "industry:7", "x": 1, "y": 1}, "acceptor": {"id": 9, "x": 40, "y": 1}}]})
+    }
+    fn towns() -> Value {
+        json!({"towns": [{"id": 1, "x": 5, "y": 5}, {"id": 2, "x": 40, "y": 5}]})
+    }
+    fn route(demand: &str, modes: &[&str], investment: f64, score: f64) -> Value {
+        json!({"demand": demand, "legs": modes.iter().map(|m| json!({"mode": m})).collect::<Vec<_>>(), "investment": investment,
+               "score": score, "roi": 2.0, "monthly_profit": 100.0, "carried": 50, "transfers": modes.len() - 1, "transit_periods": 3})
+    }
+    /// The kernel's answer for `plan()`: a bus route and a truck + rail route through a hub.
+    fn answer() -> Value {
+        let (bus, freight) = (route("t1-t2", &["bus"], 1000.0, 500.0), route("iindustry:7-i9", &["truck", "freight_rail"], 2000.0, 800.0));
+        json!({"ok": true, "kernel": {"id": "transport-investment", "plate": "invest"}, "work": {"routes": 7},
+               "result": {"options": [[bus.clone()], [freight.clone(), route("iindustry:7-i9", &["truck"], 900.0, 100.0)]],
+                          "chosen": [{"demand": "t1-t2", "option": bus}, {"demand": "iindustry:7-i9", "option": freight}],
+                          "why": [{"demand": "t1-t2", "mode": "bus", "roi": 2.0}, {"demand": "iindustry:7-i9", "mode": "truck+freight_rail", "roi": 2.0}],
+                          "routes_considered": 7}})
+    }
+
+    #[test]
+    fn the_run_is_the_kernel_the_catalogue_matches_and_its_routes_enter_the_portfolio() {
+        let asked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let log = asked.clone();
+        let k = testing::kernels(move |k: &str, i: &Value| {
+            log.borrow_mut().push((k.to_string(), i.clone()));
+            if k == "transport-investment" { Ok(answer()) } else { Err(KernelFailure::Unset) }
+        });
+        let d = decide(&plan(), &engines(), &towns(), &k);
+        assert_eq!(d["solver"], "algoglyph transport-investment over every cargo at once, then the portfolio knapsack");
+        assert_eq!(d["runs"][0]["ok"], true);
+        assert_eq!(d["runs"][0]["kernel"]["capability"], ROUTES_BY_RETURN);
+        assert_eq!(d["runs"][0]["kernel"]["catalogue"]["commit"], "1b8e009059c299b29d7a829d2d51d4e057304d4d");
+        assert_eq!((d["runs"][0]["routes_considered"].clone(), d["runs"][0]["chosen"].clone()), (json!(7), json!(2)));
+        assert_eq!((d["candidates"].clone(), d["multi_leg"].clone()), (json!(2), json!(1)));
+        assert_eq!(d["portfolio"]["chosen"][0]["mode"], "truck+freight_rail");
+        assert_eq!(d["portfolio"]["chosen"][0]["why"]["by_score"]["score"], 800.0);
+        assert_eq!(d["portfolio"]["fallback"]["reason"], "unset_dir", "the portfolio's own kernel call failed: the built-in decided");
+        // The input went in under the adapter's keys, with the params riding along.
+        let asked = asked.borrow();
+        assert_eq!(asked[0].0, "transport-investment");
+        let i = &asked[0].1;
+        assert_eq!(i, &input(&plan(), &engines(), &towns()).unwrap());
+        assert_eq!(i["params"]["max_legs"], 2);
+        assert_eq!(asked[1].0, "knapsack-dp");
+        let matched: Vec<Value> = k.record()["matches"].as_array().unwrap().iter().map(|m| m["chosen"].clone()).collect();
+        assert_eq!(matched, vec![json!("transport-investment"), json!("knapsack-dp")]);
+    }
+
+    #[test]
+    fn without_a_kernel_or_with_an_unchecked_answer_the_run_is_refused_with_its_reason() {
+        let expired = testing::catalogue(|l| l.retain(|k| k["id"] != "transport-investment"));
+        let d = decide(&plan(), &engines(), &towns(), &testing::on(expired, |k, _| match k {
+            "knapsack-dp" => Err(KernelFailure::Unset),
+            _ => panic!("an unmatched capability runs no kernel"),
+        }));
+        assert!(d["solver"].as_str().unwrap().starts_with("none: no kernel answered routes-by-return"));
+        assert_eq!(d["runs"][0]["ok"], false);
+        assert_eq!(d["runs"][0]["refused"]["refusal"]["code"], "kernel_expired");
+        assert!(d["runs"][0]["error"].as_str().unwrap().starts_with("routes-by-return: kernel_expired ("));
+        assert_eq!(d["candidates"], 0);
+        // One route list for two demands: the answer fails its domain check and is not used.
+        let mut short = answer();
+        short["result"]["options"].as_array_mut().unwrap().pop();
+        let d = decide(&plan(), &engines(), &towns(), &testing::kernels(move |k, _| if k == "knapsack-dp" { Err(KernelFailure::Unset) } else { Ok(short.clone()) }));
+        assert_eq!(d["runs"][0]["refused"]["reason"], "domain_check_failed");
+        assert_eq!(d["runs"][0]["refused"]["path"], "result.options");
+        assert_eq!(d["candidates"], 0);
+    }
+
+    #[test]
+    fn without_a_demand_nothing_runs_but_the_portfolio() {
+        let k = testing::kernels(|_, _| panic!("no demand, no kernel run"));
+        let d = decide(&json!({"params": {}}), &engines(), &towns(), &k);
+        assert_eq!((d["solver"].clone(), d["candidates"].clone()), (json!("none"), json!(0)));
+        assert_eq!(d["portfolio"]["solver"], "none", "no budget: no knapsack");
+    }
+
+    #[test]
+    fn a_plan_becomes_one_kernel_input_with_vehicles_keyed_by_cargo() {
+        let (plan, engines, towns) = (plan(), engines(), towns());
         let i = input(&plan, &engines, &towns).expect("an input");
         let d = i["demands"].as_array().unwrap();
         assert_eq!(d.len(), 2);
