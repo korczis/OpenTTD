@@ -1,0 +1,32 @@
+id: I0145
+milestone: the-planner-reads-one-coherent-priced-world
+title: "A transport service is a typed contract, transport-service/v1: demand, an optional hub, ordered legs with their load and unload semantics, and economics that stay null until computed"
+slug: transport-service-contract
+priority: p1
+profile: deep-work
+parallel_safe: true
+objective: "Write transport-service/v1 as a JSON Schema generated from one Rust source of truth (as battlebrain_contract.rs does): a Service with a service_id, its demand (cargo, producer, acceptor), ordered Legs (mode, from and to station or site, load and unload semantics matching openttd://vehicles order flags), an optional TransferNode, and economics (revenue, cost, payback) that are null until a pricing step fills them. Add valid and invalid fixtures, a fail-closed validator, and the mapping from today's station-pair candidate to a one-leg Service."
+why: "External review 2026-11-22 (digest B-11). `git grep -E 'transport-service|TransportService|service_id|TransferNode'` over tools, src and research on origin/master finds nothing; tools/research/schema/ holds only algoglyph-invocation, battlebrain-record, experiment-manifest, map-ways, mcp-instance, real-world-scenario and world-graph schemas. Candidates are station or town pairs (tools/research/mcp-rhai/src/calibrate.rs:5-6), which cannot express a feeder leg."
+scope:
+  - "tools/research/mcp-rhai/src/transport_service.rs"
+  - "tools/research/schema/transport-service.v1.schema.json"
+  - "tools/research/schema/fixtures/transport-service/**"
+  - "research/mechanisms/transport-service.md"
+non_scope:
+  - "Changing the planner to emit services (I0146 and I0147 use the contract)"
+  - "Supply-conservation solving across services"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "The committed schema equals the generated one (test)"
+  - "Valid fixtures pass; a leg without unload semantics, a leg sequence that does not chain, and economics filled without a pricing provenance are refused with stable codes"
+  - "A station-pair candidate maps to a one-leg Service and back without loss (test)"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

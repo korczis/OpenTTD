@@ -150,11 +150,12 @@ def ensure_labels(gh, wanted):
 
 
 def sync_milestones(gh, root, roadmap, ids):
-    existing = {}
+    existing, by_title = {}, {}
     for m in gh.api("GET", "milestones?state=all&per_page=100", paginate=True):
         found = MARKER_RE.search(m.get("description") or "")
         if found:
             existing[found.group(1)] = m
+        by_title[m["title"]] = m  # GitHub refuses a second milestone with the same title
     numbers = {}
     for mid in ids:
         rec = next(m for m in roadmap if m["id"] == mid)
@@ -164,7 +165,7 @@ def sync_milestones(gh, root, roadmap, ids):
             "description": milestone_description(mid, path),
             "state": "closed" if rec["status"] in CLOSED_STATES else "open",
         }
-        cur = existing.get(path)
+        cur = existing.get(path) or by_title.get(payload["title"])
         if cur is None:
             made = gh.write("POST", "milestones", payload, f"milestone {payload['title']}")
             numbers[mid] = made["number"] if made else None
@@ -176,11 +177,16 @@ def sync_milestones(gh, root, roadmap, ids):
 
 
 def sync_issues(gh, repo, branch, issues, milestone_numbers):
-    existing = {}
+    existing, by_id = {}, {}
     for i in gh.api("GET", "issues?state=all&labels=plan&per_page=100", paginate=True):
+        if "pull_request" in i:
+            continue
         found = MARKER_RE.search(i.get("body") or "")
-        if found and "pull_request" not in i:
+        if found:
             existing[found.group(1)] = i
+        titled = re.match(r"^(I\d+): ", i.get("title") or "")
+        if titled:  # a hand-edited body lost its marker: still the same record, never a duplicate
+            by_id.setdefault(titled.group(1), i)
     for rec in issues:
         path = f".ai/repo/project/issues/{rec['id']}.yaml"
         labels = ["plan", f"priority/{rec['priority']}", STATUS_LABELS[rec["status"]][0]]
@@ -191,7 +197,7 @@ def sync_issues(gh, repo, branch, issues, milestone_numbers):
             "milestone": milestone_numbers.get(rec["milestone"]),
         }
         state = "closed" if rec["status"] in CLOSED_STATES else "open"
-        cur = existing.get(path)
+        cur = existing.get(path) or by_id.get(rec["id"])
         if cur is None:
             made = gh.write("POST", "issues", payload, f"issue {payload['title'][:90]}")
             if made and state == "closed":

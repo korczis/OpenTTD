@@ -1,0 +1,34 @@
+id: I0186
+milestone: governed-access-is-authenticated-and-every-capability-reaches-every-surface
+title: "One versioned transport.* operations catalogue (snapshot, plan, evaluate, apply, status, explain) is declared once and projected to MCP, REST, Rhai, the console and the panel"
+slug: transport-operations-catalogue
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Declare the transport operations the planner and the bot already perform as one versioned catalogue (transport.snapshot, transport.plan, transport.evaluate, transport.apply, transport.status, transport.explain), each with its input and output schema, its permission (read, approval-gated mutation), the AlgoGlyph kernels it uses and the existing implementation it wraps (mcp-plan, build_plan, the decision pull, the bot's settings). Feed the declaration into the existing derivation so every surface gets it, rather than adding a projection per surface."
+why: "External review 2026-11-22 (digest B-14). git grep for transport.(plan|snapshot|apply|explain|evaluate) on origin/master finds nothing; the operations exist only under per-tool names spread over the panel (tools/research/mcp-rhai/src/panel.rs:2336 routes()), the hub (hub.rs:835) and the Rhai library (tools/research/mcp-panel/rhai/build_plan.rhai), so an agent must know the implementation to plan with them. The derivation already covers the embedded MCP catalogue and the hub method table (.ai/repo/rules/project/mcp-surfaces-are-derived.v1.md:21-37)."
+scope:
+  - "tools/research/mcp-rhai/src/transport_ops.rs"
+  - "tools/research/schema/transport-ops.v1.schema.json"
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "tools/research/mcp-rhai/src/hub.rs"
+  - "research/mcp-api.md"
+non_scope:
+  - "New planning behaviour; every operation wraps code that exists, and one with no implementation is declared as such and refused"
+  - "A second decision authority: transport.apply goes through Battlebrain's cutover gates and the approval flow (ADR 0037)"
+depends_on:
+  - I0185
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#governed-access-is-authenticated-and-exercised"
+acceptance_criteria:
+  - "The catalogue file validates against its schema, carries a version, and names for each operation its schemas, permission, kernels and implementation"
+  - "Each operation appears in OpenAPI, the Rhai catalogue, the hub method table, the panel's MCP endpoint and the console with no hand edit; the parity matrix shows the transport.* rows green"
+  - "transport.apply returns pending_approval and passes the Battlebrain cutover gates; transport.explain answers for a plan by its id"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-parity-check"
+  - "tools/research/mcp-decision-check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

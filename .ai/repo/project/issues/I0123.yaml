@@ -1,0 +1,30 @@
+id: I0123
+milestone: every-battle-match-explains-itself
+title: "A forensic AAAHogEx performance-gap report is committed: a source audit with path:line citations and every figure re-derived from the tournament database by a committed query"
+slug: aaahogex-gap-report
+priority: p1
+profile: deep-work
+parallel_safe: true
+objective: "Write research/analysis/aaahogex-performance-gap-2026-11-22.md: why AAAHogEx beats PrismaticAI, from AAAHogEx's own source (the version the arena runs, cited path:line, licence respected: cite and summarise, do not vendor), PrismaticAI's source, and the match data. Every number in it (wins, value ratio, vehicles per mode, per-year aggregates) comes from a SQL query committed beside the report and run against the tournament database, with the query's output committed as data. Claims are labelled OBSERVED/DERIVED/INFERRED."
+why: "External review 2026-11-22 (digest C-21, C-58). The review produced a source audit and three-edition figures (115/115 wins, 6.3x company value, 377 vs 55 vehicles) from a read-only query of ~/ttd-battle/results/battle.sqlite, but none of it is in the repository: `git grep` finds no AAAHogEx source audit, no research/analysis/ directory, and the figures were never re-checked. The fork's workflow .ai/repo/workflows/ai-battle-last-place-diagnosis.md expects exactly this kind of committed diagnosis."
+scope:
+  - "research/analysis/**"
+  - "tools/research/ai-battle/**"
+non_scope:
+  - "Copying the external review's text; it is a hypothesis to verify, not a source"
+  - "Changing PrismaticAI; fixes are filed under the PrismaticAI milestone"
+depends_on: []
+serves:
+  - "internal-state-is-observable-reproducibly#a-battle-explains-itself"
+acceptance_criteria:
+  - "The report exists, links the AAAHogEx version and the exact files it cites, and every behavioural claim has a path:line"
+  - "A committed .sql file reproduces every figure; its output is committed; any figure that differs from the external review's is called out"
+  - "The report ends with a ranked list of PrismaticAI gaps, each pointing to the issue that owns it or saying none does yet"
+  - "tools/knowledge/refs check passes over the report's references into this repository"
+validation:
+  - "tools/knowledge/refs check"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

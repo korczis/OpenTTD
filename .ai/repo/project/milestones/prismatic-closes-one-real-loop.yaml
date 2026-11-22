@@ -1,0 +1,28 @@
+id: prismatic-closes-one-real-loop
+title: "Prismatic closes one real loop: retrieve, coordinate, decide, act, observe, in one recorded run against live services"
+slug: prismatic-closes-one-real-loop
+order: 160
+priority: p1
+problem: "Every stage of the agent loop exists, but no run joins them (research/agent-loop.md:62: 'Nothing is fake, and nothing is joined up'). Prismatic has never decided live: the decision path was proven against a stand-in (:78-84), and I0092's prismatic-rhai-check reported NOT RUN, with nothing on 4004. The mesh-record blackboard is contract-tested only and waited for Majordomus 1.2.0 (:51). That release is now installed. Retrieval is lexical (:50). Three pieces outside this repository are missing, and nothing in the fork checks for them: Prismatic does not echo observed_digest (:53), the bridge's operator approval is not on its main (:55), and the bridge's /companies carries no tick or digest (:52). The console can deny every pending approval (src/prismatic_mcp/prismatic_mcp.h:75-79), but nothing refuses the next submission. Idempotency keys live in process memory (tools/research/mcp-rhai/src/panel_decision.rs:604-607), so a restart can apply a retry twice. ZeroMQ consumers never check the envelope's seq (research/mechanisms/event-bus-and-store.md:37; tools/research/mcp-rhai/src/bin/mcp-bus-tail.rs:87-94). The fork has no chaos suite, no plan with dependent steps, and no multi-agent experiment."
+outcome: "One recorded run links an evidence query, typed mesh records, a decision made live by prismatic_api, an approval by an authenticated operator, the command the game executed and its effect read back a game month later, and stopping the run leaves no listener. A frozen-input ablation says whether Prismatic changed the decision. A kill switch halts every agent mutation. A check tells which cross-repository pieces are still missing. Bus consumers detect gaps and backfill them from the store. A plan of dependent steps keeps a receipt per step and survives an interruption and an owner's GUI takeover without spending twice. A chaos check drives each failure to a closed outcome. Retrieval gains a semantic ranker only if it wins on held-out questions. A role-separated multi-agent controller is measured against a solo one."
+acceptance_criteria:
+- "tools/research/agent-loop-check exits 0 with a run record linking evidence answer, mesh keys, plan.directive, approval, decision and verdict; it exits 3 (NOT RUN) when prismatic_api or majordomus 1.2.0 is absent"
+- "mcp-decision-check and prismatic-rhai-check pass against a live prismatic_api, and a frozen-input ablation record states how often Prismatic's directive differs from the baseline"
+- "tools/research/mesh-records-check passes live, with stale_revision, not_own and out_of_scope refusals observed from the real server"
+- "While the game's MCP server is halted, no channel can post a mutation, and the halt and its lift are on the bus"
+- "tools/research/agent-loop-deps prints one OBSERVED line per cross-repository dependency, and research/agent-loop.md's rows take their missing-piece text from it"
+- "Bus consumers report and backfill a dropped range in tests with a lossy fixture publisher"
+- "A plan of dependent steps ends applied, partial or failed with a receipt per step; a panel killed mid-plan resumes without a second post; a GUI takeover ends the plan partial"
+- "tools/research/agent-chaos-check reports PASS, FAIL or NOT RUN per fault, and none is a silent success"
+- "mcp-evidence --benchmark reports BM25, embedding and hybrid on benchmark v2's held-out half, and the default is whichever wins there"
+- "A pre-registered multi-agent-against-solo experiment is recorded with invalid recommendations and duplicate actions per arm"
+validation:
+- "tools/research/agent-loop-check"
+- "tools/research/mesh-records-check"
+- "tools/research/agent-chaos-check"
+- "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+- "tools/gate.sh change"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
