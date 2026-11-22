@@ -44,7 +44,10 @@ Usage: $SELF <smoke|change|research|research-free|full> [options]
             reproducible and its leaderboard derived (tools/research/
             ai-battle/battle.py check), that the town-authority model and
             its outputs are what src/ derives (tools/research/town-model/
-            derive.py --check), and that every published surface
+            derive.py --check), that the AlgoGlyph kernel contracts are what
+            the pinned AlgoGlyph source derives (algoglyph-contracts --check;
+            NOT RUN, so PARTIAL, without an AlgoGlyph checkout), and
+            that every published surface
             agrees with the repository: Markdown regions current, every
             relative link and anchor resolving (tools/surfaces/surfaces check),
             and every file and symbol the .ai/ records cite still exists
@@ -483,6 +486,18 @@ cmd_change() {
   python3 -B tools/research/ai-battle/battle.py check
   echo "==> tools/research/town-model/derive.py --check (the town-authority model is what src/ derives)"
   python3 -B tools/research/town-model/derive.py --check
+  # I0228: the AlgoGlyph kernel contracts are what the pinned AlgoGlyph source derives. Without an
+  # AlgoGlyph checkout ($ALGOGLYPH_ROOT, its submodule) the tool prints NOT RUN and exits 3: PARTIAL.
+  echo "==> algoglyph-contracts --check (research/battlebrain/README.md#derived-kernel-contracts-i0228)"
+  rc=0
+  RUSTFLAGS="${RUSTFLAGS:--C target-cpu=native}" cargo run --quiet --release --offline \
+    --no-default-features \
+    --manifest-path tools/research/mcp-rhai/Cargo.toml --bin algoglyph-contracts -- --check || rc=$?
+  case "$rc" in
+    0) ;;
+    "$EXIT_PARTIAL") status="$EXIT_PARTIAL" ;;
+    *) exit "$rc" ;;
+  esac
   if compgen -G 'research/results/postmortem-*.json' > /dev/null; then
     echo "==> battle-postmortem check (research/battle-postmortem.md: every post-mortem .md is what its .json derives)"
     # RUSTFLAGS replaces a target's rustflags from a global cargo config; a `-C lto` there breaks
