@@ -49,7 +49,8 @@ flowchart LR
   bound parameter.
 - **Analytic views.** Every time a store opens, it runs the table files and then every view file
   (`CREATE OR REPLACE VIEW`), so a changed definition reaches old files too. Each view carries its
-  `COMMENT ON VIEW`. `GET /api/db/tables` lists them under `views` with their comment and columns.
+  `COMMENT ON VIEW` and a `COMMENT ON COLUMN` for each of its columns. `GET /api/db/tables` lists
+  them under `views` with their comment and columns.
   They are generic over runs: every row carries `instance` and `run_ms` (the run's start), and the
   current run is the largest `run_ms`. Read them instead of repeating their SQL. A test fails when
   this list lacks a view.
@@ -67,11 +68,14 @@ flowchart LR
   | `schema_doc` | the store describing itself: every table, view and column with its comment |
 
 - **The store documents itself.** Every table file comments its table and each column next to
-  its definition, and every view file comments its view. These comments are written at every open.
+  its definition, and every view file comments its view and each column the view has. DuckDB 1.5
+  takes `COMMENT ON COLUMN` on a view, and `CREATE OR REPLACE VIEW` drops it, so the comments follow
+  the view in its file and are written at every open.
   An agent or a script learns the store with one query: `SELECT * FROM schema_doc` (also
   `GET /api/db/query?sql=...`). `GET /api/db/tables` reads the same comments back from the store
   (`queries/store_schema.sql`). A test fails when a file creates an object other than its name, a
-  table, view or column lacks its comment, or `schema_doc` has a row without one.
+  table, view or column lacks its comment, a view file lacks the comment of a column the store
+  gives that view (read from `duckdb_columns()`), or `schema_doc` has a row without one.
 - **Named queries.** A file in `sql/queries/` is one read-only statement with named parameters
   (`$company`), and its leading `--` lines describe it. `GET /api/db/named` lists them with their
   parameters, which come from DuckDB's prepared statement and are never declared twice.

@@ -1,0 +1,32 @@
+id: I0219
+milestone: a-remote-human-plays-the-bot
+title: "A remote person plays a recorded game against the disclosed bot over the internet, with every change waiting for the host's approval"
+slug: remote-human-plays-the-bot
+priority: p3
+profile: deep-work
+parallel_safe: false
+objective: "With the coordinator path proven (I0218), the owner invites a person on another network to a game against PrismaticAI: an invite-only (or password-protected public) server from one clean commit, the bot's company disclosed as an AI, auto-approve off so every change the host's tooling proposes waits for the host, a stated length and map. real-game-check passes before the invite. The run's record holds the build ids of host and remote client, the settings, the bot's settings, each approval the host gave or refused, company samples over the game and the result, with the person anonymised. The research/real-game.md and README.md rows that say NOT RUN are replaced by what was run."
+why: "External review 2026-11-22 (digests B-50, C-35, merged: both ask for the same run). research/real-game.md:105 lists 'A remote human joining over the internet' as NOT RUN ('needs a second machine and a person'), README.md:637-638 repeats it and README.md:1530 notes the bot's opponents so far are other AIs on loopback. The fairness rules are written but not enforced by the game (research/real-game.md:62-75), so the record has to show they were kept."
+scope:
+  - "research/real-game.md"
+  - "research/results/**"
+  - "README.md"
+non_scope:
+  - "Recruiting a person; the owner invites them"
+  - "Any agent approving a change during the game; approvals are the host's"
+  - "Public official servers (ADR 0030)"
+depends_on:
+  - I0218
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#a-remote-human-plays-the-bot"
+acceptance_criteria:
+  - "real-game-check exits 0 on the hosted stack before the invite, and its output is in the record"
+  - "The record under research/results/ has the game's length, both build ids, the bot's disclosure, every approval the host gave or refused, company samples and the result, and identifies no person"
+  - "research/real-game.md's remote row and README.md:637-638 state what was run, by whom in anonymised terms and with which record; anything still unproven stays NOT RUN"
+  - "The page does not generalise one game into a claim about the bot's strength against people"
+validation:
+  - "tools/surfaces/surfaces sync && tools/surfaces/surfaces check"
+evidence_required:
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

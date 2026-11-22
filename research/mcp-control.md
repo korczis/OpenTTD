@@ -1532,6 +1532,39 @@ and the auto-approve lines (HTTP 403) and records the refusal as an operator eve
 through `POST /api/approve`, which is the panel's Approve button. Withdrawing your own request
 (`deny`) is still allowed. `mcp-panel-check` tests both cases.
 
+## The Prismatic control window in the game
+
+The first row of the fork's toolbar menu, *Prismatic control...*, opens a window of the game
+itself (`src/prismatic_mcp/prismatic_mcp_panel.cpp`, class `PrismaticControl`, RESEARCH-ONLY): the
+fork's state where the owner plays, in one resizable list that refreshes every second.
+
+| Section | Read from |
+|---|---|
+| MCP server | `GetStatusLine()`, the line `prismatic_mcp status` prints |
+| Waiting for your approval | `PendingApprovals()`: id, tool, the exact arguments the approval binds to, expired |
+| Latest decisions | `DecisionTrace()`: what ran, its command result and the verdict observed afterwards |
+| Questions from this game | `Menu::Requests()`: every *Ask the planner...* or request item, answered or waiting |
+| Switches | the menu table's Toggle rows (`Human player: paused`), flipped by a click |
+
+Its buttons: **Approve** and **Deny** act on the selected approval, **Ask the planner...** queues a
+question like the menu item, **Open the hub** and **Console**. Approve and Deny run the console's
+own `prismatic_mcp approve|deny <id>`, so a click consents exactly as the typed command does and
+follows that command wherever it leads. An Approve click injected by a UI tool (`openttd.input.*`,
+and `openttd.ui.press`, `choose`, `type`, `close`, `click_tile`, which click and type through the
+same entry points; `UI::InjectingInput`, set around every UI tool) is refused and said so in the console: the
+window answers the owner's own hand, and `mcp-human` or any MCP client cannot approve its own
+request by moving the owner's mouse. Deny, which only withdraws a request, stays open, as in the
+panel.
+
+The window has no state or list of its own: `openttd.ui.control` (read-only, in every process, a
+dedicated server included) answers the same `Panel::Snapshot()` it draws, so an MCP client, a Rhai
+script and the owner see one thing. `openttd.ui.menu.run {index: 0}` opens it.
+
+Limit: the approvals listed are the queue of the process the window runs in. In a game the owner
+hosts on a dedicated server, the owner's GUI client is another process; its window lists that
+client's queue, and the server's queue is read with `openttd.ui.control` on the server's MCP
+endpoint (or the panel) until approvals reach the client.
+
 ## The world as data: map, stations, road graph
 
 | Surface | What it is |
