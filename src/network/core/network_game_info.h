@@ -179,6 +179,18 @@ void ResearchNetCompatInitFromEnv();
  */
 extern CompanyMask _research_coplay;
 bool ResearchCoplayAllows(CompanyID company);
+
+/*
+ * RESEARCH-ONLY (fork): the company a client rejoins after the server restarts its game (a `load`
+ * on the server, ClientNetworkGameSocketHandler::ReceiveServerNewGame). Upstream reconnects every
+ * client as a spectator; a client that played a company asks for that company again, so the
+ * owner co-playing with the bot is back in the company the operator opened, with no `move` by hand.
+ * The server still decides: the company must exist and admit the client (ResearchCoplayAllows for
+ * an AI company), exactly as for a first join. See research/coplay.md "After a load".
+ */
+CompanyID ResearchRejoinCompany(CompanyID played);
+/** The company this client asks for when it reconnects after a server restart (ResearchRejoinCompany). */
+extern CompanyID _research_rejoin_company;
 #endif /* OTTD_RESEARCH_INSTRUMENTATION */
 
 void FillStaticNetworkServerGameInfo();
