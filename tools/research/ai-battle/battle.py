@@ -20,9 +20,11 @@ Commands:
   run        schedule matches forever and serve the dashboard (SIGTERM / Ctrl-C stops; STOP holds it)
   status     print the current edition's leaderboard
   report     write research/results/battle-<utc>-<edition>.{json,md} and the README leaderboard
-  render     rewrite every tracked battle-*.md (tables and charts) and the README leaderboard from
-             the records' JSON alone; `surfaces sync` runs it, so a renderer change reaches every page
-  check      validate every battle record and that the README leaderboard is derived (the gate)
+  render     rewrite every tracked battle-*.md and ablation-*.md (tables and charts) and the README
+             leaderboard from the records' JSON alone; `surfaces sync` runs it, so a renderer change
+             reaches every page
+  check      validate every battle and ablation record and that every page and the README
+             leaderboard is derived (the gate)
   fitness    one short local match of the working tree's PrismaticAI against a reference AI; fails
              on a Squirrel error, an unfinished match or a collapsing fleet (the gate, on change)
 
@@ -2030,13 +2032,117 @@ def cmd_report(cfg: dict, check_only: bool, edition: str | None = None) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------- ablation records
+# `ablate --write` records research/results/ablation-<utc>-seed<S>.{json,md}: one local match per
+# variant of PrismaticAI on one seed. The page (tables and charts) is derived from the JSON alone by
+# render_ablation_md; `render` rewrites every tracked page and `check` fails while one is stale.
+ABLATION_SCHEMA = "ai-battle-ablation/v1"
+ABLATION_GLOB = "ablation-*.json"
+ABLATION_CHARTS_BEGIN, ABLATION_CHARTS_END = "<!-- ablation-charts:begin -->", "<!-- ablation-charts:end -->"
+ABLATION_REQUIRED = {"schema": str, "id": str, "generated_at": str, "seed": int, "years": int,
+                     "field": list, "match_cfg": dict, "rev": str, "tree_dirty": bool, "rows": list}
+ABLATION_ROW = ("variant", "settings", "exit_code", "value", "money", "vehicles", "rail", "road", "air",
+                "errors", "field_best", "t", "vs_first")
+
+
+def ablation_vs_first(rows: list[dict]) -> list[float]:
+    """Each variant's final value against the first (the baseline), as cmd_ablate records it."""
+    base = rows[0]["value"] or 1
+    return [round(r["value"] / base - 1, 4) for r in rows]
+
+
+def validate_ablation(rec: dict, name: str) -> list[str]:
+    """What an ablation page is derived from: the schema, the id its file is named by, and a row per
+    variant (each named once, as the charts link it) whose ratio to the baseline is its own."""
+    errs = [f"{name}: '{k}' missing or not {t.__name__}" for k, t in ABLATION_REQUIRED.items()
+            if not isinstance(rec.get(k), t)]
+    if errs:
+        return errs
+    if rec["schema"] != ABLATION_SCHEMA:
+        errs.append(f"{name}: schema is {rec['schema']!r}, expected {ABLATION_SCHEMA!r}")
+    if name != f"{rec['id']}.json":
+        errs.append(f"{name}: file name does not match id {rec['id']!r}")
+    if not re.fullmatch(r"[0-9a-f]{40}", rec["rev"]):
+        errs.append(f"{name}: rev is not a full commit hash")
+    rows = rec["rows"]
+    if not rows:
+        return errs + [f"{name}: no variant row"]
+    for r in rows:
+        missing = [k for k in ABLATION_ROW if k not in r]
+        if missing:
+            errs.append(f"{name}: row {r.get('variant')} lacks {missing}")
+    if errs:
+        return errs
+    names = [r["variant"] for r in rows]
+    if len(set(names)) != len(names):
+        errs.append(f"{name}: a variant is named twice")
+    if [r["vs_first"] for r in rows] != ablation_vs_first(rows):
+        errs.append(f"{name}: vs_first is not derived from the values")
+    return errs
+
+
+def render_ablation_charts(rec: dict) -> str:
+    """The ablation's charts, every number taken from its JSON: each variant's final value with
+    the best opponent in its match, its change against the baseline (the first variant), its share
+    of that best opponent, and its rail, road and air fleet at the end. Each mark opens the
+    variant's row."""
+    page, rows = f"{rec['id']}.md", rec["rows"]
+    names = [r["variant"] for r in rows]
+    links = [mark_link(page, "Variant", n) for n in names]
+    base = rows[0]
+    change = [round(r["vs_first"] * 100, 1) for r in rows]
+    share = [round(100 * r["value"] / r["field_best"], 1) if r["field_best"] else 0 for r in rows]
+    lo = min(rows, key=lambda r: r["value"])
+    hi = max(rows, key=lambda r: r["value"])
+    spread = hi["value"] / lo["value"] - 1 if lo["value"] else 0
+    # Three series at most: the palette's fourth colour is the paper the chart is drawn on.
+    fleet = [(k.capitalize(), [r[k] for r in rows]) for k in ("rail", "road", "air")
+             if all(isinstance(r[k], int) for r in rows)] or [("Vehicles", [r["vehicles"] for r in rows])]
+    out = [ABLATION_CHARTS_BEGIN,
+           f"<!-- derived from {rec['id']}.json by `battle.py render`; `battle.py check` fails when it is "
+           "stale -->", "",
+           f"Highest final value: {hi['variant']} ({hi['vs_first']:+.1%} against {base['variant']}); "
+           f"lowest: {lo['variant']} ({lo['vs_first']:+.1%}). Spread between them: {spread:.1%} of the "
+           f"lowest, on one seed ({rec['seed']}).", "",
+           mermaid_xy(f"Final company value by variant, and the best opponent in its match (seed {rec['seed']}, "
+                      f"{rec['years']} years)", names,
+                      [("Final value", [r["value"] for r in rows]),
+                       ("Best opponent", [r["field_best"] for r in rows])], "Company value", links), "",
+           mermaid_xy(f"Final company value against the baseline {base['variant']} (%)", names,
+                      [("Change against the baseline (%)", change)], "Change (%)", links), "",
+           mermaid_xy("Final company value as a share of the best opponent (%)", names,
+                      [("Share of the best opponent (%)", share)], "Share (%)", links), "",
+           mermaid_xy(f"Fleet at the end by variant: {', '.join(n.lower() for n, _ in fleet)} vehicles",
+                      names, fleet, "Vehicles", links), "",
+           ABLATION_CHARTS_END]
+    return "\n".join(out)
+
+
+def render_ablation_md(rec: dict, charts: bool = True) -> str:
+    mc, rows = rec["match_cfg"], rec["rows"]
+    md = [f"# {rec['id']}", "",
+          "Derived from its .json by `tools/research/ai-battle/battle.py ablate --write`; do not edit.", "",
+          f"One local match per variant of PrismaticAI against {', '.join(rec['field'])}, seed {rec['seed']}, "
+          f"{rec['years']} years from {mc['start_year']}, at `{rec['rev'][:10]}`"
+          f"{' (tree dirty)' if rec['tree_dirty'] else ''}. "
+          "Each value is the variant's last quarterly referee sample. One seed: a direction, not a verdict.", "",
+          "| Variant | Value | vs first | Vehicles | Rail | Road | Air | Squirrel errors | Settings |",
+          "|---|---|---|---|---|---|---|---|---|"]
+    md += [f"| {r['variant']} | {r['value']:,} | {r['vs_first']:+.1%} | {r['vehicles']} | {r['rail']} | "
+           f"{r['road']} | {r['air']} | {r['errors']} | `{r['settings']}` |" for r in rows]
+    if charts:
+        md += ["", render_ablation_charts(rec)]
+    return "\n".join(md) + "\n"
+
+
 def cmd_render() -> int:
-    """Rewrite every tracked record's .md and the README leaderboard from the records' JSON. Pure:
-    it reads only the records (tracked_records) and the chart palette, so `surfaces sync` may run
-    it, and a change of render_md reaches every page in the commit that makes it."""
-    files, written = tracked_records(), 0
-    for f in files:
-        md, text = f.with_suffix(".md"), render_md(json.loads(f.read_text()))
+    """Rewrite every tracked record's .md (battle and ablation) and the README leaderboard from the
+    records' JSON. Pure: it reads only the records (tracked_records) and the chart palette, so
+    `surfaces sync` may run it, and a change of render_md or render_ablation_md reaches every page
+    in the commit that makes it."""
+    files, ablations, written = tracked_records(), tracked_records(ABLATION_GLOB), 0
+    for f, render in [(f, render_md) for f in files] + [(f, render_ablation_md) for f in ablations]:
+        md, text = f.with_suffix(".md"), render(json.loads(f.read_text()))
         if not md.is_file() or md.read_text() != text:
             md.write_text(text)
             written += 1
@@ -2047,7 +2153,8 @@ def cmd_render() -> int:
     region = replace_region(readme, render_region(latest_record()))
     if region != readme:
         README.write_text(region)
-    print(f"battle render: {written} of {len(files)} record page(s) rewritten, README leaderboard "
+    print(f"battle render: {written} of {len(files) + len(ablations)} record page(s) "
+          f"({len(files)} battle, {len(ablations)} ablation) rewritten, README leaderboard "
           + ("rewritten" if region != readme else "current"))
     return 0
 
@@ -2060,6 +2167,14 @@ def cmd_check() -> int:
         errs += validate_record(rec, f.name)
         md = f.with_suffix(".md")
         if not md.is_file() or md.read_text() != render_md(rec):
+            drift.append(f"{md.name}: not derived from {f.name} (run battle.py render)")
+    ablations = tracked_records(ABLATION_GLOB)
+    for f in ablations:
+        rec = json.loads(f.read_text())
+        found = validate_ablation(rec, f.name)
+        errs += found
+        md = f.with_suffix(".md")
+        if not found and (not md.is_file() or md.read_text() != render_ablation_md(rec)):
             drift.append(f"{md.name}: not derived from {f.name} (run battle.py render)")
     latest = latest_record()
     cfg_never = json.loads(DEFAULT_CONFIG.read_text()).get("never_last", [])
@@ -2080,7 +2195,8 @@ def cmd_check() -> int:
     if drift:
         return 11
     n = len(files)
-    print(f"battle check: {n} record(s) valid, README leaderboard derived")
+    print(f"battle check: {n} record(s) and {len(ablations)} ablation record(s) valid, every page and "
+          "the README leaderboard derived")
     return 0
 
 
@@ -2253,29 +2369,23 @@ def cmd_ablate(cfg: dict, seed: int, years: int, variants: list[str], field: lis
                          "vehicles": last.get("vehicles", 0), "rail": last.get("rail"), "road": last.get("road"),
                          "air": last.get("air"), "errors": errors.get(0, 0), "field_best": field_best,
                          "t": last.get("t", "")})
-    base = rows[0]["value"] or 1
-    for r in rows:
-        r["vs_first"] = round(r["value"] / base - 1, 4)
+    for r, vs in zip(rows, ablation_vs_first(rows)):
+        r["vs_first"] = vs
         print(f"ablate: {r['variant']:12} value {r['value']:>12,} ({r['vs_first']:+.1%})  veh {r['vehicles']:>4} "
               f"rail {r['rail']} road {r['road']} air {r['air']}  err {r['errors']}  [{r['settings']}]")
     if write:
         now = dt.datetime.now(dt.timezone.utc)
         rid = f"ablation-{now.strftime('%Y%m%dT%H%M%S')}-seed{seed}"
-        rec = {"schema": "ai-battle-ablation/v1", "id": rid, "generated_at": now.isoformat(timespec="seconds"),
+        rec = {"schema": ABLATION_SCHEMA, "id": rid, "generated_at": now.isoformat(timespec="seconds"),
                "seed": seed, "years": years, "field": field, "slot": slot, "match_cfg": mc,
                "rev": git("rev-parse", "HEAD"), "tree_dirty": bool(git("status", "--porcelain", "--",
                                                                         cfg["prismatic"]["path"])),
                "rows": rows}
+        for e in validate_ablation(rec, f"{rid}.json"):
+            log(f"warning: {e}")
         (RESULTS_DIR / f"{rid}.json").write_text(json.dumps(rec, indent=1) + "\n")
-        md = [f"# {rid}", "", "Derived from its .json by `tools/research/ai-battle/battle.py ablate --write`; do not edit.", "",
-              f"One local match per variant of PrismaticAI against {', '.join(field)}, seed {seed}, {years} years "
-              f"from {mc['start_year']}, at `{rec['rev'][:10]}`{' (tree dirty)' if rec['tree_dirty'] else ''}. "
-              "Each value is the variant's last quarterly referee sample. One seed: a direction, not a verdict.", "",
-              "| Variant | Value | vs first | Vehicles | Rail | Road | Air | Squirrel errors | Settings |",
-              "|---|---|---|---|---|---|---|---|---|"]
-        md += [f"| {r['variant']} | {r['value']:,} | {r['vs_first']:+.1%} | {r['vehicles']} | {r['rail']} | {r['road']} | "
-               f"{r['air']} | {r['errors']} | `{r['settings']}` |" for r in rows]
-        (RESULTS_DIR / f"{rid}.md").write_text("\n".join(md) + "\n")
+        # The page (table and charts) is derived from the JSON alone, as `render` re-derives it.
+        (RESULTS_DIR / f"{rid}.md").write_text(render_ablation_md(rec))
         log(f"wrote research/results/{rid}.{{json,md}}")
     return 0
 

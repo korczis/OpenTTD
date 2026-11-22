@@ -21,6 +21,10 @@ Resources implemented in this build. All are read-only, wrapped in the common en
 The table names some resources; the live list, with every description, is `resources/list` on a
 running server (and the hub's catalogue across every instance).
 
+Each `resources/read` is served in its own poll, so a client reading several while the game runs
+gets several ticks. `openttd.resources.read_many {uris: [...]}` (`08-tool-catalog.md`) builds them
+all in one call on the main thread instead: one `game_tick` for every answer, without a pause.
+
 Rules honored: unknown → `null`/explicit availability (never coerced to 0); invalid uri → JSON-RPC
 `-32602`; lists sorted by stable id (pool ascending index); money states its unit; date states
 calendar Y-M-D; no memory addresses; no secrets. See `exposure-coverage-matrix.md` for the domains

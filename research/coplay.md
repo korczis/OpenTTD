@@ -60,6 +60,32 @@ Run on 2026-11-22 on this branch (macOS, `build-gate-research`: RelWithDebInfo,
 
 A row without a result is not a claim (rule `project.never-report-unrun-validation-as-pass`).
 
+## Deploying into a running game
+
+A new panel or game binary needs the stack restarted, and restarting starts a new world. To keep
+the owner's game:
+
+1. Save it from the server's console. Use the panel's `POST /api/console {"command": "save <name>"}`
+   or type it in the developer console. The file lands in the panel's temporary personal directory
+   (`<tmp>/save/<name>.sav`), and that directory is removed when the panel stops. Copy the file to
+   `~/Documents/OpenTTD/save/` first.
+2. Stop the stack (Ctrl-C on `mcp-e2e`, or SIGINT to the panel).
+3. Start it from the savegame: `tools/research/mcp-e2e --arm-input --coplay --load <file>`. The panel
+   passes `-g <file>` to the server instead of `-G <seed>`. It starts no new bot, because the saved AI
+   companies play on, each restarted by the game from its saved data. `--coplay` opens the company
+   the game reports for the bot and joins the client to it, as on a new world. The arena counts the
+   saved companies and starts only what its lineup still lacks.
+
+The co-play opening (`research_coplay`) is server state, not game state, so it is not in the save,
+and `--coplay` opens it again.
+
+Verified on 2026-11-22 against the seed 20261122 co-play game, saved in November 1960. The stack
+started from the save on side ports (panel 8810, game 3990, `--no-gui`), with the binary of
+the news-refs branch. All 8 companies came back with their names, money and loans, and
+`/api/bots` listed all 8 AIs running: PrismaticAI four times, AAAHogEx, LuDiAI AfterFix, CivilAI
+and AdmiralAI. No new bot was started. The client half (`--coplay` after `--load`): NOT RUN on
+that check.
+
 ## Limits
 
 - Loopback R&D games that the owner runs only. It changes nothing about stock servers, and a

@@ -1902,6 +1902,16 @@ static bool ConResearchCoplay(std::span<std::string_view> argv)
 
 #ifdef OTTD_PRISMATIC_MCP_SERVER
 /**
+ * Whether the console line being run came over the network: a network client's rcon or an
+ * admin-port rcon. The bearer token is never printed to such a console (RESEARCH-ONLY).
+ * @return true when the output goes to a remote client or admin.
+ */
+static bool PrismaticMcpConsoleIsRemote()
+{
+	return _redirect_console_to_client != ClientID::Invalid || _redirect_console_to_admin != AdminID::Invalid();
+}
+
+/**
  * RESEARCH-ONLY / UNSTABLE: control and inspect the embedded loopback MCP server.
  * The server is off by default and binds 127.0.0.1/::1 only; the bearer token is
  * shown here for the local operator and is never written to openttd.cfg or normal
@@ -1946,7 +1956,7 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 				IConsolePrint(ec ? CC_ERROR : CC_INFO, "Token written to {}{}", path, ec ? " (permissions not set)" : " (mode 0600)");
 				PrismaticMCP::Registry::AnnounceTokenFile(path); // the registry record names the file, never the token
 			} else {
-				if (_redirect_console_to_client != ClientID::Invalid) {
+				if (PrismaticMcpConsoleIsRemote()) {
 				IConsolePrint(CC_ERROR, "Refused: the bearer token is not sent to a remote console; read it on the server or pass a token file.");
 			} else {
 				IConsolePrint(CC_WARNING, "Bearer token (this console, and the console log if one is open): {}", PrismaticMCP::GetToken());
@@ -1969,7 +1979,7 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 	}
 	if (sub == "token") {
 		/* An rcon or admin caller would receive the bearer over the network: the token stays local. */
-		if (_redirect_console_to_client != ClientID::Invalid) {
+		if (PrismaticMcpConsoleIsRemote()) {
 			IConsolePrint(CC_ERROR, "Refused: the bearer token is not sent to a remote console.");
 			return true;
 		}

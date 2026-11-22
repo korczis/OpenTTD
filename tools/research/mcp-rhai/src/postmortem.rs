@@ -369,6 +369,188 @@ pub fn edition(edition: &str, matches: &[Value], prismatic: &dyn Fn(&Value, &str
     })
 }
 
+// ---------------------------------------------------------------------- the charts
+
+/// The charts of a page sit between these markers: `tools/surfaces/surfaces check` refuses a chart
+/// outside a generated region, and `battle-postmortem render` rewrites the whole page, this region too.
+pub const CHARTS_BEGIN: &str = "<!-- postmortem-charts:begin -->";
+pub const CHARTS_END: &str = "<!-- postmortem-charts:end -->";
+/// The NoirGFX palette (tools/research/noirgfx/style.toml, the README scoreboard's too) in series
+/// order: grey for the best contestant's bars, signal red for the first PrismaticAI line, then ink
+/// and signal_dark. A test proves each colour is the one style.toml names.
+pub const CHART_PALETTE: &str = "#8a8a8a, #d11f1a, #0b0b0b, #5e0b08";
+/// The headings the charts link to (their GitHub slugs are the `#` of each link).
+const H_CONTESTANTS: &str = "Contestants";
+const H_CAUSES: &str = "Why PrismaticAI loses";
+const H_TRAJECTORY: &str = "Trajectory (median of the January samples over the matches)";
+
+/// A number as Mermaid parses it: plain digits, never an exponent (1.044e+08 is a parse error).
+pub fn mermaid_num(v: f64) -> String {
+    if v.fract() == 0.0 {
+        return format!("{v:.0}");
+    }
+    let s = format!("{v:.6}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn mermaid_label(t: &str) -> String {
+    t.replace('"', "'")
+}
+
+/// A heading's anchor as GitHub and tools/surfaces make it (`github_slug`).
+fn slug(t: &str) -> String {
+    t.to_lowercase().chars().filter(|c| c.is_alphanumeric() || "-_ ".contains(*c)).collect::<String>().replace(' ', "-")
+}
+
+/// A query value, percent-encoded (everything but the unreserved characters).
+fn query(v: &str) -> String {
+    v.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
+        .collect()
+}
+
+/// The link of a mark to the row it summarises: `<page>?col=<column>&filter=<value>#<heading>`.
+/// The site shows only the rows whose cell in that column is the value; GitHub opens the page.
+fn row_link(page: &str, column: &str, value: &str, heading: &str) -> String {
+    format!("{page}?col={}&filter={}#{}", query(column), query(value), slug(heading))
+}
+
+/// The y-axis end beyond `v`: 10% of room, three significant digits, a whole number on a count's axis.
+fn span(v: f64, whole: bool) -> String {
+    if v == 0.0 {
+        return "0".into();
+    }
+    let edge: f64 = format!("{:.2e}", v * 1.1).parse().unwrap_or(v * 1.1);
+    mermaid_num(if whole { if edge > 0.0 { edge.ceil() } else { edge.floor() } } else { edge })
+}
+
+/// A Mermaid xychart-beta: a bar for the first series, a line for each further one. GitHub draws it;
+/// the site reads it back and draws it with ECharts, naming the series from `%% series:` and opening
+/// each category's `%% links:` target (tools/surfaces/README.md "Charts").
+pub fn mermaid_xy(title: &str, labels: &[String], series: &[(String, Vec<f64>)], y_title: &str, links: &[String]) -> String {
+    let values: Vec<f64> = series.iter().flat_map(|(_, v)| v.iter().copied()).collect();
+    let whole = values.iter().all(|v| v.fract() == 0.0);
+    let lo = values.iter().copied().fold(0.0, f64::min);
+    let hi = values.iter().copied().fold(1.0, f64::max);
+    let mut l = vec!["```mermaid".to_string(), "---".into(), "config:".into(), "  xyChart:".into(), "    width: 900".into(),
+        "    height: 360".into(), "  themeVariables:".into(), "    xyChart:".into(),
+        format!("      plotColorPalette: \"{CHART_PALETTE}\""), "---".into(), "xychart-beta".into(),
+        format!("    title \"{}\"", mermaid_label(title)),
+        format!("    x-axis [{}]", labels.iter().map(|x| format!("\"{}\"", mermaid_label(x))).collect::<Vec<_>>().join(", ")),
+        format!("    %% series: {}", series.iter().map(|(n, _)| mermaid_label(n)).collect::<Vec<_>>().join(" | "))];
+    if !links.is_empty() {
+        l.push(format!("    %% links: {}", links.join(" | ")));
+    }
+    l.push(format!("    y-axis \"{}\" {} --> {}", mermaid_label(y_title), span(lo, whole), span(hi, whole)));
+    for (i, (_, v)) in series.iter().enumerate() {
+        l.push(format!("    {} [{}]", if i == 0 { "bar" } else { "line" }, v.iter().map(|x| mermaid_num(*x)).collect::<Vec<_>>().join(", ")));
+    }
+    l.push("```".into());
+    l.join("\n")
+}
+
+/// A Mermaid pie, a slice per item (and its link, in the same order).
+pub fn mermaid_pie(title: &str, items: &[(String, f64)], links: &[String]) -> String {
+    let mut l = vec!["```mermaid".to_string(), format!("pie showData title {}", mermaid_label(title))];
+    if !links.is_empty() {
+        l.push(format!("    %% links: {}", links.join(" | ")));
+    }
+    for (k, v) in items {
+        l.push(format!("    \"{}\" : {}", mermaid_label(k), mermaid_num(*v)));
+    }
+    l.push("```".into());
+    l.join("\n")
+}
+
+/// The best contestant (the first by average rank) and every PrismaticAI one: who the trajectory
+/// table and charts show. None when the trajectories lack the best contestant.
+fn trajectory_keys(pm: &Value) -> Option<Vec<String>> {
+    let best = pm["contestants"].as_array()?.first()?["key"].as_str()?.to_string();
+    pm["trajectories"].as_object()?.get(&best)?;
+    let mut who = vec![best];
+    for c in pm["contestants"].as_array().into_iter().flatten() {
+        let k = c["key"].as_str().unwrap_or("");
+        if c["prismatic"].as_bool() == Some(true) && k != who[0] { who.push(k.to_string()); }
+    }
+    Some(who)
+}
+
+/// The years of the trajectory: the best contestant's.
+fn trajectory_years(pm: &Value, best: &str) -> Vec<String> {
+    pm["trajectories"][best].as_object().map(|y| y.keys().cloned().collect()).unwrap_or_default()
+}
+
+/// PrismaticAI's losses by cause: (cause, losses over its contestants' matches, per contestant),
+/// the most frequent first.
+pub fn prismatic_causes(pm: &Value) -> Vec<(String, u64, Vec<(String, u64)>)> {
+    let mut acc: BTreeMap<String, Vec<(String, u64)>> = BTreeMap::new();
+    for c in pm["contestants"].as_array().into_iter().flatten().filter(|c| c["prismatic"].as_bool() == Some(true)) {
+        for x in c["causes"].as_array().into_iter().flatten() {
+            let n = x["matches"].as_u64().unwrap_or(0);
+            if n > 0 {
+                acc.entry(x["cause"].as_str().unwrap_or("").to_string()).or_default()
+                    .push((c["key"].as_str().unwrap_or("").to_string(), n));
+            }
+        }
+    }
+    let mut out: Vec<(String, u64, Vec<(String, u64)>)> = acc.into_iter().map(|(c, per)| (c, per.iter().map(|p| p.1).sum(), per)).collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    out
+}
+
+/// The post-mortem's charts, every number from its JSON: the best contestant against every PrismaticAI
+/// contestant year by year (company value, fleet), last places per contestant, and PrismaticAI's
+/// losses by cause. Each mark links the row of this page's table it summarises.
+pub fn charts(pm: &Value) -> String {
+    let page = format!("postmortem-{}.md", pm["edition"].as_str().unwrap_or("?"));
+    let mut out = vec![CHARTS_BEGIN.to_string(),
+        "<!-- generated by battle-postmortem from this post-mortem's JSON; `battle-postmortem render` \
+         rewrites it, `battle-postmortem check` fails while it is stale -->".to_string(), String::new()];
+    if let Some(who) = trajectory_keys(pm) {
+        let years = trajectory_years(pm, &who[0]);
+        let links: Vec<String> = years.iter().map(|y| row_link(&page, "Year", y, H_TRAJECTORY)).collect();
+        let vs = if who.len() > 1 { " vs PrismaticAI" } else { "" };
+        for (field, title, axis) in [("value", "Company value", "Company value"), ("vehicles", "Fleet", "Vehicles")] {
+            let series: Vec<(String, Vec<f64>)> = who.iter()
+                .map(|w| (w.clone(), years.iter().map(|y| pm["trajectories"][w.as_str()][y.as_str()][field].as_f64().unwrap_or(0.0)).collect()))
+                .collect();
+            out.push(mermaid_xy(&format!("{title} per year (median January sample): {}{vs}", who[0]), &years, &series, axis, &links));
+            out.push(String::new());
+        }
+    }
+    let cs: Vec<&Value> = pm["contestants"].as_array().into_iter().flatten().collect();
+    if !cs.is_empty() {
+        let labels: Vec<String> = cs.iter().map(|c| c["key"].as_str().unwrap_or("").to_string()).collect();
+        let links: Vec<String> = cs.iter().map(|c| row_link(&page, "Contestant", &contestant_cell(c), H_CONTESTANTS)).collect();
+        let lasts = vec![("Last places".to_string(), cs.iter().map(|c| num(c, "last_place")).collect())];
+        out.push(mermaid_xy(&format!("Last places per contestant over {} finished matches", pm["matches"]), &labels, &lasts, "Last places", &links));
+        out.push(String::new());
+    }
+    let causes = prismatic_causes(pm);
+    if !causes.is_empty() {
+        let items: Vec<(String, f64)> = causes.iter().map(|(c, n, _)| (c.clone(), *n as f64)).collect();
+        let links: Vec<String> = causes.iter().map(|(c, _, _)| row_link(&page, "Cause", c, H_CAUSES)).collect();
+        out.push(mermaid_pie("PrismaticAI losses by cause (contestant-matches)", &items, &links));
+        out.push(String::new());
+    }
+    if out.len() == 3 {
+        out.push("No contestant was analysed: nothing to chart.".into());
+        out.push(String::new());
+    }
+    out.push(CHARTS_END.into());
+    out.join("\n")
+}
+
+/// A contestant's cell in the Contestants table: its key, ` *` for PrismaticAI (what a chart filters on).
+fn contestant_cell(c: &Value) -> String {
+    format!("{}{}", c["key"].as_str().unwrap_or(""), if c["prismatic"].as_bool() == Some(true) { " *" } else { "" })
+}
+
+/// A value as the trajectory table shows it: 94.4M, 229k, 9.
+fn short(x: Option<f64>) -> String {
+    x.map(|v| if v.abs() >= 1e6 { format!("{:.1}M", v / 1e6) } else if v.abs() >= 1e3 { format!("{:.0}k", v / 1e3) } else { format!("{v:.0}") })
+        .unwrap_or_default()
+}
+
 /// The post-mortem as Markdown, derived from its JSON only (so `check` can regenerate and compare).
 pub fn markdown(pm: &Value) -> String {
     let mut s = String::new();
@@ -387,13 +569,16 @@ pub fn markdown(pm: &Value) -> String {
         }
         s += "\n";
     }
-    s += "## Contestants\n\n| Contestant | Matches | Avg rank | Last | Value / winner | Peak fleet | Final fleet | Idle cash | Gap opens (median) | Causes (matches) |\n|---|---|---|---|---|---|---|---|---|---|\n";
+    // The charts first: each mark links the row of a table below that it summarises.
+    s += "## Charts\n\n";
+    s += &charts(pm);
+    s += "\n\n";
+    s += &format!("## {H_CONTESTANTS}\n\n| Contestant | Matches | Avg rank | Last | Value / winner | Peak fleet | Final fleet | Idle cash | Gap opens (median) | Causes (matches) |\n|---|---|---|---|---|---|---|---|---|---|\n");
     for c in pm["contestants"].as_array().into_iter().flatten() {
         let causes = c["causes"].as_array().into_iter().flatten()
             .map(|x| format!("{} ({})", x["cause"].as_str().unwrap_or(""), x["matches"])).collect::<Vec<_>>().join(", ");
-        s += &format!("| {}{} | {} | {} | {} | {:.3} | {:.1} | {:.1} | {:.2} | {} | {} |\n",
-            c["key"].as_str().unwrap_or(""), if c["prismatic"].as_bool() == Some(true) { " *" } else { "" },
-            c["matches"], c["avg_rank"], c["last_place"], num(c, "avg_value_share_of_winner"),
+        s += &format!("| {} | {} | {} | {} | {:.3} | {:.1} | {:.1} | {:.2} | {} | {} |\n",
+            contestant_cell(c), c["matches"], c["avg_rank"], c["last_place"], num(c, "avg_value_share_of_winner"),
             num(c, "avg_peak_vehicles"), num(c, "avg_final_vehicles"), num(c, "avg_idle_cash_share"),
             c["median_gap_opens"].as_str().unwrap_or("-"), if causes.is_empty() { "-".into() } else { causes });
     }
@@ -408,40 +593,44 @@ pub fn markdown(pm: &Value) -> String {
     s += &format!("- `slow_start`: first vehicle more than {} quarter(s) after the start\n", t["slow_start_quarters"]);
     s += &format!("- `mode_gap`: a mode that earns at least {} of the winner's profit, with no vehicle of it (referee v3)\n", t["mode_gap_share"]);
     s += &format!("- gap opens: the first quarter from which value stays below {} of the winner's\n\n", t["gap_share"]);
-    // When and in what: the yearly medians of the best contestant against every PrismaticAI one.
-    if let (Some(best), Some(traj)) = (pm["contestants"].as_array().and_then(|c| c.first()), pm["trajectories"].as_object()) {
-        let best = best["key"].as_str().unwrap_or("");
-        let mut who: Vec<&str> = vec![best];
-        for c in pm["contestants"].as_array().into_iter().flatten() {
-            if c["prismatic"].as_bool() == Some(true) { who.push(c["key"].as_str().unwrap_or("")); }
+    // What the pie summarises: every PrismaticAI contestant's causes, summed per cause.
+    let causes = prismatic_causes(pm);
+    if !causes.is_empty() {
+        s += &format!("## {H_CAUSES}\n\n");
+        s += "A loss is one PrismaticAI contestant in one match with that cause; a match with several causes counts \
+              once for each.\n\n| Cause | Losses | Contestants (matches) |\n|---|---|---|\n";
+        for (c, n, per) in &causes {
+            let per = per.iter().map(|(k, m)| format!("{k} ({m})")).collect::<Vec<_>>().join(", ");
+            s += &format!("| `{c}` | {n} | {per} |\n");
         }
-        if traj.contains_key(best) {
-            s += "## Trajectory (median of the January samples over the matches)\n\n";
-            s += "Value / vehicles (of which aircraft and trains) / last year's profit from air and rail, the \
-                  best contestant first. Without the parenthesis, the referee of that edition had no per-mode fields.\n\n";
-            s += "| Year |";
-            for w in &who { s += &format!(" {w} |"); }
-            s += "\n|---|";
-            for _ in &who { s += "---|"; }
-            s += "\n";
-            let years: Vec<String> = traj[best].as_object().map(|y| y.keys().cloned().collect()).unwrap_or_default();
-            for (i, y) in years.iter().enumerate() {
-                if !(i < 3 || i % 5 == 0 || i + 1 == years.len()) { continue; }
-                s += &format!("| {y} |");
-                for w in &who {
-                    let r = &traj[*w][y.as_str()];
-                    let f = |k: &str| r.get(k).and_then(Value::as_f64);
-                    let k = |x: Option<f64>| x.map(|v| if v.abs() >= 1e6 { format!("{:.1}M", v / 1e6) } else if v.abs() >= 1e3 { format!("{:.0}k", v / 1e3) } else { format!("{v:.0}") }).unwrap_or_default();
-                    s += &format!(" {} / {} veh", k(f("value")), k(f("vehicles")));
-                    if f("air").is_some() || f("rail").is_some() {
-                        s += &format!(" ({} air, {} rail) / profit air {} rail {}", k(f("air")), k(f("rail")), k(f("pair")), k(f("prail")));
-                    }
-                    s += " |";
+        s += "\n";
+    }
+    // When and in what: the yearly medians of the best contestant against every PrismaticAI one.
+    if let Some(who) = trajectory_keys(pm) {
+        let traj = &pm["trajectories"];
+        s += &format!("## {H_TRAJECTORY}\n\n");
+        s += "Value / vehicles (of which aircraft and trains) / last year's profit from air and rail, the \
+              best contestant first. Without the parenthesis, the referee of that edition had no per-mode fields.\n\n";
+        s += "| Year |";
+        for w in &who { s += &format!(" {w} |"); }
+        s += "\n|---|";
+        for _ in &who { s += "---|"; }
+        s += "\n";
+        // Every year: each one is a mark of the trajectory charts, which links to its row.
+        for y in trajectory_years(pm, &who[0]) {
+            s += &format!("| {y} |");
+            for w in &who {
+                let r = &traj[w.as_str()][y.as_str()];
+                let f = |k: &str| r.get(k).and_then(Value::as_f64);
+                s += &format!(" {} / {} veh", short(f("value")), short(f("vehicles")));
+                if f("air").is_some() || f("rail").is_some() {
+                    s += &format!(" ({} air, {} rail) / profit air {} rail {}", short(f("air")), short(f("rail")), short(f("pair")), short(f("prail")));
                 }
-                s += "\n";
+                s += " |";
             }
             s += "\n";
         }
+        s += "\n";
     }
     s += "## Proposals for the next edition\n\n";
     let props = pm["proposals"].as_array().cloned().unwrap_or_default();
@@ -583,5 +772,124 @@ mod tests {
         r["replica_of"] = json!("m-0001");
         r["id"] = json!("m-0009");
         assert_eq!(edition("e1", &[fixture(), r], &lineup_is_prismatic)["matches"], 1);
+    }
+
+    /// Every link target of a chart: (column, filter value, heading anchor).
+    fn chart_links(md: &str) -> Vec<(String, String, String)> {
+        let decode = |v: &str| {
+            let b = v.as_bytes();
+            let mut out = Vec::new();
+            let mut i = 0;
+            while i < b.len() {
+                if b[i] == b'%' { out.push(u8::from_str_radix(&v[i + 1..i + 3], 16).unwrap()); i += 3; } else { out.push(b[i]); i += 1; }
+            }
+            String::from_utf8(out).unwrap()
+        };
+        md.lines().filter_map(|l| l.trim().strip_prefix("%% links: ")).flat_map(|l| l.split(" | "))
+            .map(|t| {
+                let (q, h) = t.split_once('#').unwrap();
+                let q = q.split_once('?').unwrap().1;
+                let (c, f) = q.split_once('&').unwrap();
+                (decode(c.strip_prefix("col=").unwrap()), decode(f.strip_prefix("filter=").unwrap()), h.to_string())
+            }).collect()
+    }
+
+    /// The cells of `column` in the first table after the heading whose anchor is `anchor`.
+    fn cells(md: &str, anchor: &str, column: &str) -> Vec<String> {
+        let lines: Vec<&str> = md.lines().collect();
+        let start = lines.iter().position(|l| l.starts_with('#') && slug(l.trim_start_matches('#').trim()) == anchor)
+            .unwrap_or_else(|| panic!("no heading #{anchor}"));
+        let split = |l: &str| l.trim().trim_matches('|').split('|').map(|c| c.trim().trim_matches('`').to_string()).collect::<Vec<_>>();
+        let head = (start..lines.len()).find(|&i| lines[i].starts_with('|') && split(lines[i]).contains(&column.to_string()))
+            .unwrap_or_else(|| panic!("no table with {column} after #{anchor}"));
+        let idx = split(lines[head]).iter().position(|c| c == column).unwrap();
+        lines[head + 2..].iter().take_while(|l| l.starts_with('|')).map(|l| split(l)[idx].clone()).collect()
+    }
+
+    fn two_matches() -> Value {
+        let mut other = fixture();
+        other["id"] = json!("m-0002");
+        edition("e1", &[other, fixture()], &lineup_is_prismatic)
+    }
+
+    #[test]
+    fn numbers_in_a_chart_are_plain_digits() {
+        assert_eq!(mermaid_num(1.044e8), "104400000");
+        assert_eq!(mermaid_num(1e21), "1000000000000000000000");
+        assert_eq!(mermaid_num(0.5), "0.5");
+        assert_eq!(mermaid_num(2.0), "2");
+        assert_eq!(span(94_400_000.0, true), "104000000");
+        assert_eq!(span(29.0, true), "32");
+        let md = markdown(&two_matches());
+        let numbers = md.lines().filter_map(|l| {
+            let l = l.trim_start();
+            if l.starts_with("bar [") || l.starts_with("line [") { l.split_once('[').map(|x| x.1) } else if l.starts_with("y-axis") { l.rsplit('"').next() } else { None }
+        });
+        for l in numbers {
+            assert!(!l.contains('e'), "an exponent in {l}");
+        }
+    }
+
+    #[test]
+    fn the_charts_are_derived_from_the_json_inside_their_markers() {
+        let pm = two_matches();
+        let md = markdown(&pm);
+        let (a, b) = (md.find(CHARTS_BEGIN).unwrap(), md.find(CHARTS_END).unwrap());
+        let region = &md[a..b];
+        // Every chart of the page is inside the region (surfaces check refuses one outside).
+        assert_eq!(md.matches("```mermaid").count(), region.matches("```mermaid").count());
+        assert_eq!(region.matches("xychart-beta").count(), 3, "{region}");
+        assert_eq!(region.matches("pie showData").count(), 1, "{region}");
+        // Value and fleet per year: the best contestant's bar, a line per PrismaticAI contestant.
+        assert!(region.contains("%% series: Winner | PrismaticAI hoard | PrismaticAI"), "{region}");
+        assert!(region.contains("bar [0, 200000, 1000000]") && region.contains("line [0, 9000, 10000]"), "{region}");
+        assert!(region.contains("bar [0, 50, 90]") && region.contains("line [0, 4, 2]"), "{region}");
+        // Last places in the Contestants table's order, and PrismaticAI's causes summed.
+        assert!(region.contains("x-axis [\"Winner\", \"PrismaticAI hoard\", \"PrismaticAI\"]"), "{region}");
+        assert!(region.contains("bar [0, 0, 2]"), "{region}");
+        assert!(region.contains("\"stalls_small\" : 2"), "{region}");
+        // The chart is a function of the JSON alone: a round trip through its text changes nothing.
+        let back: Value = serde_json::from_str(&serde_json::to_string_pretty(&pm).unwrap()).unwrap();
+        assert_eq!(markdown(&back), md);
+    }
+
+    #[test]
+    fn every_mark_links_a_row_of_the_table_it_summarises() {
+        let md = markdown(&two_matches());
+        let links = chart_links(&md);
+        // 3 years twice, 3 contestants, and a slice per PrismaticAI cause.
+        assert_eq!(links.len(), 3 + 3 + 3 + prismatic_causes(&two_matches()).len(), "{links:?}");
+        for (col, value, anchor) in &links {
+            let rows = cells(&md, anchor, col);
+            assert!(rows.contains(value), "{col}={value} is no row of #{anchor}: {rows:?}");
+        }
+        // One link per category, in order, so a click opens its own row.
+        for block in md.split("```mermaid").skip(1) {
+            let block = block.split("```").next().unwrap();
+            let links = block.lines().find_map(|l| l.trim().strip_prefix("%% links: ")).unwrap().split(" | ").count();
+            let marks = match block.lines().find_map(|l| l.trim().strip_prefix("x-axis [")) {
+                Some(x) => x.matches("\", \"").count() + 1,
+                None => block.lines().filter(|l| l.trim().starts_with('"')).count(),
+            };
+            assert_eq!(links, marks, "{block}");
+        }
+    }
+
+    #[test]
+    fn the_palette_is_noirgfx() {
+        let style = include_str!("../../noirgfx/style.toml");
+        for (name, colour) in [("signal", "#d11f1a"), ("ink", "#0b0b0b"), ("signal_dark", "#5e0b08")] {
+            assert!(style.contains(&format!("{name} = \"{colour}\"")), "style.toml names {name} otherwise");
+            assert!(CHART_PALETTE.contains(colour));
+        }
+    }
+
+    #[test]
+    fn an_edition_without_prismatic_causes_has_no_pie() {
+        let mut pm = two_matches();
+        for c in pm["contestants"].as_array_mut().unwrap() { c["causes"] = json!([]); }
+        let md = markdown(&pm);
+        assert!(!md.contains("pie showData") && !md.contains(&format!("## {H_CAUSES}")), "{md}");
+        assert_eq!(md.matches("xychart-beta").count(), 3);
     }
 }
