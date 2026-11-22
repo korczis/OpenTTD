@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# refresh-branch: bring a pull request's branch up to master and regenerate what is derived.
+#
+# Usage: tools/surfaces/refresh-branch [--push] <branch>
+#        tools/surfaces/refresh-branch -h | --help
+#
+# Two pull requests that each add a document both rewrite the same count in README.md's facts
+# region; whichever lands second carries a number that is one short, and Surfaces fails on it.
+# This merges origin/master into <branch> and runs `tools/surfaces/surfaces sync` on the result,
+# so the branch holds what master will hold after the merge.
+#
+#   - A merge conflict inside a generated region (between `<!-- name:begin ... -->` and
+#     `<!-- name:end ... -->`, any tool's markers) is resolved by taking master's side; the sync
+#     that follows rewrites the region from the merged sources either way.
+#   - Any other conflict is left to the branch's owner: the merge is aborted and the exit is 10.
+#   - A sync commit is made only when the sync changed something, titled
+#     "Doc: [Surfaces] Regenerate derived regions after merging master". A branch whose head
+#     already is such a commit, with master merged, has nothing to do.
+#   - --push pushes the result as a fast-forward of the remote branch, never a force: when its
+#     owner pushed in the meantime the push is refused, and the next run retries.
+#
+# Exit: 0 nothing to do, 3 refreshed (and pushed with --push), 10 a conflict outside the derived
+# regions, 2 usage, 1 any other failure. It prints one line saying which.
+set -euo pipefail
+
+push=0
+branch=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --push) push=1 ;;
+    -*) echo "refresh-branch: unknown flag $1 (usage: refresh-branch -h)" >&2; exit 2 ;;
+    *) [[ -z "$branch" ]] || { echo "refresh-branch: one branch only" >&2; exit 2; }; branch="$1" ;;
+  esac
+  shift
+done
+[[ -n "$branch" ]] || { echo "refresh-branch: name a branch (usage: refresh-branch -h)" >&2; exit 2; }
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+TITLE="Doc: [Surfaces] Regenerate derived regions after merging master"
+git config user.name >/dev/null || git config user.name "github-actions[bot]"
+git config user.email >/dev/null || git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+git fetch -q origin master "$branch"
+git checkout -q -B "$branch" "origin/$branch"
+start="$(git rev-parse HEAD)"
+
+if ! git merge -q --no-edit origin/master >/dev/null 2>&1; then
+  # Resolve the conflicts that sit inside generated regions; anything else stays the owner's.
+  if ! python3 - "$(git diff --name-only --diff-filter=U)" <<'EOF'
+import re, sys
+from pathlib import Path
+BEGIN = re.compile(r"<!-- ?(?:surfaces:begin [a-z0-9-]+|[A-Za-z0-9_-]+:begin)\b")
+END = re.compile(r"<!-- ?(?:surfaces:end [a-z0-9-]+|[A-Za-z0-9_-]+:end)\b")
+for name in filter(None, sys.argv[1].split("\n")):
+    out, inside, state, ours, theirs = [], False, None, [], []
+    for line in Path(name).read_text().splitlines(keepends=True):
+        if state is None and line.startswith("<<<<<<< "):
+            state, ours, theirs = "ours", [], []
+        elif state == "ours" and line.startswith("||||||| "):
+            state = "base"
+        elif state in ("ours", "base") and line.startswith("======="):
+            state = "theirs"
+        elif state == "theirs" and line.startswith(">>>>>>> "):
+            if not inside:
+                sys.exit(f"{name}: a conflict outside a generated region")
+            out += theirs  # master's side; the sync rewrites the region anyway
+            state = None
+        elif state == "ours":
+            ours.append(line)
+        elif state == "theirs":
+            theirs.append(line)
+        elif state is None:
+            if BEGIN.search(line):
+                inside = True
+            elif END.search(line):
+                inside = False
+            out.append(line)
+    Path(name).write_text("".join(out))
+EOF
+  then
+    git merge --abort
+    echo "refresh-branch: $branch conflicts with master outside the derived regions; left to its owner"
+    exit 10
+  fi
+  git add -- $(git diff --name-only --diff-filter=U)
+  git commit -q --no-edit
+fi
+
+tools/surfaces/surfaces sync >/dev/null
+if ! git diff --quiet; then
+  git add -u
+  git commit -q -m "$TITLE" -m "tools/surfaces/refresh-branch: origin/master merged into $branch, then tools/surfaces/surfaces sync, so the derived regions count what the merge will hold."
+fi
+
+if [[ "$(git rev-parse HEAD)" == "$start" ]]; then
+  echo "refresh-branch: $branch is current with master and its derived regions"
+  exit 0
+fi
+if [[ $push == 1 ]]; then
+  # A plain push is a fast-forward of what was fetched: it fails when the owner pushed since.
+  if ! git push -q origin "HEAD:refs/heads/$branch"; then
+    echo "refresh-branch: $branch moved while refreshing; not pushed, the next run retries"
+    exit 1
+  fi
+  echo "refresh-branch: $branch refreshed and pushed ($(git rev-parse --short HEAD))"
+else
+  echo "refresh-branch: $branch refreshed locally ($(git rev-parse --short HEAD)), not pushed"
+fi
+exit 3

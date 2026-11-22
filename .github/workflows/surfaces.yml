@@ -46,6 +46,14 @@ jobs:
             tools/surfaces/package-lock.json
             tools/research/mcp-panel/package-lock.json
 
+      # Two pull requests can each be current and still merge into a stale count (both add a
+      # document, both write the same number). master therefore builds from regenerated regions,
+      # so the site and the wiki never skip a deploy over it; the `refresh` job below brings the
+      # README itself back in step through the next pull request (tools/surfaces/refresh-branch).
+      - name: Regenerate the derived regions (default branch only)
+        if: env.PUBLISH == 'true'
+        run: tools/surfaces/surfaces sync
+
       - name: Check regions, links and anchors
         run: tools/surfaces/surfaces check
 
@@ -85,6 +93,58 @@ jobs:
           name: wiki
           path: target/web/wiki
           retention-days: 1
+
+  # Keeps every same-repository pull request current with master: merges master into its branch,
+  # regenerates the derived regions, pushes the result as a fast-forward (never a force), and
+  # dispatches this workflow on the branch, because a push made with GITHUB_TOKEN starts no
+  # workflow; the dispatched run reports "Check and build" on the new head. On a pull request it
+  # refreshes that branch; on a push to the default branch, every open pull request with auto-merge.
+  refresh:
+    name: Refresh branches against master
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: read
+    concurrency:
+      group: refresh-${{ github.head_ref || github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Merge master into the branches and regenerate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$HEAD_REF" ]; then
+            branches="$HEAD_REF"
+          else
+            branches=$(gh pr list -R "$GITHUB_REPOSITORY" --state open --limit 100 \
+              --json headRefName,isCrossRepository,autoMergeRequest \
+              --jq '.[] | select(.autoMergeRequest != null and (.isCrossRepository | not)) | .headRefName')
+          fi
+          for b in $branches; do
+            set +e
+            tools/surfaces/refresh-branch --push "$b"
+            rc=$?
+            set -e
+            if [ $rc -eq 3 ]; then
+              gh workflow run surfaces.yml -R "$GITHUB_REPOSITORY" --ref "$b"
+            fi
+          done
 
   pages:
     name: Publish the site
