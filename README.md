@@ -383,6 +383,29 @@ every quarter, and nothing under `src/` changes.
   editing its lineup changes the running game within seconds. It makes no ranking claim
   ([`research/live-arena.md`](research/live-arena.md)).
 
+<!-- surfaces:begin table-chart src=research/ai-battle/README.md region=battle label=Contestant value=Points/match line=Avg_rank -->
+```mermaid
+---
+config:
+  xyChart:
+    width: 900
+    height: 360
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#d11f1a, #8a8a8a, #0b0b0b, #ece4d6"
+---
+xychart-beta
+    title "Points/match by contestant (line: Avg rank)"
+    x-axis ["AAAHogEx", "PrismaticAI GA g347.3", "PrismaticAI pre-g150", "PrismaticAI GA g347.brainSafe", "PrismaticAI", "PrismaticAI GA g347.brainExplore", "PrismaticAI GA g347.0", "AdmiralAI", "LuDiAI AfterFix", "CivilAI"]
+    %% series: Points/match | Avg rank
+    y-axis "Points/match" 0 --> 5.368
+    bar [4, 3, 3, 3, 2.857, 2.833, 2.833, 2.024, 0.927, 0.122]
+    line [1, 2, 2, 2, 2.14, 2.17, 2.17, 2.98, 4.07, 4.88]
+```
+<!-- surfaces:end table-chart -->
+
+<details><summary>The newest battle record (generated)</summary>
+
 <!-- surfaces:begin include src=research/ai-battle/README.md region=battle -->
 Latest record: [`battle-20261122T045411-a80cc94a`](research/results/battle-20261122T045411-a80cc94a.md) (0/4 replays identical).
 
@@ -411,6 +434,8 @@ Latest record: [`battle-20261122T045411-a80cc94a`](research/results/battle-20261
 | 422264390 | m-0011 | m-0056 | imac / mbp | NO |
 | 167540501 | m-0030 | m-0064 | ubuntu / mbp | NO |
 <!-- surfaces:end include -->
+
+</details>
 
 ## Rail lines that pay
 
@@ -574,7 +599,7 @@ Everything else is proven on loopback; a remote person joining over the internet
 
 ## Counted from the source
 
-Each number is counted from the tracked files whenever the documents are regenerated
+Each number and chart is counted from the tracked files whenever the documents are regenerated
 (`tools/surfaces/surfaces sync`, declared in [`surfaces.toml`](surfaces.toml)), so it cannot drift
 from the code. The right-hand column says what was counted.
 
@@ -585,13 +610,22 @@ from the code. The right-hand column says what was counted.
 | **22** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
 | **28** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **42** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **43** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **11** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **16** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **35** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **93** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **89** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
 | **860** | published documents on the site and the wiki | published documents under `/` |
+<!-- surfaces:end facts -->
+
+<!-- surfaces:begin facts group=tooling as=pie -->
+```mermaid
+pie showData title Counted from the sources: tooling
+    "research tools and checks (tools/research/, shell and Python)" : 43
+    "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 11
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 16
+```
 <!-- surfaces:end facts -->
 
 ## How it compares
@@ -1181,6 +1215,14 @@ What the fork delivers, from its `.ai/` feature records:
 | [AI layer](.ai/repo/features/supervised-ai-layer.md) | stable | Decisions, rules, plan, intents and knowledge live in tracked records that every agent and provider reads the same way. |
 <!-- surfaces:end ai-features -->
 
+<!-- surfaces:begin ai-features as=pie -->
+```mermaid
+pie showData title Features by status
+    "stable" : 5
+    "draft" : 5
+```
+<!-- surfaces:end ai-features -->
+
 #### 0.4.3) Research documents
 
 Every write-up under [`research/`](./research/README.md), with the summary each one gives of
@@ -1263,6 +1305,14 @@ those files:
 | [project.web-ui-is-covered-end-to-end](.ai/repo/rules/project/web-ui-is-covered-end-to-end.v1.md) | blocking | Cover every web UI page with a Playwright end-to-end check that drives it in a real browser against a live game, declare it with an `e2e-covers:` line, and keep tools/research/e2e-coverage passing; a page, button or flow no such check drives is treated as not built. |
 <!-- surfaces:end ai-rules -->
 
+<!-- surfaces:begin ai-rules origin=project as=pie -->
+```mermaid
+pie showData title Rules (project) by class
+    "blocking" : 19
+    "advisory" : 2
+```
+<!-- surfaces:end ai-rules -->
+
 A failing gate is reported plainly as `FAIL` or `NOT RUN`, with the reason. An agent never retries
 with `--no-verify`, never narrows scope quietly to make a gate pass, and never commits now to "fix
 it in a follow-up"; an override exists only at the owner's own request, with the stated reason.
@@ -1278,6 +1328,15 @@ the fork adds is in the paths listed in 0.4 and in this section of the README.
 
 Every decision behind the rules above, upstream's architecture recorded as it is and the fork's own
 choices, with its status (generated from [`.ai/repo/adrs/`](./.ai/repo/adrs/README.md)):
+
+<!-- surfaces:begin ai-adrs as=pie -->
+```mermaid
+pie showData title Decisions by status
+    "proposed" : 31
+    "accepted" : 3
+    "superseded" : 1
+```
+<!-- surfaces:end ai-adrs -->
 
 <details><summary>All ADRs</summary>
 
@@ -1432,17 +1491,38 @@ Milestones of the plan with the issues done and still open, derived from the iss
 [`.ai/repo/project/`](./.ai/repo/project/README.md) (generated):
 
 <!-- surfaces:begin ai-plan -->
-| Milestone | Issues done | Open issues |
-|---|---|---|
-| [The fork states what it is, and one set of ground rules binds every agent](.ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml) | 2/2 | — |
-| [A change is validated at the tier its size needs, and the report cannot round up](.ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml) | 4/4 | — |
-| [Internal state is observable through gated instrumentation, and every experiment records how it ran](.ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml) | 8/8 | — |
-| [Prismatic steers a company in a live game through the standalone bridge](.ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 5/5 | — |
-| [An agent reads and, with approval, changes the game over an embedded MCP server](.ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml) | 53/53 | — |
-| [The fork is published, supervised by Majordomus, and current with upstream](.ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml) | 7/7 | — |
-| [NoirGFX: the game in the owner's SIG NIHL noir, from OpenGFX and Kenney models](.ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml) | 1/1 | — |
-| [Planning decisions read recorded history from the store and publish what they chose as data](.ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml) | 7/7 | — |
-| [Rhai is a live IDE: edited, run, debugged and inspected in the panel, and it reaches Prismatic's models and blackboard](.ai/repo/project/milestones/rhai-is-a-live-ide.yaml) | 6/6 | — |
+| # | Milestone | Issues done | Open issues |
+|---|---|---|---|
+| M1 | [The fork states what it is, and one set of ground rules binds every agent](.ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml) | 2/2 | — |
+| M2 | [A change is validated at the tier its size needs, and the report cannot round up](.ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml) | 4/4 | — |
+| M3 | [Internal state is observable through gated instrumentation, and every experiment records how it ran](.ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml) | 8/8 | — |
+| M4 | [Prismatic steers a company in a live game through the standalone bridge](.ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 5/5 | — |
+| M5 | [An agent reads and, with approval, changes the game over an embedded MCP server](.ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml) | 53/53 | — |
+| M6 | [The fork is published, supervised by Majordomus, and current with upstream](.ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml) | 7/7 | — |
+| M7 | [NoirGFX: the game in the owner's SIG NIHL noir, from OpenGFX and Kenney models](.ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml) | 1/1 | — |
+| M8 | [Planning decisions read recorded history from the store and publish what they chose as data](.ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml) | 7/7 | — |
+| M9 | [Rhai is a live IDE: edited, run, debugged and inspected in the panel, and it reaches Prismatic's models and blackboard](.ai/repo/project/milestones/rhai-is-a-live-ide.yaml) | 6/6 | — |
+<!-- surfaces:end ai-plan -->
+
+<!-- surfaces:begin ai-plan as=bar -->
+```mermaid
+---
+config:
+  xyChart:
+    width: 900
+    height: 360
+  themeVariables:
+    xyChart:
+      plotColorPalette: "#d11f1a, #8a8a8a, #0b0b0b, #ece4d6"
+---
+xychart-beta
+    title "Issues done (bar) and planned (line) per milestone, in plan order"
+    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"]
+    %% series: Issues | Planned
+    y-axis "Issues" 0 --> 58.3
+    bar [2, 4, 8, 5, 53, 7, 1, 7, 6]
+    line [2, 4, 8, 5, 53, 7, 1, 7, 6]
+```
 <!-- surfaces:end ai-plan -->
 
 ## 1.0) About

@@ -96,10 +96,11 @@ A region is a pair of HTML comments whose contents the generator owns:
 | Generator | Arguments | Table |
 |---|---|---|
 | `docs-index` | `dir=<path>` (default: all), `depth=<n>` | Every published document under the path, with its derived summary |
-| `ai-features` | — | `.ai/` features: name, status, headline |
-| `ai-adrs` | — | Architecture decisions: id, status, title |
-| `ai-rules` | `origin=project\|vendored\|all` | Rules: id, class, statement |
-| `ai-plan` | — | Milestones with issues done and still open (status derived from the issue stamps) |
+| `ai-features` | `as=pie` | `.ai/` features: name, status, headline; or a pie by status |
+| `ai-adrs` | `as=pie` | Architecture decisions: id, status, title; or a pie by status |
+| `ai-rules` | `origin=project\|vendored\|all`, `as=pie` | Rules: id, class, statement; or a pie by class |
+| `ai-plan` | `as=bar` | Milestones (`M1` ... in plan order) with issues done and still open (status derived from the issue stamps); or a bar chart of done against planned |
+| `table-chart` | `src=<document>`, `region=<name>`, `label=<column>`, `value=<column>`, `line=<column>` | A bar chart of one column of the first table that has those columns, in a region of another document (or the whole document); `line` adds a second column as a line, `_` stands for a space, numbers may carry `k`, `M` or `G` |
 | `surfaces` | — | Where the site and the wiki are published |
 | `toc` | `depth=<n>` (default 3) | The headings that follow the region, levels 2 to `n`, nested and linked with their anchors |
 | `include` | `src=<document>`, `region=<name>` | The body of a marked region of another document (`<!-- name:begin -->`, any tool's marker, or a surfaces region of that generator), its relative links rewritten for this document and its comment lines dropped |
@@ -114,6 +115,32 @@ linked to its page, with what was counted as its tooltip.
 An `include` reads the other document as it is on disk when `sync` starts. When that region is
 itself one this `sync` regenerates, the include catches up on the next `sync`, and `check` says so
 until then.
+
+## Charts
+
+A chart is a number drawn, so it is generated like one. Every chart in a document is a Mermaid
+`pie` or `xychart-beta` block written by a region (`facts as=pie`, `ai-* as=pie|bar`,
+`table-chart`) or by a tool between its own markers (the README scoreboard). GitHub and the wiki
+render Mermaid natively, so a reader of the repository sees the chart without a build.
+
+The site reads the same block back (`mermaid_chart_spec`) and draws it with Apache ECharts in the
+site's palette: a tooltip per value, zoom when there are many categories, a switch between bars and
+lines, the data as a table, an image export, and a card that maximizes to the viewport until
+Escape. The Mermaid source stays under the chart. `diagrams-check` fails when a page's chart has
+no ECharts canvas, as it fails on a Mermaid diagram that does not render.
+
+`check` enforces both halves:
+
+| Finding | When |
+|---|---|
+| `chart` | a Mermaid chart (pie, xychart, sankey, quadrant, radar) outside a generated region: a surfaces region, or any tool's `<!-- name:begin -->`/`<!-- name:end -->` markers |
+| `library` | a tracked `package.json` depends on, a page loads, or code imports a library `[check] libraries` in `surfaces.toml` lists; the finding names what to use instead |
+
+The libraries are one layer per kind of view: Apache ECharts for charts and graphs (here and in
+the control panel, rule `project.panel-charts-go-through-one-layer`), D3 for bespoke layouts and
+force physics, three.js for 3D, p5 for generative art, Mermaid for diagrams in Markdown and
+Flowbite for the shell. Chart.js, Cytoscape and the like would be a second layer for a view
+ECharts already draws, so they are listed.
 
 ## Generators
 

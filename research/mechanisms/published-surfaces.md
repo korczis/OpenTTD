@@ -68,8 +68,11 @@ The generator's full reference is [`tools/surfaces/README.md`](../../tools/surfa
   `.github/workflows/surfaces.yml`. Exit codes: 0 ok, 2 usage, 10 findings, 11 drift.
 - `tools/surfaces/surfaces sync --check` writes nothing and exits 11 when a region would change
   or a declared generator's check fails; `check` reports such a generator as a `generate` finding.
-- There is no unit test suite for the generator in `tools/surfaces/`; it is checked by running it
-  over this repository.
+- `tools/research/test_surfaces_diagrams.py` and `tools/research/test_surfaces_charts.py` test the
+  diagram and chart checks, the chart read-back and the table of contents; the rest of the
+  generator is checked by running it over this repository.
+- `tools/surfaces/diagrams-check` opens every built page in Chrome: each Mermaid diagram becomes
+  an SVG and each generated chart an ECharts canvas.
 
 ## Related
 

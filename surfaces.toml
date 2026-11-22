@@ -12,6 +12,11 @@ exclude = ["changelog.md"]
 # Rules vendored from Majordomus carry front matter that does not parse as YAML (an unquoted ": ").
 # They are fixed upstream and replaced on the next vendor update, never edited here.
 front_matter_exclude = [".ai/repo/rules/vendor/**"]
+# One visualization layer per kind of view (the owner's order; rule project.docs-are-derived-and-current):
+# ECharts for charts and graphs, D3 for bespoke layouts and force physics, three.js for 3D, p5 for
+# generative art, Mermaid for diagrams in Markdown. A library listed here fails the check wherever
+# a manifest depends on it, a page loads it or code imports it; the value names what to use instead.
+libraries = { "chart.js" = "Apache ECharts", "cytoscape" = "Apache ECharts (graph series) or D3", "highcharts" = "Apache ECharts", "plotly.js" = "Apache ECharts", "vis-network" = "Apache ECharts (graph series) or D3" }
 
 # Numbers the README and other documents state, each counted from the tracked files on every
 # sync by the `facts` region (tools/surfaces/README.md). Only what to count is declared here.
