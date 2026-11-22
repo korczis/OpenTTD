@@ -160,7 +160,10 @@ function PrismaticAI::BuildStarterRoute(aggressiveness, used_towns) {
 		tried++;
 		if (PrismaticAI.BuildRouteInTown(town, aggressiveness)) return town;
 	}
-	AILog.Warning("PrismaticAI: no new route in the " + tried + " largest unused town(s)");
+	/* Every town already has a route: nothing was tried, so there is nothing to warn about. With
+	 * rich growth lifting max_routes the bot reached this every heartbeat, and the narrator relayed
+	 * "no new route in the 0 largest unused town(s)" into the owner's chat (2026-11-22). */
+	if (tried > 0) AILog.Warning("PrismaticAI: no new route in the " + tried + " largest unused town(s)");
 	return -1;
 }
 

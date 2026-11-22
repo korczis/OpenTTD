@@ -284,7 +284,8 @@ def info_settings(path: Path) -> dict:
     """Every AddSetting({...}) of an AI's info.nut as {name: {min, max, step, default, boolean,
     ingame}}: step is step_size (1 when absent), default is custom_value, boolean and ingame are
     CONFIG_BOOLEAN and CONFIG_INGAME in its flags. Settings declared in a counted loop
-    (`for (local i = 2; i <= 16; i++)`) are expanded, so "fr" + i + "_from" gives fr2_from..."""
+    (`for (local i = 1; i <= 24; i++)`) are expanded, so "line" + i + "_trains" gives
+    line1_trains..."""
     out: dict = {}
     _sq_settings(strip_squirrel_comments(Path(path).read_text()), {}, out)
     return out

@@ -267,8 +267,20 @@ pub fn h_db_tables(_: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
 }
 
 pub fn h_db_query(_: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
-    let sql = i.body.get("sql").and_then(Value::as_str).or_else(|| i.query.get("sql")).unwrap_or(bus_sinks::DEFAULT_QUERY);
+    let sql = i.body.get("sql").and_then(Value::as_str).or_else(|| i.query.get("sql")).unwrap_or(bus_sinks::default_query());
     Ok(run_query(sql))
+}
+
+/// GET /api/db/named: every named query of `sql/queries` with its description and parameters.
+pub fn h_db_named_list(_: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
+    Ok(bus_sinks::queries(sinks()))
+}
+
+/// POST /api/db/named {name, params}: one named query, its parameters bound by DuckDB.
+pub fn h_db_named_run(_: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
+    let name = i.body.get("name").and_then(Value::as_str).unwrap_or("");
+    let params = i.body.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
+    Ok(bus_sinks::named(sinks(), name, &params))
 }
 
 #[cfg(test)]
