@@ -1,0 +1,33 @@
+id: I0118
+milestone: every-battle-match-explains-itself
+title: "Battle matches capture each AI company's decision log at script debug level 3, stored compressed and size-bounded beside the match record"
+slug: battle-ai-decision-logs
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Run battle matches (and GA fitness matches) with the script debug level that makes AI decisions visible (`-d script=3`, or a per-run setting defaulting to 3 for tournament editions), split the log per company, compress it, cap its size, and link it from the match record so a post-mortem can read why each AI built, refused to build, or stopped growing."
+why: "External review 2026-11-22 (digest C-22). tools/research/ai-battle/battle.py:1182 (tournament match) and :2590 (GA fitness) start the game with `-d script=1`, which drops the AI's own decision lines (TryBuild, RouteBuilder, PrismaticAI invest/fleet). Without them the binding cap on PrismaticAI's fleet and its failure rates cannot be measured, only guessed."
+scope:
+  - "tools/research/ai-battle/battle.py"
+  - "tools/research/test_ai_battle.py"
+  - "research/ai-battle/README.md"
+  - "tools/research/schema/**"
+non_scope:
+  - "Changing any AI's behaviour"
+  - "Re-running past editions; old records stay as they are and say they have no decision log"
+depends_on: []
+serves:
+  - "internal-state-is-observable-reproducibly#a-battle-explains-itself"
+acceptance_criteria:
+  - "A new tournament match and a GA fitness match both run with script level 3 (or the configured level, recorded in the match record)"
+  - "The record links one compressed log per AI company; logs above a cap are truncated with a marker, and the cap is in the record"
+  - "Tests cover the command line built for both paths and the per-company split on a fixture log"
+  - "Wall-clock overhead of level 3 is measured on one match and written into research/ai-battle/README.md"
+  - "The remote GA orchestrator's dispatch still works (its matches run through the same battle binary); the change is announced on the peer board before landing"
+validation:
+  - "python3 -m unittest tools/research/test_ai_battle.py"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

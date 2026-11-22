@@ -1,0 +1,34 @@
+id: I0193
+milestone: the-live-agent-workbench
+title: "The ~ console takes /chat, /cancel, /rhai and /flow next to /ask, /do, /plan and /bot, and a /status that never shadows upstream's status"
+slug: in-game-workbench-commands
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Register the missing workbench commands on top of the bridge, each mapped to a canonical operation rather than its own code: /chat (a turn with the agent, answered through the bridge), /cancel <request> (withdraws a queued request or a pending plan), /rhai <service|expression> (start, stop or evaluate in the panel's engine), /flow <kernel|flow> (run an AlgoGlyph kernel or a saved flow). The agent's status gets a research-only name that cannot collide with upstream's server-only status command; the leading-slash normalisation keeps resolving to upstream commands first."
+why: "External review 2026-11-22 (digest A-27). 5900a9d314 added the slash form and ask/do/ai: src/console.cpp:340-345 strips a leading '/' when the bare name exists, and src/console_cmds.cpp:3500-3506 registers mcp, bot, plan and aliases ask, do -> plan and ai -> bot. /chat, /cancel, /rhai and /flow are not registered. Upstream already owns status (src/console_cmds.cpp:3577, ConStatus, server only) and say (:3570), so a naive /status would shadow or be shadowed."
+scope:
+  - "src/console_cmds.cpp"
+  - "src/console.cpp"
+  - "src/tests/test_prismatic_mcp.cpp"
+  - "tools/research/mcp-panel/rhai/ask_relay.rhai"
+  - "research/mcp-console.md"
+non_scope:
+  - "Changing any upstream console command's behaviour"
+  - "Approval from the console (ADR 0038's console and chat adapters, peer worktree fix/approval-core)"
+depends_on:
+  - I0192
+serves:
+  - "openttd-validates-agent-driven-engineering#the-workbench-drives-the-game-end-to-end"
+acceptance_criteria:
+  - "Each command is research-gated, has help text, and resolves to one bridge operation; Tab completion lists it"
+  - "upstream status, say and every other upstream command behave as before with and without a leading '/', covered by a test"
+  - "/cancel withdraws a queued request and a pending plan, and the panel shows it withdrawn"
+  - "A live check types each command on a client and reads its answer back from the console"
+validation:
+  - "tools/gate.sh research"
+  - "tools/research/mcp-panel-check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

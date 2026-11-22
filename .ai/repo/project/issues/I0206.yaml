@@ -1,0 +1,37 @@
+id: I0206
+milestone: the-panel-has-integrity
+title: "An instance's health is six separate states (process, endpoint, token, authenticated, catalogue, game) and a registry record never advertises an MCP endpoint on port 0"
+slug: instance-health-states
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Replace the one `alive` flag of panel.rs `discover()` with separate, derived states per instance: process (owner_pid alive), endpoint (a concrete host and a port above 0), token (token_file present and readable, or reached through its owning panel), authenticated (an authorised ping answers), catalogue (tools/list answered with a count), game (a game tick is readable). Each failed state carries its reason. mcp-panel writes its registry record again once the MCP server's real port is known, and a record whose endpoint is port 0 is refused by the schema and reported, never probed. The hub reads the same states."
+why: "External review 2026-11-22 (digest A-52). tools/research/mcp-rhai/src/panel.rs:1528 sets `alive` false and each probe branch sets it from one call (:1532 a panel's /api/status, :1536 mcp_up through the owning panel, :1541 a ping), so process, token, authentication, catalogue and game readiness collapse into one badge (static/app.js:58-61 `alive`/`down`). The endpoint is formatted from `args.mcp_port` (panel.rs:1016-1018) and written once at start (bin/mcp-panel.rs:198-200), so a panel started with a free MCP port of 0 advertises http://127.0.0.1:0/mcp. Owner-pid liveness is already separate (panel.rs:1519-1522) and a server without a token_file is reached through its panel (panel.rs:3173 test); both stay."
+scope:
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-panel.rs"
+  - "tools/research/mcp-rhai/src/hub.rs"
+  - "tools/research/schema/mcp-instance.v1.schema.json"
+  - "tools/research/mcp-panel/static/app.js"
+  - "tools/research/mcp-panel/static/components.js"
+  - "tools/research/mcp-panel/test/app.test.mjs"
+  - "research/mcp-hub.md"
+non_scope:
+  - "The topology graph (I0207)"
+  - "Authenticating principals for approvals (I0182)"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#every-panel-control-works"
+acceptance_criteria:
+  - "/api/instances answers {process, endpoint, token, authenticated, catalogue, game} per instance, each {ok, reason?}; cargo tests cover a dead owner, port 0, a missing token_file, a rejected token, an empty catalogue and a server with no game"
+  - "A panel started with a free MCP port rewrites its record with the bound port; a record with port 0 fails mcp-instance/v1 validation and is listed with that reason, not probed"
+  - "The cluster card and the hub's instance table show the six states with their reasons; node tests cover the markup"
+  - "research/mcp-hub.md documents the states and what each probe reads"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "node --test tools/research/mcp-panel/test/*.test.mjs"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

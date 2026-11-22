@@ -1,0 +1,37 @@
+id: I0185
+milestone: governed-access-is-authenticated-and-every-capability-reaches-every-surface
+title: "The panel and the hub answer a standards MCP client, with tools and resources derived from their route table and method table"
+slug: host-operations-over-mcp
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Serve an MCP endpoint (Streamable HTTP, POST /mcp) from the panel and from the hub, projecting every panel route and hub method as an MCP tool or resource derived from routes() and the hub method table: name, description and inputSchema from the same declaration that feeds OpenAPI, read-only routes annotated readOnlyHint, mutating ones still going through the approval flow. Access goes through the one web access policy. A standards MCP client can then list and call research operations (duels, plans, the store, AlgoGlyph) without a second hand-written catalogue."
+why: "External review 2026-11-22 (digest A-24). tools/research/mcp-rhai/src/panel.rs:2336 routes() declares REST paths under /api/* only; the hub serves JSON-RPC over WebSocket, POST /hub/rpc, OpenAPI and GraphQL (research/mcp-hub.md) from its method table (tools/research/mcp-rhai/src/hub.rs:835), and neither serves MCP: the panel and hub only act as MCP clients of the game (panel.rs:620-628, hub.rs:247-249). An MCP-speaking agent therefore reaches game tools but none of the operations the panel and hub own."
+scope:
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "tools/research/mcp-rhai/src/hub.rs"
+  - "tools/research/mcp-rhai/src/mcp_serve.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-panel.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-hub.rs"
+  - "research/mcp-hub.md"
+  - "research/mcp-control.md"
+non_scope:
+  - "Proxying the game's own MCP server under a second name; the game's tools stay on its endpoint"
+  - "A new access policy; the endpoint calls web_access::gate like every other route"
+depends_on:
+  - I0184
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#governed-access-is-authenticated-and-exercised"
+acceptance_criteria:
+  - "initialize, tools/list, tools/call, resources/list and resources/read work against the panel's and the hub's /mcp, tested with a stock MCP client library"
+  - "Every route of routes() and every hub method appears exactly once, derived; a new route appears with no hand edit (asserted through I0184's fixture)"
+  - "A mutating operation called over MCP returns pending_approval and is executed only through the approval flow"
+  - "The parity matrix's MCP column is green for host-owned operations"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-hub-check"
+  - "tools/research/mcp-parity-check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
