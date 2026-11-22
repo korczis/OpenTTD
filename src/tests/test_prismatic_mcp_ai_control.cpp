@@ -4,8 +4,8 @@
  */
 
 /**
- * @file test_prismatic_mcp_ai_control.cpp The control openttd://ai derives for each AI setting,
- * against the fixture the web panel's test (tools/research/mcp-panel/test/bots.test.mjs) reads too.
+ * @file test_prismatic_mcp_ai_control.cpp The control openttd://ai derives for each AI setting.
+ * Checked against the fixture the web panel's test (tools/research/mcp-panel/test/bots.test.mjs) reads too.
  */
 
 #include "../stdafx.h"
