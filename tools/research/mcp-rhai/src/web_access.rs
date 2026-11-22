@@ -180,7 +180,7 @@ fn cookie(header: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String>
 }
 
 /// Equal without an early exit on the first differing byte.
-fn same(a: &str, b: &str) -> bool {
+pub fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 

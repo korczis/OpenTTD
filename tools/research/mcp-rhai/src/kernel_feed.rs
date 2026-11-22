@@ -5,16 +5,19 @@
 //! The split (decided 2026-11-18, research/mcp-control.md "AlgoGlyph fed from the store"): AlgoGlyph
 //! stays a generic kernel runner behind its `flow serve` line protocol and learns nothing of OpenTTD,
 //! ZeroMQ or DuckDB; this side knows the game, reads the store through the panel's read-only
-//! `/api/db/query`, follows the ZeroMQ bus, and builds each kernel's input.
+//! `/api/db/named`, follows the ZeroMQ bus, and builds each kernel's input.
 //!
 //! A trailing window of the `samples` table (one row per company per game day, ADR 0033) is seeded
-//! from the store with one statement (`seed_sql`) and kept current by the bus's `game.sample`
+//! from the store with one named query (`seed_query`, `sql/queries/kernel_window.sql`) and kept
+//! current by the bus's `game.sample`
 //! envelopes; `game.new_world` empties it. Which kernel takes what from the window is one table,
 //! `FEEDS`; a kernel with no row there gets the caller's input unchanged and the event says
 //! `fallback`. Every call is described by one `plan.kernel` event (`event`): {decision, version,
 //! kernel, inputs: {live, stored | fallback}, choice}.
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, VecDeque};
+
+use crate::store_sql::Named;
 
 /// The version named in every event: this module's revision of the feeding rules.
 pub const VERSION: &str = "kernel-feed/1";
@@ -43,8 +46,8 @@ pub struct Window {
     pub by_company: BTreeMap<i64, VecDeque<Sample>>,
     pub from_store: usize,
     pub from_bus: usize,
-    /// The statement the window was seeded with, or why it was not.
-    pub seed: Result<String, String>,
+    /// The query the window was seeded with, or why it was not.
+    pub seed: Result<Named, String>,
 }
 
 impl Window {
@@ -98,25 +101,14 @@ pub fn samples_of_event(d: &Value) -> Vec<Sample> {
     })).collect()
 }
 
-/// An instance name as the registry writes it (letters, digits, `-`, `_`, `.`), so it can stand in a
-/// quoted literal of the read-only statement.
-pub fn valid_instance(i: &str) -> bool {
-    !i.is_empty() && i.len() <= 64 && i.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+/// The query that seeds the window (`sql/queries/kernel_window.sql`): the newest `days` samples of
+/// every company of the instance's latest run (a store file keeps every run of its instance, and
+/// game ticks restart).
+pub fn seed_query(instance: &str, days: usize) -> Named {
+    Named::new("kernel_window", json!({"instance": instance, "days": days}))
 }
 
-/// The statement that seeds the window: the newest `days` samples of every company of the
-/// instance's latest run (a store file keeps every run of its instance, and game ticks restart).
-pub fn seed_sql(instance: &str, days: usize) -> Result<String, String> {
-    if !valid_instance(instance) { return Err(format!("not an instance name: {instance:?}")); }
-    Ok(format!(
-        "SELECT company, game_tick, game_date, money, loan, value, net, vehicles FROM samples \
-         WHERE instance = '{instance}' AND company IS NOT NULL AND game_tick IS NOT NULL \
-         AND ts_ms >= (SELECT coalesce(max(started_ms), 0) FROM runs WHERE instance = '{instance}') \
-         QUALIFY row_number() OVER (PARTITION BY company ORDER BY game_tick DESC) <= {days} \
-         ORDER BY company, game_tick"))
-}
-
-/// The samples of a `/api/db/query` answer {columns, rows, count, capped}: rows are lists in the
+/// The samples of a store's answer {columns, rows, count, capped}: rows are lists in the
 /// order of `columns`, so each field is found by its column's name.
 pub fn samples_of_answer(a: &Value) -> Result<Vec<Sample>, String> {
     if let Some(e) = a.get("error").filter(|e| !e.is_null()) { return Err(format!("the store refused: {e}")); }
@@ -180,19 +172,17 @@ pub fn feed(kernel: &str, input: &Value, company: Option<i64>, w: &Window, store
 }
 
 /// One kernel call fed from the store by a caller that holds no window of its own (the panel's
-/// `POST /api/actionplan`): a window of `days` seeded with `seed_sql` through `read` (the panel's
-/// own store, the code of `/api/db/query`), then `feed`. The input, what was fed or why not, and the
-/// window (its seed statement and row count). A store that is off or refuses the statement is the
+/// `POST /api/actionplan`): a window of `days` seeded with `seed_query` through `read` (the panel's
+/// own store, the code of `/api/db/named`), then `feed`. The input, what was fed or why not, and the
+/// window (its seed query and row count). A store that is off or refuses the statement is the
 /// fallback it names.
 #[allow(dead_code)] // mcp-kernel-feed keeps a window of its own
 pub fn from_store(kernel: &str, input: &Value, company: Option<i64>, instance: &str, days: usize,
-                  read: impl FnOnce(&str) -> Result<Value, String>) -> (Value, Fed, Window) {
+                  read: impl FnOnce(&Named) -> Result<Value, String>) -> (Value, Fed, Window) {
     let mut w = Window::new(days);
     let mut rows = Vec::new();
-    w.seed = seed_sql(instance, w.days).and_then(|sql| {
-        rows = samples_of_answer(&read(&sql)?)?;
-        Ok(sql)
-    });
+    let q = seed_query(instance, w.days);
+    w.seed = read(&q).and_then(|a| samples_of_answer(&a)).map(|r| { rows = r; q });
     for s in rows { w.push(s, Source::Store); }
     if let Err(why) = &w.seed {
         let why = format!("the store gave no samples: {why}");
@@ -202,12 +192,12 @@ pub fn from_store(kernel: &str, input: &Value, company: Option<i64>, instance: &
     (input, fed, w)
 }
 
-/// What a plan.* event names as its stored input for one fed call: the seed statement with the rows
-/// it gave, or the fallback with its reason (ADR 0034 point 2).
+/// What a plan.* event names as its stored input for one fed call: the seed query with the rows it
+/// gave, or the fallback with its reason (ADR 0034 point 2).
 #[allow(dead_code)] // mcp-kernel-feed writes its own `inputs.stored` (`event`)
 pub fn stored(fed: &Fed, w: &Window) -> crate::panel_events::Stored {
     match (fed, &w.seed) {
-        (Ok(_), Ok(sql)) => crate::panel_events::Stored::Query { sql: sql.clone(), rows: w.rows() },
+        (Ok(_), Ok(q)) => crate::panel_events::Stored::Query { query: q.clone(), rows: w.rows() },
         (Err(why), _) | (Ok(_), Err(why)) => crate::panel_events::Stored::Fallback(why.clone()),
     }
 }
@@ -217,10 +207,16 @@ pub fn stored(fed: &Fed, w: &Window) -> crate::panel_events::Stored {
 /// bus through POST /api/bus/publish. `version` is the build's revision with the feeding rules and
 /// the window as its parameters.
 pub fn event(kernel: &str, kernel_input: &Value, fed: &Fed, w: &Window, live: Value, answer: &Value, runner: Value) -> Value {
-    let stored = match fed {
-        Ok(v) => json!({"query": w.seed.as_ref().ok(), "rows": w.rows(), "from_store": w.from_store, "from_bus": w.from_bus, "used": v}),
-        Err(why) => json!({"fallback": why, "query": w.seed.as_ref().ok(), "seed_error": w.seed.as_ref().err(), "rows": w.rows()}),
+    let mut stored = match fed {
+        Ok(v) => json!({"rows": w.rows(), "from_store": w.from_store, "from_bus": w.from_bus, "used": v}),
+        Err(why) => json!({"fallback": why, "seed_error": w.seed.as_ref().err(), "rows": w.rows()}),
     };
+    // The seed query as it ran ({query, name, params}), or a null query when the window was not seeded.
+    match (w.seed.as_ref().ok().map(Named::record), stored.as_object_mut()) {
+        (Some(Value::Object(q)), Some(s)) => s.extend(q),
+        (_, Some(s)) => { s.insert("query".into(), Value::Null); }
+        _ => {}
+    }
     let version = crate::panel_events::version(json!({"rules": VERSION, "window_days": w.days,
                                                       "feeds": FEEDS.iter().map(|(k, _)| *k).collect::<Vec<_>>()}));
     json!({"kind": "plan.kernel", "data": {
@@ -246,7 +242,7 @@ mod tests {
     fn window() -> Window {
         let mut w = Window::new(30);
         for s in samples_of_answer(&answer()).unwrap() { w.push(s, Source::Store); }
-        w.seed = Ok("SELECT ...".into());
+        w.seed = Ok(seed_query("panel-8800", 30));
         w
     }
 
@@ -270,6 +266,9 @@ mod tests {
         assert_eq!(e["data"]["version"]["revision"], crate::panel_events::REVISION);
         assert_eq!(e["data"]["inputs"]["stored"]["rows"], 4);
         assert_eq!(e["data"]["inputs"]["stored"]["from_store"], 4);
+        assert_eq!((e["data"]["inputs"]["stored"]["name"].clone(), e["data"]["inputs"]["stored"]["params"]["instance"].clone()),
+                   (json!("kernel_window"), json!("panel-8800")));
+        assert!(e["data"]["inputs"]["stored"]["query"].as_str().unwrap().contains("FROM samples"));
     }
 
     #[test]
@@ -329,11 +328,25 @@ mod tests {
     }
 
     #[test]
-    fn the_seed_reads_the_latest_run_of_a_well_formed_instance_only() {
-        let q = seed_sql("panel-8800", 30).unwrap();
-        assert!(q.starts_with("SELECT ") && q.contains("instance = 'panel-8800'") && q.contains("<= 30"));
-        assert!(q.contains("FROM runs"));
-        assert!(seed_sql("x'; DROP TABLE samples; --", 30).is_err());
+    fn the_seed_reads_the_latest_run_of_the_instance_with_its_values_bound() {
+        let q = seed_query("panel-8800", 30);
+        assert_eq!(q.to_json(), json!({"name": "kernel_window", "params": {"instance": "panel-8800", "days": 30}}));
+        assert!(q.sql().contains("instance = $instance") && q.sql().contains("<= $days") && q.sql().contains("FROM runs"));
         assert!(samples_of_answer(&json!({"error": "no such table"})).is_err());
+        // What a caller without a window of its own gets: the query it was read with, or why not.
+        let mut asked = None;
+        let (input, fed, w) = from_store("action-plan", &json!({"actions": []}), None, "panel-8800", 30,
+                                         |q| { asked = Some(q.clone()); Ok(answer()) });
+        assert_eq!(asked, Some(q.clone()));
+        assert_eq!((input["cash"].as_f64(), w.rows()), (Some(297300.0), 4));
+        let mut want = q.record();
+        want["rows"] = json!(4);
+        assert_eq!(stored(&fed, &w).to_json(), want);
+        let (_, fed, w) = from_store("action-plan", &json!({"actions": []}), None, "panel-8800", 30, |_| Err("store off".into()));
+        assert_eq!(fed.unwrap_err(), "the store gave no samples: store off");
+        assert_eq!(stored(&Err("x".into()), &w).to_json(), json!({"fallback": "x"}));
+        let e = event("action-plan", &json!({}), &Err("x".into()), &w, json!({}), &json!({}), json!({}));
+        assert_eq!((e["data"]["inputs"]["stored"]["query"].clone(), e["data"]["inputs"]["stored"]["seed_error"].clone()),
+                   (Value::Null, json!("store off")));
     }
 }
