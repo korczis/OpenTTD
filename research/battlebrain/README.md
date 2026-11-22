@@ -271,6 +271,39 @@ condition, not output equality:
 - every divergence across at least three captures (seeds, maps or companies) is classified, and
   none is `defect`.
 
+## Phase 06: evidence, duels and regression gates
+
+[`experiment-freight-margin.md`](experiment-freight-margin.md) pre-registers the experiment. It
+fixes the hypotheses, the arms, the metrics, the seeds, the sample size, the stopping rules and
+five separate checks before any pair is played. H1 (correctness) says a freight-margin@2 decision
+never applies an unpriced or unaffordable line. H2 (strategy) says a battlebrain-steered company
+does not end with a lower value share than under planner v4 on held-start pairs, within a margin
+of 10%.
+
+**Every strategy result is NOT RUN.** On 2026-11-22 the owner ordered that only one game runs on
+the mesh: the co-play game on :8800, which belongs to another session. No duel, capture or live
+decision has been run for this experiment. C2 (per-pair correctness), C3 (performance), C4
+(strategy, H2) and C5 (operator safety) are NOT RUN for that reason.
+
+- **The sample size is derived.** `battle.py power` reads the 351 battle records. Their split-half
+  Kendall tau of the GA score is 0.212, so one seed carries a rank reliability of only 0.065. The
+  paired log value ratio has a median standard deviation of 0.366 across seeds. That gives **93
+  held-start pairs** for a one-sided non-inferiority test at a margin of 10% (α 0.05, power 0.8),
+  or 27 pairs at a margin of 20%.
+- **The harness reuses mcp-duel.** Arm P is a duel with `--capture-at-start`: the held start is
+  captured after company A is founded, while the game is still paused. `battlebrain live` decides
+  on that capture. Arm BB is a duel of the same seed with `--directive`. `mcp-duel pair-check`
+  makes a pair valid only if both starts lead to the same decision. `--directive` refuses a
+  directive that leaves any other `fr*` slot to the planner, so arm BB can run only once the
+  directive clears them (I0117).
+- **Regression gate C1** (`tools/research/mcp-rhai/src/battlebrain_regression.rs`, run by
+  `cargo test --bin battlebrain`): every freight-margin@2 shadow result is replayed on its capture,
+  and its comparison block must be unchanged. The selected line must also be priced and
+  affordable. It needs at least three such results. The first run found that the 1953-02-09
+  result's reason named `freight-margin@1`, a label written before fcac673236. The result was
+  re-recorded from the same capture; its lines, budget, divergence and selection are unchanged.
+  Since then, all three reproduce.
+
 ## Not yet done
 
 - Cutover (Phase 04): no live decision, no rollback switch, no live run.

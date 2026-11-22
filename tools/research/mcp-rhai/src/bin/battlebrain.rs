@@ -60,6 +60,8 @@ fn refused(rs: &[bb::Refusal]) -> i32 {
     1
 }
 
+#[cfg(test)] #[path = "../battlebrain_regression.rs"] mod battlebrain_regression; // Phase 06 gate C1
+
 fn read_json(path: &str) -> Result<Value, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     serde_json::from_str(&text).map_err(|e| format!("{path}: not JSON: {e}"))
