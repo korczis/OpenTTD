@@ -30,7 +30,10 @@ except ImportError:
 
 # Every line of findings.py runs: LINE events from the moment it is imported (sys.monitoring,
 # Python 3.12+), compared at the end of the module with the lines its code objects hold.
-TOOL = sys.monitoring.COVERAGE_ID
+# The first free tool id, the coverage slot preferred: the changed-lines tracer
+# (tools/coverage) may already hold it in this very process.
+TOOL = next(t for t in (sys.monitoring.COVERAGE_ID, 0, 2, 3, 4, 5)
+            if sys.monitoring.get_tool(t) is None)
 HITS: set[int] = set()
 
 
