@@ -5,7 +5,7 @@
    are rows of CHARTS, keep their parameters in the address and maximize (Escape restores). */
 
 import {
-  ecInit, maximizable, PALETTE, UI, CLS, $, esc, whole, compact, INK, AXIS as axis, patchAddress, badge as tag,
+  ecInit, maximizable, PALETTE, UI, CLS, $, esc, api, whole, compact, INK, AXIS as axis, patchAddress, badge as tag,
 } from './components.js';
 
 const echarts = globalThis.echarts;
@@ -108,7 +108,7 @@ function arm(id, draw) {
 /** /results; exported so a test can mount it again in a fresh document (test/results.test.mjs). */
 export async function listPage() {
   const state = getState();
-  const all = (await (await fetch('/api/results')).json()).results || [];
+  const all = (await api('/api/results')).results || [];
   const seeds = [...new Set(all.map((r) => r.seed))].sort((a, b) => a - b);
   $('page').innerHTML = `
     <div id="scoreboard" class="${CLS.card}" aria-live="polite"></div>
@@ -174,7 +174,7 @@ export async function listPage() {
   const drawCompare = async () => {
     const runs = [];
     for (const n of state.compare) {
-      cache[n] = cache[n] || await (await fetch('/api/result?name=' + encodeURIComponent(n))).json();
+      cache[n] = cache[n] || await api('/api/result?name=' + encodeURIComponent(n));
       if (cache[n].series) runs.push({ name: n, series: cache[n].series });
     }
     cmp = cmp || ecInit($('compare-chart'), echarts);
@@ -195,7 +195,7 @@ export async function listPage() {
   setTimeout(() => { draw(); drawCompare(); }, 30);
 
   const poll = async () => {
-    const d = await (await fetch('/api/duel')).json();
+    const d = await api('/api/duel');
     if (!d.started) return;
     $('duel-run').classList.remove('hidden');
     const months = Number((d.args || [])[(d.args || []).indexOf('--months') + 1]) || 36;
@@ -211,9 +211,8 @@ export async function listPage() {
     ev.preventDefault();
     const body = { months: Number($('d-months').value) || 36, label: $('d-label').value, opponent: $('d-opponent').value, bot_settings: $('d-bot').value, calibrated: $('d-cal').checked };
     if ($('d-seed').value !== '') body.seed = Number($('d-seed').value);
-    const r = await fetch('/api/duel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const d = await r.json();
-    $('duel-msg').textContent = r.ok ? `started: mcp-duel ${d.args.join(' ')} (about a minute per game month)` : (d.error || `HTTP ${r.status}`);
+    const d = await api('/api/duel', body);
+    $('duel-msg').textContent = d.ok ? `started: mcp-duel ${d.args.join(' ')} (about a minute per game month)` : (d.error || `HTTP ${d.status}`);
     poll();
   };
   poll();
@@ -246,19 +245,18 @@ async function scoreboardCard() {
     const btn = $('sb-write');
     btn.onclick = async () => {
       btn.disabled = true; btn.textContent = 'Regenerating…';
-      const r = await fetch('/api/scoreboard', { method: 'POST' });
-      render(await r.json(), r.ok ? 'README.md regenerated; review the diff, then commit and push.' : '');
+      const r = await api('/api/scoreboard', {});
+      render(r, r.ok ? 'README.md regenerated; review the diff, then commit and push.' : '');
     };
   };
-  try { render(await (await fetch('/api/scoreboard')).json()); } catch (e) { render({ error: String(e) }); }
+  try { render(await api('/api/scoreboard')); } catch (e) { render({ error: String(e) }); }
 }
 
 /** /result/<name>; exported for the same reason. */
 export async function resultPage(name) {
   const state = getState();
-  const r = await fetch('/api/result?name=' + encodeURIComponent(name));
-  if (!r.ok) { $('page').innerHTML = `<div class="${CLS.card}">No such duel. <a class="underline" href="/results">All duels</a>.</div>`; return; }
-  const d = await r.json();
+  const d = await api('/api/result?name=' + encodeURIComponent(name));
+  if (!d.ok) { $('page').innerHTML = `<div class="${CLS.card}">No such duel. <a class="underline" href="/results">All duels</a>.</div>`; return; }
   const s = d.summary;
   $('crumbs').insertAdjacentHTML('beforeend', `<li class="text-gray-400">/</li><li class="text-gray-500 dark:text-gray-400">${esc(shortName(name))}</li>`);
   const stat = (label, v, sub) => `<div class="${CLS.card} mb-0"><p class="text-sm text-gray-500 dark:text-gray-400">${esc(label)}</p><p class="mt-1 ${UI.cardTitle} sm:text-2xl">${esc(v)}</p><p class="text-xs text-gray-500 dark:text-gray-400">${esc(sub)}</p></div>`;
@@ -306,9 +304,8 @@ export async function resultPage(name) {
     if (s.bot_settings) body.bot_settings = s.bot_settings;
     // A calibrated run is run again calibrated: its plan's log names the calibration it started from.
     if ((d.plan || []).some((l) => /planner: calibration from/.test(l))) body.calibrated = true;
-    const r2 = await fetch('/api/duel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const d2 = await r2.json();
-    $('again-msg').innerHTML = r2.ok ? `started; <a class="underline" href="/results?compare=${encodeURIComponent(name)}">follow it on the duels page</a>` : esc(d2.error || `HTTP ${r2.status}`);
+    const d2 = await api('/api/duel', body);
+    $('again-msg').innerHTML = d2.ok ? `started; <a class="underline" href="/results?compare=${encodeURIComponent(name)}">follow it on the duels page</a>` : esc(d2.error || `HTTP ${d2.status}`);
   };
   showLog();
   setTimeout(draw, 30);

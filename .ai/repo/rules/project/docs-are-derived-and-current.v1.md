@@ -7,7 +7,7 @@ description: Documentation, tables, counts, charts and diagrams are generated fr
 statement: Derive every number, table, list and chart from the sources; infer what can be inferred instead of declaring it; keep code generic (no instance named where data can give it); draw every Markdown diagram in Mermaid; and keep the gates that prove this, surfaces check, e2e-coverage, readme-scoreboard and diagrams-check, passing on every change.
 status: active
 class: blocking
-depends_on: [project.published-surfaces-are-derived@1, project.mcp-surfaces-are-derived@1, project.web-ui-is-covered-end-to-end@1, project.never-report-unrun-validation-as-pass@1]
+depends_on: [project.published-surfaces-are-derived@1, project.mcp-surfaces-are-derived@1, project.web-ui-is-covered-end-to-end@2, project.never-report-unrun-validation-as-pass@1]
 tags: [docs, surfaces, derived, mermaid, enforcement]
 ---
 

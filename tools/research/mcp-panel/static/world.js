@@ -1,6 +1,6 @@
 'use strict';
 import {
-  ecInit as panelEcInit, PALETTE as THEME_PALETTE, $, esc as escHtml, UI, badge,
+  ecInit as panelEcInit, PALETTE as THEME_PALETTE, $, esc as escHtml, api, liveImage, UI, badge,
 } from './components.js';
 /* The world view: the whole map (bespoke canvas) and the road network (ECharts, map coordinates),
    both derived from MCP resources through the panel. Parameters live in the URL. */
@@ -48,8 +48,8 @@ function ecInit(id) {
 
 /* ---- data -------------------------------------------------------------------------------------- */
 async function get(path) {
-  const r = await fetch(path);
-  const j = await r.json();
+  const j = await api(path);
+  if (!j.ok) throw new Error(j.error || `HTTP ${j.status}`);
   return j.data ?? j;
 }
 let map = null; let towns = []; let stations = []; let graph = null; let plan = null;
@@ -183,8 +183,8 @@ function drawPlan() {
 async function refresh() {
   try {
     [map, { towns }, { stations }, graph] = await Promise.all([
-      get('/api/resources/map'), get('/api/resources/towns'), get('/api/resources/stations'), fetch('/api/graph').then((r) => r.json())]);
-    try { plan = await (await fetch('/api/plan?limit=10&params=' + encodeURIComponent(JSON.stringify({ budget: state.budget, payback_months: state.payback, modes: state.modes })))).json(); } catch (e) { plan = null; }
+      get('/api/resources/map'), get('/api/resources/towns'), get('/api/resources/stations'), api('/api/graph')]);
+    plan = await api('/api/plan?limit=10&params=' + encodeURIComponent(JSON.stringify({ budget: state.budget, payback_months: state.payback, modes: state.modes })));
     drawMap(); drawGraph(); drawPlan();
     $('w-msg').textContent = `updated ${new Date().toLocaleTimeString()} from openttd://map, openttd://towns, openttd://stations and /api/graph`;
   } catch (e) { $('w-msg').textContent = `not reachable: ${e.message}`; }
@@ -192,8 +192,10 @@ async function refresh() {
 
 /* ---- click to drive the owner's camera -------------------------------------------------------- */
 async function viewTool(name, args) {
-  const r = await fetch('/api/view/tool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, arguments: args }) });
-  return r.json();
+  const d = await api('/api/view/tool', { name, arguments: args });
+  // A non-JSON answer ({status, text}) is a failure too.
+  if (!d.ok || 'text' in d) throw new Error(d.error || `HTTP ${d.status}`);
+  return d;
 }
 async function goTo(x, y, what) {
   $('w-msg').textContent = `${tileText(map, x, y, what)}; moving your camera there`;
@@ -258,12 +260,11 @@ $('yards-run').addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = 'Proving…';
   $('yards-body').innerHTML = '<tr><td class="px-3 py-2" colspan="7">Laying the routes with AlgoGlyph track-planning…</td></tr>';
   try {
-    const r = await fetch('/api/plan?limit=10&track=6&yards=4');
-    const d = await r.json();
+    const d = await api('/api/plan?limit=10&track=6&yards=4');
     const pairs = (d.yards && d.yards.pairs) || [];
-    $('yards-body').innerHTML = r.ok
+    $('yards-body').innerHTML = d.ok && !('text' in d) // a non-JSON answer ({status, text}) is a failure too
       ? (pairs.map(yardRow).join('') || '<tr><td class="px-3 py-2" colspan="7">No two priced lines meet at one station site.</td></tr>')
-      : `<tr><td class="px-3 py-2 text-red-600 dark:text-red-400" colspan="7">${escHtml(d.error || 'HTTP ' + r.status)}</td></tr>`;
+      : `<tr><td class="px-3 py-2 text-red-600 dark:text-red-400" colspan="7">${escHtml(d.error || 'HTTP ' + d.status)}</td></tr>`;
   } catch (e) {
     $('yards-body').innerHTML = `<tr><td class="px-3 py-2 text-red-600" colspan="7">${escHtml(e.message)}</td></tr>`;
   }
@@ -292,11 +293,10 @@ $('cal-run').addEventListener('click', async () => {
   const btn = $('cal-run');
   btn.disabled = true; btn.textContent = 'Calibrating…';
   try {
-    const [r, st] = await Promise.all([fetch('/api/plan?calibrate=1'), get('/api/resources/stations')]);
-    const d = await r.json();
+    const [d, st] = await Promise.all([api('/api/plan?calibrate=1'), get('/api/resources/stations')]);
     calStations = st.stations || [];
     const c = d.calibration;
-    if (!r.ok || !c) throw new Error(d.error || 'no calibration in the answer');
+    if (!d.ok || !c) throw new Error(d.error || 'no calibration in the answer');
     const name = (id) => (calStations.find((s) => s.id === id) || {}).name || `#${id}`;
     $('cal-modes').innerHTML = calModesHtml(c.modes);
     $('cal-body').innerHTML = calRowsHtml(c.lines, name);
@@ -316,14 +316,4 @@ setInterval(() => { if (state.live) refresh(); }, 5000);
 window.addEventListener('resize', () => setTimeout(drawMap, 30));
 
 /* ---- live view of the owner's game window --------------------------------------------------- */
-(function liveView() {
-  const img = document.getElementById('live-img'); if (!img) return;
-  let busy = false;
-  setInterval(() => {
-    if (busy || document.hidden) return; busy = true;
-    const next = new Image();
-    next.onload = () => { img.src = next.src; busy = false; document.getElementById('live-msg').textContent = 'updated ' + new Date().toLocaleTimeString(); };
-    next.onerror = () => { busy = false; document.getElementById('live-msg').textContent = 'no GUI client attached yet'; };
-    next.src = '/api/view/screenshot?t=' + Date.now();
-  }, 1200);
-})();
+if (globalThis.document) liveImage($('live-img'), $('live-msg'));

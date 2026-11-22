@@ -6,7 +6,7 @@
 
    The pure render functions are exported for Node (test/battle.test.mjs). */
 (function battle() {
-  const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const { esc, $ } = globalThis.PanelKit ?? require('./shell.js').KIT;
   const num = (v, d = 0) => (v === null || v === undefined || Number.isNaN(Number(v)) ? '–' : Number(v).toLocaleString('en-US', { maximumFractionDigits: d }));
   const money = (v) => {
     const n = Number(v); if (!Number.isFinite(n)) return '–';
@@ -141,9 +141,8 @@
   if (typeof module !== 'undefined') { module.exports = { leaderboardHtml, tuningHtml, pairedHtml, hostsHtml, liveHtml, eventsHtml, kpis, money }; }
   if (typeof document === 'undefined') return;
 
-  const $ = (id) => document.getElementById(id);
-  const api = (new URLSearchParams(location.search).get('api') || 'http://127.0.0.1:8765').replace(/\/$/, '');
-  $('b-api').textContent = api;
+  const battleApi = (new URLSearchParams(location.search).get('api') || 'http://127.0.0.1:8765').replace(/\/$/, '');
+  $('b-api').textContent = battleApi;
   let lastAt = 0;
   const render = (st) => {
     lastAt = Date.now();
@@ -167,13 +166,14 @@
   const stale = () => {
     if (Date.now() - lastAt > 10000) {
       $('b-live').className = 'inline-block w-2 h-2 rounded-full bg-red-500';
-      $('b-state').textContent = lastAt ? 'stale: the battle API stopped answering' : `no answer from ${api}`;
+      $('b-state').textContent = lastAt ? 'stale: the battle API stopped answering' : `no answer from ${battleApi}`;
     }
   };
   setInterval(stale, 2000);
-  const poll = async () => { try { render(await (await fetch(`${api}/api/state`)).json()); } catch { stale(); } };
+  // raw fetch: battle.py's own API at a configurable cross-origin base, not this server.
+  const poll = async () => { try { render(await (await fetch(`${battleApi}/api/state`)).json()); } catch { stale(); } };
   try {
-    const es = new EventSource(`${api}/api/stream`);
+    const es = new EventSource(`${battleApi}/api/stream`);
     es.addEventListener('state', (e) => { try { render(JSON.parse(e.data)); } catch { /* skip a bad frame */ } });
     es.onerror = () => stale();
   } catch { /* no SSE: the poll carries it */ }

@@ -9,7 +9,7 @@
    A running bot is changed through one Apply that asks for exactly the keys that differ; each key
    is its own approval (openttd.ai.set_setting), so the button says how many it will ask. */
 
-import { UI, CLS, TONE, $, esc as h, whole } from './components.js';
+import { UI, CLS, TONE, $, esc as h, api, whole } from './components.js';
 
 const LINE = /^([a-z]+?)(\d*)_([a-z]+)$/;
 const INPUT = `${CLS.field} block data-[dirty=true]:border-yellow-400 data-[dirty=true]:ring-1 data-[dirty=true]:ring-yellow-400 disabled:opacity-60`;
@@ -172,7 +172,6 @@ let formSig = '';
 /** Asks of running bots: company -> { name -> { from, to, state, approval, reason } }. */
 const asked = new Map();
 
-const api = (...a) => globalThis.api(...a);
 const say = (html) => { $('bot-msg').innerHTML = html; };
 
 /** The value a control holds: an integer, or null when it holds none. */

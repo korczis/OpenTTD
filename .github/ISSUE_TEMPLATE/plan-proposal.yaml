@@ -1,0 +1,34 @@
+name: Proposal for the plan
+description: Something that should become an issue or milestone in .ai/repo/project. A worker converts it into a record and closes this.
+title: "Proposal: "
+labels: ["proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues labelled `plan` are projections of `.ai/repo/project` records. This form is for
+        what is not in the plan yet. Name observable outcomes and evidence, not implementation.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What must become true
+      description: The outcome, stated so that someone can check it.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: The evidence that it is not true today (path:line, command output, result file).
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria and validation
+      description: How we will know it is done; which command or result proves it.
+  - type: input
+    id: milestone
+    attributes:
+      label: Milestone or intent it serves (if known)
+      placeholder: records-and-status-tell-the-truth

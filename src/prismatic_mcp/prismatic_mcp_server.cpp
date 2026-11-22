@@ -1053,7 +1053,9 @@ json HandleToolsCall(const json &id, const json &params)
 		pa.canonical_args = canonical;
 		pa.args_summary = aargs.dump();
 		pa.created_tick = now;
-		pa.expiry_tick = now + APPROVAL_TTL_TICKS;
+		/* An action that names its own stale date (ai.set_settings' expires_tick, bound with the args)
+		 * expires then, if that is sooner than the TTL; its execution re-checks the date as well. */
+		pa.expiry_tick = detail::ApprovalExpiry(now, APPROVAL_TTL_TICKS, detail::BoundExpiresTick(type, aargs));
 		pa.state = ApprovalState::Pending;
 		_approvals.push_back(pa);
 		Debug(Facility::Net, Severity::Error, "[prismatic-mcp] pending approval #{} for {} args={} (approve in console: prismatic_mcp approve {})",
@@ -1598,8 +1600,8 @@ std::string ListApprovals()
 			a.state == ApprovalState::Approved ? "APPROVED" :
 			a.state == ApprovalState::Denied ? "DENIED" : "CONSUMED";
 		bool expired = now > a.expiry_tick && a.state == ApprovalState::Pending;
-		s += fmt::format("#{} {} {}tool={} args={}\n", a.id, st, expired ? "(EXPIRED) " : "",
-			a.tool, a.args_summary);
+		s += fmt::format("#{} {} {}tool={} args={} expires_tick={}\n", a.id, st, expired ? "(EXPIRED) " : "",
+			a.tool, a.args_summary, a.expiry_tick);
 	}
 	return s;
 }
