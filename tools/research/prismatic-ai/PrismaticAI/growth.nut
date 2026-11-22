@@ -235,3 +235,45 @@ function PrismaticAI::FeedStations(b) {
 		return;
 	}
 }
+
+/* The production of the `feed` largest unserved producers of `cargo` near industry `p`, close enough
+ * that a station at p can join them (station spread plus the catchment radius). */
+function PrismaticAI::ClusterProduction(p, cargo, feed) {
+	local reach = AIGameSettings.IsValid("station.station_spread") ? AIGameSettings.GetValue("station.station_spread") : 12;
+	reach += AIStation.GetCoverageRadius(AIStation.STATION_TRAIN);
+	local prods = [];
+	foreach (q, _ in AIIndustryList_CargoProducing(cargo)) {
+		if (q == p || AIIndustry.IsBuiltOnWater(q)) continue;
+		if (AIIndustry.GetDistanceManhattanToTile(q, AIIndustry.GetLocation(p)) > reach) continue;
+		if (AIIndustry.GetLastMonthTransported(q, cargo) > 0) continue;
+		prods.push(AIIndustry.GetLastMonthProduction(q, cargo));
+	}
+	prods.sort(function(a, b) { return b - a; });
+	local sum = 0;
+	for (local i = 0; i < min(feed, prods.len()); i++) sum += prods[i];
+	return sum;
+}
+
+/* Right after a line is built: join up to `feed` unserved producers of its cargo near its source
+ * station into that station (JoinSourceToStation). */
+function PrismaticAI::FeedNewLine(slot, feed) {
+	local line = RAIL_LINES[slot - 1];
+	if (!("from" in line)) return;
+	if (!("fed" in line)) line.fed <- {};
+	local reach = AIGameSettings.IsValid("station.station_spread") ? AIGameSettings.GetValue("station.station_spread") : 12;
+	reach += AIStation.GetCoverageRadius(AIStation.STATION_TRAIN);
+	local cands = AIIndustryList_CargoProducing(line.cargo);
+	cands.Valuate(AIIndustry.GetDistanceManhattanToTile, line.a);
+	cands.KeepBelowValue(reach + 1);
+	cands.RemoveItem(line.from);
+	cands.Valuate(AIIndustry.GetLastMonthProduction, line.cargo);
+	cands.Sort(AIList.SORT_BY_VALUE, AIList.SORT_DESCENDING);
+	foreach (q, prod in cands) {
+		if (line.fed.len() >= feed) break;
+		if (AIIndustry.IsBuiltOnWater(q) || AIIndustry.GetLastMonthTransported(q, line.cargo) > 0) continue;
+		line.fed[q] <- true;
+		local t = PrismaticAI.JoinSourceToStation(line.a, q, line.cargo);
+		AILog.Info("PrismaticAI: rail line " + slot + " (" + line.label + ") " + (t != null ? "also takes " + AICargo.GetCargoLabel(line.cargo) +
+			" from " + AIIndustry.GetName(q) + " (" + prod + " a month) through a station tile at " + t : "found no station tile reaching " + AIIndustry.GetName(q)));
+	}
+}

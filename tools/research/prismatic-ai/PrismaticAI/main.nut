@@ -496,7 +496,7 @@ function PrismaticAI::Start() {
 		if (year_now != this.own_failed_year) { this.own_failed_year = year_now; this.own_failed = 0; }
 		if (!frozen && handed_done && !pair_open && this.own_built < own_cap && (b.own_fail_pause == 0 || this.own_failed < b.own_fail_pause) &&
 				money + headroom_own >= b.line_budget) {
-			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried);
+			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried, b.rail_feed);
 			if (own != null) {
 				this.freight_tried[own.from + "-" + own.to + "-" + own.cargo] <- true;
 				this.own_built++;
@@ -508,6 +508,8 @@ function PrismaticAI::Start() {
 				if (PrismaticAI.BuildFreightRailRoute(own.from, own.to, own.cargo, PrismaticAI.RailShape(b, true)) > 0) {
 					this.routes++;
 					this.own_failed = 0;
+					/* Multi-source: the cluster the planner scored joins the new source station (growth.nut). */
+					if (b.rail_feed > 0) this.FeedNewLine(RAIL_LINES.len(), b.rail_feed);
 				} else {
 					this.own_failed++;
 					AICompany.SetLoanAmount(loan_before);
