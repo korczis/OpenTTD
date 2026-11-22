@@ -1,0 +1,37 @@
+id: I0213
+milestone: algoglyph-is-accountable
+title: "A line planned by track-planning and laid by mcp-human reports its estimated cost, the money actually spent and the delta, or REFUTED or NOT VERIFIED with the reason"
+slug: track-plan-predicted-versus-actual
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Close Problem, Kernel, Plan, Execute, Observe, Evaluate on one rail line: mcp-plan --track prices a line (its `track.money` and `estimated_build`, linecost.rs), mcp-human lays exactly that plan's pieces, bridges and tunnels through the game window on a disposable mcp-human-e2e stack, and an evaluation reads back the geometry (the game's rail bits and spans against the plan, rail.rs `missing` and `has_span`) and the money spent. The money is measured in a window with nothing else moving it (game paused with construction allowed, or the company's money sampled around each build step with running costs and income from the same window subtracted), and the record states which. The result is {estimate, actual, delta, verdict: CONFIRMED within tolerance | REFUTED | NOT VERIFIED, reason} beside the plan and the build."
+why: "External review 2026-11-22 (digest A-37). Plan and execute exist: linecost.rs prices lines with track-planning (research/mcp-control.md:999-1017), and mcp-human lays a kernel plan through the game's own tools (tools/research/mcp-human/src/rail.rs:445 plan_track, :462 lay_track, :491 build_span); line A of a transfer yard is laid that way (research/mcp-human.md:229-231). No record compares the estimate with what was spent; calibration compares predicted and real profit only (tools/research/mcp-rhai/src/calibrate.rs:7-8, and per service I0146). The bot does not lay the kernel's route but its own pathfinder's (research/mcp-control.md:1017-1021), so only mcp-human's build is the plan that was priced."
+scope:
+  - "tools/research/mcp-human/src/rail.rs"
+  - "tools/research/mcp-human/src/main.rs"
+  - "tools/research/mcp-human-e2e"
+  - "research/mcp-human.md"
+  - "research/results/**"
+non_scope:
+  - "PrismaticAI's own track building (it uses its own pathfinder)"
+  - "Profit calibration (I0146)"
+  - "Arming input on any stack but a disposable one mcp-human-e2e started"
+depends_on:
+  - I0212
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#algoglyph-plans-are-accountable"
+acceptance_criteria:
+  - "mcp-human rail --evaluate writes {estimate, actual, delta, verdict, reason, window} for each line it lays; a unit test covers the verdict rules on fixture numbers"
+  - "One run with a bridge or a tunnel on the route is committed under research/results/ with the seed, build id and the plan it laid; a route the game refused is NOT VERIFIED with the game's error"
+  - "Geometry read back from openttd://map/ways equals the plan, or the record lists every missing piece"
+  - "research/mcp-human.md states the measured delta and the tolerance, and does not generalise beyond the seed"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-human/Cargo.toml"
+  - "tools/research/mcp-human-e2e --test --rail \"1\""
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

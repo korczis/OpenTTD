@@ -1,0 +1,39 @@
+id: I0218
+milestone: a-remote-human-plays-the-bot
+title: "An invite-only game on the owner's research server is joined through the game coordinator from a second machine outside its network, and real-game-check reads the registration"
+slug: invite-only-game-through-the-coordinator
+priority: p3
+profile: deep-work
+parallel_safe: false
+objective: "Make the coordinator path observable, then run it. Add a read-only, research-gated MCP resource openttd://network/server that reports the server game type, whether the coordinator registered the server and issued an invite code (the code itself shown only to the loopback host, redacted in every record), the connection type the coordinator found (`_network_server_connection_type`) and the connected clients with their company and join time, no addresses. Extend tools/research/real-game-check with a `coordinator` item that reads it. Then host an invite-only game from one clean-commit build with the bot installed and disclosed, and join it by invite code from a client built from the same commit on a second machine of the owner's that is outside the host's network (not the LAN or the tailnet path). Record the run."
+why: "External review 2026-11-22 (digests B-50, C-35). research/real-game.md:106 lists 'An invite-only game through the coordinator' as NOT RUN, and README.md:637-638 says everything is proven on loopback only. The page's setup asks for `network.server_game_type` invite-only (research/real-game.md:84-85), and real-game-check reads that setting (tools/research/real-game-check:10, :61) but nothing about the coordinator: the game holds the state in `_network_server_connection_type` and `_network_server_invite_code` (src/network/network_internal.h:73-74), and no openttd:// resource exposes the network (src/prismatic_mcp/prismatic_mcp_server.cpp:329-332 list only meta and status). The joining client must be the same fork commit (research/real-game.md:79-81; ADR 0030 keeps fork builds off public servers, and this server is the owner's own)."
+scope:
+  - "src/prismatic_mcp/prismatic_mcp_server.cpp"
+  - "src/prismatic_mcp/prismatic_mcp_world.cpp"
+  - "src/prismatic_mcp/prismatic_mcp_world.h"
+  - "src/tests/test_prismatic_mcp.cpp"
+  - "research/prismatic-mcp/07-resource-catalog.md"
+  - "tools/research/real-game-check"
+  - "research/real-game.md"
+  - "research/results/**"
+non_scope:
+  - "Joining any public or official server with a fork build (ADR 0030)"
+  - "Port forwarding or exposing MCP beyond loopback; MCP stays on loopback (real-game-check `mcp`)"
+  - "Publishing the invite code, a client address or a person's name in any record"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#a-remote-human-plays-the-bot"
+acceptance_criteria:
+  - "openttd://network/server exists only with OPTION_RESEARCH_INSTRUMENTATION and OPTION_PRISMATIC_MCP_SERVER ON, is read-only, and a Catch2 test covers its shape with no coordinator and with a registered one"
+  - "real-game-check reports `coordinator` PASS when an invite code is issued, FAIL when the game type is invite-only and none is, NOT RUN when the resource is absent"
+  - "A client on a second machine outside the host's network joins by invite code; the record under research/results/ names both build ids, the connection type, the join time and the bot's disclosed name, with the code redacted"
+  - "research/real-game.md's coordinator row states what was run and its record; README.md is regenerated"
+validation:
+  - "cmake --build build-mcp --target openttd_test && ctest --test-dir build-mcp -R prismatic --output-on-failure"
+  - "tools/gate.sh change"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

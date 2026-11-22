@@ -1,0 +1,32 @@
+id: I0177
+milestone: prismatic-closes-one-real-loop
+title: "A chaos check drives the decision path through its infrastructure failures (kernel serve killed, store off, stale read, approval denied or expired, a command that never posts, the panel restarting) to a closed outcome"
+slug: agent-chaos-check
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "tools/research/agent-chaos-check injects each fault on a research stack and asserts a fail-closed outcome. AlgoGlyph serve killed mid-call: the planner names the fallback or refuses, and never labels the builtin as the kernel (with I0160's restart). Store off: decisions name their fallback. Stale observation: 409. Approval denied, or expired: the directive's outcome says so, and nothing is applied. A command approved but never posted (game paused past the plan's expiry): the step stays unverified, and the plan is not reported applied. Panel killed mid-plan: resume as in I0176. Each case reports PASS, FAIL or NOT RUN, and none passes silently."
+why: "External review 2026-11-22 (digest B-27). mcp-decision-check passes 16/16 live, covering stale observations, a wrong digest and keyed replay (research/agent-loop.md:93-95). Store-off fallbacks are unit-tested (tools/research/mcp-rhai/src/duel_outcomes.rs:609-611, tools/research/mcp-rhai/src/panel.rs:3359-3365). But no check kills the kernel serve, stalls a command after approval or restarts the panel mid-plan. Under tools/research, `git grep -iE 'chaos|SIGKILL'` finds only the panel's shutdown of its own children (panel.rs:543-603)."
+scope:
+  - "tools/research/agent-chaos-check"
+  - "research/agent-loop.md"
+  - "research/results/**"
+non_scope:
+  - "Adversarial attacks on the decision path (replayed key, second writer, self-approval); I0155 covers them"
+  - "Fixing a failure it finds; each goes into its own issue"
+depends_on:
+  - I0176
+  - I0160
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
+acceptance_criteria:
+  - "Each of the six faults has a case, and each case's expected outcome is written in the check before its first run"
+  - "One full run is recorded under research/results/, and every FAIL becomes a filed issue"
+  - "A case whose prerequisite is missing (no AlgoGlyph checkout, no store build) reports NOT RUN, never PASS"
+validation:
+  - "tools/research/agent-chaos-check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -1,0 +1,31 @@
+id: I0140
+milestone: the-planner-reads-one-coherent-priced-world
+title: "openttd://vehicles orders carry their load, unload and transfer flags, so a transfer chain can be observed and verified over MCP"
+slug: vehicle-orders-load-unload-flags
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Add each order's OrderLoadType and OrderUnloadType (full load, full load any, no load; unload, transfer, no unload, unload if accepted), its non-stop and stop-location flags, and its refit cargo where set, to every order of openttd://vehicles, read-only, named in the resource description and the catalogue."
+why: "External review 2026-11-22 (digest B-02). src/prismatic_mcp/prismatic_mcp_entities.cpp:62-68 builds each order as only {type, destination}; `git grep -i unload src/prismatic_mcp` finds only a station's time_since_unload (prismatic_mcp_server.cpp:512). Without these flags neither a transfer service (I0147) nor per-service calibration (I0146) can be observed."
+scope:
+  - "src/prismatic_mcp/prismatic_mcp_entities.cpp"
+  - "src/prismatic_mcp/prismatic_mcp_server.cpp"
+  - "src/tests/test_prismatic_mcp.cpp"
+  - "research/prismatic-mcp/07-resource-catalog.md"
+non_scope:
+  - "Any order-writing tool"
+  - "A savegame field"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "Every order object carries load and unload as names, plus non_stop and stop_location"
+  - "A unit test builds a vehicle with a transfer order and a no-load order and checks the JSON"
+  - "The build with both research options ON and the default build both pass"
+validation:
+  - "build-mcp/openttd_test '[prismatic_mcp]'"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

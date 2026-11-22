@@ -1,0 +1,34 @@
+id: I0194
+milestone: the-live-agent-workbench
+title: "A Rhai service runs a pinned immutable revision: a new one activates atomically for new runs, a bad one is refused without losing the old, and rollback restores the previous"
+slug: rhai-revisions-and-rollback
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Store every validated text of a library script as an immutable, content-addressed revision; let a service run pin the revision it started on; make activation an explicit step (activate B for new invocations while A's in-flight run finishes on A), with a refused revision C leaving the active one untouched and a rollback to any earlier revision. Keep today's save-and-reload as the default path that creates and activates a revision. Expose revisions, activate and rollback on the panel API (and so on every derived surface) and on the Scripts page, and recover the active revision after a panel restart or a client reconnect."
+why: "External review 2026-11-22 (digest A-31). Milestone rhai-is-a-live-ide (I0088-I0093) is done: CodeMirror 6, lint, completion, a debugger and shared memory (research/rhai-ide.md:49-60). Its hot reload restarts a service from the text it validated and keeps the old run when the new text does not parse (tools/research/mcp-rhai/src/panel_scripts.rs:13, :187, :256-295), but there is no revision store: the previous text is gone after a good reload, nothing pins an in-flight invocation, and nothing can roll back. The editor stays CodeMirror 6, as the owner chose (research/rhai-ide.md:206-207)."
+scope:
+  - "tools/research/mcp-rhai/src/panel_scripts.rs"
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "tools/research/mcp-panel/static/scripts.js"
+  - "tools/research/mcp-panel/test/"
+  - "tools/research/mcp-scripts-check"
+  - "research/rhai-ide.md"
+non_scope:
+  - "Monaco or any editor other than CodeMirror 6"
+  - "Versioning files outside the Rhai library directory"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#the-workbench-drives-the-game-end-to-end"
+acceptance_criteria:
+  - "GET /api/scripts/<name>/revisions lists content-addressed revisions; activate and rollback are POST routes and Rhai functions derived from OpenAPI"
+  - "A test runs a service on A, activates B while A's run is in flight (A's run finishes on A, the next on B), refuses a broken C with A or B still active, and rolls back"
+  - "The active revision survives a panel restart; mcp-scripts-check drives activate and rollback on the Scripts page in a browser"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "node --test tools/research/mcp-panel/test/"
+  - "tools/research/mcp-scripts-check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
