@@ -1,0 +1,41 @@
+id: I0226
+milestone: records-and-status-tell-the-truth
+title: "The open findings (what is missing, blocked, handed off, not run or failed) are one page derived from the records, and a check fails while it is stale"
+slug: open-findings-surface
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Add a generic generator, tools/surfaces/findings.py, that computes the repository's open findings from what it already records: issue non_scope entries with no open follow-up issue, open issues blocked on an unfinished dependency, issue evidence that reports a declared open status (NOT RUN, PARTIAL), table rows whose status column holds such a status, documents whose front matter declares an open status (knowledge candidates), and passages a document marks with an open-finding marker (handoffs, recorded failures). Each finding carries its kind, its evidence locator (path:line and record id), its follow-up (an issue id, or none) and an OBSERVED/DERIVED label. The page research/open-findings.md holds the result between the tool's markers; surfaces.toml declares the sources and the generator, so surfaces sync regenerates it and surfaces check fails while it is stale. Live sources (majordomus plan drift) are printed by --live and never committed."
+why: "Owner order 2026-11-22: a hand-written 'what is missing' list in a chat answer is yet another derived surface ('opet toto je dalsi derived surface'). Every fact in that list (the AlgoGlyph contract proposal, the planner kernels left out of the catalogue matcher by I0098's non_scope, the capability matrix blocked on I0111, the January 1954 round in which track-planning priced none of 21 rail lines) is recoverable from the repository, so writing it by hand restates the records and goes stale."
+scope:
+  - "tools/surfaces/findings.py"
+  - "tools/surfaces/test_findings.py"
+  - "tools/surfaces/README.md"
+  - "surfaces.toml"
+  - "research/open-findings.md"
+  - "research/mechanisms/planner-and-algoglyph.md"
+  - "research/battlebrain/algoglyph-contract-proposal.md"
+  - "README.md"
+  - ".ai/repo/project/issues/I0226.yaml"
+non_scope:
+  - "Opening an issue for each finding that has none; the page names them, the owner decides which deserve one"
+  - "Rewriting the non_scope entries of other issues to name a follow-up"
+  - "The Majordomus side of the generator (a separate proposal carries it into prismatic-majordomus)"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#status-surfaces-match-the-code"
+acceptance_criteria:
+  - "research/open-findings.md lists, from the generator alone, the four facts of the owner's hand-written list: the AlgoGlyph contract handoff, I0098's non_scope on the planner's kernel calls, I0114 blocked on I0111, and the January 1954 track-planning failure"
+  - "Every finding names its kind, its evidence locator, its follow-up (an issue id, or 'none — needs an issue') and an OBSERVED/DERIVED label"
+  - "tools/surfaces/findings.py names no fact of this repository: every source, vocabulary and path is declared in surfaces.toml"
+  - "surfaces check fails while the committed page is stale, and on a malformed marker, an undeclared kind or a follow-up id that names no issue"
+  - "The tests run every line of tools/surfaces/findings.py"
+validation:
+  - "python3 -B -m unittest discover -s tools/surfaces -p 'test_findings.py'"
+  - "tools/surfaces/surfaces check"
+  - "tools/knowledge/refs check"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

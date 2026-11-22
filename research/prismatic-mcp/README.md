@@ -101,6 +101,28 @@ the same content cross-linked from the top-level README, and `AGENTS.md` / `CLAU
 ground rules that apply before any of this.
 <!-- END GENERATED: prismatic-mcp-readme-cta -->
 
+## AI settings and the control that edits each
+
+`openttd://ai` (and `openttd.ai.list`) describes every setting of every company's AI as its
+`info.nut` declares it (`name`, `description`, `min`, `max`, `step`, `default`, `flags`, `labels`,
+`value`, `editable`) and adds a derived `control`, so every form draws a setting the same way: the
+web panel's My bot card (`tools/research/mcp-panel/static/bots.js`) and the game's own settings
+window. The rules live once, in `src/prismatic_mcp/prismatic_mcp_ai_control.h`:
+
+- `kind`: `toggle` for the `boolean` flag; `select` when labels name integer values, with
+  `options` `[{value, label}]` in ascending order; `range` for more than one value in at most 2000
+  steps (a step of 0 counts as 1); `number` otherwise.
+- `picker`: on a `range` or `number` whose description names a world list (`(town id`,
+  `(industry id`, `(cargo id`); a client that has that list offers its entries.
+- The place: `table {base, line, field}` for names `<base><N>_<field>` when the base has at least
+  two lines (the bare `<base>_<field>` is line 1), else `group`, the first word when another
+  setting shares it, else `general`. A name declared twice is placed by its first declaration.
+
+The panel derives the same itself only for an AI read from its `info.nut`, with no game to ask.
+`src/tests/prismatic_mcp_ai_controls.json` pins both derivations, given these settings, these
+controls: the Catch2 test `src/tests/test_prismatic_mcp_ai_control.cpp`, the panel's
+`test/bots.test.mjs` and, in a browser, `tools/research/mcp-overview-check` all read it.
+
 ## The toolbar menu (in the game)
 
 A research build adds one button to the main toolbar, after the help button: a prism drawn in the

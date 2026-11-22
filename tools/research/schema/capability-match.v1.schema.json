@@ -27,6 +27,13 @@
           "compatible": {
             "type": "boolean"
           },
+          "contract": {
+            "description": "the derived contract the keys and types were checked against (tools/research/schema/derived/algoglyph-contracts.json); null when none is of the catalogue's commit",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "engine": {
             "description": "as the catalogue lists it; null when absent",
             "type": [
@@ -40,6 +47,27 @@
           "exact_because": {
             "minLength": 1,
             "type": "string"
+          },
+          "hand_kept": {
+            "description": "what the adapter still keeps by hand, each with why no source gives it",
+            "items": {
+              "properties": {
+                "field": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "why": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "why"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
           "kernel": {
             "minLength": 1,
@@ -57,7 +85,9 @@
                     "engine_mismatch",
                     "unmapped_field",
                     "unknown_field",
-                    "input_shape_drift"
+                    "input_shape_drift",
+                    "output_shape_drift",
+                    "type_mismatch"
                   ]
                 },
                 "message": {
@@ -78,7 +108,7 @@
             "type": "array"
           },
           "shape": {
-            "description": "verified: the catalogue's input shape declares every mapped key",
+            "description": "verified: the derived contract (or, without one of the catalogue's commit, the catalogue's input shape) declares every mapped key",
             "enum": [
               "verified",
               "opaque",
