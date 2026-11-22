@@ -656,7 +656,7 @@ from the code. The right-hand column says what was counted.
 | **36** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **102** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **89** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
-| **866** | published documents on the site and the wiki | published documents under `/` |
+| **867** | published documents on the site and the wiki | published documents under `/` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
