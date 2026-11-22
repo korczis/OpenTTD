@@ -59,10 +59,23 @@ Server banner: `OpenTTD 20260724-prismatic-mcp-server-m0822f6b762`. Console log:
 | Batch rejected | `[{...}]` | `-32600 Batch requests are not supported` |
 | Method not found | `tools/call` | `-32601 Method not found` (no tools registered — by design) |
 | Token rotation | `prismatic_mcp rotate` then reuse old token | **401** — old bearer invalidated |
-| Status | `prismatic_mcp status` | `running endpoint=http://127.0.0.1:8731/mcp read_only=true requests=11 denied=4 conns=0` |
+| Status | `prismatic_mcp status` | `running endpoint=http://127.0.0.1:8731/mcp read_only=true requests=11 denied=4 conns=0` (this build had no tools; since I0110 the line derives the capabilities, see below) |
 | Clean stop | `prismatic_mcp stop` then `GET /mcp` | connection **refused** — listener closed; game continued, then `quit` |
 
 Redacted transcript: `evidence/mcp-transcript.jsonl` (token replaced with `<REDACTED_TOKEN>`).
+
+The table is the 2026-07-24 capture of the first vertical, which had no tools yet: today
+`tools/call` runs the catalogue of `08-tool-catalog.md`, and the status line no longer prints a
+fixed `read_only=true`. It prints what the build and the process can do, derived from the tool
+registry and the input arming (`07-resource-catalog.md`, "What `openttd://mcp/status` says the
+server can do"). A run on 2026-11-22 (lundra, dedicated research build, revision
+`20261122--m9aaa7beed8`, `prismatic_mcp start 28741`) printed:
+
+```
+prismatic_mcp running endpoint=http://127.0.0.1:28741/mcp requests=1 denied=0 conns=0 read_only=false capabilities=reads,approval_gated_commands,script_api,ai_tools,pause input_armed=false
+```
+
+`openttd://mcp/status` carries the same values as `read_only`, `capabilities` and `input_armed`.
 
 ## What this proves / does not prove
 
