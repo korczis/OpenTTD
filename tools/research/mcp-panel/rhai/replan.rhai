@@ -75,9 +75,12 @@ fn month_of(date) {
     parse_int(p[0]) * 12 + parse_int(p[1])
 }
 
-fn rows_of(sql) {
-    let r = api_dbQuery(#{ sql: sql });
+// One named query of the store (tools/research/mcp-rhai/sql/queries/<name>.sql) with its
+// parameters bound by DuckDB: no SQL is written or joined here. GET /api/db/named lists them.
+fn rows_of(name, params) {
+    let r = api_dbNamedRun(#{ name: name, params: params });
     if "error" in r { throw `store: ${r.error}`; }
+    if "http_error" in r { throw `store: ${r.http_error} ${r.body}`; }
     r.rows ?? []
 }
 
@@ -106,22 +109,18 @@ fn finances(company) {
     #{ quarters: qs, trend: trend }
 }
 
-// The company's rank by value in this run and its last months' value changes, from the store's
-// views company_latest and company_month (research/mechanisms/event-bus-and-store.md).
-const CURRENT_RUN = "(SELECT max(run_ms) FROM run_spans)";
+// The company's rank by value in this run and its last months' value changes, from the named
+// queries company_rank and company_trend over the store's views.
 const TREND_MONTHS = 6;
 
 fn rank(company) {
-    let of = rows_of(`SELECT count(*) FROM company_latest WHERE run_ms = ${global::CURRENT_RUN}`)[0][0];
-    let me = rows_of(`SELECT rank, value, game_date FROM company_latest
-        WHERE run_ms = ${global::CURRENT_RUN} AND company = ${company}`);
+    let me = rows_of("company_rank", #{ company: company });
     let months = [];
-    for m in rows_of(`SELECT month, value_change FROM company_month WHERE run_ms = ${global::CURRENT_RUN}
-        AND company = ${company} ORDER BY month DESC LIMIT ${global::TREND_MONTHS}`) {
-        months.push(#{ month: m[0], value_change: m[1] });
+    for m in rows_of("company_trend", #{ company: company, months: global::TREND_MONTHS }) {
+        months.push(#{ month: m[0], value: m[1], value_change: m[2], money: m[3], money_change: m[4], vehicles: m[5] });
     }
-    if me.is_empty() { return #{ rank: 0, of: of, value: 0, date: "", months: months }; }
-    #{ rank: me[0][0], of: of, value: me[0][1], date: me[0][2], months: months }
+    if me.is_empty() { return #{ rank: 0, of: 0, value: 0, date: "", months: months }; }
+    #{ rank: me[0][0], of: me[0][1], value: me[0][2], date: me[0][3], months: months }
 }
 
 fn vehicles() { read("openttd://vehicles").data.vehicles ?? [] }
