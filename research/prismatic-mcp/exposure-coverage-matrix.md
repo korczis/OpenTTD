@@ -11,7 +11,7 @@ is catalogued as designed-but-not-yet-adapted, not pretended-covered.
 | Companies (`openttd://companies`) | `EXPOSED_READ_ONLY` | id/name/is_ai/money/inaugurated. Server-visible; see privacy note. |
 | Vehicles / towns / industries / stations | `EXPOSED_READ_ONLY` | `openttd://vehicles`, `openttd://towns`, `openttd://stations`, `openttd://depots`, `openttd://engines`; industries only as nodes of `openttd://world/graph`. Unpaginated. |
 | Map tiles / regions | `EXPOSED_READ_ONLY` | `openttd://map`, `openttd://map/terrain`, `openttd://map/ways`: the whole map, one string per row, encoding included. No area cap. |
-| AI / GameScript state & logs | `EXPOSED_READ_ONLY` (state) / `NOT_YET_ADAPTED` (logs) | `openttd://ai`: every company's AI, its declared settings and live values. Script logs are not exposed. |
+| AI / GameScript state & logs | `EXPOSED_READ_ONLY` (state, heartbeat) / `NOT_YET_ADAPTED` (other log lines) | `openttd://ai`: every company's AI, its declared settings and live values. `openttd://ai/status`: each AI company's newest `<Name> heartbeat: key=value ...` line from its own script log, split into fields (read from the log buffer; the script is asked nothing). Other script log lines, and the Game Script's, are not exposed. |
 | Native UI windows / viewport | `EXPOSED_READ_ONLY` / local GUI tools | `openttd.ui.*`, `openttd.input.*`, `openttd.view.*` tools and `openttd://ui/menu`, `openttd://ui/requests`; they change only the local window and viewport, never game state. |
 | Debug / performance / pools | `NOT_YET_ADAPTED` | expensive diagnostics must be opt-in/bounded (Phase E). |
 | Settings schema | `NOT_YET_ADAPTED` | game settings are not exposed; AI settings are, through `openttd://ai`. Secrets omitted/redacted when added. |

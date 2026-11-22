@@ -743,21 +743,25 @@ enum class WindowClass : uint16_t {
 	 */
 	Help,
 
+#ifdef OTTD_PRISMATIC_MCP_SERVER
 	/**
 	 * RESEARCH-ONLY: the bot's yes/no question with an optional auto-confirm countdown
-	 * (prismatic_mcp_view.cpp); opened only with OPTION_PRISMATIC_MCP_SERVER, appended last so no
-	 * upstream value moves. %Window numbers:
+	 * (prismatic_mcp_view.cpp). Compiled only with OPTION_PRISMATIC_MCP_SERVER, and appended last,
+	 * so no upstream value moves and a default build has no such class. A window class is never
+	 * saved nor sent over the network; GenerateWidget.cmake keeps it out of the script API.
+	 * %Window numbers:
 	 *   - 0 = the question, its countdown bar and its No/Yes buttons
 	 */
 	PrismaticAsk,
 
 	/**
 	 * RESEARCH-ONLY: the Prismatic control window (prismatic_mcp_panel.cpp): the MCP server's
-	 * status, approvals waiting for the owner, decisions, questions and switches; opened only with
-	 * OPTION_PRISMATIC_MCP_SERVER, appended last so no upstream value moves. %Window numbers:
+	 * status, approvals waiting for the owner, decisions, questions and switches. Compiled only
+	 * with OPTION_PRISMATIC_MCP_SERVER, like PrismaticAsk. %Window numbers:
 	 *   - 0 = the list and its buttons
 	 */
 	PrismaticControl,
+#endif /* OTTD_PRISMATIC_MCP_SERVER */
 
 	Invalid = 0xFFFF, ///< Invalid window.
 };
