@@ -70,6 +70,8 @@ mod panel_mesh_page;
 mod panel_store;
 #[path = "../panel_town.rs"]
 mod panel_town;
+#[path = "../panel_battle.rs"]
+mod panel_battle;
 
 static STOP: AtomicBool = AtomicBool::new(false);
 

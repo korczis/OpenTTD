@@ -2418,6 +2418,8 @@ pub fn routes() -> Vec<Route> {
           None, h_instances),
         r("GET", "/api/mesh", "mesh", "The Majordomus mesh this repository's server cooperates with (src/panel_mesh_page.rs, read-only): `mesh` (identity, trust policy, providers, tallies), `peers` (machines, runtimes, sessions, claims) and `nodes` (every discovered node with trust, presence and endpoints), read from the Majordomus server ($MAJORDOMUS_URL, else the one `majordomus serve ensure` names for this checkout) /api/v1/mesh, /peers and /nodes unchanged; 200 also when Majordomus is down (`reachable` false, `errors` per part)", false,
           None, crate::panel_mesh_page::h_mesh),
+        r("GET", "/api/battle/contestants", "battleContestants", "The LAN battle's contestants as tools/research/ai-battle/battle.json declares them (src/panel_battle.rs, read-only, read on every request): `file`, `count` and `contestants` in the file's order, each as the file has it (ai, label, source, group) with `settings` made explicit (\"\" for the AI's defaults); the live arena (rhai/arena.rhai) plays this lineup, so it is written in one place. 404 when the file is missing", false,
+          None, crate::panel_battle::h_contestants),
         r("POST", "/api/instances/call", "instancesCall", "One MCP JSON-RPC call on a named instance of the cluster (a panel's server or a GUI client)", true,
           s(json!({"name": st(), "method": st(), "params": obj()}), &["name", "method"]), h_instances_call),
         r("GET", "/api/news", "news", "The news the owner's game window has shown, newest first (openttd.view.news.list on the GUI client); ?limit=N", true,
@@ -3229,7 +3231,8 @@ mod tests {
         // And the observation a directive is bound to (GET /api/bridge/observation; agent loop step 1).
         // And evidence retrieval (GET /api/evidence; research/agent-loop.md, Retrieve).
         // And the store's named queries (GET and POST /api/db/named; sql/queries).
-        assert_eq!(rs.len(), 76);
+        // And the LAN battle's contestants the live arena plays (GET /api/battle/contestants; panel_battle.rs).
+        assert_eq!(rs.len(), 77);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -3243,7 +3246,8 @@ mod tests {
             "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query", "/api/db/named",
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
             "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
-            "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh"].contains(&r.path)));
+            "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh",
+            "/api/battle/contestants"].contains(&r.path)));
     }
 
     /// A store with two runs of one instance: the older run's days must not feed the books.
