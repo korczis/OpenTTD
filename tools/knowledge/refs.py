@@ -22,7 +22,8 @@ files, a symbol must occur as a whole word in the file it is cited in, an anchor
 hold its symbol, and a `tracks` pathspec must match at least one tracked file. With
 `--strict-lines` a bare line number fails too: a document that promises `path:line` citations
 (a capability matrix) cites every one anchored, so each is checked. An anchored line that moved
-is named with the line its symbol is on now; `--fix-lines` rewrites it to the nearest one.
+is named with the line its symbol is on now; `--fix-lines` rewrites it when that line is
+unambiguous (the symbol's only line, or its only declaring line).
 
 What is not judged, because it is not a claim about this tree: a span that resolves to nothing
 and has no file extension, no trailing `/` and no symbol (a branch such as `research/x`, a
@@ -35,7 +36,7 @@ Commands:
                                      every reference resolves; exit 1 naming each that does not
                                      (--file: any file, such as a model's answer, judged the same;
                                      --strict-lines: a line number must be anchored; --fix-lines:
-                                     move each anchored line whose symbol moved, in place)
+                                     move each anchored line whose symbol moved unambiguously)
   index  [--pathspec P]... [--out F] the reverse index (cited file -> records) as JSON
   impact <rev-range> [--pathspec P]... [--json]
                                      the records that cite or track a file the range changes,
@@ -77,6 +78,7 @@ class Ref:
     kind: str  # file | dir | tracks
     lines: tuple[int, int] | None = None  # a cited line or range, `path:12-14`
     anchor: str | None = None             # the symbol a cited line must hold, `path:12:Name`
+    raw: str = ""                         # the span as written, which --fix-lines replaces
 
     def label(self) -> str:
         if self.kind == "tracks":
@@ -213,7 +215,7 @@ def scan(repo: Repo, record: str, text: str | None = None) -> list[Ref]:
                 refs.append(Ref(record, n, bare, None, "dir"))
             elif symbol or "." in bare.rsplit("/", 1)[-1] or bare in repo.files:
                 refs.append(Ref(record, n, bare, symbol.strip() if symbol else None, "file",
-                                line_range(m.group("line")), m.group("anchor")))
+                                line_range(m.group("line")), m.group("anchor"), span.strip()))
     return refs
 
 
@@ -234,17 +236,32 @@ def anchor_lines(repo: Repo, ref: Ref) -> list[int]:
     return [n for n, line in enumerate(repo.text(ref.path).splitlines(), start=1) if rx.search(line)]
 
 
+def declares(line: str, word: str) -> bool:
+    """Does this line declare or define `word`: a keyword before it (`fn`, `def`, `function`,
+    `class`, `const`, ...), or a definition at column 0 such as `json ResourceMcpStatus()`?"""
+    w = re.escape(word)
+    return bool(re.search(r"\b(?:fn|def|function|class|struct|enum|const|static|type|let|trait|impl|mod)\s+"
+                          r"(?:[A-Za-z_]\w*::)*" + w + r"\b", line)
+                or re.match(r"^[A-Za-z_][\w:<>,*& ]*?\b" + w + r"\s*\([^;]*$", line))
+
+
 def moved(repo: Repo, ref: Ref) -> Ref | None:
-    """An anchored line whose symbol is no longer on it, cited again at the occurrence nearest
-    the old line (ties: the earlier line), its range shifted with it and cut at the file's end;
-    None when it cannot move."""
+    """An anchored line whose symbol is no longer on it, cited again where the symbol is now: its
+    only line, or else its only declaring line, the range shifted with it and cut at the file's
+    end. None when it cannot move, or when the new line is ambiguous: moving to the nearest of
+    several occurrences would cite a call as readily as the definition, so a person chooses."""
     if not (ref.lines and ref.anchor) or ref.path not in repo.files:
         return None
     found = anchor_lines(repo, ref)
     a, b = ref.lines
     if not found or any(a <= n <= b for n in found):
         return None
-    to = min(found, key=lambda n: (abs(n - a), n))
+    if len(found) > 1:
+        lines = repo.text(ref.path).splitlines()
+        found = [n for n in found if declares(lines[n - 1], symbol_word(ref.anchor or ""))]
+        if len(found) != 1:
+            return None
+    to = found[0]
     end = min(to + b - a, len(repo.text(ref.path).splitlines()))
     return Ref(ref.record, ref.line, ref.path, None, "file", (to, end), ref.anchor)
 
@@ -303,7 +320,8 @@ def line_problem(repo: Repo, ref: Ref, strict_lines: bool) -> str | None:
         if not found:
             return f"does not contain '{word}'"
         at = ", ".join(str(n) for n in found[:5]) + (" ..." if len(found) > 5 else "")
-        return f"does not hold '{word}' there; it is on line {at} (--fix-lines moves the citation)"
+        how = "--fix-lines moves the citation" if moved(repo, ref) else "ambiguous: edit the citation"
+        return f"does not hold '{word}' there; it is on line {at} ({how})"
     if not strict_lines:
         return None  # a bare line number: only the file is checked
     if not exists:
@@ -321,7 +339,7 @@ def fix_lines(repo: Repo, refs: list[Ref]) -> list[tuple[Ref, Ref]]:
         path = repo.root / record
         lines = path.read_text(encoding="utf-8").split("\n")
         for old, new in todo:
-            lines[old.line - 1] = lines[old.line - 1].replace(f"`{old.label()}`", f"`{new.label()}`", 1)
+            lines[old.line - 1] = lines[old.line - 1].replace(f"`{old.raw}`", f"`{new.label()}`", 1)
         path.write_text("\n".join(lines), encoding="utf-8")
     return moves
 

@@ -262,12 +262,33 @@ class RefsTest(unittest.TestCase):
         self.write("research/matrix.md", "`src/net/server.cpp:3-6:Reject`\n")
         _, out = self.run_cli("check", "--pathspec", "research/matrix.md", "--fix-lines")
         self.assertNotIn("MOVED", out)
-        # Nearest occurrence wins, and an earlier line breaks a tie.
-        self.write("src/net/server.cpp", "Accept\nx\nx\nAccept\nx\nx\nAccept\n")
-        self.write("research/matrix.md", "`src/net/server.cpp:5:Accept` and `src/net/server.cpp:2:Accept`\n")
-        self.run_cli("check", "--pathspec", "research/matrix.md", "--fix-lines")
+
+    def test_fix_lines_moves_to_the_one_declaring_line_and_never_guesses(self) -> None:
+        # A symbol on several lines moves only to its one declaration, wherever the calls are.
+        self.write("src/net/server.cpp", "x\nAccept();\nx\nx\nx\nvoid Server::Accept()\n{\n\tAccept();\n}\n")
+        self.write("tools/x.rs", "fn other() { portfolio(1) }\n\n\npub fn portfolio(c: u8) -> u8 {\n    c\n}\n")
+        self.write("tools/y.nut", "x\nfunction PrismaticAI::Modernize(b) {\n}\nthis.Modernize(b);\n")
+        self.write("research/matrix.md", "`src/net/server.cpp:3:Accept` `tools/x.rs:2-3:portfolio` `tools/y.nut:3-3:Modernize`\n")
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md", "--strict-lines")
+        self.assertEqual(code, 1)
+        self.assertIn("src/net/server.cpp:3:Accept does not hold 'Accept' there; it is on line 2, 6, 8 "
+                      "(--fix-lines moves the citation)", out)
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md", "--strict-lines", "--fix-lines")
+        self.assertEqual(code, 0, out)
         self.assertEqual((self.root / "research/matrix.md").read_text(encoding="utf-8"),
-                         "`src/net/server.cpp:4:Accept` and `src/net/server.cpp:1:Accept`\n")
+                         "`src/net/server.cpp:6:Accept` `tools/x.rs:4-5:portfolio` `tools/y.nut:2:Modernize`\n")
+        # Several lines and no declaration among them (or two): ambiguous, so nothing is moved.
+        self.write("src/net/server.cpp", "x\nAccept();\nx\nx\nAccept();\n")
+        self.write("tools/x.rs", "fn portfolio() {}\nx\nx\nfn portfolio() {}\n")
+        self.write("research/matrix.md", "`src/net/server.cpp:3:Accept` and `tools/x.rs:2:portfolio`\n")
+        code, out = self.run_cli("check", "--pathspec", "research/matrix.md", "--fix-lines")
+        self.assertEqual(code, 1)
+        self.assertNotIn("MOVED", out)
+        self.assertIn("it is on line 2, 5 (ambiguous: edit the citation)", out)
+        self.assertIn("it is on line 1, 4 (ambiguous: edit the citation)", out)
+        self.assertTrue(refs.declares("json ResourceMcpStatus()", "ResourceMcpStatus"))
+        self.assertFalse(refs.declares("\tResourceMcpStatus();", "ResourceMcpStatus"))
+        self.assertFalse(refs.declares("int x = Foo(1);", "Foo"))
 
     def test_fix_lines_needs_records_not_files(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
