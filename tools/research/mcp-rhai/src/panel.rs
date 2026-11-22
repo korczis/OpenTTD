@@ -4198,6 +4198,13 @@ mod tests {
                     // the tick and date of the game, each company with its books.
                     "openttd://companies" => res(json!({"game_tick": tick, "game_date": date, "data": {"companies": [
                         {"id": 1, "is_ai": true, "name": "A", "money": 5_000_000, "loan": 0, "max_loan": 300_000}]}})),
+                    // The server's queue the panel reads its pending approvals from (#211): every
+                    // set_settings call below is held as approval 40 + its place among the calls.
+                    "openttd://approvals" => res(json!({"data": {"approvals": calls.lock().unwrap().iter().enumerate()
+                        .filter(|(_, c)| c["name"] == "openttd.ai.set_settings")
+                        .map(|(i, c)| json!({"id": 41 + i, "tool": c["name"], "args": c["arguments"], "state": "pending",
+                                             "expired": false, "created_tick": tick, "expires_tick": tick + 74}))
+                        .collect::<Vec<_>>()}})),
                     other => res(json!({"error": format!("no {other}")})),
                 },
                 _ => {
