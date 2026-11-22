@@ -40,6 +40,7 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 | growing platforms in place (`rail_grow_max=6`) | 8 | -3.1% | 5 |
 | `rail_len=4` plus growth | 8 | -0.5% | 4 |
 | joining unserved same-cargo producers (`rail_feed`) | 8 | -1.9% | fired in 1 game |
+| planner scores source clusters and joins them at once (`rail_feed`, after 8b8e121e8a) | 8 | -8.8% | 3 joins in 8 games; 0.47 to 1.50 |
 | `invest_road_cap=20, max_routes=30` | 4 | -0.7% | - |
 | `air_routes_max=20, invest_air_cap=12, air_planes=3` | 4 | -12.0% | - |
 
@@ -50,8 +51,9 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
   (the planner) and sources chosen as clusters.
 - Size platforms at 4 tiles when a line is built. Growing them later gave the gain back.
 - Post-hoc feeding rarely fires, because a second unserved producer within station spread is rare.
-  Multi-source stations must be chosen by the planner, with `JoinSourceToStation` (growth.nut) doing
-  the building.
+  Scoring clusters in the planner did not help either (-8.8%, 3 joins in 8 games): on these 256x256
+  maps, same-cargo producers within one station's spread are rare. Multi-source needs feeders
+  (road or rail) from producers further away, not catchment joins.
 - Two lines that share both stations must tell their trains apart by shared orders. Otherwise each
   sells the other's trains.
 - A single replay is chaotic: `07472abe/m-0006` moved by up to 15% with no behavioural change.
