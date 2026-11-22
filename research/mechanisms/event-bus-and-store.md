@@ -40,6 +40,24 @@ flowchart LR
   `~/.local/state/prismatic-mcp/store/`, committed in batches at least twice a second. Tables:
   `runs`, `events`, `samples`. It is the cargo feature `store` and links the system libduckdb; a
   panel without it reports `"store": "off"`.
+- **Analytic views.** Every time a store opens, it recreates the views of `VIEWS` in
+  `bus_sinks.rs`, so a changed definition reaches old files too. Each view carries its
+  `COMMENT ON VIEW`. `GET /api/db/tables` lists them under `views` with their comment and columns.
+  They are generic over runs: every row carries `instance` and `run_ms` (the run's start), and the
+  current run is the largest `run_ms`. Read them instead of repeating their SQL. A test fails when
+  this list lacks a view.
+
+  | View | What it answers |
+  |---|---|
+  | `run_spans` | every run with its start and the next run's start |
+  | `company_month` | each company's last sample of each game month: value, money, loan, net, vehicles and the change from the month before |
+  | `company_latest` | each company's latest month and its rank by value in its run |
+  | `run_events` | every event with the run it belongs to |
+  | `news` | the news the owner's window showed, one column per field (`type`, `style`, `text`, `advice`, `refs`) |
+  | `advice` | the news of type advice: a lost or stuck vehicle, one that loses money, an old one, a failed order or renewal |
+  | `plan_decisions` | every `plan.*` decision with its choice and version |
+  | `kind_month` | how many events of each kind each game month raised |
+
 - **Read-only queries.** Only SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW, one statement; the
   connection also runs without external access. While the panel runs it holds the file's lock, so
   outside readers go through the route or the bus

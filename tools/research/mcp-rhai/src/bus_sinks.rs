@@ -166,6 +166,72 @@ pub fn read_only_sql(sql: &str) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------- the analytic views
+
+/// One analytic view of the store: its name, what it answers (its `COMMENT ON VIEW`, listed by
+/// `GET /api/db/tables`) and its query. Every view is recreated whenever a store opens, so a
+/// changed definition reaches every file, old ones included. Each is generic over runs: a row
+/// carries its `instance` and `run_ms` (the run's start), and the current run is the largest
+/// `run_ms`. Rhai, the planner and AlgoGlyph feeds read these instead of repeating the SQL.
+pub struct View {
+    pub name: &'static str,
+    pub comment: &'static str,
+    pub select: &'static str,
+}
+
+/// The views, in dependency order (a view only reads tables and the views before it).
+pub const VIEWS: &[View] = &[
+    View { name: "run_spans",
+           comment: "Every run of this store: instance, session, seed, run_ms (its start) and until_ms (the next run's start, or the end of time).",
+           select: "SELECT instance, session, seed, started_ms AS run_ms,
+                    coalesce(lead(started_ms) OVER (PARTITION BY instance ORDER BY started_ms), 9223372036854775807) AS until_ms
+                    FROM runs" },
+    View { name: "company_month",
+           comment: "Each company's last sample of each game month (YYYY-MM) of each run: value, money, loan, net, vehicles, with the change from the month before.",
+           select: "SELECT *, value - lag(value) OVER w AS value_change, money - lag(money) OVER w AS money_change,
+                    vehicles - lag(vehicles) OVER w AS vehicles_change
+                    FROM (SELECT r.instance, r.run_ms, r.seed, s.company, last(s.name ORDER BY s.ts_ms) AS name,
+                          substr(s.game_date, 1, 7) AS month, max(s.game_date) AS game_date,
+                          last(s.value ORDER BY s.ts_ms) AS value, last(s.money ORDER BY s.ts_ms) AS money,
+                          last(s.loan ORDER BY s.ts_ms) AS loan, last(s.net ORDER BY s.ts_ms) AS net,
+                          last(s.vehicles ORDER BY s.ts_ms) AS vehicles
+                          FROM samples s JOIN run_spans r ON s.instance = r.instance AND s.ts_ms >= r.run_ms AND s.ts_ms < r.until_ms
+                          GROUP BY ALL)
+                    WINDOW w AS (PARTITION BY instance, run_ms, company ORDER BY month)" },
+    View { name: "company_latest",
+           comment: "Each company's latest month of each run (company_month's columns) and its rank by value among that run's companies.",
+           select: "SELECT *, rank() OVER (PARTITION BY instance, run_ms ORDER BY value DESC) AS rank
+                    FROM (SELECT * FROM company_month
+                          QUALIFY row_number() OVER (PARTITION BY instance, run_ms, company ORDER BY month DESC) = 1)" },
+    View { name: "run_events",
+           comment: "Every event with the run it belongs to (run_ms, seed) beside its own columns.",
+           select: "SELECT r.run_ms, r.seed, e.* FROM events e
+                    JOIN run_spans r ON e.instance = r.instance AND e.ts_ms >= r.run_ms AND e.ts_ms < r.until_ms" },
+    View { name: "news",
+           comment: "The news the owner's window showed (news.shown), one column per field: type, style, text, and advice and refs when the game reports them.",
+           select: "SELECT instance, run_ms, seed, seq, game_date, data->>'type' AS type, data->>'style' AS style,
+                    data->>'text' AS text, data->>'advice' AS advice, data->'refs' AS refs
+                    FROM run_events WHERE kind = 'news.shown'" },
+    View { name: "advice",
+           comment: "The news of type advice: a lost or stuck vehicle, one that loses money, an old one, a failed order or renewal.",
+           select: "SELECT * FROM news WHERE type = 'advice'" },
+    View { name: "plan_decisions",
+           comment: "Every planning decision (plan.* events): its kind, decision, choice and version.",
+           select: "SELECT instance, run_ms, seed, seq, game_date, kind, data->>'decision' AS decision,
+                    data->'choice' AS choice, data->'version' AS version
+                    FROM run_events WHERE kind LIKE 'plan.%'" },
+    View { name: "kind_month",
+           comment: "How many events of each kind each game month of each run raised.",
+           select: "SELECT instance, run_ms, substr(game_date, 1, 7) AS month, kind, count(*) AS n
+                    FROM run_events WHERE game_date IS NOT NULL GROUP BY ALL" },
+];
+
+/// The statements that (re)create every view with its comment.
+pub fn views_sql() -> String {
+    VIEWS.iter().map(|v| format!("CREATE OR REPLACE VIEW {} AS {};\nCOMMENT ON VIEW {} IS '{}';\n",
+                                 v.name, v.select, v.name, v.comment.replace('\'', "''"))).collect()
+}
+
 // ---------------------------------------------------------------------- the DuckDB sink
 
 #[cfg(feature = "store")]
@@ -229,6 +295,7 @@ pub mod db {
 
         fn init(conn: Connection, instance: &str) -> Result<Store, String> {
             conn.execute_batch(TABLES).map_err(e)?;
+            conn.execute_batch(&super::views_sql()).map_err(|err| format!("views: {err}"))?;
             Ok(Store { conn, instance: instance.to_string() })
         }
 
@@ -561,20 +628,27 @@ pub fn query(sinks: Option<&Sinks>, sql: &str) -> (u16, Value) {
     (503, json!({"error": format!("store off: {why}")}))
 }
 
-/// The store's schema: `{store, tables: [{name, columns: [{name, type}]}]}`.
+/// The store's schema: `{store, tables: [{name, columns}], views: [{name, comment, columns}]}`,
+/// each column `{name, type}`; a view's comment is its row of `VIEWS`.
 pub fn tables(sinks: Option<&Sinks>) -> (u16, Value) {
-    let (code, out) = query(sinks, "SELECT table_name, column_name, data_type FROM information_schema.columns \
-                                    WHERE table_schema = 'main' ORDER BY table_name, ordinal_position");
+    let (code, out) = query(sinks, "SELECT c.table_name, c.column_name, c.data_type, t.table_type \
+                                    FROM information_schema.columns c JOIN information_schema.tables t \
+                                    ON c.table_schema = t.table_schema AND c.table_name = t.table_name \
+                                    WHERE c.table_schema = 'main' ORDER BY c.table_name, c.ordinal_position");
     if code != 200 {
         return (code, out);
     }
     let mut tables: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut views: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     for row in out["rows"].as_array().into_iter().flatten() {
-        let table = row[0].as_str().unwrap_or("").to_string();
-        tables.entry(table).or_default().push(json!({"name": row[1], "type": row[2]}));
+        let name = row[0].as_str().unwrap_or("").to_string();
+        let into = if row[3].as_str() == Some("VIEW") { &mut views } else { &mut tables };
+        into.entry(name).or_default().push(json!({"name": row[1], "type": row[2]}));
     }
     let tables: Vec<Value> = tables.into_iter().map(|(name, columns)| json!({"name": name, "columns": columns})).collect();
-    (200, json!({"store": sinks.map_or(json!("off"), Sinks::store_status), "tables": tables}))
+    let views: Vec<Value> = VIEWS.iter().map(|v| json!({"name": v.name, "comment": v.comment,
+                                                        "columns": views.remove(v.name).unwrap_or_default()})).collect();
+    (200, json!({"store": sinks.map_or(json!("off"), Sinks::store_status), "tables": tables, "views": views}))
 }
 
 #[cfg(test)]
@@ -650,6 +724,53 @@ mod tests {
 
     #[cfg(feature = "store")]
     #[test]
+    fn the_views_aggregate_each_run_by_month_rank_companies_and_split_news() {
+        let mut st = db::Store::open_in_memory("panel-v").unwrap();
+        // Two runs: the first one's rows never reach the second's.
+        st.insert_run(&json!("s"), Some(1), 10, (None, None, None)).unwrap();
+        let old = json!({"t": 1, "date": "1950-01-05", "companies": [{"id": 0, "name": "Old", "value": 999.0}]});
+        st.insert_samples(&sample_rows(&old, 20)).unwrap();
+        st.insert_run(&json!("s"), Some(2), 100, (None, None, None)).unwrap();
+        for (ts, date, a, b) in [(110, "1951-01-10", 100.0, 300.0), (120, "1951-01-28", 150.0, 300.0), (130, "1951-02-03", 180.0, 250.0)] {
+            let s = json!({"t": ts, "date": date, "companies": [{"id": 0, "name": "A", "value": a, "money": a, "fleet": 2},
+                                                                 {"id": 1, "name": "B", "value": b, "money": b, "fleet": 3}]});
+            st.insert_samples(&sample_rows(&s, ts)).unwrap();
+        }
+        let news = |seq: i64, ty: &str, text: &str| envelope(&json!({"seq": seq, "kind": "news.shown",
+            "data": {"type": ty, "style": "thin", "text": text, "advice": if ty == "advice" { json!("vehicle_lost") } else { Value::Null },
+                     "refs": if ty == "advice" { json!([{"vehicle": 7}]) } else { Value::Null }}}),
+            "panel-v", &json!("s"), Some(2), 140 + seq, Some(&json!({"t": 9, "date": "1951-02-04"})));
+        st.insert_events(&[news(1, "advice", "Train #8 is lost"), news(2, "general", "hello"),
+                           envelope(&json!({"seq": 3, "kind": "plan.portfolio", "data": {"decision": "bot.portfolio", "choice": {"k": 1}}}),
+                                    "panel-v", &json!("s"), Some(2), 150, Some(&json!({"t": 9, "date": "1951-02-04"})))]).unwrap();
+        let r = st.reader().unwrap();
+        let q = |sql: &str| r.query(sql).unwrap()["rows"].clone();
+        assert_eq!(q("SELECT count(*) FROM run_spans"), json!([[2]]));
+        assert_eq!(q("SELECT company, month, value, value_change FROM company_month WHERE run_ms = 100 ORDER BY company, month"),
+                   json!([[0, "1951-01", 150.0, null], [0, "1951-02", 180.0, 30.0], [1, "1951-01", 300.0, null], [1, "1951-02", 250.0, -50.0]]));
+        assert_eq!(q("SELECT company, name, rank FROM company_latest WHERE run_ms = 100 ORDER BY rank"), json!([[1, "B", 1], [0, "A", 2]]));
+        assert_eq!(q("SELECT name FROM company_latest WHERE run_ms = 10"), json!([["Old"]]));
+        assert_eq!(q("SELECT advice, refs->0->>'vehicle', text FROM advice"), json!([["vehicle_lost", "7", "Train #8 is lost"]]));
+        assert_eq!(q("SELECT count(*) FROM news"), json!([[2]]));
+        assert_eq!(q("SELECT decision, choice->>'k' FROM plan_decisions"), json!([["bot.portfolio", "1"]]));
+        assert_eq!(q("SELECT kind, n FROM kind_month ORDER BY kind"), json!([["news.shown", 2], ["plan.portfolio", 1]]));
+        // Reopening recreates them: a changed definition reaches old files.
+        assert!(r.query("SELECT comment FROM duckdb_views() WHERE view_name = 'company_latest'").unwrap()["rows"][0][0]
+                .as_str().is_some_and(|c| c.contains("rank")));
+    }
+
+    #[test]
+    fn every_view_is_documented_where_the_store_is() {
+        let doc = include_str!("../../../../research/mechanisms/event-bus-and-store.md");
+        for v in VIEWS {
+            assert!(doc.contains(&format!("`{}`", v.name)), "research/mechanisms/event-bus-and-store.md lacks the view `{}`", v.name);
+        }
+        let sql = views_sql();
+        assert_eq!(sql.matches("CREATE OR REPLACE VIEW").count(), VIEWS.len());
+    }
+
+    #[cfg(feature = "store")]
+    #[test]
     fn a_row_names_the_instance_its_envelope_is_about_and_a_publisher_without_ports_records_nulls() {
         let mut st = db::Store::open_in_memory("hub-1").unwrap();
         st.insert_run(&Value::Null, None, 10, (None, None, None)).unwrap();
@@ -679,6 +800,10 @@ mod tests {
         assert_eq!(s.bus()["topics_seen"], json!({"game.sample": 1}));
         let (code, t) = tables(Some(&s));
         assert_eq!((code, t["tables"].as_array().map(Vec::len)), (200, Some(3)));
+        // Every view exists in the file, with columns, and the sample is in the monthly views.
+        let views = t["views"].as_array().unwrap();
+        assert_eq!(views.len(), VIEWS.len());
+        assert!(views.iter().all(|v| v["columns"].as_array().is_some_and(|c| !c.is_empty())), "{views:?}");
         assert_eq!(query(None, "SELECT 1").0, 503);
         let _ = std::fs::remove_dir_all(dir);
     }
