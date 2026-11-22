@@ -403,6 +403,13 @@ class PrismaticAI extends AIInfo {
 			flags = CONFIG_INGAME,
 		});
 		AddSetting({
+			name = "air_add_full",
+			description = "Air yield (after AAAHogEx, whose planes fly 89% full): one more plane calls at an airport of ours only while the planes flying from it are this percent full: a plane added to an air route (fleet growth, InvestSurplus) needs the route's flying planes that full, a new autopilot route from an airport we have (air_reuse) the planes flying from that airport (fleet.nut AirRouteHasDemand, autopilot.nut BestAirPair; 0: off).",
+			min_value = 0, max_value = 100,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
 			name = "rail_twin_max",
 			description = "Rail capacity (after AAAHogEx's double track): most twin lines, each a second line with its own track and platforms between the same two industries, built when a line runs all its trains and still has a trainload waiting (steward.nut TwinLines; 0: off).",
 			min_value = 0, max_value = 24,
