@@ -264,8 +264,8 @@ flowchart LR
 3. **Stages** run in chain order. Each gets `params.common` merged under its own params. It sees
    every earlier proposal in `ctx.proposed`, so it can refine one or veto it. A stage that fails,
    is missing, or has a name that is not letters, digits and `_` is noted, and the chain goes on.
-   Stages are resolved by name (`import "policy/" + name`), so a new file in `policy/` can be used
-   from the chain without changing the runner.
+   Stages are resolved by name (`` import `policy/${name}` ``), so a new file in `policy/` can be
+   used from the chain without changing the runner.
 4. **Merge.** `first`: the earliest stage to propose a setting sets it. `priority` (the default):
    the highest `params.<stage>.priority` sets it, and a tie goes to the later stage. A veto from any
    stage drops the setting for the round.
@@ -297,14 +297,14 @@ any script):
            "params": {"rich": {"steps_max": 1}, "common": {"idle_budgets": 5}}}}
 ```
 
-**Hot reload and its limit.** The panel restarts a service within a second
-(`/api/services` `reload_every_ms`) when its own file or a top-level library it imports changes. It
-does not watch `policy/` today: the watcher stamps only import names without a `/`
-(`panel_scripts.rs` `stamps` → `path_of`), and the host's module resolver caches each module for
-the run. So an edit under `policy/` takes effect at the service's next start (stop and start it, or
-save `prismatic_tune.rhai`). A change to `policy.chain` takes effect at the next round. The
-library's parse test, `every_script_of_the_library_parses`, reads only the top-level folder, so it
-does not cover `policy/` either.
+**Hot reload.** The panel restarts a service within a second (`/api/services` `reload_every_ms`)
+when its own file or any library it imports changes, a library in a subdirectory included
+(`import "policy/lib"`). A template import (`` import `policy/${name}` ``) makes every script under
+the directory of its literal prefix a dependency, so an edit of any stage reloads the runner. The
+directories come from the tree (`panel_scripts.rs` `scripts_under`, `template_dirs_of`), not from
+a list of names; a stage file added to `policy/` is watched from the service's next start. A change
+to `policy.chain` takes effect at the next round. The library's parse test,
+`every_script_of_the_library_parses`, walks the library recursively, so `policy/` is parsed too.
 
 Verified offline on 2026-11-22: every file parsed (`mcp-rhai --panel http://127.0.0.1:9`), and a
 harness ran the runner's pure ctx builder, chain and merge on live GET data (company 0, 15.9× behind

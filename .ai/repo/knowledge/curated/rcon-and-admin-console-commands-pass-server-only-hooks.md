@@ -48,4 +48,5 @@ Re-verified against origin/master at 1a1297fce2 (owner-delegated review, task t-
 - src/network/network_admin.cpp:515-526 ReceiveAdminRemoteConsoleCommand sets _redirect_console_to_admin and runs IConsoleCmdExec.
 - src/console_cmds.cpp:164-172 ConHookServerOnly tests only _network_server.
 - src/console.cpp:95-103 IConsolePrint redirects to the rcon client or the admin.
+- Superseded on branch fix/mcp-token-never-printed (red-team finding 8): no console, local or remote, receives the token; `start` writes it to a 0600 file and prints the path, `token` prints the path and a fingerprint and still refuses a remote caller (PrismaticMcpConsoleIsRemote tests both redirects since PR #34).
 - Revised today: src/console_cmds.cpp:1949-1952 (prismatic_mcp start) and :1971-1972 (prismatic_mcp token) test only _redirect_console_to_client; _redirect_console_to_admin is not tested there (grep), so the token would reach an admin-port caller. Inferred from the source, not reproduced.

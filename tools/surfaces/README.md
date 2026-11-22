@@ -110,6 +110,7 @@ A region is a pair of HTML comments whose contents the generator owns:
 | `toc` | `depth=<n>` (default 3) | The headings that follow the region, levels 2 to `n`, nested and linked with their anchors |
 | `include` | `src=<document>`, `region=<name>` | The body of a marked region of another document (`<!-- name:begin -->`, any tool's marker, or a surfaces region of that generator), its relative links rewritten for this document and its comment lines dropped |
 | `facts` | `group=<name>`, `as=table\|line\|pie` | Numbers counted from the tracked files: each `[[facts.items]]` in `surfaces.toml` counts regex `matches` `in` a glob, tracked `files` matching a glob, or published `docs` under a path; the table shows what was counted, `line` is one sentence of bold numbers, `pie` a Mermaid pie |
+| `open-findings` | `as=pie` | What the records say is missing, blocked, handed off, not run or failed, one row per finding with its kind, its evidence (record and line), its follow-up issue and an OBSERVED/DERIVED label, computed by `findings.py` from the sources `[findings]` declares; or a pie by kind, each slice opening the table filtered to that kind ([Open findings](#open-findings)) |
 
 A fact marked `site_only = true` is left out of every Markdown region and shown only on the site's
 overview, where it is computed at build time. The document count is one: nearly every pull request
@@ -195,6 +196,58 @@ race. What keeps it from blocking:
 `tools/surfaces/test_refresh_branch.py` runs every path of `refresh-branch` against scratch
 repositories, and `tools/surfaces/test_surfaces_workflow.py` keeps the workflow from pushing to a
 pull request's branch again; both run in the Surfaces workflow.
+
+## Open findings
+
+A list of what is still missing restates the records it was read from, so it is a derived
+surface like any index. `findings.py` computes it, the `open-findings` region renders it (here:
+[`research/open-findings.md`](../../research/open-findings.md)), and `check` fails while the
+committed copy is stale. The generator names no fact of a repository: `[findings]` in
+`surfaces.toml` says where to look and which vocabulary the records use.
+
+| Source | Declared by | A finding when | Kind | Label |
+|---|---|---|---|---|
+| Issue records | `issues = { in, id, non_scope_of }` | an issue that is not done depends on one that is not done | `blocked` | DERIVED |
+| | | a `non_scope` entry of an issue whose status is in `non_scope_of` names no open issue (one that names only done issues was taken over and is dropped) | `out-of-scope` | DERIVED |
+| | | an `evidence[].result` holds an open status: the sentence around it | the status's kind | OBSERVED |
+| Tables | `tables = { in, columns, exclude }` | a row's cell under a header in `columns` begins with an open status | the status's kind | OBSERVED |
+| Front matter | `front_matter = [{ in, field, values, kind }]` | the document's `field` holds one of `values` | `kind` | OBSERVED |
+| Markers | `markers = { in, exclude }` | a passage is marked as below | the marker's `kind` | OBSERVED |
+| Live | `live = [{ id, kind, command, items, keep, record, text }]` | only under `findings.py --live`: each item of the command's JSON at `items` whose fields match `keep` | `kind` | DERIVED |
+
+`statuses` maps each open status of the records' vocabulary (`NOT RUN`, `PARTIAL`, ...) to a kind,
+matched as a whole token, case and all. `kinds` declares every kind, with its meaning and in the
+order the page lists them; a finding of an undeclared kind is a check finding. An issue's status
+comes from its lifecycle stamps: `completed_at` is done, `verified_at` verified, `started_at`
+active, none open; only a done issue satisfies a dependency, as in Majordomus.
+
+A finding's **follow-up** is the open issues that own it: what a blocked issue waits on, the
+issue whose evidence says NOT RUN while it is still open, the open issues a row or passage names
+(`id` is how an issue id is written), or a marker's `follow-up=`. With none the page says
+"none — needs an issue". The **evidence** is the record id or document with the line it is on.
+
+A sentence in prose is not a status cell, so a document marks the passage it means:
+
+```html
+... settings. <!-- open-finding kind=failed -->In that round no route was found.<!-- /open-finding --> Then ...
+
+<!-- open-finding kind=handoff follow-up=I0123 -->
+A paragraph that is the finding, up to the next blank line.
+```
+
+The marker takes `kind=` (required, a declared kind) and `follow-up=` (an issue record that
+exists). An inline marker runs to `<!-- /open-finding -->`, or to the end of its paragraph or the
+next marker; one on its own line takes the paragraph after it. Markers inside code fences or
+backticks are examples, not findings. `check` fails on an unknown attribute, an undeclared kind,
+a follow-up that names no issue and a closing marker with no opening one in its paragraph.
+
+Live sources answer for the moment (`majordomus plan drift` reads the forge and the branches), so
+committing them would make every check depend on the clock. `findings.py --live` prints them with
+the rest, and prints `NOT RUN: <id>: <why>` for a command that is missing or fails.
+
+`findings.py [--json] [--live]` prints the same list from the command line (from the tracked
+files only, where `sync` also reads files not yet added). `test_findings.py` runs every line of
+it against scratch repositories and a `surfaces sync`/`check` round trip.
 
 ## Generators
 
@@ -360,6 +413,7 @@ The project rule `project.published-surfaces-are-derived` states the contract.
 |---|---|
 | `surfaces` | Entry point. Creates the virtual environment, then runs `surfaces.py` |
 | `surfaces.py` | The generator: discovery, rendering, regions, check |
+| `findings.py` | The open findings: their sources, read through `[findings]` in `surfaces.toml` |
 | `assets/input.css`, `assets/app.js` | The site's stylesheet source and client script (Mermaid theme, ECharts builders, maximize) |
 | `diagrams-check` | Every Mermaid diagram of a built site renders, in Chrome |
 | `pages-check` | Every declared page of a built site works, in Chrome, with its own scenario |
