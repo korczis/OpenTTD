@@ -7,7 +7,7 @@
 
    The pure render functions are exported for Node (test/mesh.test.mjs). */
 (function mesh() {
-  const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const { esc, $, api } = globalThis.PanelKit ?? require('./shell.js').KIT;
   const num = (v) => (v === null || v === undefined || Number.isNaN(Number(v)) ? '–' : Number(v).toLocaleString('en-US'));
   const shell = typeof module !== 'undefined' ? require('./shell.js') : { UI: globalThis.PanelUI, TONE: globalThis.PanelTONE };
   const badge = (text, tone) => `<span class="${shell.UI.badge} ${shell.TONE[tone] || shell.TONE.gray}">${esc(text)}</span>`;
@@ -107,7 +107,6 @@
   if (typeof module !== 'undefined') { module.exports = { tone, ago, kpis, providersHtml, sessionRows, peersHtml, nodesHtml }; }
   if (typeof document === 'undefined') return;
 
-  const $ = (id) => document.getElementById(id);
   let lastAt = 0;
   const setState = (cls, text) => { $('m-live').className = `inline-block w-2 h-2 rounded-full ${cls}`; $('m-state').textContent = text; };
   const render = (m) => {
@@ -132,9 +131,9 @@
   const poll = async () => {
     if (document.hidden) return;
     try {
-      const r = await fetch('/api/mesh');
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      render(await r.json());
+      const m = await api('/api/mesh', undefined, { shownIn: 'm-state' });
+      if (!m.ok) throw new Error(m.status ? `HTTP ${m.status}` : m.error);
+      render(m);
     } catch (e) {
       setState('bg-red-500', lastAt ? `stale: ${e.message}` : `GET /api/mesh failed: ${e.message}`);
     }

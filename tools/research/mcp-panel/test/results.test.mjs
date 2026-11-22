@@ -183,7 +183,8 @@ test('/results: a refused start says why; an empty seed is left to the panel', a
 test('/results: Regenerate README posts and shows the new scoreboard', async () => {
   posts.length = 0;
   await $('sb-write').onclick();
-  assert.deepEqual(posts, [['/api/scoreboard', undefined]]);
+  // The one API client sends a bodiless POST as an empty JSON object.
+  assert.deepEqual(posts, [['/api/scoreboard', {}]]);
   assert.match($('scoreboard').innerHTML, /README current/);
   assert.match($('scoreboard').innerHTML, /README\.md regenerated; review the diff, then commit and push\./);
   assert.equal($('sb-write').disabled, true, 'a current README has nothing to regenerate');

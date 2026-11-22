@@ -3,7 +3,7 @@
 //!
 //! Usage:
 //!   mcp-hub [serve] [--port 8790] [--registry DIR] [--panel URL]... [--static DIR] [--audit-every S]
-//!                   [--bus-port N] [--no-store]
+//!                   [--bus-port N] [--no-store] [--bind IP] [--allow-origin O ...] [--token T]
 //!   mcp-hub check [--hub ws://127.0.0.1:8790/ws] [--event-wait SECONDS]
 //!   mcp-hub audit [--hub ws://127.0.0.1:8790/ws] [--json]
 //!   mcp-hub intent-check [--hub ws://127.0.0.1:8790/ws] ["<sentence>"]...
@@ -35,6 +35,8 @@ use std::time::{Duration, Instant};
 mod bus_sinks;
 #[path = "../hub.rs"]
 mod hub;
+#[path = "../web_access.rs"]
+mod web_access;
 #[path = "../panel_events.rs"]
 #[allow(dead_code)]
 mod panel_events;
@@ -283,10 +285,20 @@ fn sink_config(args: &[String], port: u16) -> hub::SinkConfig {
 
 fn serve(args: &[String]) -> i32 {
     let port = arg(args, "--port").unwrap_or_else(|| "8790".into());
-    let listener = match TcpListener::bind(format!("127.0.0.1:{port}")) {
+    // The one web access policy (src/web_access.rs): --bind, --allow-origin (repeatable), --token.
+    let mut web = web_access::Policy::default();
+    for (i, a) in args.iter().enumerate() {
+        if let Some(v) = args.get(i + 1).filter(|_| matches!(a.as_str(), "--bind" | "--allow-origin" | "--token")) {
+            if let Err(e) = web.flag(a, v) { eprintln!("mcp-hub: {e}"); return 2; }
+        }
+    }
+    let (web, note) = web.finish(port.parse().unwrap_or(0));
+    let listener = match TcpListener::bind(format!("{}:{port}", if web.bind.is_ipv6() { format!("[{}]", web.bind) } else { web.bind.to_string() })) {
         Ok(l) => l,
-        Err(e) => { eprintln!("mcp-hub: cannot bind 127.0.0.1:{port}: {e}"); return 1; }
+        Err(e) => { eprintln!("mcp-hub: cannot bind {}:{port}: {e}", web.bind); return 1; }
     };
+    if let Some(n) = note { println!("mcp-hub: {n}"); }
+    web_access::install(web);
     let panels: Vec<String> = args.iter().enumerate().filter(|(_, a)| *a == "--panel").filter_map(|(i, _)| args.get(i + 1).cloned()).collect();
     let cfg = hub::Config {
         registry: arg(args, "--registry").map(PathBuf::from).unwrap_or_else(default_registry),
@@ -328,8 +340,8 @@ fn main() {
         "check" => (&["--hub", "--event-wait"], &["--hub", "--event-wait"]),
         "audit" => (&["--hub", "--json"], &["--hub"]),
         "intent-check" => (&["--hub"], &["--hub"]),
-        _ => (&["--port", "--panel", "--registry", "--static", "--audit-every", "--bus-port", "--no-store", "--help"],
-              &["--port", "--panel", "--registry", "--static", "--audit-every", "--bus-port"]),
+        _ => (&["--port", "--panel", "--registry", "--static", "--audit-every", "--bus-port", "--no-store", "--help", "--bind", "--allow-origin", "--token"],
+              &["--port", "--panel", "--registry", "--static", "--audit-every", "--bus-port", "--bind", "--allow-origin", "--token"]),
     };
     if let Some(f) = unknown_flag(rest, known, valued) {
         eprintln!("mcp-hub {cmd}: unknown option {f} (-h for usage)");

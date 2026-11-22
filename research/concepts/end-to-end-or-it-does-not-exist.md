@@ -9,7 +9,7 @@ prove that the page shows them, that the button calls them, or that the pieces a
 The fork's web UI is the control panel and the hub
 ([mechanism: control panel](../mechanisms/control-panel.md), [mechanism: hub](../mechanisms/hub.md)).
 The rule
-[`web-ui-is-covered-end-to-end.v1.md`](../../.ai/repo/rules/project/web-ui-is-covered-end-to-end.v1.md)
+[`web-ui-is-covered-end-to-end.v2.md`](../../.ai/repo/rules/project/web-ui-is-covered-end-to-end.v2.md)
 is blocking. It quotes the owner's order of 2026-11-18 and requires:
 
 - **Pages are derived.** The pages are every page of every app in the one shell's registry,

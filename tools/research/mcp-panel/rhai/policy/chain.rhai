@@ -29,10 +29,12 @@ fn chain() {
                 // Money counts as idle above cash_reserve + this many line budgets.
                 idle_budgets: 3,
                 // The growth direction of every knob a stage may push: +1 raises it, -1 lowers it
-                // (invest_ppv_div: a lower divisor adds a vehicle at a lower yield).
+                // (invest_ppv_div rises: fleet.nut InvestSurplus skips a route while
+                // ppv * invest_ppv_div < price, so a larger divisor adds a vehicle at a lower yield;
+                // the first live round of 2026-11-22 proposed 3 -> 1, which would have stopped it).
                 growth: #{ rich_growth: 1, invest_air_cap: 1, invest_road_cap: 1, max_routes: 1,
                            air_routes_max: 1, air_reuse: 1, own_lines: 1, rail_twin_max: 1,
-                           invest_ppv_div: -1, rich_air_cap_max: 1, rich_served_below: 1,
+                           invest_ppv_div: 1, rich_air_cap_max: 1, rich_served_below: 1,
                            airport_fill: 1, rich_budgets: -1 },
             },
             rich: #{
