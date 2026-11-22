@@ -820,6 +820,14 @@ month it records each company's value, money, loan and vehicles from the console
 command, and it writes `research/results/ab-<time>-seed<N>.{json,md}`. A result is a run that
 completed, not a claim.
 
+Each page carries charts derived from its JSON alone, between `<!-- ab-charts:begin -->` and
+`<!-- ab-charts:end -->`: company value per game month (A as bars, B as a line), A's lead over B per
+month (below zero while B is ahead), and the fleet per month for both. Each month's mark opens that
+month's row of A's table (the lead's opens B's row). `tools/research/mcp-ab --render` rewrites the
+region on every tracked page without starting a game, and `tools/research/mcp-ab --render --check`
+exits 11 while one is stale; `tools/surfaces/surfaces sync` and `check` run them (generator
+`ab-charts` in `surfaces.toml`), so a change of the charts reaches every page in one commit.
+
 ## Planner v4: freight, and a portfolio chosen by AlgoGlyph
 
 - **Freight pairs.** Every producing industry in `openttd://world/graph` (with last month's

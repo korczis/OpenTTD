@@ -128,3 +128,10 @@ check = ["python3", "-B", "tools/research/town-model/derive.py", "--check"]
 id = "ai-battle"
 outputs = ["research/ai-battle/README.md"]
 check = ["python3", "-B", "tools/research/ai-battle/battle.py", "check"]
+
+# Every A/B record page's charts, derived from its JSON (written only by a run of mcp-ab).
+[[generators.items]]
+id = "ab-charts"
+outputs = ["research/results"]
+sync = ["tools/research/mcp-ab", "--render"]
+check = ["tools/research/mcp-ab", "--render", "--check"]
