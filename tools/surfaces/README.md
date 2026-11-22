@@ -162,6 +162,32 @@ force physics, three.js for 3D, p5 for generative art, Mermaid for diagrams in M
 Flowbite for the shell. Chart.js, Cytoscape and the like would be a second layer for a view
 ECharts already draws, so they are listed.
 
+## Parallel merges
+
+A count in a region changes with every pull request that adds what it counts. Two pull requests
+that each add a document both write the same new number, both pass on their own, and the second
+to merge leaves `README.md` one short. Waiting for every owner to re-sync turns auto-merge into a
+race, so the workflow keeps the branches current itself:
+
+- **On every same-repository pull request, and on every push to the default branch for each open
+  pull request with auto-merge**, the `refresh` job runs `tools/surfaces/refresh-branch --push
+  <branch>`. It merges `origin/master` into the branch, resolves a conflict inside a generated
+  region by taking master's side, runs `surfaces sync`, and commits "Doc: [Surfaces] Regenerate
+  derived regions after merging master" only when the sync changed something. A conflict
+  anywhere else aborts the merge and leaves the branch to its owner (exit 10).
+- **The push is a fast-forward of what was fetched, never a force.** When the owner pushed in the
+  meantime it is refused, and the next push to master retries.
+- **A push made with `GITHUB_TOKEN` starts no workflow**, so the job dispatches Surfaces on the
+  branch; that run reports "Check and build" on the new head, which is what branch protection and
+  auto-merge wait for. Dispatched runs do not refresh again, so a sync commit cannot start another.
+- **The default branch builds from regenerated regions**, so a count that still slipped through
+  never stops the site and the wiki from deploying; the next pull request brings the file back in
+  step.
+
+Locally, `tools/surfaces/refresh-branch <branch>` does the same without pushing.
+`tools/surfaces/test_refresh_branch.py` runs every path of it against scratch repositories, in
+the Surfaces workflow.
+
 ## Generators
 
 Some derived text belongs to another tool: a region under that tool's own markers, or a whole
