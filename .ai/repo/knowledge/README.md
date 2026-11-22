@@ -34,10 +34,11 @@ value.
 <!-- surfaces:begin docs-index dir=.ai/repo/knowledge as=pie by=status -->
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by status
-    %% links: README.md?col=Status&filter=verified#records-generated | README.md?col=Status&filter=superseded#records-generated | README.md?col=Status&filter=active#records-generated
+    %% links: README.md?col=Status&filter=verified#records-generated | README.md?col=Status&filter=superseded#records-generated | README.md?col=Status&filter=active#records-generated | README.md?col=Status&filter=candidate#records-generated
     "verified" : 84
     "superseded" : 3
     "active" : 2
+    "candidate" : 1
 ```
 <!-- surfaces:end docs-index -->
 
@@ -46,7 +47,7 @@ pie showData title Documents under .ai/repo/knowledge/ by status
 pie showData title Documents under .ai/repo/knowledge/ by route
     %% links: README.md?col=Route&filter=platform#records-generated | README.md?col=Route&filter=project#records-generated | README.md?col=Route&filter=#records-generated | README.md?col=Route&filter=enforcement#records-generated | README.md?col=Route&filter=documentation#records-generated | README.md?col=Route&filter=generator#records-generated
     "platform" : 61
-    "project" : 16
+    "project" : 17
     "unknown" : 4
     "enforcement" : 3
     "documentation" : 3
@@ -58,7 +59,7 @@ pie showData title Documents under .ai/repo/knowledge/ by route
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by epistemics
     %% links: README.md?col=Epistemics&filter=observed#records-generated | README.md?col=Epistemics&filter=decided#records-generated | README.md?col=Epistemics&filter=#records-generated | README.md?col=Epistemics&filter=inferred#records-generated
-    "observed" : 82
+    "observed" : 83
     "decided" : 3
     "unknown" : 2
     "inferred" : 2
@@ -73,6 +74,7 @@ pie showData title Documents under .ai/repo/knowledge/ by epistemics
 | [Candidate records](candidates/README.md) | active |  |  | What the tool derived from the ledger and git at an episode boundary and nobody has reviewed yet, discovered as a knowledge source class. |
 | [Held-start duel pairs on three seeds did not confirm air_add_waiting=10 with catchment_stops=8, which won the paired battle](candidates/held-start-duel-pairs-did-not-confirm-the-air-and-catchment-defaults.md) | superseded | project | observed | Before claiming a bot default from duels, or reading the battle's paired win of air_add_waiting/catchment_stops; ten-year held-start pairs were inconclusive while 36 paired battle seeds favoured the change. |
 | [MCP approvals outlive a server stop, a token rotation and a new world; only their tick TTL and use retire them](candidates/mcp-approvals-survive-stop-rotation-and-a-new-world.md) | superseded | platform | observed | Before treating a token rotation or a restart of the MCP server as revoking what was approved. |
+| [PrismaticAI trails AAAHogEx on network breadth; raising its caps or growing its stations does not close the gap](candidates/prismatic-ai-falls-behind-aaahogex-on-breadth-not-caps.md) | candidate | project | observed | Before tuning PrismaticAI caps, station growth or feeders to catch AAAHogEx; replayed A/Bs on 2026-11-22 show which levers move value and which do not. |
 | [openttd://vehicles reports the front vehicle's cargo capacity only, so a train led by an engine shows 0](candidates/vehicles-resource-gives-the-front-vehicles-capacity-only.md) | superseded | platform | observed | Before computing a fleet's or a route's capacity from openttd://vehicles. |
 | [Curated notes](curated/README.md) | active |  |  | What this repository chose to write about itself, discovered as a knowledge source class. |
 | [A PrismaticAI change that moves a few units of money in every game sends exact replays down other paths](curated/a-bot-change-that-moves-money-in-every-game-replays-as-chaos.md) | verified | project | observed | Before reading an ablate --match A/B of a PrismaticAI change: replays are exact, so any game-state difference, even a few units of interest, diverges the whole game, and a few replays then measure chaos, not the change. |

@@ -24,6 +24,7 @@ running server (and the hub's catalogue across every instance).
 Each `resources/read` is served in its own poll, so a client reading several while the game runs
 gets several ticks. `openttd.resources.read_many {uris: [...]}` (`08-tool-catalog.md`) builds them
 all in one call on the main thread instead: one `game_tick` for every answer, without a pause.
+`mcp-plan --capture` uses it when the server lists it (`research/battlebrain/README.md`).
 
 Rules honored: unknown → `null`/explicit availability (never coerced to 0); invalid uri → JSON-RPC
 `-32602`; lists sorted by stable id (pool ascending index); money states its unit; date states
