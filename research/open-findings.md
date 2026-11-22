@@ -187,7 +187,7 @@ pie showData title Open findings by kind
 | not-run | C3 performance: NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):268 | none — needs an issue | OBSERVED |
 | not-run | C4 strategy (H2): NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):269 | none — needs an issue | OBSERVED |
 | not-run | C5 operator safety: NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):270 | none — needs an issue | OBSERVED |
-| not-run | A client restart after a crash (the supervisor fix): NOT RUN: no crash happened in this run | [research/coplay.md](coplay.md):59 | none — needs an issue | OBSERVED |
+| not-run | A client restart after a crash (the supervisor fix): NOT RUN: no crash happened in this run | [research/coplay.md](coplay.md):72 | none — needs an issue | OBSERVED |
 | not-run | Mesh records: NOT RUN, because the panel had no $MAJORDOMUS_URL. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):116 | none — needs an issue | OBSERVED |
 | not-run | A remote human joining over the internet: NOT RUN: needs a second machine and a person | [research/real-game.md](real-game.md):105 | none — needs an issue | OBSERVED |
 | not-run | An invite-only game through the coordinator: NOT RUN | [research/real-game.md](real-game.md):106 | none — needs an issue | OBSERVED |
