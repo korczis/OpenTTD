@@ -124,8 +124,10 @@ until then.
 
 A chart is a number drawn, so it is generated like one. Every chart in a document is a Mermaid
 `pie` or `xychart-beta` block written by a region (`facts as=pie`, `ai-* as=pie|bar`,
-`table-chart`) or by a tool between its own markers: the README scoreboard and every A/B record
-page (`tools/research/mcp-ab --render`, markers `ab-charts`), drawn from its record's JSON and
+`table-chart`) or by a tool between its own markers: the README scoreboard, every duel page
+(`tools/research/mcp-duel --render`, markers `duel-charts`), every AI battle record page
+(`battle.py render`, markers `battle-charts`) and every A/B record page
+(`tools/research/mcp-ab --render`, markers `ab-charts`), each drawn from its record's JSON and
 declared as a generator below. GitHub and the wiki render Mermaid natively, so a reader of the
 repository sees the chart without a build.
 

@@ -5,7 +5,8 @@ kind: knowledge
 class: fact
 title: "Held-start duel pairs on three seeds did not confirm air_add_waiting=10 with catchment_stops=8, which won the paired battle"
 description: "Before claiming a bot default from duels, or reading the battle's paired win of air_add_waiting/catchment_stops; ten-year held-start pairs were inconclusive while 36 paired battle seeds favoured the change."
-status: candidate
+status: superseded
+superseded_by: duels-run-side-by-side-are-noisy
 epistemics: observed
 date: 2026-11-19
 tags: [duel, a-b, prismatic-ai, defaults, noise, ai-battle]
@@ -61,3 +62,7 @@ never flew: 20 vehicles, 0 aircraft. They measure only `catchment_stops`, and ar
   seeds (`/api/promotions`), which compare on many fresh maps.
 - In these pairs the planned bot (with `a23cbe0df4`) beat the unplanned rival by about 21% on seed
   4242 in both arms. That is the fix's effect, not the defaults'.
+
+# Rejected
+
+Superseded: the air_add_waiting=10 / catchment_stops=8 defaults it tests are gone. 6111dc0fef (2026-11-19 22:45, after this record) made the GA elite the default and named these duels as why held-start pairs were not its evidence; 962699034c changed the defaults again. At 1a1297fce2 tools/research/prismatic-ai/PrismaticAI/info.nut:390 gives air_add_waiting medium_value 20 and :355 catchment_stops 8 (src/script/script_info.cpp:184 takes medium_value as the default), so no 10/8 default exists to confirm. The duel results stay in research/results/duel-20261119T*; the lesson that ten-year held-start pairs resolve only large effects is kept by duels-run-side-by-side-are-noisy. Note: the descriptions in info.nut:353 and :388 still say default 2 and 0, out of step with the values.
