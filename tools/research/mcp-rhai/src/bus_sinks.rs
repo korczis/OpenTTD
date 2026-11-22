@@ -770,6 +770,15 @@ mod tests {
         st.insert_events(&[news(1, "advice", "Train #8 is lost"), news(2, "general", "hello"),
                            envelope(&json!({"seq": 3, "kind": "plan.portfolio", "data": {"decision": "bot.portfolio", "choice": {"k": 1}}}),
                                     "panel-v", &json!("s"), Some(2), 150, Some(&json!({"t": 9, "date": "1951-02-04"})))]).unwrap();
+        // build_audit.rhai's writes: the month's last audit of a company wins, other keys stay out.
+        let audit = |seq: i64, key: &str, date: &str, no_exit: i64, fresh: Value| envelope(&json!({"seq": seq, "kind": "rhai.shared",
+            "data": {"op": "set", "key": key, "rev": seq, "writer": "build_audit", "value": {"company": 0, "date": date, "month": &date[..7],
+                "depots": {"road": 3, "rail": 0, "ship": 1}, "exits": {"open": 2, "dead_end": 0, "no_exit": no_exit},
+                "stops": {"drive_through": 1, "bay": 1, "drive_through_share": 0.5}, "duplicate_depots": 1, "duplicate_stations": 0,
+                "defects_total": no_exit + 2, "new_keys": fresh}}}),
+            "panel-v", &json!("s"), Some(2), 160 + seq, Some(&json!({"t": 9, "date": date})));
+        st.insert_events(&[audit(4, "audit.0", "1951-01-05", 1, json!([])), audit(5, "audit.0", "1951-01-20", 2, json!(["no_exit:road:9"])),
+                           audit(6, "audit.0", "1951-02-01", 2, json!([])), audit(7, "audit.cfg", "1951-02-01", 9, json!([]))]).unwrap();
         let r = st.reader().unwrap();
         let q = |sql: &str| r.query(sql).unwrap()["rows"].clone();
         assert_eq!(q("SELECT count(*) FROM run_spans"), json!([[2]]));
@@ -780,7 +789,13 @@ mod tests {
         assert_eq!(q("SELECT advice, refs->0->>'vehicle', text FROM advice"), json!([["vehicle_lost", "7", "Train #8 is lost"]]));
         assert_eq!(q("SELECT count(*) FROM news"), json!([[2]]));
         assert_eq!(q("SELECT decision, choice->>'k' FROM plan_decisions"), json!([["bot.portfolio", "1"]]));
-        assert_eq!(q("SELECT kind, n FROM kind_month ORDER BY kind"), json!([["news.shown", 2], ["plan.portfolio", 1]]));
+        assert_eq!(q("SELECT kind, month, n FROM kind_month ORDER BY kind, month"),
+                   json!([["news.shown", "1951-02", 2], ["plan.portfolio", "1951-02", 1], ["rhai.shared", "1951-01", 2], ["rhai.shared", "1951-02", 2]]));
+        assert_eq!(q("SELECT company, month, game_date, road_depots, ship_depots, open_depots, no_exit_depots, dead_end_depots,
+                      duplicate_depots, duplicate_stations, drive_through_stops, bay_stops, drive_through_share, defects, new_defects
+                      FROM build_audit ORDER BY month"),
+                   json!([[0, "1951-01", "1951-01-20", 3, 1, 2, 2, 0, 1, 0, 1, 1, 0.5, 4, 1],
+                          [0, "1951-02", "1951-02-01", 3, 1, 2, 2, 0, 1, 0, 1, 1, 0.5, 4, 0]]));
         // The store documents itself: every table, view and column, a view's columns too, has its comment.
         let undocumented = q("SELECT name, column_name FROM schema_doc WHERE comment IS NULL OR comment = ''");
         assert_eq!(undocumented, json!([]), "schema_doc rows without a comment");
