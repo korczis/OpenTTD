@@ -719,7 +719,7 @@ Prismatic or another AI.
 
 | Surface | What it does |
 |---|---|
-| `openttd.view.news.list`, `GET /api/news?limit=N`, Rhai `api_news(#{limit: 5})` | the news this client has shown, newest first: text, type (`company_info`, `arrival_company`, `subsidies`, ...), style, date |
+| `openttd.view.news.list`, `GET /api/news?limit=N`, Rhai `api_news(#{limit: 5})` | the news this client has shown, newest first: text, type (`company_info`, `arrival_company`, `subsidies`, ...), style, date; for an advice item `advice` (`vehicle_lost`, `train_stuck`, `vehicle_unprofitable`, `vehicle_old`, `order`, ...); and `refs`, the objects the item names as the news window resolves them (`{vehicle, unit, owner}`, `{station}`, `{tile, x, y}`, `{industry}`, `{town}`, `{engine}`). The panel publishes each item as `news.shown`, so these fields reach the bus, the store's `news` and `advice` views and Rhai `events()` |
 | `openttd.view.news.show`, `POST /api/news {text, style?, tile / x,y / town / vehicle}` | a news message in the owner's window. With a target it gets a viewport there (style `thin`); `normal` is a newspaper and `small` an information window. It is local to that client: GUI state, not game state, never sent to the server |
 | `openttd.view.news.close`, `POST /api/news/close` | close the news window |
 | event `news.shown` (`/api/events?kinds=news`, SSE) | every new item, from the game or from a caller |

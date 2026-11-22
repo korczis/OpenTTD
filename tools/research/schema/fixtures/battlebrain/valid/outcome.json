@@ -1,0 +1,35 @@
+{
+ "case": "a well-formed outcome",
+ "value": {
+  "at": {
+   "date": "1961-02-10",
+   "tick": 76000
+  },
+  "body": {
+   "decision": "bb:59d4dbf001487c5fd9bd272c276cd823ec9e86df448439032f7d839813f5f029",
+   "executor": {
+    "id": "mcp-panel"
+   },
+   "observed": {
+    "built": true,
+    "fr_from": 12
+   },
+   "result": "applied"
+  },
+  "derived_from": [
+   "bb:59d4dbf001487c5fd9bd272c276cd823ec9e86df448439032f7d839813f5f029"
+  ],
+  "id": "bb:4a7e3c9dd191fea9a8007988e915ae7a74f054cef8aea93248aa710e48f0c66b",
+  "producer": {
+   "id": "mcp-panel",
+   "version": "fixture"
+  },
+  "schema": "battlebrain-record/v1",
+  "scope": {
+   "company": 1,
+   "instance": "research-fixture"
+  },
+  "status": "observed",
+  "type": "outcome"
+ }
+}

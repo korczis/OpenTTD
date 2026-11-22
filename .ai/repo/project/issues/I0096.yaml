@@ -1,0 +1,52 @@
+id: I0096
+milestone: prismatic-steers-a-company-through-the-bridge
+title: "Battlebrain runs in shadow on the planner's own snapshot: same inputs, its own freight-line decision recorded beside the planner's choice, and the executor refuses any shadow decision"
+slug: battlebrain-shadow
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "For the freight-line decision, battlebrain applies policy freight-margin@1 to the candidates planner v4 produced from one captured snapshot, records the planner's choice and its own as separate candidates with a decision in mode shadow, and reports where they differ and why. A shadow decision can never be applied: the directive's decision block says mode shadow and the executor refuses it."
+why: "Phase 03 of the owner-run Battlebrain prompt pack: shadow evidence is the gate before any cutover (I0095 defined the contracts)."
+scope:
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/mcp-rhai/src/battlebrain_policy.rs"
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-plan.rs"
+  - "tools/research/mcp-rhai/src/panel_decision.rs"
+  - "tools/research/schema/**"
+  - "research/prismatic-bridge/decision-contract.schema.json"
+  - "research/battlebrain/**"
+non_scope:
+  - "Cutover: no shadow decision reaches a game"
+  - "Any change in prismatic-platform or algoglyph"
+  - "Starting a game: captures read a running research panel only, with its owner's consent"
+depends_on:
+  - I0095
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#a-decision-contract-is-defined"
+acceptance_criteria:
+  - "freight-margin@1 is a pure function of the planner's output, the company's money and loan headroom and its parameters, with a documented deterministic tie-break; unit tests cover adopt, HOLD on margin, HOLD on reserve and ties"
+  - "the decision block carries mode shadow|live; a shadow block is refused by the executor before any step (panel_decision.rs test)"
+  - "mcp-plan --capture <dir> writes every openttd:// read with its sha256 and the game tick; --snapshot <dir> replays it and refuses a file whose digest differs (test)"
+  - "battlebrain shadow on a captured, token-free snapshot writes the planner's candidate, its own candidate and a shadow decision, valid against battlebrain-record/v1, and a comparison naming the solver (kernel or built-in fallback), cost, profit, payback and the reason for any divergence"
+validation:
+  - "cargo test --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-plan --bin mcp-panel"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+started_at: 2026-11-22T10:03:24Z
+started_event: sha256:866f56c68add1d66652c854a7017d784316978a4d8d7a81ea754dbb39aa3b305
+updated_at: 2026-11-22T10:03:42Z
+verified_at: 2026-11-22T10:03:31Z
+verified_event: sha256:a9ad989fd5d57e06d48216927c327bae660adbdf247ab5ed104d0f268e68b7a2
+completed_at: 2026-11-22T10:03:42Z
+completed_event: sha256:3df207fd0320eae553b201f0f9b2e158ae0403b84dc46d4cd7e3f5b233ff0a95
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-plan --bin mcp-panel; mcp-plan --capture (one read-only pass of :8800) and --snapshot twice; battlebrain snapshot + shadow on the capture, company 3"
+    result: "release tests on the tree with origin/master and feature/prismatic-ai-planned-freight-only merged: battlebrain 26/26, mcp-panel 221/221 (incl. decision_gate refuses shadow 409 / invalid 422 before any step), mcp-plan 45/45 (incl. capture replay refuses a changed file). Real capture: two replays byte-identical, tampered towns.json refused; shadow on both replays byte-identical, records valid battlebrain-record/v1, block mode shadow; divergence input_model_discrepancy (planner line 127603 > budget 125011). Finding: the selected line is unpriced (24 unpriced lines) -> cutover threshold requires track found. NOT RUN: any live decision (shadow only); coherent capture (game running)."
+    artifact: "research/results/battlebrain-shadow-20261122T084607Z-coplay-8800.json"
+    commit: e3d666890aa2825600b15d6c2dbd801ec6e5257e
+    recorded_at: 2026-11-22T10:03:37Z

@@ -1,0 +1,642 @@
+{
+ "case": "an input unit the contract does not know",
+ "catalogue": {
+  "commit": "1b8e009059c299b29d7a829d2d51d4e057304d4d",
+  "kernels": [
+   {
+    "engine": "custom",
+    "id": "action-plan",
+    "input": "{actions: [{id, kind, label?, cost?, income?, loan?, repeat? | amount?+step?, after?: [ids], params?: {the executor's arguments, carried onto each step}}], cash, loan?, max_loan?, loan_step? (openttd://companies loan_step: the step of repay/repay_loan/borrow actions that give none)}",
+    "title": "Plan, then act"
+   },
+   {
+    "engine": "stochastic",
+    "id": "bayes-update",
+    "input": "{successes, failures, prior?: \"flat\" | \"jeffreys\" | \"sceptical\" | \"hopeful\" | [a, b], credible?: 0.8 | 0.9 | 0.95 | 0.99, cells?: 100 | 200 | 400}",
+    "title": "Bayesian updating"
+   },
+   {
+    "engine": "custom",
+    "id": "human-pointing",
+    "input": "{from: [x, y], to: [x, y], width (target px), seed (integer >= 0), model?: {fitts_a, fitts_b, rate_hz, curvature, overshoot_from, tremor, speed}, drag?: boolean}",
+    "title": "A hand on the mouse"
+   },
+   {
+    "engine": "grid",
+    "id": "knapsack-dp",
+    "input": "the kernel's data form (see its fromData)",
+    "title": "Knapsack by dynamic programming"
+   },
+   {
+    "engine": "stochastic",
+    "id": "pert-monte-carlo",
+    "input": "{tasks: [{name?, a, m, b, after: number[]}] in topological order, runs? (default 10000), lambda? (default 4), seed? (default 1)}",
+    "title": "PERT schedule by Monte Carlo"
+   },
+   {
+    "engine": "numeric",
+    "id": "simplex-method",
+    "input": "{A: number[][], b: number[] (each >= 0), c: number[], rule?: \"bland\" | \"dantzig\"}: maximise c\u00b7x, A x <= b, x >= 0",
+    "title": "Simplex method"
+   },
+   {
+    "engine": "custom",
+    "id": "track-planning",
+    "input": "{map?: openttd://map data, ways?, terrain?, prices?, bridges?, railtype? | heights: string[] (2 hex digits a tile) | number[][], types?: string[], roads?: string[] (1 hex digit a tile), blocked?: [x, y][], from: {x, y, dir: NE|SE|SW|NW}, to: {x, y, dir?}, costs?, rules?, meta?: boolean}. from and to are the station tiles themselves (a station site's end tile, not the tile beyond it): the plan starts on the tile after from and stops on the tile before to. Pieces and spans keep their shape: track {kind, x, y, track, piece, heading, z, foundation, incline, crossing, cleared}; bridge or tunnel {kind, from, to, heading, axis, length, z, foundations}",
+    "title": "Track planner"
+   },
+   {
+    "engine": "custom",
+    "id": "transport-investment",
+    "input": "{places: [{id, x, y}], demands: [{id, from, to, cargo, volume, payment, td1, td2, two_way?, production_cost?}], modes: [{mode, build_per_tile, terminal, vehicle?: {name, price, running_per_year, capacity, speed_kmh}, vehicles?: {<cargo>: vehicle}, overhead_periods, min_leg?, max_leg?, length_factor?}], hubs?: [ids], prebuilt?: [{from, to, mode}], params?: {payback_months, load_factor, transfer_periods, transfer_cost_per_unit, max_legs, k, budget?}}",
+    "title": "What to build, by return"
+   },
+   {
+    "engine": "graph",
+    "goal": "articulation",
+    "id": "articulation-points",
+    "params": [
+     {
+      "key": "edgesPerVertex",
+      "value": 1.2
+     }
+    ],
+    "shape": "geometric",
+    "title": "Articulation points and biconnected components"
+   },
+   {
+    "engine": "graph",
+    "goal": "sssp",
+    "id": "bellman-ford",
+    "params": [
+     {
+      "key": "cycleWeight",
+      "value": -40
+     }
+    ],
+    "shape": "signed",
+    "title": "Bellman\u2013Ford"
+   },
+   {
+    "engine": "graph",
+    "goal": "matching",
+    "id": "bipartite-matching",
+    "params": [],
+    "shape": "bipartite",
+    "title": "Bipartite matching"
+   },
+   {
+    "engine": "graph",
+    "goal": "mst",
+    "id": "boruvka-mst",
+    "params": [
+     {
+      "key": "maxWeight",
+      "value": 9
+     }
+    ],
+    "shape": "geometric",
+    "title": "Bor\u016fvka's algorithm"
+   },
+   {
+    "engine": "graph",
+    "goal": "betweenness",
+    "id": "brandes-betweenness",
+    "params": [],
+    "shape": "communities",
+    "title": "Betweenness centrality (Brandes)"
+   },
+   {
+    "engine": "graph",
+    "goal": "bfs",
+    "id": "breadth-first-search",
+    "params": [],
+    "shape": "grid",
+    "title": "Breadth-first search"
+   },
+   {
+    "engine": "graph",
+    "goal": "bridges",
+    "id": "bridges",
+    "params": [
+     {
+      "key": "edgesPerVertex",
+      "value": 1.2
+     }
+    ],
+    "shape": "geometric",
+    "title": "Bridges"
+   },
+   {
+    "engine": "graph",
+    "goal": "centrality",
+    "id": "centrality-comparison",
+    "params": [
+     {
+      "key": "powerRounds",
+      "value": 300
+     }
+    ],
+    "shape": "communities",
+    "title": "Degree, closeness and eigenvector centrality"
+   },
+   {
+    "engine": "graph",
+    "goal": "components",
+    "id": "connected-components",
+    "params": [
+     {
+      "key": "edgesPerVertex",
+      "value": 1.2
+     }
+    ],
+    "shape": "islands",
+    "title": "Connected components"
+   },
+   {
+    "engine": "graph",
+    "goal": "credible",
+    "id": "credible-path",
+    "params": [
+     {
+      "key": "cost",
+      "value": "doubt"
+     },
+     {
+      "key": "minConfidence",
+      "value": 0.3
+     }
+    ],
+    "shape": "links",
+    "title": "Most credible path"
+   },
+   {
+    "engine": "graph",
+    "goal": "cpm",
+    "id": "critical-path",
+    "params": [
+     {
+      "key": "maxDuration",
+      "value": 9
+     }
+    ],
+    "shape": "dag",
+    "title": "Critical path"
+   },
+   {
+    "engine": "graph",
+    "goal": "sssp",
+    "id": "dag-shortest-paths",
+    "params": [],
+    "shape": "signed-dag",
+    "title": "Shortest paths in a DAG"
+   },
+   {
+    "engine": "graph",
+    "goal": "dfs",
+    "id": "depth-first-search",
+    "params": [],
+    "shape": "geometric",
+    "title": "Depth-first search"
+   },
+   {
+    "engine": "graph",
+    "goal": "sssp",
+    "id": "dijkstra",
+    "params": [
+     {
+      "key": "maxWeight",
+      "value": 9
+     }
+    ],
+    "shape": "geometric",
+    "title": "Dijkstra's algorithm"
+   },
+   {
+    "engine": "graph",
+    "goal": "maxflow",
+    "id": "edmonds-karp",
+    "params": [
+     {
+      "key": "maxCapacity",
+      "value": 12
+     }
+    ],
+    "shape": "flow",
+    "title": "Shortest augmenting paths (Edmonds\u2013Karp)"
+   },
+   {
+    "engine": "graph",
+    "goal": "ownership",
+    "id": "effective-ownership",
+    "params": [
+     {
+      "key": "crossHoldings",
+      "value": 1
+     }
+    ],
+    "shape": "ownership",
+    "title": "Effective beneficial ownership"
+   },
+   {
+    "engine": "graph",
+    "goal": "ego",
+    "id": "ego-network",
+    "params": [
+     {
+      "key": "k",
+      "value": 2
+     }
+    ],
+    "shape": "communities",
+    "title": "Ego network expansion"
+   },
+   {
+    "engine": "graph",
+    "goal": "emst",
+    "id": "euclidean-mst",
+    "params": [],
+    "shape": "points",
+    "title": "Euclidean minimum spanning tree"
+   },
+   {
+    "engine": "graph",
+    "goal": "euler",
+    "id": "euler-tour",
+    "params": [],
+    "shape": "eulerian",
+    "title": "Euler tour"
+   },
+   {
+    "engine": "graph",
+    "goal": "sphere",
+    "id": "fibonacci-sphere",
+    "params": [],
+    "shape": "small-world",
+    "title": "Fibonacci sphere layout"
+   },
+   {
+    "engine": "graph",
+    "goal": "apsp",
+    "id": "floyd-warshall",
+    "params": [],
+    "shape": "digraph",
+    "title": "Floyd\u2013Warshall"
+   },
+   {
+    "engine": "graph",
+    "goal": "force-layout",
+    "id": "force-atlas2",
+    "params": [
+     {
+      "key": "iterations",
+      "value": 250
+     },
+     {
+      "key": "gravity",
+      "value": 1
+     },
+     {
+      "key": "scaling",
+      "value": 2
+     }
+    ],
+    "shape": "communities",
+    "title": "ForceAtlas2 layout"
+   },
+   {
+    "engine": "graph",
+    "goal": "maxflow",
+    "id": "ford-fulkerson",
+    "params": [
+     {
+      "key": "maxCapacity",
+      "value": 12
+     }
+    ],
+    "shape": "flow",
+    "title": "Augmenting paths (Ford\u2013Fulkerson)"
+   },
+   {
+    "engine": "graph",
+    "goal": "geo-layout",
+    "id": "geo-graph",
+    "params": [
+     {
+      "key": "pull",
+      "value": 0.3
+     },
+     {
+      "key": "iterations",
+      "value": 200
+     },
+     {
+      "key": "cooling",
+      "value": 0.98
+     }
+    ],
+    "shape": "geometric",
+    "title": "Graph over a map"
+   },
+   {
+    "engine": "graph",
+    "goal": "hamilton",
+    "id": "hamilton-path",
+    "params": [
+     {
+      "key": "prune",
+      "value": true
+     }
+    ],
+    "shape": "grid",
+    "title": "Hamilton path by backtracking"
+   },
+   {
+    "engine": "graph",
+    "goal": "waves",
+    "id": "kahn-waves",
+    "params": [],
+    "shape": "dag",
+    "title": "Kahn's algorithm and parallel waves"
+   },
+   {
+    "engine": "graph",
+    "goal": "scc",
+    "id": "kosaraju-scc",
+    "params": [
+     {
+      "key": "reciprocity",
+      "value": 0.35
+     }
+    ],
+    "shape": "digraph",
+    "title": "Strong components (Kosaraju)"
+   },
+   {
+    "engine": "graph",
+    "goal": "mst",
+    "id": "kruskal-mst",
+    "params": [
+     {
+      "key": "maxWeight",
+      "value": 9
+     }
+    ],
+    "shape": "geometric",
+    "title": "Kruskal's algorithm"
+   },
+   {
+    "engine": "graph",
+    "goal": "lpa",
+    "id": "label-propagation",
+    "params": [],
+    "shape": "communities",
+    "title": "Label propagation"
+   },
+   {
+    "engine": "graph",
+    "goal": "modularity",
+    "id": "louvain-leiden",
+    "params": [
+     {
+      "key": "method",
+      "value": "leiden"
+     }
+    ],
+    "shape": "communities",
+    "title": "Louvain and Leiden communities"
+   },
+   {
+    "engine": "graph",
+    "goal": "mincostflow",
+    "id": "min-cost-flow",
+    "params": [
+     {
+      "key": "maxCapacity",
+      "value": 12
+     }
+    ],
+    "shape": "flow",
+    "title": "Minimum-cost flow"
+   },
+   {
+    "engine": "graph",
+    "goal": "cycles",
+    "id": "ownership-cycles",
+    "params": [
+     {
+      "key": "crossHoldings",
+      "value": 1
+     }
+    ],
+    "shape": "ownership",
+    "title": "Circular ownership by DFS colouring"
+   },
+   {
+    "engine": "graph",
+    "goal": "pagerank",
+    "id": "pagerank",
+    "params": [
+     {
+      "key": "damping",
+      "value": 0.85
+     }
+    ],
+    "shape": "digraph",
+    "title": "PageRank"
+   },
+   {
+    "engine": "graph",
+    "goal": "pagerank",
+    "id": "personalised-pagerank",
+    "params": [
+     {
+      "key": "damping",
+      "value": 0.85
+     }
+    ],
+    "shape": "communities",
+    "title": "Personalised PageRank"
+   },
+   {
+    "engine": "graph",
+    "goal": "maxflow",
+    "id": "preflow-push",
+    "params": [
+     {
+      "key": "maxCapacity",
+      "value": 12
+     }
+    ],
+    "shape": "flow",
+    "title": "Preflow-push"
+   },
+   {
+    "engine": "graph",
+    "goal": "mst",
+    "id": "prim-mst",
+    "params": [
+     {
+      "key": "maxWeight",
+      "value": 9
+     }
+    ],
+    "shape": "geometric",
+    "title": "Prim's algorithm"
+   },
+   {
+    "engine": "graph",
+    "goal": "sir",
+    "id": "sir-cascade",
+    "params": [
+     {
+      "key": "beta",
+      "value": 0.35
+     },
+     {
+      "key": "gamma",
+      "value": 0.3
+     }
+    ],
+    "shape": "small-world",
+    "title": "A story spreading through a network"
+   },
+   {
+    "engine": "graph",
+    "goal": "activation",
+    "id": "spreading-activation",
+    "params": [
+     {
+      "key": "decay",
+      "value": 0.7
+     },
+     {
+      "key": "threshold",
+      "value": 2
+     }
+    ],
+    "shape": "communities",
+    "title": "Spreading activation"
+   },
+   {
+    "engine": "graph",
+    "goal": "layered",
+    "id": "sugiyama-layout",
+    "params": [
+     {
+      "key": "sweeps",
+      "value": 8
+     },
+     {
+      "key": "crossHoldings",
+      "value": 1
+     }
+    ],
+    "shape": "dag",
+    "title": "Layered DAG layout (Sugiyama)"
+   },
+   {
+    "engine": "graph",
+    "goal": "scc",
+    "id": "tarjan-scc",
+    "params": [
+     {
+      "key": "reciprocity",
+      "value": 0.35
+     }
+    ],
+    "shape": "digraph",
+    "title": "Strong components (Tarjan)"
+   },
+   {
+    "engine": "graph",
+    "goal": "toposort",
+    "id": "topological-sort",
+    "params": [],
+    "shape": "dag",
+    "title": "Topological sort"
+   },
+   {
+    "engine": "graph",
+    "goal": "closure",
+    "id": "transitive-closure",
+    "params": [
+     {
+      "key": "reciprocity",
+      "value": 0.35
+     }
+    ],
+    "shape": "digraph",
+    "title": "Transitive closure (Warshall)"
+   },
+   {
+    "engine": "graph",
+    "goal": "support",
+    "id": "transitive-support",
+    "params": [
+     {
+      "key": "fanIn",
+      "value": 0.7
+     }
+    ],
+    "shape": "reasoning",
+    "title": "Transitive support of a conclusion"
+   },
+   {
+    "engine": "graph",
+    "goal": "merge",
+    "id": "union-find-entity-merge",
+    "params": [
+     {
+      "key": "threshold",
+      "value": 0.45
+     }
+    ],
+    "shape": "records",
+    "title": "Merging duplicates with union-find"
+   },
+   {
+    "engine": "graph",
+    "goal": "ksp",
+    "id": "yen-k-shortest",
+    "params": [
+     {
+      "key": "k",
+      "value": 3
+     }
+    ],
+    "shape": "geometric",
+    "title": "Yen's k shortest paths"
+   }
+  ],
+  "source": "npm run --silent flow -- kernels"
+ },
+ "expect": "unknown_unit",
+ "value": {
+  "budget": {
+   "timeout_ms": 120000
+  },
+  "catalogue": {
+   "commit": "1b8e009059c299b29d7a829d2d51d4e057304d4d",
+   "digest": "sha256:97e08572418b44db62dd546959a396dceddb555aa5a49d12ad54a9bd7a455c8d"
+  },
+  "duration_ms": 412,
+  "input": {
+   "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "units": {
+    "capacity": "thousands",
+    "values": "money_per_year",
+    "weights": "money"
+   }
+  },
+  "kernel": {
+   "engine": "grid",
+   "id": "knapsack-dp"
+  },
+  "output": {
+   "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "schema": "algoglyph-invocation/v1",
+  "status": "ok"
+ }
+}

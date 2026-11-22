@@ -1118,6 +1118,7 @@ dependencies = [
  "rw-scenario",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tungstenite",
  "ureq 2.12.1",

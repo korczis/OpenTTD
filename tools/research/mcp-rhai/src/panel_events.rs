@@ -79,7 +79,7 @@ pub const KINDS: &[Kind] = &[
     // The server console and the GUI client.
     k("ai.log", By::Panel, "panel.rs:read_log", "`{company, level, text}`", "a console line `[script:N] [C] [L] text`, as the server prints it"),
     k("console.line", By::Panel, "panel.rs:read_log", "`{line}`", "every other console line"),
-    k("news.shown", By::Panel, "panel.rs:watch_news", "the news item object", "each news item once, read every 2 s from the GUI client"),
+    k("news.shown", By::Panel, "panel.rs:watch_news", "the news item object: text, type, style, date; advice and refs (vehicle, station, tile, industry, town, engine) when the game has them", "each news item once, read every 2 s from the GUI client"),
     k("ask.answered", By::Panel, "panel.rs:ask_answers", "the question with its answer", "once per answer"),
     // The panel's own sentences (Game::event): prose for the page and GET /api/status, never a contract.
     k("panel.server", By::Panel, "panel.rs:Game::event", "`{text}`", "the server starts, exits, reports its script budget"),
