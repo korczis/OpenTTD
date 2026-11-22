@@ -7,8 +7,8 @@ sources are its tracked Markdown, its git history and its `.ai/` layer. The outp
 |---|---|---|---|
 | Site | `surfaces site` | Every Markdown document as a page, plus an overview with interactive charts, the `.ai/` layer (features, decisions, rules, plan, dependency graph) and search | GitHub Pages |
 | Wiki | `surfaces wiki` | The same documents as wiki pages: `Home`, a sidebar, links rewritten to pages | The repository's GitHub wiki |
-| Markdown regions | `surfaces sync` | Tables inside the documents themselves (document indexes, features, decisions, rules, plan, surfaces), between markers | The repository |
-| Gate | `surfaces check` | Fails while a region is stale, a relative link or anchor leads nowhere, a document's front matter does not parse, a tool's flags and its usage disagree, or a diagram is drawn in characters instead of Mermaid | Pre-commit, `tools/gate.sh`, CI |
+| Markdown regions | `surfaces sync` | Tables inside the documents themselves (document indexes, features, decisions, rules, plan, surfaces, facts, a table of contents, a region included from another document), between markers, after every declared generator has run | The repository |
+| Gate | `surfaces check` | Fails while a region is stale, a declared generator's check fails, a relative link or anchor leads nowhere, a document's front matter does not parse, a tool's flags and its usage disagree, or a diagram is drawn in characters instead of Mermaid | Pre-commit, `tools/gate.sh`, CI |
 | Diagrams | `diagrams-check` | Opens every built page with a Mermaid block in Chrome and fails on a diagram that does not render to an SVG | CI, after `site` |
 
 Nothing in the generator names a repository. Every fact comes from git (`origin`, `HEAD`,
@@ -49,8 +49,8 @@ The fix is not more diligence. Publish nothing that a person has to keep in step
 
 ```bash
 tools/surfaces/surfaces check          # the gate: exit 10 on a finding
-tools/surfaces/surfaces sync           # regenerate every Markdown region in place
-tools/surfaces/surfaces sync --check   # write nothing; exit 11 when a region would change
+tools/surfaces/surfaces sync           # run every declared generator, then regenerate every region
+tools/surfaces/surfaces sync --check   # write nothing; exit 11 when a region or generator would change
 tools/surfaces/surfaces site           # build target/web/site (needs node for the assets)
 tools/surfaces/surfaces wiki           # build target/web/wiki
 tools/surfaces/surfaces list           # what each surface publishes, one document per line
@@ -101,6 +101,8 @@ A region is a pair of HTML comments whose contents the generator owns:
 | `ai-rules` | `origin=project\|vendored\|all` | Rules: id, class, statement |
 | `ai-plan` | — | Milestones with issues done and still open (status derived from the issue stamps) |
 | `surfaces` | — | Where the site and the wiki are published |
+| `toc` | `depth=<n>` (default 3) | The headings that follow the region, levels 2 to `n`, nested and linked with their anchors |
+| `include` | `src=<document>`, `region=<name>` | The body of a marked region of another document (`<!-- name:begin -->`, any tool's marker, or a surfaces region of that generator), its relative links rewritten for this document and its comment lines dropped |
 | `facts` | `group=<name>`, `as=table\|line\|pie` | Numbers counted from the tracked files: each `[[facts.items]]` in `surfaces.toml` counts regex `matches` `in` a glob, tracked `files` matching a glob, or published `docs` under a path; the table shows what was counted, `line` is one sentence of bold numbers, `pie` a Mermaid pie |
 
 A fact is the one kind of number a committed document can state without going stale: it changes
@@ -108,6 +110,31 @@ only when the files it counts change, and `surfaces sync` rewrites it in the sam
 of commits or of today's date is not a fact in this sense, since every commit would change it; the
 site's overview computes those at build time instead. The overview also shows every fact as a card
 linked to its page, with what was counted as its tooltip.
+
+An `include` reads the other document as it is on disk when `sync` starts. When that region is
+itself one this `sync` regenerates, the include catches up on the next `sync`, and `check` says so
+until then.
+
+## Generators
+
+Some derived text belongs to another tool: a region under that tool's own markers, or a whole
+generated file. `surfaces.toml` declares each such tool once, with the command that regenerates its
+output and the command that fails while it is stale:
+
+```toml
+[[generators.items]]
+id = "readme-scoreboard"
+outputs = ["README.md"]                                   # where a finding points
+sync = ["tools/research/readme-scoreboard"]               # optional: regenerate in place
+check = ["tools/research/readme-scoreboard", "--check"]   # exit non-zero while stale
+```
+
+`surfaces sync` runs every `sync` before it regenerates the regions, so a region that reads a
+generated document sees its new text. `surfaces check` and `surfaces sync --check` run every
+`check`, and a failure is a `generate` finding with the tool's last output. Commands run from the
+repository root with `SURFACES_GENERATING=1` set, and a nested `surfaces` call skips the
+generators, so a generator may itself call `surfaces`. A generator without `sync` is regenerated
+by its own workflow, and `check` still proves it current.
 
 Edit the text around a region, never inside it. `surfaces sync` rewrites the inside, and
 `surfaces check` fails while it would.

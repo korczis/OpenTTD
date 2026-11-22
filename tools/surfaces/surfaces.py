@@ -55,7 +55,10 @@ DEFAULTS = {
     "wiki": {"out": f"{GENERATED_ROOT}/wiki", "mount": "/wiki"},
     "regions": {"report": f"{GENERATED_ROOT}/markdown"},
     "facts": {"items": []},
+    "generators": {"items": []},
 }
+# Set while a declared generator runs, so a generator that calls surfaces again does not recurse.
+NESTED_ENV = "SURFACES_GENERATING"
 
 REGION_RE = re.compile(
     r"(<!-- surfaces:begin (?P<name>[a-z0-9-]+)(?P<args>(?: [a-z0-9_-]+=[^ >]+)*) -->\n)"
@@ -775,11 +778,70 @@ class Regions:
     def __init__(self, repo: Repo, docs: dict[str, Doc], layer: Layer):
         self.repo, self.docs, self.layer = repo, docs, layer
 
-    def render(self, name: str, args: dict, doc: Doc) -> str:
+    pos: int = 0  # where in the document's text the region being rendered ends
+
+    def render(self, name: str, args: dict, doc: Doc, pos: int = 0) -> str:
         fn = getattr(self, "gen_" + name.replace("-", "_"), None)
         if fn is None:
             raise KeyError(name)
+        self.pos = pos
         return fn(args, doc).strip()
+
+    def gen_toc(self, args: dict, doc: Doc) -> str:
+        """The headings that follow the region, down to `depth` (default 3), nested by level,
+        each linked with the anchor GitHub and the site give it."""
+        depth = int(args.get("depth", 3))
+        start = doc.text[: self.pos].count("\n") - doc.offset
+        tokens = markdown().parse(doc.body)
+        seen: dict[str, int] = {}
+        entries = []
+        for i, tok in enumerate(tokens):
+            if tok.type != "heading_open":
+                continue
+            text = inline_text(tokens[i + 1])
+            base = github_slug(text)
+            n = seen.get(base, 0)
+            seen[base] = n + 1
+            level = int(tok.tag[1])
+            if tok.map and tok.map[0] >= start and 2 <= level <= depth:
+                entries.append((level, text, base if n == 0 else f"{base}-{n}"))
+        if not entries:
+            return "No heading follows this region."
+        top = min(level for level, _, _ in entries)
+        label = lambda t: t.replace("[", "\\[").replace("]", "\\]")  # noqa: E731
+        return "\n".join(f"{'    ' * (level - top)}- [{label(text)}](#{slug})"
+                         for level, text, slug in entries)
+
+    def gen_include(self, args: dict, doc: Doc) -> str:
+        """The body of a marked region of another document, its relative links rewritten for this
+        one. `region=NAME` finds `<!-- NAME:begin -->` ... `<!-- NAME:end -->` (any tool's marker)
+        or a surfaces region of that generator; HTML comment lines inside are dropped."""
+        src, name = args.get("src", "").strip("/"), args.get("region", "")
+        if not src or not name:
+            raise ValueError("include needs src=<document> and region=<name>")
+        if src == doc.path:
+            raise ValueError("include cannot read its own document")
+        source = self.docs.get(src)
+        if source is None:
+            raise ValueError(f"include: {src} is not a published document")
+        rx = re.compile(
+            rf"<!-- (?:{re.escape(name)}:begin|surfaces:begin {re.escape(name)})\b[^>]*-->\n(.*?)"
+            rf"<!-- (?:{re.escape(name)}:end|surfaces:end {re.escape(name)})\b[^>]*-->", re.S)
+        m = rx.search(source.text)
+        if m is None:
+            raise ValueError(f"include: {src} has no region '{name}'")
+        body = "".join(line for line in m[1].splitlines(keepends=True)
+                       if not re.fullmatch(r"\s*<!--.*-->\s*", line))
+        base = posixpath.dirname(src)
+
+        def relink(target: str, _image: bool) -> str:
+            if not target or target.startswith(("#", "/")) or SCHEME_RE.match(target):
+                return target
+            path, _, frag = target.partition("#")
+            resolved = posixpath.normpath(posixpath.join(base, path)) if path else src
+            return rel_md(doc, resolved) + (f"#{frag}" if frag else "")
+
+        return rewrite_source_links(body, relink)
 
     def gen_docs_index(self, args: dict, doc: Doc) -> str:
         prefix = args.get("dir", "").strip("/")
@@ -915,9 +977,12 @@ def sync_regions(repo: Repo, docs: dict[str, Doc], layer: Layer, write: bool) ->
                 return m[0]  # an example inside a code block, not a region
             line = doc.text[: m.start()].count("\n") + 1
             try:
-                body = gens.render(m["name"], parse_args(m["args"]), doc)
+                body = gens.render(m["name"], parse_args(m["args"]), doc, m.end(1))
             except KeyError:
                 findings.append(Finding("region", doc.path, line, f"unknown generator '{m['name']}'"))
+                return m[0]
+            except ValueError as err:
+                findings.append(Finding("region", doc.path, line, str(err)))
                 return m[0]
             fresh = m[1] + body + "\n" + m[5]
             state = "current" if fresh == m[0] else "stale"
@@ -1741,8 +1806,39 @@ def check_doc_flags(tools: dict[str, list[Tool]], doc: Doc) -> list[Finding]:
     return sorted(found, key=lambda f: f.line)
 
 
+def run_generators(root: Path, cfg: dict, mode: str) -> list[Finding]:
+    """Run each generator `surfaces.toml` declares, its `sync` command (regenerate in place) or
+    its `check` command (fail while its output is stale). They own derived text the regions do
+    not: another tool's markers, a generated file. One `surfaces sync` then regenerates every
+    derived document, and `surfaces check` (commit hook, gate, CI) proves every one current."""
+    if os.environ.get(NESTED_ENV):
+        return []
+    findings = []
+    env = dict(os.environ, **{NESTED_ENV: "1"})
+    for g in cfg["generators"]["items"]:
+        cmd = g.get(mode)
+        if not cmd:
+            continue
+        argv = cmd if isinstance(cmd, list) else cmd.split()
+        where = (g.get("outputs") or [CONFIG_FILE])[0]
+        try:
+            r = subprocess.run(argv, cwd=root, env=env, capture_output=True, text=True)
+        except OSError as err:
+            findings.append(Finding("generate", where, 0, f"{g.get('id', '?')}: {argv[0]}: {err}"))
+            continue
+        if r.returncode != 0:
+            tail = " ".join((r.stdout + "\n" + r.stderr).split())[-300:]
+            hint = "run tools/surfaces/surfaces sync" if g.get("sync") else "fix its source"
+            findings.append(Finding("generate", where, 0,
+                                    f"{g.get('id', '?')}: `{' '.join(argv)}` exited {r.returncode} "
+                                    f"({hint}): {tail}"))
+    return findings
+
+
 def run_check(repo: Repo, cfg: dict, docs: dict[str, Doc], layer: Layer) -> list[Finding]:
-    findings, _ = sync_regions(repo, docs, layer, write=False)
+    findings = run_generators(repo.root, cfg, "check")
+    region_findings, _ = sync_regions(repo, docs, layer, write=False)
+    findings += region_findings
     for path, why in sorted(FRONT_ERRORS.items()):
         if not matches(path, cfg["check"]["front_matter_exclude"]):
             findings.append(Finding("front", path, 1, f"front matter does not parse, so the page shows it as text: {why}"))
@@ -1789,9 +1885,10 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="surfaces", description=__doc__.split("\n\n")[0])
     ap.add_argument("--repo", default=None, help="repository root (default: the git toplevel of the cwd)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("check", help="fail on a stale region, a broken link or anchor (exit 10)")
-    s = sub.add_parser("sync", help="regenerate the Markdown regions in place")
-    s.add_argument("--check", action="store_true", help="write nothing; exit 11 when a region would change")
+    sub.add_parser("check", help="fail on a stale region or generator output, a broken link or anchor (exit 10)")
+    s = sub.add_parser("sync", help="run every declared generator, then regenerate the Markdown regions in place")
+    s.add_argument("--check", action="store_true",
+                   help="write nothing; exit 11 when a region or a generator's output would change")
     s = sub.add_parser("site", help="build the static site")
     s.add_argument("--out", default=None)
     s.add_argument("--no-assets", action="store_true", help="skip the CSS/JS build (HTML only)")
@@ -1804,6 +1901,9 @@ def main(argv: list[str]) -> int:
     root = Path(git(start, "rev-parse", "--show-toplevel").strip())
     os.chdir(root)
     cfg = load_config(root)
+    generated: list[Finding] = []
+    if args.cmd == "sync":  # generators first: they may write documents the regions then read
+        generated = run_generators(root, cfg, "check" if args.check else "sync")
     repo = load_repo(root)
     docs = load_docs(repo, cfg)
     layer = load_layer(repo)
@@ -1820,16 +1920,20 @@ def main(argv: list[str]) -> int:
         return EXIT_FINDINGS if findings else EXIT_OK
     if args.cmd == "sync":
         findings, report = sync_regions(repo, docs, layer, write=not args.check)
+        findings = generated + findings
         for f in findings:
             print(f)
         if not args.check:
             write_region_report(repo, cfg, report)
         stale = sum(r["state"] == "stale" for r in report)
         verb = "would change" if args.check else "regenerated"
-        print(f"surfaces sync: {len(report)} region(s), {stale} {verb}")
-        if any(f.message.startswith("unknown generator") for f in findings):
+        gens = len([g for g in cfg["generators"]["items"] if g.get("check" if args.check else "sync")])
+        print(f"surfaces sync: {gens} generator(s), {len(generated)} failed; "
+              f"{len(report)} region(s), {stale} {verb}")
+        if any(f.kind == "region" and "is stale" not in f.message for f in findings) \
+                or (generated and not args.check):
             return EXIT_FINDINGS
-        return EXIT_DRIFT if args.check and stale else EXIT_OK
+        return EXIT_DRIFT if args.check and (stale or generated) else EXIT_OK
     if args.cmd == "site":
         out = Path(args.out or cfg["site"]["out"]).resolve()
         Site(repo, cfg, docs, layer, out).build(assets=not args.no_assets)
