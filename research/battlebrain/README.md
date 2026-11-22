@@ -96,7 +96,14 @@ adapters at a protocol boundary, because the runner's outputs carry no schema.
 The shadow run goes in four steps, and nothing in them reaches a game:
 
 1. `mcp-plan --capture <dir>` writes every `openttd://` read with its sha256 and game tick, plus
-   `openttd://companies`. It is one pass of GET requests only.
+   `openttd://companies`. It only reads. When the server lists `openttd.resources.read_many` as
+   read-only, every read comes from one call of that tool, so the capture is one game tick and
+   `window.coherent` is true. The set of resources that call reads is not written down anywhere:
+   the plan runs on what one call returned, and every name it asked for that was missing is added
+   for the next call, until a run asks for nothing outside its set. That run's answer is the one
+   captured. When the tool is absent, not read-only or refused, or the plan reads more resources
+   than one call accepts (at most 32), the capture reads each resource on its own as before.
+   `capture.json`'s `coherence` field then says why, for example `read_many not offered: ...`.
 2. `mcp-plan --snapshot <dir>` replays the capture and refuses any file whose digest changed.
 3. `battlebrain snapshot` turns the capture into a snapshot record. The record carries the tick
    window and states whether the capture is coherent.
@@ -177,7 +184,8 @@ condition, not output equality:
 ## Not yet done
 
 - Cutover (Phase 04): no live decision, no rollback switch, no live run.
-- Only one real capture exists, and it is not coherent.
+- Only one real capture exists, and it is not coherent. A coherent capture through
+  `read_many` is unit-tested against a fake server answer and has not been taken on a live game yet.
 - A planner adapter limitation: the baseline is the portfolio's best-scored freight rail line,
   not the bot's slot order from `settings_from_plan`.
 - AlgoGlyph still has no kernel version, output schema or units. The invocation envelope pins
