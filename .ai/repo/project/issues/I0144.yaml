@@ -1,0 +1,37 @@
+id: I0144
+milestone: the-planner-reads-one-coherent-priced-world
+title: "The planner prices revenue from the game's own income quote, one batched read-only call, and keeps the economics of running lines apart from those of a new investment"
+slug: revenue-from-the-games-quote
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Add a read-only MCP tool that answers a batch of income quotes `{cargo, distance, transit_days, amount}` from the game's own GetTransportedGoodsIncome (current inflation and NewGRF cargo included) at one tick, bounded per call like read_many. plan.rs, cargo.rs and invest.rs take their per-unit income from it when the server offers it, name the source in the answer, and fall back to the copied formula only with a stated reason. Running lines (measured profit, sunk cost) and new investment (quoted revenue, full cost) are separate fields of the plan."
+why: "External review 2026-11-22 (digest B-13). The planner re-implements the payment formula with copied constants: tools/research/mcp-rhai/src/plan.rs:84-100 (time factor 'exactly as src/economy.cpp GetTransportedGoodsIncome'), :72 and :195 (passenger payment 3185 and cargo rows), and invest.rs:85 and :183 repeat 3185. Only PrismaticAI asks the game (tools/research/prismatic-ai/PrismaticAI/rail.nut:1243 AICargo.GetCargoIncome); `git grep GetCargoIncome tools/` finds nothing else, and no MCP tool quotes income."
+scope:
+  - "src/prismatic_mcp/prismatic_mcp_server.cpp"
+  - "src/prismatic_mcp/prismatic_mcp_detail.h"
+  - "src/tests/test_prismatic_mcp.cpp"
+  - "research/prismatic-mcp/08-tool-catalog.md"
+  - "tools/research/mcp-rhai/src/plan.rs"
+  - "tools/research/mcp-rhai/src/cargo.rs"
+  - "tools/research/mcp-rhai/src/invest.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-plan.rs"
+non_scope:
+  - "Removing the copied formula (it stays as the named fallback for a server without the tool)"
+depends_on:
+  - I0138
+  - I0142
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "The tool is listed with readOnlyHint true and a per-call cap; it refuses an unknown cargo per entry (C++ unit test)"
+  - "A test compares the quote and the copied formula on the base-set cargos and fails when they differ beyond rounding"
+  - "A plan answer names its income source (game quote, or fallback with its reason) and lists running lines and new investment in separate fields"
+validation:
+  - "build-mcp/openttd_test '[prismatic_mcp]'"
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

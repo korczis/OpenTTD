@@ -1,0 +1,31 @@
+id: I0156
+milestone: battlebrain-decides-live-with-rollback
+title: "Battlebrain chooses computations by typed capability: the policy names a capability, a domain-checked kernel from the discovered catalogue computes it, inside a bounded typed DAG"
+slug: battlebrain-capability-selection
+priority: p3
+profile: deep-work
+parallel_safe: false
+objective: "Two-stage selection (Phase 05): the policy asks for a capability (price-line, select-portfolio, forecast-payback), a resolver picks a compatible kernel from the discovered catalogue that has a domain check for that capability, and a DAG of such steps runs with bounded depth, step count and budget, each step an algoglyph-invocation/v1 envelope. No capability resolves to a hand-named kernel; an unresolvable one is refused."
+why: "External review 2026-11-22 (digest C-50). research/battlebrain/README.md:89-92 says per-kernel domain checks are 'adapters at a protocol boundary' for knapsack-dp and track-planning only, and the one policy is freight-margin (tools/research/mcp-rhai/src/battlebrain_policy.rs). The roadmap puts this after the vertical slice is verified, hence the dependency on the live run."
+scope:
+  - "tools/research/mcp-rhai/src/battlebrain_policy.rs"
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/schema/**"
+  - "research/battlebrain/README.md"
+non_scope:
+  - "Any change in algoglyph (used from outside)"
+depends_on:
+  - I0152
+  - I0159
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "A capability with two compatible kernels resolves deterministically; one with none is refused (tests)"
+  - "A DAG over its depth, step or budget bound is refused before any kernel runs (tests)"
+  - "freight-margin's decision is reproduced byte for byte through the capability path on the I0150 captures"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

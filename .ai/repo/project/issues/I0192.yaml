@@ -1,0 +1,33 @@
+id: I0192
+milestone: the-live-agent-workbench
+title: "One non-blocking bridge carries a console request to any panel or hub operation by name and brings its answer back, on a client and on a dedicated server"
+slug: console-orchestrator-bridge
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Generalise the ask path into a bridge: the console queues a request of a new kind ('op': an operation name and its arguments) in openttd://ui/requests on a client, or prints one structured line on a dedicated server, and returns at once. One relay (the existing ask relay, extended, not a second one) validates the arguments against the operation's schema from the panel's OpenAPI or the hub method table, calls it, and answers into the same console and as news. The game loop never waits for a solver; a mutation still goes through the approval flow."
+why: "External review 2026-11-22 (digest B-15). src/console_cmds.cpp:2158-2185 ConPlan queues text as an 'ask' (PrismaticMCP::Menu::Ask at :2177) or prints [prismatic-plan] on a dedicated server, and tools/research/mcp-panel/rhai/ask_relay.rhai answers it through the intent resolver only. The console's commands are derived from the embedded catalogue (research/mcp-console.md), so no operation the panel or hub owns (duels, plans, Rhai, AlgoGlyph) is reachable from the game."
+scope:
+  - "src/console_cmds.cpp"
+  - "src/prismatic_mcp/prismatic_mcp_menu.cpp"
+  - "src/prismatic_mcp/prismatic_mcp_menu.h"
+  - "src/tests/test_prismatic_mcp.cpp"
+  - "tools/research/mcp-panel/rhai/ask_relay.rhai"
+  - "research/mcp-console.md"
+non_scope:
+  - "Any outbound call from C++; the game only queues and prints, as today"
+  - "The in-game control window (peer worktree feature/prismatic-control-window, which also edits prismatic_mcp_menu.cpp); coordinate on the board before landing"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#the-workbench-drives-the-game-end-to-end"
+acceptance_criteria:
+  - "A console line naming an operation queues an 'op' request and returns in the same tick; the relay answers it into the console and as news"
+  - "Arguments are validated against the operation's live schema; an unknown operation or a bad argument is answered with the reason, never executed"
+  - "A mutating operation returns pending_approval and runs only after approval; a unit test covers the queueing and the line format, a live check the round trip on a client and a dedicated server"
+validation:
+  - "tools/gate.sh research"
+  - "tools/research/mcp-panel-check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

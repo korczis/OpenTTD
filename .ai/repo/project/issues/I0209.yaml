@@ -1,0 +1,43 @@
+id: I0209
+milestone: the-panel-has-integrity
+title: "A Director page in the one shell joins opportunities, the action-plan DAG, the approval lifecycle and history, every mark leading to its page and every action through the console's own approval path"
+slug: director-cockpit
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Add a Director page to static/shell.js PAGES that composes what the panel already derives, each through components.js and the shared selection (I0208): Now (company standing, money, the latest Battlebrain decision of I0153), Opportunities (the planner's ranked candidates from /api/plan and /api/investment, each linked to its map pair and its priced track), Plan (the existing action-plan DAG drawn once, moved or reused from the home card, not copied), Execution (the request lifecycle of I0187: proposed, pending approval, approved, executed, observed, with Approve through the same /api/approve path as the console) and History (the store's plan.* and decision events). Forms come from the shared renderer (I0204); state lives in the address; every card maximizes. Forecast against actual is added by I0217."
+why: "External review 2026-11-22 (digest B-16). The pieces exist but are scattered and partly unlinked: approvals render on the home page (static/app.js:20, :88), the action-plan DAG is a home card (static/index.html:118-121, app.js:387), the plan table and portfolio sit on the World page (static/world.html:78-83), the investment answer has no view at all (route /api/investment, panel.rs:2405), and no page shows opportunities, an approval's lifecycle or decision history. Rule project.panel-items-are-routable-pages and the one-shell rule require one registry entry, not a new layout."
+scope:
+  - "tools/research/mcp-panel/static/shell.js"
+  - "tools/research/mcp-panel/static/director.html"
+  - "tools/research/mcp-panel/static/director.js"
+  - "tools/research/mcp-panel/static/index.html"
+  - "tools/research/mcp-panel/static/app.js"
+  - "tools/research/mcp-panel/static/components.js"
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "tools/research/mcp-panel/test/**"
+  - "research/mcp-control.md"
+non_scope:
+  - "A second approval path: Approve goes through /api/approve and the game's own approval, never around it"
+  - "Three.js views; ECharts for charts and graphs, D3 only for a bespoke layout ECharts cannot draw"
+  - "The flow editor of the live agent workbench"
+depends_on:
+  - I0208
+  - I0153
+  - I0187
+serves:
+  - "openttd-validates-agent-driven-engineering#every-panel-control-works"
+acceptance_criteria:
+  - "The Director page is one PAGES entry; it has no layout of its own and test/shell.test.mjs covers it"
+  - "Each view is derived from an existing route or store query, named in the chart registry with its address keys; a node test builds each from fixture answers"
+  - "The action-plan DAG has one implementation, used by the home card and the Director page"
+  - "An approval driven from the Director page reaches the same pending decision as /approve in the console; mcp-ui-crawl-check passes on the page"
+  - "A pick on the Director page selects the entity on every other page (I0208)"
+validation:
+  - "node --test tools/research/mcp-panel/test/*.test.mjs"
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/e2e-coverage"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
