@@ -21,8 +21,9 @@
 //! by its own `schema`; the fit itself is Prismatic's code:
 //!
 //! - every CompanyOut of `GET /api/bridge/companies` carries `history` (prismatic-history/v1): the
-//!   panel's bus endpoint and the read-only store query of that company's samples (`samples_sql`), to
-//!   run on the panel's `/api/db/query`;
+//!   panel's bus endpoint and the read-only store query of that company's samples (`samples_query`,
+//!   `sql/queries/company_samples.sql`) with the values of its parameters (`samples_params`), to run
+//!   on the panel's `/api/db/query` as `{sql, params}`;
 //! - a directive's working may carry `fit` (prismatic-fit/v1): the model, its parameters, the samples
 //!   it was fitted from (that query, or the bus, with the row count) and its quality, or the fallback
 //!   Prismatic took. The panel checks it (`fit_stored`) and records it as plan.directive's
@@ -47,6 +48,7 @@ use crate::bus_sinks::{read_only_sql, SCHEMA as BUS_SCHEMA};
 use crate::panel::Game;
 use crate::panel_bot;
 use crate::panel_events;
+use crate::store_sql::Named;
 
 /// A directive the contract allows: at least one of `ai` and `company_id`, and the settings it carries.
 #[derive(Debug, PartialEq)]
@@ -262,7 +264,7 @@ pub const HISTORY_SCHEMA: &str = "prismatic-history/v1";
 pub const FIT_SCHEMA: &str = "prismatic-fit/v1";
 /// The bus kinds a fit reads: the daily sample and the settings an applied directive set.
 pub const HISTORY_KINDS: &[&str] = &["game.sample", "plan.directive"];
-/// The columns `samples_sql` answers, in order.
+/// The columns `samples_query` answers, in order.
 pub const SAMPLE_COLUMNS: &[&str] = &["instance", "seed", "run_ms", "game_tick", "game_date", "value", "money", "loan",
                                       "net", "vehicles", "aggressiveness", "directive_outcome"];
 /// The fewest rows the panel offers as enough to fit from (advisory: twelve game months of one run).
@@ -270,38 +272,26 @@ pub const MIN_ROWS: usize = 12;
 /// What Prismatic decided with before it fitted (prismatic_api OpenttdController, read at a8bc5a9d65).
 pub const HAND_MODEL: &str = "mean_growth = aggressiveness * 0.08, std_growth = 0.05 + aggressiveness * 0.35";
 
-/// The read-only statement of `company`'s recorded samples in every run of the store: the first
-/// sample of each game month (so a long store stays under /api/db/query's cap), each with its run
-/// (`run_ms`, the run's start, and `seed`) and the aggressiveness the latest plan.directive of that
-/// run had set for the company by then, with its outcome when it was published (`applied`, `pending`
-/// approval or verdict, `unverified`, or `sent`; plan.directive_outcome tells how a pending one ended); null
-/// before any, which is the AI's own default. A company id is reused across runs, so a fit reads
-/// the rows whose aggressiveness is known.
-pub fn samples_sql(company: i64) -> String {
-    format!("WITH r AS (SELECT instance, seed, started_ms, lead(started_ms) OVER (PARTITION BY instance ORDER BY started_ms) AS until_ms FROM runs), \
-s AS (SELECT x.instance, r.seed, r.started_ms AS run_ms, x.ts_ms, x.game_tick, x.game_date, x.value, x.money, x.loan, x.net, x.vehicles \
-FROM samples x JOIN r ON r.instance = x.instance AND x.ts_ms >= r.started_ms AND (r.until_ms IS NULL OR x.ts_ms < r.until_ms) \
-WHERE x.company = {company} \
-QUALIFY row_number() OVER (PARTITION BY x.instance, r.started_ms, substr(x.game_date, 1, 7) ORDER BY x.game_tick, x.ts_ms) = 1), \
-a AS (SELECT e.instance, r.started_ms AS run_ms, e.ts_ms, \
-TRY_CAST(json_extract_string(e.data, '$.choice.settings.aggressiveness') AS BIGINT) AS aggressiveness, \
-json_extract_string(e.data, '$.choice.outcome') AS directive_outcome \
-FROM events e JOIN r ON r.instance = e.instance AND e.ts_ms >= r.started_ms AND (r.until_ms IS NULL OR e.ts_ms < r.until_ms) \
-WHERE e.kind = 'plan.directive' AND json_extract_string(e.data, '$.choice.outcome') IN ('applied', 'pending', 'unverified', 'sent') \
-AND TRY_CAST(json_extract_string(e.data, '$.choice.company_id') AS BIGINT) = {company} \
-AND json_extract_string(e.data, '$.choice.settings.aggressiveness') IS NOT NULL) \
-SELECT s.instance, s.seed, s.run_ms, s.game_tick, s.game_date, s.value, s.money, s.loan, s.net, s.vehicles, a.aggressiveness, a.directive_outcome \
-FROM s ASOF LEFT JOIN a ON s.instance = a.instance AND s.run_ms = a.run_ms AND s.ts_ms >= a.ts_ms \
-ORDER BY s.instance, s.run_ms, s.game_tick")
+/// The named query of `company`'s recorded samples in every run of the store
+/// (`sql/queries/company_samples.sql`): the first sample of each game month (so a long store stays
+/// under /api/db/query's cap), each with its run (`run_ms`, the run's start, and `seed`) and the
+/// aggressiveness the latest plan.directive of that run had set for the company by then, with its
+/// outcome when it was published (`applied`, `pending` approval or verdict, `unverified`, or `sent`;
+/// plan.directive_outcome tells how a pending one ended); null before any, which is the AI's own
+/// default. A company id is reused across runs, so a fit reads the rows whose aggressiveness is known.
+pub fn samples_query(company: i64) -> Named {
+    Named::new("company_samples", json!({"company": company}))
 }
 
 /// The history the panel offers for `company` (companyHistory of the decision contract): the bus to
-/// subscribe to, the store (or "off": then `query_url` answers 503), and the samples query.
+/// subscribe to, the store (or "off": then `query_url` answers 503), and the samples query with the
+/// values its parameters take for this company.
 pub fn history(company: i64, bus: &Value, store: &Value, panel: &str) -> Value {
     json!({"schema": HISTORY_SCHEMA,
            "bus": {"endpoint": bus, "envelope": BUS_SCHEMA, "kinds": HISTORY_KINDS},
            "store": store.as_str().map(str::to_string).unwrap_or_else(|| store.to_string()),
-           "query_url": format!("{panel}/api/db/query"), "samples_query": samples_sql(company),
+           "query_url": format!("{panel}/api/db/query"), "samples_query": samples_query(company).sql(),
+           "samples_params": samples_query(company).params,
            "columns": SAMPLE_COLUMNS, "min_rows": MIN_ROWS})
 }
 
@@ -371,6 +361,9 @@ pub fn fit_of(raw: &Value) -> Result<Option<Value>, Vec<String>> {
                     None => errors.push("fit.samples.query must be a string".into()),
                 }
             }
+            if s.get("params").is_some_and(|p| !p.is_object()) {
+                errors.push("fit.samples.params must be an object of the query's parameter values".into());
+            }
             if let Some(b) = bus {
                 if !b.as_str().is_some_and(|b| b.starts_with("tcp://")) { errors.push(format!("fit.samples.bus must be a tcp:// endpoint, not {b}")); }
             }
@@ -395,7 +388,7 @@ pub fn fit_stored(raw: &Value) -> Value {
                                     "rows": s["rows"], "fit": fit}),
                 None => {
                     let mut out = json!({"query": s.get("query"), "rows": s["rows"], "fit": fit});
-                    for k in ["query_url", "bus", "kinds", "runs"] {
+                    for k in ["params", "query_url", "bus", "kinds", "runs"] {
                         if let Some(v) = s.get(k) { out[k] = v.clone(); }
                     }
                     out
@@ -1047,7 +1040,8 @@ mod tests {
     fn a_fit() -> Value {
         json!({"schema": FIT_SCHEMA, "model": "growth_by_aggressiveness",
                "parameters": {"by_aggressiveness": [{"aggressiveness": 50, "mean_growth": 0.031, "std_growth": 0.12, "n": 40}]},
-               "samples": {"query": samples_sql(1), "query_url": "http://127.0.0.1:8800/api/db/query", "rows": 40, "runs": 2},
+               "samples": {"query": samples_query(1).sql(), "params": {"company": 1}, "query_url": "http://127.0.0.1:8800/api/db/query",
+                           "rows": 40, "runs": 2},
                "quality": {"residual_std": 0.11}})
     }
 
@@ -1101,10 +1095,10 @@ mod tests {
         assert_eq!(h["schema"], HISTORY_SCHEMA);
         assert_eq!(h["bus"], json!({"endpoint": null, "envelope": BUS_SCHEMA, "kinds": ["game.sample", "plan.directive"]}));
         assert_eq!((h["store"].clone(), h["query_url"].clone()), (json!("off"), json!("http://127.0.0.1:7/api/db/query")));
-        assert_eq!(h["samples_query"], samples_sql(1));
-        assert!(samples_sql(1).contains("x.company = 1") && samples_sql(1).contains("AS BIGINT) = 1"));
-        assert!(read_only_sql(&samples_sql(7)).is_ok());
-        assert_eq!(out[0]["history"]["samples_query"], samples_sql(0));
+        assert_eq!((h["samples_query"].clone(), h["samples_params"].clone()), (json!(samples_query(1).sql()), json!({"company": 1})));
+        assert!(samples_query(1).sql().contains("x.company = $company") && samples_query(1).sql().contains("AS BIGINT) = $company"));
+        assert!(read_only_sql(samples_query(7).sql()).is_ok());
+        assert_eq!(out[0]["history"]["samples_params"], json!({"company": 0}));
     }
 
     #[test]
@@ -1115,7 +1109,7 @@ mod tests {
         assert_eq!(ignored, vec!["engine"]);
         let steps = vec![step("company 1 aggressiveness=50".into(), Ok(json!({"status": "executed", "verdict": "VERIFIED_SUCCESS"})))];
         let e = directive_event("http://x/decision", &raw, Ok(&d), &ignored, &steps);
-        assert_eq!(e["inputs"]["stored"], json!({"query": samples_sql(1), "rows": 40, "fit": a_fit(),
+        assert_eq!(e["inputs"]["stored"], json!({"query": samples_query(1).sql(), "params": {"company": 1}, "rows": 40, "fit": a_fit(),
                                                   "query_url": "http://127.0.0.1:8800/api/db/query", "runs": 2}));
         assert_eq!(e["inputs"]["live"]["working"], json!({"engine": "PrismaticMonteCarlo.simulate/3"}), "the fit is not repeated as working");
         assert_eq!(e["version"]["params"]["fit_schema"], FIT_SCHEMA);
@@ -1150,6 +1144,9 @@ mod tests {
         let mut write = a_fit();
         write["samples"]["query"] = json!("DELETE FROM samples");
         assert!(bad(write)["fit_errors"][0].as_str().unwrap().starts_with("fit.samples.query is not one read-only statement"));
+        let mut listed = a_fit();
+        listed["samples"]["params"] = json!([1]);
+        assert_eq!(bad(listed)["fit_errors"], json!(["fit.samples.params must be an object of the query's parameter values"]));
         let e = bad(json!({"schema": FIT_SCHEMA, "model": "", "parameters": [], "samples": {"rows": -1}}));
         assert_eq!(e["fit_errors"].as_array().unwrap().len(), 4, "{e}");
         assert!(e["fallback"].as_str().unwrap().starts_with("Prismatic's fit breaks the decision contract and is not read: "));
@@ -1188,7 +1185,7 @@ mod tests {
         st.insert_events(&[event(1, 3000, json!({"company_id": 1, "settings": "aggressiveness=75", "fit": a_fit()}), true),
                            event(2, 4000, json!({"company_id": 0, "settings": "aggressiveness=25"}), true),
                            event(3, 100_050, json!({"company_id": 1, "settings": "aggressiveness=100"}), false)]).unwrap();
-        let out = st.query(&samples_sql(1)).unwrap();
+        let out = st.run(&samples_query(1)).unwrap();
         assert_eq!(out["columns"], json!(SAMPLE_COLUMNS));
         let got: Vec<(i64, String, f64, Value)> = out["rows"].as_array().unwrap().iter()
             .map(|r| (r[2].as_i64().unwrap(), r[4].as_str().unwrap().to_string(), r[5].as_f64().unwrap(), r[10].clone())).collect();
@@ -1200,7 +1197,12 @@ mod tests {
         assert_eq!(out["rows"][1][11], json!("applied"));
         // The directive's own event names what it was fitted from.
         let stored = st.query("SELECT json_extract_string(data, '$.inputs.stored.query') AS q, json_extract(data, '$.inputs.stored.rows') AS n FROM events WHERE seq = 1").unwrap();
-        assert_eq!(stored["rows"][0][0], json!(samples_sql(1)));
+        assert_eq!(stored["rows"][0][0], json!(samples_query(1).sql()));
+        // What a client of the history runs: the offered statement with the offered values, on
+        // /api/db/query (bus_sinks::query_bound is its code), answers the same rows.
+        let h = history(1, &Value::Null, &json!("x"), "http://p");
+        let sinks_answer = st.query_bound(h["samples_query"].as_str().unwrap(), h["samples_params"].as_object().unwrap()).unwrap();
+        assert_eq!(sinks_answer, out);
     }
 
     #[test]

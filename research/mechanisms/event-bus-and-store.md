@@ -42,8 +42,11 @@ flowchart LR
   panel without it reports `"store": "off"`.
 - **SQL in files.** Every statement the store runs on its own lives in
   [`tools/research/mcp-rhai/sql/`](../../tools/research/mcp-rhai/sql/README.md), one file each:
-  `tables/<name>.sql`, `views/NN_<name>.sql` and `queries/<name>.sql`. `build.rs` embeds whatever
-  the directory holds, and no Rust or Rhai code builds SQL by joining strings.
+  `tables/<name>.sql`, `views/NN_<name>.sql`, `queries/<name>.sql` and `inserts/<table>.sql` (the
+  writer's rows, a named parameter per column). `battle-postmortem` keeps its own under
+  `sql/postmortem/`. `build.rs` embeds whatever the directories hold
+  (`src/store_sql.rs`), and no Rust or Rhai code builds SQL by joining strings: every value is a
+  bound parameter.
 - **Analytic views.** Every time a store opens, it runs the table files and then every view file
   (`CREATE OR REPLACE VIEW`), so a changed definition reaches old files too. Each view carries its
   `COMMENT ON VIEW`. `GET /api/db/tables` lists them under `views` with their comment and columns.
@@ -74,9 +77,15 @@ flowchart LR
   parameters, which come from DuckDB's prepared statement and are never declared twice.
   `POST /api/db/named {name, params}` runs one with the values bound, never pasted into the text.
   Rhai reaches both as `api_dbNamed()` and `api_dbNamedRun(#{name: "company_rank", params:
-  #{company: 0}})`. Today's queries: `company_rank`, `company_trend` (both read by `replan.rhai`),
-  `advice_recent`, `newest_events` (what `/api/db/query` answers without `?sql=`) and
-  `store_schema`.
+  #{company: 0}})`. `replan.rhai` reads `company_rank` and `company_trend`; `newest_events` is what
+  `/api/db/query` answers without `?sql=`. The panel's own reads are named queries too:
+  `calibration_readings` (the calibration), `duel_outcomes` (own_lines from duels),
+  `kernel_window` (an action plan's books, `mcp-kernel-feed`), `company_samples` (the history a
+  company offers Prismatic: its text as `samples_query`, its values as `samples_params`) and
+  `event_field` (what an import already holds). A decision's `inputs.stored` names the query as
+  it ran: `{query, name, params, rows}`. Across stores a query travels by name: another running
+  panel answers it on its own `POST /api/db/named`. `POST /api/db/query` also takes `params` for
+  an ad-hoc statement's named parameters.
 
 - **Read-only queries.** Only SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW, one statement; the
   connection also runs without external access. While the panel runs it holds the file's lock, so
@@ -104,11 +113,12 @@ the Majordomus blackboard"). The feature record is
 | [`tools/research/mcp-rhai/src/panel_events.rs`](../../tools/research/mcp-rhai/src/panel_events.rs) | `KINDS`, the `plan` payload, the external-kind check |
 | [`tools/research/mcp-rhai/src/panel_store.rs`](../../tools/research/mcp-rhai/src/panel_store.rs) | the panel's tap and its read routes |
 | [`tools/research/mcp-rhai/src/bus_sinks.rs`](../../tools/research/mcp-rhai/src/bus_sinks.rs) | the ZeroMQ and DuckDB sinks, the read-only guard, named queries with bound parameters |
-| [`tools/research/mcp-rhai/sql/`](../../tools/research/mcp-rhai/sql/README.md) | the store's tables, views and named queries, one file each |
+| [`tools/research/mcp-rhai/sql/`](../../tools/research/mcp-rhai/sql/README.md) | the store's tables, views, named queries and row inserts, and battle-postmortem's statements, one file each |
+| [`tools/research/mcp-rhai/src/store_sql.rs`](../../tools/research/mcp-rhai/src/store_sql.rs) | the embedded files and `Named`, a query with the values bound to it |
 | [`tools/research/mcp-rhai/src/bin/mcp-bus-tail.rs`](../../tools/research/mcp-rhai/src/bin/mcp-bus-tail.rs) | a SUB client that prints envelopes |
 | [`tools/research/mcp-rhai/src/bin/mcp-bus-blackboard.rs`](../../tools/research/mcp-rhai/src/bin/mcp-bus-blackboard.rs) | the digest to the Majordomus board |
 | [`tools/research/mcp-rhai/src/board.rs`](../../tools/research/mcp-rhai/src/board.rs) | the board client it shares with Rhai's `board_post` |
-| [`tools/research/mcp-rhai/build.rs`](../../tools/research/mcp-rhai/build.rs) | finds libduckdb, stamps the git revision |
+| [`tools/research/mcp-rhai/build.rs`](../../tools/research/mcp-rhai/build.rs) | finds libduckdb, stamps the git revision, embeds `sql/` |
 | [`tools/research/mcp-panel/static/data.html`](../../tools/research/mcp-panel/static/data.html), [`data.js`](../../tools/research/mcp-panel/static/data.js) | the Data page: a query, its rows, a chart |
 
 ## How it is tested
@@ -116,8 +126,11 @@ the Majordomus blackboard"). The feature record is
 - `cargo test` in `tools/research/mcp-rhai`: `panel_events.rs` (the table is unique, no publish
   call names an undeclared kind, every kind has a producer, the knowledge note holds the table,
   only declared external kinds enter from outside), `bus_sinks.rs` (one read-only statement
-  passes the guard, the envelope, events and samples go into DuckDB and come back),
-  `panel_store.rs` and `mcp-bus-blackboard.rs`.
+  passes the guard, the envelope, events and samples go into DuckDB and come back, every SQL file
+  names its object and says what it does, an insert names each column of its table, a value is
+  bound and never pasted), `panel_store.rs` (a named query across stores, a locked one through
+  its panel's `/api/db/named`), `battle-postmortem` (its SQLite reads and DuckDB writes) and
+  `mcp-bus-blackboard.rs`.
 - `tools/research/mcp-panel-check` on a running panel: the endpoint, an envelope received by
   `mcp-bus-tail`, events in the store, INSERT and a second statement refused, `plan.portfolio` and
   `plan.bot_settings` found on the bus and in the store.

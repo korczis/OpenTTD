@@ -1844,8 +1844,8 @@ fn h_action_plan(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     let mut books = books_from_caller(&inp);
     // Cash and loan from the company's newest day in the store (I0086, ADR 0034 point 1), whichever
     // the body left out; the console below fills what the store could not, and the event names which.
-    let stored = books_from_store(&mut inp, &mut books, &format!("panel-{}", g.args.panel_port), |sql| {
-        let (code, v) = panel_store::run_query(sql);
+    let stored = books_from_store(&mut inp, &mut books, &format!("panel-{}", g.args.panel_port), |q| {
+        let (code, v) = panel_store::run_named(q);
         if code == 200 { Ok(v) } else { Err(py_str(v.get("error"))) }
     });
     if !inp.contains_key("cash") || !inp.contains_key("loan") {
@@ -1905,10 +1905,10 @@ pub const ACTION_BOOK_DAYS: usize = 30;
 /// Cash and loan of an action plan, whichever `inp` lacks, from the newest stored day of the asked
 /// company (else the lowest company id) of this instance's latest run, read with `read` (the
 /// panel's own store: `kernel_feed::from_store`). `books` records where each came from. What
-/// plan.action names as its stored input: the statement and its rows, or why the store gave
+/// plan.action names as its stored input: the named query and its rows, or why the store gave
 /// nothing, so the console fills the rest (ADR 0034 point 2).
 pub fn books_from_store(inp: &mut Map<String, Value>, books: &mut Value, instance: &str,
-                        read: impl FnOnce(&str) -> Result<Value, String>) -> panel_events::Stored {
+                        read: impl FnOnce(&crate::store_sql::Named) -> Result<Value, String>) -> panel_events::Stored {
     if inp.contains_key("cash") && inp.contains_key("loan") {
         return panel_events::Stored::Fallback("the caller gave cash and loan".into());
     }
@@ -1996,7 +1996,7 @@ fn h_calibration(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
         other => return Ok((400, json!({"error": format!("scope: all or seed, not {other}")}))),
     };
     let game = calibrate::game_of(g.args.seed, &g.resource("openttd://game/state").unwrap_or(Value::Null));
-    let cal = panel_bot::calibration(&scope, &game, panel_store::query_every_store);
+    let cal = panel_bot::calibration(&scope, &game, panel_store::every_store);
     let mut out = cal.record;
     out["params"] = json!({"calibration": cal.factors.unwrap_or_else(|| json!({}))});
     out["stored"] = cal.stored.to_json();
@@ -2019,7 +2019,7 @@ fn h_calibration_record(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String
     }
     let out: Value = serde_json::from_str(&r.stdout).map_err(|e| e.to_string())?;
     let game = calibrate::game_of(g.args.seed, &g.resource("openttd://game/state").unwrap_or(Value::Null));
-    let before = panel_bot::calibration(&calibrate::Scope::All, &game, panel_store::query_every_store);
+    let before = panel_bot::calibration(&calibrate::Scope::All, &game, panel_store::every_store);
     let e = calibration_event(&out, &game, &before);
     g.event("ai", &format!("calibration recorded in the store ({}): {} reading(s), factors {}", py_str(Some(&panel_store::store_status())),
                            e["choice"]["readings"], e["choice"]["factors"]));
@@ -2364,8 +2364,8 @@ pub fn routes() -> Vec<Route> {
           s(json!({"kind": st(), "data": obj()}), &["kind", "data"]), h_bus_publish),
         r("GET", "/api/db/tables", "dbTables", "The DuckDB store of this instance (ADR 0033): its file and every table (runs, events, samples) with its columns", false, None, panel_store::h_db_tables),
         r("GET", "/api/db/query", "dbQuery", "One read-only statement on the store (?sql=SELECT ...; SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW, one statement, anything else 400; without sql the newest 20 events): {columns, rows, count, capped}, each row a list in column order, at most 5000 rows", false, None, panel_store::h_db_query),
-        r("POST", "/api/db/query", "dbQueryPost", "The same read-only query with the statement in the body ({sql}), for statements too long for an address", false,
-          s(json!({"sql": st()}), &["sql"]), panel_store::h_db_query),
+        r("POST", "/api/db/query", "dbQueryPost", "The same read-only query with the statement in the body ({sql, params?}), for statements too long for an address; `params` binds the statement's named parameters ($company), never pasted, a missing one 400", false,
+          s(json!({"sql": st(), "params": obj()}), &["sql"]), panel_store::h_db_query),
         r("GET", "/api/db/named", "dbNamed", "Every named query of the store (one file each in tools/research/mcp-rhai/sql/queries): name, description, parameters read from the prepared statement, and its sql", false, None, panel_store::h_db_named_list),
         r("POST", "/api/db/named", "dbNamedRun", "Run one named query with its parameters bound, never pasted ({name, params: {company: 0, ...}}): {columns, rows, count, capped}; 404 for an unknown name, 400 for a missing parameter", false,
           s(json!({"name": st(), "params": obj()}), &["name"]), panel_store::h_db_named_run),
@@ -3269,7 +3269,7 @@ mod tests {
         let r = st.reader().unwrap();
         let mut inp = json!({"actions": [{"id": "r", "kind": "repay_loan", "amount": 50000}]}).as_object().cloned().unwrap();
         let mut books = books_from_caller(&inp);
-        let stored = books_from_store(&mut inp, &mut books, "panel-8800", |sql| r.query(sql));
+        let stored = books_from_store(&mut inp, &mut books, "panel-8800", |q| r.run(q));
         assert_eq!((inp["cash"].as_f64(), inp["loan"].as_f64()), (Some(298290.0), Some(300000.0)), "company 0's newest day");
         assert_eq!(books["cash"], json!({"store": "samples", "company": 0, "game_date": "1950-10-14", "game_tick": 22456}));
         assert_eq!(books["loan"]["store"], "samples");
@@ -3277,6 +3277,7 @@ mod tests {
         assert_eq!(books["trailing"]["days"], 2, "the older run's day is not in the window");
         let s = stored.to_json();
         assert!(s["query"].as_str().unwrap().contains("FROM samples"), "{s}");
+        assert_eq!((s["name"].clone(), s["params"].clone()), (json!("kernel_window"), json!({"instance": "panel-8800", "days": ACTION_BOOK_DAYS})));
         assert_eq!(s["rows"], 4, "two days of two companies");
         // The event carries the statement and its row count.
         let e = action_event(&json!({}), &Value::Object(inp.clone()), &books, &Map::new(), &stored);
@@ -3285,7 +3286,7 @@ mod tests {
         // A named company gets its own books; a loan the caller gave stays the caller's.
         let mut inp = json!({"actions": [], "company": 1, "loan": 7}).as_object().cloned().unwrap();
         let mut books = books_from_caller(&inp);
-        books_from_store(&mut inp, &mut books, "panel-8800", |sql| r.query(sql));
+        books_from_store(&mut inp, &mut books, "panel-8800", |q| r.run(q));
         assert_eq!((inp["cash"].as_f64(), inp["loan"].as_i64()), (Some(51000.0), Some(7)));
         assert_eq!((books["cash"]["company"].clone(), books["loan"].clone()), (json!(1), json!("caller")));
     }
@@ -3359,7 +3360,9 @@ mod tests {
         assert_eq!(e["choice"]["readings"], 2, "the stored one and this one");
         assert_eq!(e["choice"]["factors"], json!({"rail": 0.7, "default": 0.7}), "median of 0.6 and 0.8");
         assert_eq!(e["inputs"]["live"]["game"], game, "what the seed scope compares");
-        assert_eq!(e["inputs"]["stored"], json!({"query": calibrate::readings_sql(&calibrate::Scope::All, &game).unwrap(), "rows": 1}));
+        let mut stored = calibrate::readings_query(&calibrate::Scope::All, &game).unwrap().record();
+        stored["rows"] = json!(1);
+        assert_eq!(e["inputs"]["stored"], stored);
         let off = panel_bot::calibration(&calibrate::Scope::All, &game, |_| Err("store off: the store is not open".into()));
         let e = calibration_event(&out, &game, &off);
         assert_eq!(e["choice"]["readings"], 1);
