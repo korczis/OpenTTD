@@ -1,0 +1,33 @@
+id: I0169
+milestone: prismatic-closes-one-real-loop
+title: "A frozen-input ablation says whether Prismatic changed the decision: the same captured observation decided by prismatic_api, repeatedly, and by the panel's baseline, side by side"
+slug: prismatic-frozen-input-ablation
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "tools/research/prismatic-ablation takes the observation and companies payload captured in I0168's live run and replays it, frozen, to prismatic_api N times. It also gives the same payload to the panel's baseline, the directive applied without Prismatic (the bot's current settings). It records whether Prismatic's directive differs from the baseline, how often across its Monte Carlo repeats, and by how much, with the request and answer digests. A replay that does not reach prismatic_api is labelled SIMULATED, and the result is PARTIAL."
+why: "External review 2026-11-22 (digest B-29). Executing Prismatic's answer does not show that Prismatic changed anything. Prismatic decides by Monte Carlo over aggressiveness (research/agent-loop.md:53), so one answer can be noise. Nothing on origin/master replays a frozen input to it: the research/results/ablation-* records are PrismaticAI feature ablations, and no record has a Prismatic arm."
+scope:
+  - "tools/research/prismatic-ablation"
+  - "tools/research/test_prismatic_ablation.py"
+  - "research/results/**"
+  - "research/agent-loop.md"
+non_scope:
+  - "Editing prismatic-platform or tuning its Monte Carlo"
+  - "Game-outcome effects of Prismatic's directive; the three-arm experiment I0164 measures those"
+depends_on:
+  - I0168
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
+acceptance_criteria:
+  - "Tests on a fixture server cover the differs and equals cases and the SIMULATED label"
+  - "One record from a live prismatic_api gives N, the share of answers that differ from the baseline and the spread of the chosen value"
+  - "research/agent-loop.md's Decide row states that share"
+validation:
+  - "python3 -m unittest tools/research/test_prismatic_ablation.py"
+  - "tools/research/prismatic-ablation --capture research/results/<live-run>.json --repeats 20"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

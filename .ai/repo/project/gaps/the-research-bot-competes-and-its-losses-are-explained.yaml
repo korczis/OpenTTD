@@ -1,0 +1,24 @@
+intent: the-research-bot-competes-and-its-losses-are-explained
+observed_at: 320ad87aea
+recorded_by: "claude-code (Opus 5.5, session 6cb93e2a, worktree plan/external-review-backlog) from an external review re-checked against origin/master on 2026-11-22"
+recorded_at: '2026-11-22'
+observations:
+- id: growth-gates-late
+  statement: "Added 2026-11-22 from an external review re-checked on master: InvestSurplus buys nothing until usable money reaches max(invest_min, 20 x cash_reserve), 500k at defaults (tools/research/prismatic-ai/PrismaticAI/fleet.nut:60,71); demand growth stops at 4 planes and 8 road vehicles per route (fleet.nut:165); the hoard check starts at 500k and exempts self-steward (tools/research/ai-battle/battle.json:78, :86-89); failed rail builds leave track and stations (rail.nut:794-812, 933-993) (I0125-I0137)"
+  source: file:tools/research/prismatic-ai/PrismaticAI/fleet.nut
+- id: nothing-preregistered
+  statement: "Added 2026-11-22 from an external review re-checked on master: the tuning rule says it is enforced by review, not by a tool (.ai/repo/rules/project/a-tuning-claim-needs-held-start-pairs.v1.md:6); no comparison was pre-registered; duel records carry no profit or cargo and the scoreboard rests on company value from unregistered, often single runs (research/duel-evidence-audit.md:31, :103) (I0161-I0167)"
+  source: file:research/duel-evidence-audit.md
+conditions:
+- criterion: prismatic-ai-grows-and-recovers
+  state: missing
+  because: "milestone prismatic-ai-grows-its-fleet-and-survives-its-own-failures owns the fix; nothing in it has started"
+  observations:
+  - growth-gates-late
+- criterion: evaluations-are-pre-registered-and-paired
+  state: missing
+  because: "milestone evaluations-are-fair-pre-registered-and-paired owns the fix; nothing in it has started"
+  observations:
+  - nothing-preregistered
+risks:
+- "The tournament host is shared with the owner and the remote GA orchestrator; experiments need the owner go-ahead for each session"

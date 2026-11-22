@@ -1,0 +1,23 @@
+id: the-research-bot-competes-and-its-losses-are-explained
+title: "The fork's research bot competes against established AIs, and every loss is explained by recorded evidence"
+statement: "PrismaticAI, the fork's own Company AI, grows its fleet, recovers from its own failures and competes against established BaNaNaS AIs such as AAAHogEx in the LAN AI battle; every claim that it improved rests on a pre-registered, paired evaluation on held starts over several seeds with frozen revisions, and every loss is explained from the match's decision logs, settings and source rather than guessed."
+invariants:
+- "Game state changes only through registered commands; the bot is a Company AI like any other"
+- "A default changes only when held-start pairs over several seeds favour it beyond the opponent's spread (rule project.a-tuning-claim-needs-held-start-pairs)"
+non_goals:
+- "Beating an opponent by changing the game's rules or the opponent's settings"
+- "Claims from a single unregistered run"
+milestones:
+- prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+- evaluations-are-fair-pre-registered-and-paired
+satisfaction:
+- id: prismatic-ai-grows-and-recovers
+  criterion: "PrismaticAI's fleet grows while its money does: every fitness lineup, self-steward included, is held to the hoard check and passes it; a failed build leaves no orphan station and is not retried; a save and load mid-run neither builds a line twice nor repeats a fleet move"
+  evidence: command
+  ref: "python3 -c \"import json;f=json.load(open('tools/research/ai-battle/battle.json'))['fitness'];assert 'PrismaticAI self-steward' in f['must_not_hoard']\" && python3 -m unittest tools/research/test_ai_battle.py"
+- id: evaluations-are-pre-registered-and-paired
+  criterion: "Every comparative claim about PrismaticAI, the planner, AlgoGlyph or Prismatic cites a protocol committed under research/experiments/ before its first run (arms, frozen revisions, paired and held-out seeds, horizon, repeats, metrics, exclusion rule), runs as held-start pairs with repeats, and reports per metric a paired effect with an interval and every failed or excluded run"
+  evidence: command
+  ref: "tools/research/preregistration check research/experiments (written by I0161)"
+created_at: 2026-11-22
+updated_at: '2026-11-22'

@@ -1,0 +1,32 @@
+id: I0147
+milestone: the-planner-reads-one-coherent-priced-world
+title: "A two-leg cargo transfer service through one shared station is proven on a server: unloaded as transfer, carried on by the second leg, and paid once at the final acceptor"
+slug: two-leg-transfer-proven
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Extend the proven yard (`mcp-human yard`, mcp-human-e2e --yard) to a working service: leg A's train unloads at the shared station with a Transfer and leave-empty order, leg B's train loads there with no unload and delivers at the final acceptor. Verify from openttd://vehicles order flags, station cargo and the companies' income that the cargo arrived as transfer, was carried on, and was paid at the acceptor with the feeder share not counted twice."
+why: "External review 2026-11-22 (digest B-01). research/mcp-human.md:239 records the yard verified on seed 4242 (34 PASS, both platforms in one station) but delivery of transferred cargo was not tested; tools/research/mcp-rhai/src/yards.rs:1-12 proves geometry only; `git grep` for transfer orders in tools/research and src/prismatic_mcp finds none."
+scope:
+  - "tools/research/mcp-human/src/**"
+  - "tools/research/mcp-human-e2e"
+  - "research/mcp-human.md"
+  - "research/results/**"
+non_scope:
+  - "Teaching PrismaticAI to build transfers"
+depends_on:
+  - I0140
+  - I0141
+  - I0145
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "mcp-human-e2e --yard --transfer exits 0 on seed 4242 with PASS lines for the transfer order, the onward carriage and the single payment"
+  - "The run is a record under research/results/ with the build and runtime configuration"
+validation:
+  - "tools/research/mcp-human-e2e --test --rounds 0 --yard --transfer"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

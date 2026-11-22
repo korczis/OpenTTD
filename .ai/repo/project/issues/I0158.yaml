@@ -1,0 +1,27 @@
+id: I0158
+milestone: battlebrain-decides-live-with-rollback
+title: "One authoritative portfolio solver: cargo.rs adopts a knapsack-dp answer only after its domain check, and the named built-in knapsack is proven equal to knapsack-dp on a generated corpus"
+slug: one-portfolio-solver-checked
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "cargo.rs runs battlebrain_contract::domain_check('knapsack-dp', ...) on every AlgoGlyph answer before adopting it and falls back to the named built-in solver with the refusal as its reason. A property test compares the built-in and knapsack-dp (or its committed answers) on generated cases with ties and capacity edges, and the authority matrix row 'portfolio within a budget' states the result."
+why: "External review 2026-11-22 (digest B-06). The solver is named (tools/research/mcp-rhai/src/cargo.rs:208 'builtin knapsack (MCP_ALGOGLYPH_DIR not set or the runner refused)') and one equivalence case exists (:277 knapsack_matches_the_algoglyph_case), but open PR #55 names as gap B7 that 'cargo.rs adopts a knapsack-dp answer without domain_check'. ADR 0037:24 still describes the fallback as silent and labelled as AlgoGlyph, which cargo.rs no longer does. This lands after PR #55, which touches cargo.rs."
+scope:
+  - "tools/research/mcp-rhai/src/cargo.rs"
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "research/battlebrain/README.md"
+non_scope:
+  - "Editing ADR 0037 (accepted); the README records that its context describes the state before PR #43"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "An over-capacity or wrong-best knapsack-dp answer is refused in cargo.rs and the built-in answer is used with the refusal named (test)"
+  - "The generated equivalence test passes on at least 200 cases including ties"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan --bin battlebrain"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
