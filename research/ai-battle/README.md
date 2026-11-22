@@ -406,6 +406,10 @@ The first editions showed two failures. The battle now catches both by itself.
   refusal won the airports back but came out -6.4% over the 12 and 0.0% over 30 more; neither was committed. See
   [the knowledge record](../../.ai/repo/knowledge/curated/levelling-an-airport-site-clears-trees-and-costs-town-rating.md).
   The levelling log lines now carry the real cost again (from 8c8d025388 they said "for 0").
+- **Four-tile platforms by default (2026-11-22).** A new rail line's platform length was derived
+  from supply at build time, which gave 2-3 tiles and short trains. `rail_len` now defaults to 4.
+  In 9 replayed default matches, 4 tiles beat the derived length in all 9 (+13.5% geometric, at
+  least +1.4%); 5 and 7 did worse. Measured by openttd-1e.
 - **New maps every generation.** A match's seed includes its edition, so each GA generation meets
   new maps. Before, every generation was judged, and tuned, on the same handful of seeds.
 - **Promotion, detected automatically.** The orchestrator pairs every configuration (its settings, not
