@@ -13,6 +13,13 @@
 //!                                      game tick when the server offers openttd.resources.read_many
 //!        mcp-plan --snapshot DIR ...  (replay: read every resource from a capture instead of a game,
 //!                                      refusing a file whose sha256 differs from the capture's)
+//!        mcp-plan --catalogue FILE ... (choose the kernels from this recorded AlgoGlyph catalogue,
+//!                                      {kernels, commit} as battlebrain reads one, instead of the
+//!                                      runner's own `flow -- kernels`)
+//!
+//! Every AlgoGlyph kernel the plan calls is chosen by capability from the catalogue (src/cargo.rs
+//! `Kernels`, the matcher of battlebrain_contract.rs); the answer's `kernels` holds the catalogue
+//! and the capability-match/v1 decision of every capability the plan resolved.
 use std::time::Duration;
 
 #[path = "../graph.rs"]
@@ -43,6 +50,19 @@ mod hub_algoglyph;
 mod battlebrain_contract;
 #[path = "../reads.rs"]
 mod reads;
+
+/// The solver label of a capability: the kernel the matcher chose for it, or that none was.
+fn solver_of(kernels: &cargo::Kernels, cap: &str) -> String {
+    kernels.chosen(cap).map_or_else(|| format!("no kernel ({cap} unmatched, see kernels)"), |k| format!("algoglyph {k}"))
+}
+
+/// The record of the line pricing (--track): which capability and kernel priced the lines, on
+/// which resources, and each line's entry.
+fn line_costs(kernels: &cargo::Kernels, priced: Vec<serde_json::Value>) -> serde_json::Value {
+    serde_json::json!({"capability": linecost::RAIL_LINE_PRICE, "kernel": kernels.chosen(linecost::RAIL_LINE_PRICE),
+                       "solver": format!("{} on map, map/ways, map/terrain, economy/prices, bridges", solver_of(kernels, linecost::RAIL_LINE_PRICE)),
+                       "priced": priced})
+}
 
 /// The game's resources a track plan reads, as hub_algoglyph assembles them (from/to added later).
 fn linecost_input(read: &dyn Fn(&str) -> Result<Option<serde_json::Value>, String>) -> Result<serde_json::Value, String> {
@@ -343,9 +363,11 @@ fn main() {
     let mut yards_n = 0usize;
     let mut calibrate_too = false;
     let (mut capture_dir, mut snapshot_dir): (Option<String>, Option<String>) = (None, None);
+    let mut catalogue: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--capture" => capture_dir = args.next(),
+            "--catalogue" => catalogue = args.next(),
             "--snapshot" => snapshot_dir = args.next(),
             "--panel" => panel = args.next().unwrap_or_default(),
             "--token" => token = args.next(),
@@ -360,7 +382,7 @@ fn main() {
             }
             "--limit" => limit = args.next().and_then(|v| v.parse().ok()).unwrap_or(20),
             "-h" | "--help" => {
-                println!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--capture DIR | --snapshot DIR] [--defaults]");
+                println!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
                 return;
             }
             "--defaults" => {
@@ -375,7 +397,7 @@ fn main() {
                 }
             },
             _ => {
-                eprintln!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--capture DIR | --snapshot DIR] [--defaults]");
+                eprintln!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
                 std::process::exit(2);
             }
         }
@@ -392,6 +414,8 @@ fn main() {
         }
     }
     let source_kind = if snapshot_dir.is_some() { "capture" } else if token.is_some() { "mcp" } else { "panel" };
+    // The kernels of every run of the planner below: one catalogue, each capability matched once.
+    let kernels = catalogue.as_deref().map_or_else(cargo::Kernels::runner, cargo::Kernels::from_file);
     // One run of the planner on `src`; --capture's coherent path runs it more than once (`coherent`).
     let run = |src: &Source| -> Result<serde_json::Value, String> {
         reads::clear();
@@ -446,17 +470,17 @@ fn main() {
             let mut log = Vec::new();
             for list in ["freight", "rail"] {
                 let arr = if list == "freight" { out["freight"].as_array_mut() } else { out["by_mode"]["rail"].as_array_mut() };
-                if let Some(arr) = arr { log.extend(linecost::price(arr, &base, stations, rail_tile, track)); }
+                if let Some(arr) = arr { log.extend(linecost::price(arr, &base, stations, rail_tile, track, &kernels)); }
             }
-            out["line_costs"] = serde_json::json!({"solver": "algoglyph track-planning on map, map/ways, map/terrain, economy/prices, bridges",
-                                                   "priced": log});
+            out["line_costs"] = line_costs(&kernels, log);
             // --yards N: prove up to N transfer yards offline (src/yards.rs): the better line's route
             // blocked, can the other still leave from a platform beside it?
             if yards_n > 0 {
                 let mut lines: Vec<serde_json::Value> = out["freight"].as_array().cloned().unwrap_or_default();
                 lines.extend(out["by_mode"]["rail"].as_array().cloned().unwrap_or_default());
-                out["yards"] = serde_json::json!({"solver": "algoglyph track-planning, the better line's tiles blocked (src/yards.rs)",
-                                                  "pairs": yards::prove(&lines, &base, yards_n)});
+                let pairs = yards::prove(&lines, &base, yards_n, &kernels);
+                out["yards"] = serde_json::json!({"solver": format!("{}, the better line's tiles blocked (src/yards.rs)", solver_of(&kernels, linecost::RAIL_LINE_PRICE)),
+                                                  "pairs": pairs});
             }
         }
         let mut candidates: Vec<serde_json::Value> = Vec::new();
@@ -465,14 +489,15 @@ fn main() {
         }
         candidates.extend(out["freight"].as_array().cloned().unwrap_or_default());
         candidates.sort_by(|a, b| b["score"].as_f64().unwrap_or(0.0).total_cmp(&a["score"].as_f64().unwrap_or(0.0)));
-        out["portfolio"] = cargo::portfolio(&candidates, out["params"]["budget"].as_f64());
+        out["portfolio"] = cargo::portfolio(&candidates, out["params"]["budget"].as_f64(), &kernels);
         if invest_inputs { return Ok(invest::input(&out, &engines, &towns).unwrap_or(serde_json::Value::Null)); }
-        if invest_too { out["investment"] = invest::decide(&out, &engines, &towns); }
+        if invest_too { out["investment"] = invest::decide(&out, &engines, &towns, &kernels); }
         out["model"] = serde_json::json!("v4: v3 for passengers, freight pairs from the world graph's industries priced with each cargo's own payment rate and transit periods, and a portfolio chosen by knapsack within the budget");
         // Which runner answered the kernel calls, only when the one-serve switch is on (I0086), so
         // the default answer stays as it was.
         if cargo::flow_serve::wanted() { out["algoglyph"] = cargo::flow_serve::summary(); }
         out["reads"] = reads::json();
+        out["kernels"] = kernels.record();
         Ok(out)
     };
     // How a capture's reads were taken: at one tick through read_many, or why not.
@@ -515,6 +540,24 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_line_costs_name_the_kernel_the_catalogue_matched_or_that_none_did() {
+        let k = cargo::testing::kernels(|_, _| Err(cargo::KernelFailure::Unset));
+        let _ = linecost::route(&k, &serde_json::json!({}), &serde_json::json!({}), &serde_json::json!({}), &[]);
+        let lc = line_costs(&k, vec![serde_json::json!({"candidate": 0})]);
+        assert_eq!(lc["capability"], "rail-line-price");
+        assert_eq!(lc["kernel"], "track-planning");
+        assert_eq!(lc["solver"], "algoglyph track-planning on map, map/ways, map/terrain, economy/prices, bridges");
+        assert_eq!(lc["priced"].as_array().unwrap().len(), 1);
+        let expired = cargo::testing::catalogue(|l| l.retain(|k| k["id"] != "track-planning"));
+        let k = cargo::testing::on(expired, |_, _| panic!("no kernel"));
+        let _ = linecost::route(&k, &serde_json::json!({}), &serde_json::json!({}), &serde_json::json!({}), &[]);
+        let lc = line_costs(&k, vec![]);
+        assert_eq!(lc["kernel"], serde_json::Value::Null);
+        assert_eq!(solver_of(&k, linecost::RAIL_LINE_PRICE), "no kernel (rail-line-price unmatched, see kernels)");
+        assert_eq!(k.record()["matches"][0]["refusal"]["code"], "kernel_expired");
+    }
 
     fn temp(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("mcp-plan-capture-test-{tag}-{}", std::process::id()));

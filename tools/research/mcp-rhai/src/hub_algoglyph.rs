@@ -1,21 +1,24 @@
 //! RESEARCH-ONLY / UNSTABLE: AlgoGlyph's kernels as hub methods.
 //!
-//! AlgoGlyph (`$MCP_ALGOGLYPH_DIR`, else `~/dev/algoglyph-wt/main`, else `~/dev/algoglyph`) answers one kernel on caller data
+//! AlgoGlyph is the git submodule `tools/research/vendor/algoglyph`, pinned at one commit (I0227,
+//! ADR 0039; `$MCP_ALGOGLYPH_DIR` overrides, see `dir`). It answers one kernel on caller data
 //! through its flow CLI: `npm run --silent flow -- kernel <id> -` reads the input on stdin and
 //! prints the answer as JSON; `flow -- kernels` lists every kernel with the input shape it reads.
+//! Its Rust kernels (crate algoglyph-kernels, linked from the same submodule) are entries of that
+//! catalogue with engine native-rust and answer in this process (`native`, src/algoglyph_native.rs).
 //! Nothing here names a kernel except `track_plan`, which assembles the track-planning input from a
 //! game: the `data` of its openttd://map, map/ways, map/terrain, economy/prices and bridges,
 //! verbatim, read in that order (a resource the game does not publish is left out, and the kernel falls back to
 //! its defaults). The planner checks slopes against heights, so the four are read back to back.
 //!
 //! Methods (added to the hub's table, so they are in rpc.discover, GraphQL and OpenAPI):
-//!   algoglyph.kernels                          every kernel with the input it reads
-//!   algoglyph.kernel     {kernel, input}       one kernel on that input
+//!   algoglyph.kernels                          every kernel with the input it reads: the runner's, then the native ones
+//!   algoglyph.kernel     {kernel, input}       one kernel on that input (a native one in-process)
 //!   algoglyph.track_plan {instance, from, to, costs?, rules?}   a rail route in that game
 
 use serde_json::{json, Value};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -26,27 +29,65 @@ pub const KERNEL_TIMEOUT: Duration = Duration::from_secs(120);
 pub const TRACK_INPUTS: [(&str, &str); 5] = [("map", "map"), ("ways", "map/ways"), ("terrain", "map/terrain"),
     ("prices", "economy/prices"), ("bridges", "bridges")];
 
-/// Where AlgoGlyph is checked out: `$MCP_ALGOGLYPH_DIR`, else a checkout of origin/main at
-/// `~/dev/algoglyph-wt/main` when there is one (the primary checkout can be far behind main and
-/// lack the planner's kernels), else `~/dev/algoglyph`.
+#[path = "algoglyph_native.rs"]
+pub mod native;
+
+/// The AlgoGlyph submodule this crate is built next to: tools/research/vendor/algoglyph.
+pub fn submodule() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../vendor/algoglyph")
+}
+
+/// Whether the flow CLI can run in `dir`: a checkout with its package.json and its node_modules.
+pub fn runnable(dir: &Path) -> bool {
+    dir.join("package.json").is_file() && dir.join("node_modules").is_dir()
+}
+
+/// The commit a checkout is cleanly at: its HEAD when no tracked file differs from it, else None.
+pub fn clean_head(dir: &Path) -> Option<String> {
+    let git = |args: &[&str]| Command::new("git").arg("-C").arg(dir).args(args).output().ok()
+        .filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    git(&["status", "--porcelain", "--untracked-files=no"]).filter(String::is_empty)?;
+    git(&["rev-parse", "HEAD"])
+}
+
+/// Where AlgoGlyph is checked out: `$MCP_ALGOGLYPH_DIR` (an experiment against another version),
+/// else the pinned checkout `default_dir` finds.
 pub fn dir() -> PathBuf {
     std::env::var_os("MCP_ALGOGLYPH_DIR").map(PathBuf::from).unwrap_or_else(|| {
-        default_dir(&PathBuf::from(std::env::var_os("HOME").unwrap_or_default()))
+        default_dir(&submodule(), &PathBuf::from(std::env::var_os("HOME").unwrap_or_default()),
+            native::pinned_commit().as_deref(), &clean_head)
     })
 }
 
-/// The checkout used when `$MCP_ALGOGLYPH_DIR` is not set, under the home directory `home`.
-pub fn default_dir(home: &std::path::Path) -> PathBuf {
-    let main = home.join("dev/algoglyph-wt/main");
-    if main.join("package.json").is_file() { main } else { home.join("dev/algoglyph") }
+/// The checkout used when `$MCP_ALGOGLYPH_DIR` is not set: the first of the submodule,
+/// `~/dev/algoglyph-wt/main` and `~/dev/algoglyph` (under `home`) that can run the flow CLI and is
+/// cleanly at the pinned commit `pin` (`at` says which commit a checkout is at). The pin is the only
+/// version the fork trusts, so a checkout elsewhere serves only at that commit (one whose
+/// node_modules are installed spares installing them in every worktree); none: the submodule, whose
+/// path the refusal names.
+pub fn default_dir(submodule: &Path, home: &Path, pin: Option<&str>, at: &dyn Fn(&Path) -> Option<String>) -> PathBuf {
+    [submodule.to_path_buf(), home.join("dev/algoglyph-wt/main"), home.join("dev/algoglyph")].into_iter()
+        .find(|d| runnable(d) && pin.is_some() && at(d).as_deref() == pin)
+        .unwrap_or_else(|| submodule.to_path_buf())
+}
+
+/// The discovered kernel catalogue: the runner's `flow -- kernels`, then every native kernel.
+pub fn kernels() -> Result<Value, String> {
+    flow(&["kernels"], None).map(native::merge)
+}
+
+/// One kernel on `input`: a native one in this process, any other through the flow CLI.
+pub fn kernel(id: &str, input: &Value) -> Result<Value, String> {
+    if native::routes(id) { Ok(native::run(id, input)) } else { flow(&["kernel", id, "-"], Some(input)) }
 }
 
 /// The method table entries, appended to the hub's own.
 pub fn methods() -> Vec<Value> {
     vec![
-        json!({"method": "algoglyph.kernels", "params": {}, "result": "every AlgoGlyph kernel with the input shape it reads (flow -- kernels)"}),
+        json!({"method": "algoglyph.kernels", "params": {},
+               "result": "every AlgoGlyph kernel with the input shape it reads: flow -- kernels, then the native-rust kernels of the pinned crate"}),
         json!({"method": "algoglyph.kernel", "params": {"kernel": "required: a kernel id from algoglyph.kernels", "input": "object: that kernel's input"},
-               "result": "the kernel's answer (flow -- kernel <id> -)"}),
+               "result": "the kernel's answer (flow -- kernel <id> -; a native-rust kernel in-process)"}),
         json!({"method": "algoglyph.track_plan",
                "params": {"instance": "required: a game instance", "from": "{x, y, dir: NE|SE|SW|NW}", "to": "{x, y, dir?}", "costs": "optional", "rules": "optional",
                           "railtype": "optional: a label (RAIL, ELRL, MONO, MGLV) or index of openttd://railtypes; plain rail when left out"},
@@ -57,8 +98,8 @@ pub fn methods() -> Vec<Value> {
 /// Run the flow CLI with `args`, `stdin` on its standard input; its standard output parsed as JSON.
 pub fn flow(args: &[&str], stdin: Option<&Value>) -> Result<Value, String> {
     let dir = dir();
-    if !dir.join("package.json").is_file() {
-        return Err(format!("no AlgoGlyph at {} (set MCP_ALGOGLYPH_DIR)", dir.display()));
+    if !runnable(&dir) {
+        return Err(format!("no installed AlgoGlyph at {} (tools/research/algoglyph-pin install, or set MCP_ALGOGLYPH_DIR)", dir.display()));
     }
     let mut child = Command::new("npm").args(["run", "--silent", "flow", "--"]).args(args)
         .current_dir(&dir).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
@@ -192,16 +233,77 @@ mod tests {
         assert_eq!(published(json!({"data": {"width": 8}})).unwrap(), Some(json!({"data": {"width": 8}})));
     }
 
+    /// A checkout that can run the flow CLI: package.json and node_modules.
+    fn installed(d: &Path) {
+        std::fs::create_dir_all(d.join("node_modules")).unwrap();
+        std::fs::write(d.join("package.json"), "{}").unwrap();
+    }
+
     #[test]
-    fn without_the_variable_a_main_checkout_is_preferred_to_the_primary_one() {
-        let home = std::env::temp_dir().join(format!("hub-algoglyph-{}", std::process::id()));
+    fn without_the_variable_the_submodule_serves_else_a_checkout_only_at_the_pin() {
+        // This file is compiled into two modules of one test binary (hub::algoglyph and
+        // rhai_host::algoglyph), so each test runs twice in one process at once: the scratch
+        // directory names the module as well as the process.
+        let home = std::env::temp_dir().join(format!("hub-algoglyph-{}-{}", module_path!().replace("::", "-"), std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(home.join("dev/algoglyph")).unwrap();
-        assert_eq!(default_dir(&home), home.join("dev/algoglyph"));
-        std::fs::create_dir_all(home.join("dev/algoglyph-wt/main")).unwrap();
-        std::fs::write(home.join("dev/algoglyph-wt/main/package.json"), "{}").unwrap();
-        assert_eq!(default_dir(&home), home.join("dev/algoglyph-wt/main"));
+        let sub = home.join("repo/tools/research/vendor/algoglyph");
+        let (main, primary) = (home.join("dev/algoglyph-wt/main"), home.join("dev/algoglyph"));
+        let pin = "1b8e009059c299b29d7a829d2d51d4e057304d4d";
+        let at_pin = |_: &Path| Some(pin.to_string());
+        // Nothing installed: the submodule, whose path the refusal names.
+        assert_eq!(default_dir(&sub, &home, Some(pin), &at_pin), sub);
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("package.json"), "{}").unwrap();
+        installed(&primary);
+        assert_eq!(default_dir(&sub, &home, Some(pin), &at_pin), primary, "a submodule without node_modules does not run");
+        installed(&main);
+        assert_eq!(default_dir(&sub, &home, Some(pin), &at_pin), main);
+        // A checkout at another commit, or a dirty one (no clean head), is passed over.
+        let elsewhere = |d: &Path| if d == main { Some("0".repeat(40)) } else if d == primary { None } else { Some(pin.to_string()) };
+        assert_eq!(default_dir(&sub, &home, Some(pin), &elsewhere), sub);
+        installed(&sub);
+        assert_eq!(default_dir(&sub, &home, Some(pin), &at_pin), sub, "the submodule first");
+        assert_eq!(default_dir(&sub, &home, None, &at_pin), sub, "no pin record: nothing is trusted, the submodule is named");
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_clean_head_is_the_commit_of_a_checkout_with_no_tracked_change() {
+        let d = std::env::temp_dir().join(format!("hub-algoglyph-git-{}-{}", module_path!().replace("::", "-"), std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let git = |args: &[&str]| assert!(Command::new("git").arg("-C").arg(&d).args(args).output().unwrap().status.success(), "git {args:?}");
+        assert_eq!(clean_head(&d), None, "not a checkout");
+        git(&["init", "-q"]);
+        std::fs::write(d.join("a"), "1").unwrap();
+        git(&["add", "a"]);
+        git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "a"]);
+        let head = clean_head(&d).expect("a clean checkout");
+        assert_eq!(head.len(), 40);
+        std::fs::write(d.join("untracked"), "x").unwrap();
+        assert_eq!(clean_head(&d).as_deref(), Some(head.as_str()), "an untracked file changes no tracked one");
+        std::fs::write(d.join("a"), "2").unwrap();
+        assert_eq!(clean_head(&d), None, "a tracked change");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_submodule_is_the_vendored_checkout_next_to_this_crate() {
+        assert!(submodule().ends_with("../vendor/algoglyph"));
+        assert!(submodule().join("crates/algoglyph-kernels/Cargo.toml").is_file(), "the crate this binary links is there");
+    }
+
+    #[test]
+    fn a_native_kernel_is_answered_without_the_runner_and_any_other_needs_it() {
+        let id = native::entries(&json!([])).first().and_then(|k| k["id"].as_str()).map(str::to_string).expect("a native kernel");
+        let v = kernel(&id, &json!({"keys": [2, 1]})).expect("in-process");
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["kernel"]["engine"], native::ENGINE);
+        // A runner kernel goes to the flow CLI: with no installed checkout that is a refusal naming it.
+        if !runnable(&dir()) {
+            assert!(kernel("knapsack-dp", &json!({})).unwrap_err().contains("algoglyph-pin install"));
+            assert!(kernels().unwrap_err().contains("algoglyph-pin install"));
+        }
     }
 
     #[test]

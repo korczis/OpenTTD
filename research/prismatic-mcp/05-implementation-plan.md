@@ -4,6 +4,9 @@ Honest status of every phase. `DONE` = implemented and compiled (and, where note
 `PARTIAL` = foundation in place, explicit gaps. `STAGED` = designed, not yet implemented.
 Per AGENTS.md, nothing is marked done that was not actually built and checked.
 
+The server's reads, mutations and status resource as the code has them now, cited by line with
+their end-to-end evidence, are rows of the [capability matrix](../capability-matrix.md#the-surfaces-mcp-server-panel-hub-bridge).
+
 Status update (2026-11-17): phases D to H have landed in part or in full since this plan was
 written; each phase below says what exists now and cites its source. The plan's original wording
 for what is still open is kept.

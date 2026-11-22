@@ -101,10 +101,36 @@ class RefreshBranch(unittest.TestCase):
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn("refreshed locally", r.stdout)
         self.assertEqual(self.facts("HEAD"), "2")
-        self.assertEqual(git(self.work, "log", "-1", "--format=%s").stdout.strip(), TITLE)
-        self.assertEqual(git(self.work, "log", "-1", "--format=%s", "HEAD^").stdout.strip(),
-                         "Merge origin/master into t")
+        # One merge commit, already holding the regenerated region.
+        self.assertEqual(git(self.work, "log", "-1", "--format=%s").stdout.strip(), "Merge origin/master into t")
+        self.assertEqual(git(self.work, "rev-list", "--count", "origin/t..HEAD", "^origin/master").stdout.strip(), "1")
         self.assertEqual(self.facts("origin/t"), "1", "without --push nothing reaches origin")
+
+    def test_a_local_pre_commit_hook_that_checks_regions_accepts_the_merge(self):
+        self.race()
+        hook = self.work / ".git/hooks/pre-commit"
+        hook.write_text(textwrap.dedent("""\
+            #!/usr/bin/env bash
+            # Stand-in for surfaces check: the facts region must hold the number of documents.
+            n=$(ls docs/*.md 2>/dev/null | wc -l | tr -d ' ')
+            grep -A1 'surfaces:begin facts' README.md | tail -1 | grep -qx "$n" || { echo stale >&2; exit 10; }
+            """))
+        hook.chmod(0o755)
+        r = self.run_script("--push", "t")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        git(self.work, "fetch", "-q", "origin")
+        self.assertEqual(self.facts("origin/t"), "2")
+
+    def test_a_branch_with_master_but_stale_regions_gets_one_sync_commit(self):
+        git(self.work, "checkout", "-q", "-b", "t")
+        (self.work / "docs").mkdir(exist_ok=True)
+        (self.work / "docs/unsynced.md").write_text("# unsynced\n")
+        self.commit("Doc: a page without sync", ["docs/unsynced.md"])
+        git(self.work, "push", "-q", "origin", "t")
+        r = self.run_script("t")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertEqual(git(self.work, "log", "-1", "--format=%s").stdout.strip(), TITLE)
+        self.assertEqual(self.facts("HEAD"), "1")
 
     def test_push_then_rerun_is_idempotent(self):
         self.race()

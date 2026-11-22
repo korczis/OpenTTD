@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn host_docs_cover_the_real_header() {
         let d = host_docs(HOST_DOC);
-        for n in ["rpc", "read", "board_post", "kernel", "loopback_get", "env", "sleep", "to_json", "tools"] {
+        for n in ["rpc", "read", "board_post", "kernel", "build_audit", "loopback_get", "env", "sleep", "to_json", "tools"] {
             assert!(d.contains_key(n), "main.rs documents {n}");
         }
     }

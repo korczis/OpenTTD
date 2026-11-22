@@ -5,6 +5,8 @@
 //!
 //! Usage: mcp-bus-blackboard [--panel URL]... [--endpoint tcp://HOST:PORT]... [--majordomus URL]
 //!                           [--repo DIR] [--min-gap SECONDS] [--duration SECONDS] [--dry-run]
+//!                           [--give-up SECONDS] [--idle-exit SECONDS] [--exit-with-parent]
+//!                           [--pidfile PATH]
 //!
 //! Panels: every `--panel` (its `GET /api/bus`) and `--endpoint`; with neither, every live panel record
 //! of the registry (`$PRISMATIC_MCP_REGISTRY`, default `~/.local/state/prismatic-mcp/instances`) that
@@ -29,7 +31,19 @@
 //!
 //! `--dry-run` prints each post instead of announcing it; `--duration` stops after that many seconds.
 //! SIGINT/SIGTERM stop it: a last unnamed announcement says it stopped, then the session ends.
-//! Exit status: 0 on a clean stop, 2 on bad usage, 3 when no panel or no Majordomus server is reachable.
+//!
+//! It never outlives what it serves (src/daemon.rs). Every subscription runs on one runtime thread,
+//! and a panel whose registry record went away is unsubscribed: ZeroMQ retries the connection to a
+//! dead panel forever, so before, each panel ever seen kept a thread and a runtime of its own (18 of
+//! them, 54 kqueues, after 13.5 h). A Majordomus server that
+//! stops answering is tried again with a growing wait (1 s doubling to 60 s), looked up again with
+//! `majordomus serve ensure` every 10 s when it was not given, and given up on after `--give-up`
+//! seconds (default 600, 0 never): exit 4. `--idle-exit` stops it (exit 0) after that many seconds
+//! following no panel; `--exit-with-parent` stops it (exit 4) when the process that started it is
+//! gone; its working directory deleted stops it too (exit 4). `--pidfile` refuses a second copy
+//! (exit 5) and takes over a dead one's file.
+//! Exit status: 0 on a clean stop, 2 on bad usage, 3 when no panel or no Majordomus server is
+//! reachable at start, 4 when what it serves is gone, 5 when its pidfile names a live process.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -40,9 +54,10 @@ use zeromq::{Socket, SocketRecv};
 
 #[path = "../board.rs"]
 mod board;
+use board::daemon::{self, Idle, Pidfile, Watch};
 use board::{clip, Board};
 
-const USAGE: &str = "usage: mcp-bus-blackboard [--panel URL]... [--endpoint tcp://HOST:PORT]... [--majordomus URL] [--repo DIR] [--min-gap SECONDS] [--duration SECONDS] [--dry-run]";
+const USAGE: &str = "usage: mcp-bus-blackboard [--panel URL]... [--endpoint tcp://HOST:PORT]... [--majordomus URL] [--repo DIR] [--min-gap SECONDS] [--duration SECONDS] [--dry-run] [--give-up SECONDS] [--idle-exit SECONDS] [--exit-with-parent] [--pidfile PATH]";
 
 /// The default gap between two posts of one instance.
 const MIN_GAP_MS: u64 = 30_000;
@@ -54,6 +69,15 @@ const RECENT_KEEP: usize = 3;
 const TOPICS: [&str; 4] = ["game.", "company.", "decision.", "plan."];
 /// How often the registry is read again (the MCP session is pinged on board::PING).
 const RESCAN: Duration = Duration::from_secs(30);
+
+/// The rescan interval: RESCAN, or `$MCP_BUS_RESCAN_MS` (tests shorten it).
+fn rescan_every() -> Duration {
+    std::env::var("MCP_BUS_RESCAN_MS").ok().and_then(|v| v.parse().ok()).map_or(RESCAN, Duration::from_millis)
+}
+/// How long a Majordomus server may not answer before the bridge gives up (exit 4).
+const GIVE_UP: Duration = Duration::from_secs(600);
+/// How often a server that does not answer is looked up again, when it was not given.
+const RESOLVE_EVERY: Duration = Duration::from_secs(10);
 
 // ------------------------------------------------------------------------------------ the digest
 
@@ -280,11 +304,16 @@ struct Args {
     gap_ms: u64,
     duration: Option<Duration>,
     dry: bool,
+    give_up: Duration,
+    idle_exit: Option<Duration>,
+    exit_with_parent: bool,
+    pidfile: Option<std::path::PathBuf>,
 }
 
 fn parse(argv: &[String]) -> Result<Args, String> {
     let mut a = Args { panels: vec![], endpoints: vec![], majordomus: std::env::var("MAJORDOMUS_URL").ok().filter(|s| !s.is_empty()),
-                       repo: None, gap_ms: MIN_GAP_MS, duration: None, dry: false };
+                       repo: None, gap_ms: MIN_GAP_MS, duration: None, dry: false, give_up: GIVE_UP, idle_exit: None,
+                       exit_with_parent: false, pidfile: None };
     let mut it = argv.iter();
     while let Some(flag) = it.next() {
         let mut val = || it.next().cloned().ok_or(format!("{flag} needs a value"));
@@ -297,6 +326,10 @@ fn parse(argv: &[String]) -> Result<Args, String> {
             "--min-gap" => a.gap_ms = (secs(val()?)? * 1000.0) as u64,
             "--duration" => a.duration = Some(Duration::from_secs_f64(secs(val()?)?)),
             "--dry-run" => a.dry = true,
+            "--give-up" => a.give_up = Duration::from_secs_f64(secs(val()?)?),
+            "--idle-exit" => a.idle_exit = Some(Duration::from_secs_f64(secs(val()?)?)),
+            "--exit-with-parent" => a.exit_with_parent = true,
+            "--pidfile" => a.pidfile = Some(val()?.into()),
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -315,11 +348,6 @@ fn registry() -> std::path::PathBuf {
     }
 }
 
-fn pid_alive(pid: i64) -> bool {
-    // SAFETY: kill with signal 0 only checks that the process exists.
-    pid > 0 && pid <= i64::from(i32::MAX) && unsafe { libc::kill(pid as libc::pid_t, 0) } == 0
-}
-
 /// (instance, endpoint) of every panel record naming a bus whose owner lives. Read-only: unlike the
 /// panel's own discovery, no record is removed.
 fn registry_panels() -> Vec<(String, String)> {
@@ -329,7 +357,7 @@ fn registry_panels() -> Vec<(String, String)> {
         let p = e.path();
         if p.extension().and_then(|x| x.to_str()) != Some("json") { continue; }
         let Some(r) = std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { continue };
-        if r["kind"].as_str() != Some("panel") || !r["owner_pid"].as_i64().map_or(false, pid_alive) { continue; }
+        if r["kind"].as_str() != Some("panel") || !r["owner_pid"].as_i64().map_or(false, daemon::pid_alive) { continue; }
         if let (Some(name), Some(bus)) = (r["name"].as_str(), r["bus"].as_str()) {
             out.push((name.to_string(), bus.to_string()));
         }
@@ -352,24 +380,72 @@ enum Msg {
     Gone(String, String),
 }
 
-/// Follow one endpoint on a thread of its own, handing each envelope to `tx`.
-fn subscribe(endpoint: String, tx: mpsc::Sender<Msg>) {
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a tokio runtime");
-        let why = rt.block_on(async {
-            let mut sock = zeromq::SubSocket::new();
-            if let Err(e) = sock.connect(&endpoint).await { return format!("connect: {e}"); }
-            for t in TOPICS {
-                if let Err(e) = sock.subscribe(t).await { return format!("subscribe {t}: {e}"); }
-            }
-            loop {
-                let msg = match sock.recv().await { Ok(m) => m, Err(e) => return format!("recv: {e}") };
-                let Some(env) = msg.get(1).or_else(|| msg.get(0)).and_then(|b| serde_json::from_slice::<Value>(b).ok()) else { continue };
-                if tx.send(Msg::Event(env)).is_err() { return String::new(); }
-            }
+/// Follow one endpoint until it fails, handing each envelope to `tx`; returns why it ended.
+async fn follow_one(endpoint: &str, tx: &mpsc::Sender<Msg>) -> String {
+    let mut sock = zeromq::SubSocket::new();
+    if let Err(e) = sock.connect(endpoint).await { return format!("connect: {e}"); }
+    for t in TOPICS {
+        if let Err(e) = sock.subscribe(t).await { return format!("subscribe {t}: {e}"); }
+    }
+    loop {
+        let msg = match sock.recv().await { Ok(m) => m, Err(e) => return format!("recv: {e}") };
+        let Some(env) = msg.get(1).or_else(|| msg.get(0)).and_then(|b| serde_json::from_slice::<Value>(b).ok()) else { continue };
+        if tx.send(Msg::Event(env)).is_err() { return String::new(); }
+    }
+}
+
+enum SubCmd {
+    Follow(String),
+    Drop(String),
+}
+
+/// Every subscription, as one task each on one runtime thread: dropping an endpoint aborts its task
+/// and closes its socket, so a panel that went away leaves nothing behind.
+struct Subs {
+    cmd: tokio::sync::mpsc::UnboundedSender<SubCmd>,
+    tasks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Subs {
+    fn start(tx: mpsc::Sender<Msg>) -> Subs {
+        let (cmd, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubCmd>();
+        let tasks = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = tasks.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a tokio runtime");
+            let local = tokio::task::LocalSet::new();
+            local.block_on(&rt, async move {
+                let mut live: BTreeMap<String, tokio::task::JoinHandle<()>> = BTreeMap::new();
+                while let Some(c) = rx.recv().await {
+                    let (endpoint, follow) = match c { SubCmd::Follow(e) => (e, true), SubCmd::Drop(e) => (e, false) };
+                    if let Some(old) = live.remove(&endpoint) { old.abort(); }
+                    if follow {
+                        let (tx, e) = (tx.clone(), endpoint.clone());
+                        live.insert(endpoint, tokio::task::spawn_local(async move {
+                            let why = follow_one(&e, &tx).await;
+                            let _ = tx.send(Msg::Gone(e, why));
+                        }));
+                    }
+                    live.retain(|_, h| !h.is_finished());
+                    count.store(live.len(), Ordering::SeqCst);
+                }
+            });
         });
-        let _ = tx.send(Msg::Gone(endpoint, why));
-    });
+        Subs { cmd, tasks }
+    }
+
+    fn follow(&self, endpoint: &str) {
+        let _ = self.cmd.send(SubCmd::Follow(endpoint.to_string()));
+    }
+
+    fn drop_endpoint(&self, endpoint: &str) {
+        let _ = self.cmd.send(SubCmd::Drop(endpoint.to_string()));
+    }
+
+    /// Subscriptions running, as of the last command the runtime took.
+    fn running(&self) -> usize {
+        self.tasks.load(Ordering::SeqCst)
+    }
 }
 
 // ------------------------------------------------------------------------------------------ main
@@ -400,6 +476,11 @@ fn main() {
         return;
     }
     let args = parse(&argv).unwrap_or_else(|e| { eprintln!("{USAGE}\nmcp-bus-blackboard: {e}"); std::process::exit(2) });
+    let _pidfile = args.pidfile.as_deref().map(|p| Pidfile::claim(p).unwrap_or_else(|e| {
+        eprintln!("mcp-bus-blackboard: {e}");
+        std::process::exit(5)
+    }));
+    let watch = if args.exit_with_parent { Watch::default().with_parent() } else { Watch::default() }.cwd();
     let url = if args.dry { args.majordomus.clone().unwrap_or_else(|| "(dry run)".into()) } else {
         majordomus_url(&args).unwrap_or_else(|e| { eprintln!("mcp-bus-blackboard: {e}"); std::process::exit(3) })
     };
@@ -410,6 +491,7 @@ fn main() {
     }
     let from_registry = args.panels.is_empty() && args.endpoints.is_empty();
     let (tx, rx) = mpsc::channel::<Msg>();
+    let subs = Subs::start(tx);
     let mut followed: BTreeSet<String> = BTreeSet::new();
     let mut instances: BTreeSet<String> = BTreeSet::new();
     let follow = |found: Vec<(String, String)>, followed: &mut BTreeSet<String>, instances: &mut BTreeSet<String>| -> bool {
@@ -417,7 +499,7 @@ fn main() {
         for (instance, endpoint) in found {
             if followed.insert(endpoint.clone()) {
                 eprintln!("mcp-bus-blackboard: following {instance} at {endpoint}");
-                subscribe(endpoint, tx.clone());
+                subs.follow(&endpoint);
                 changed |= instances.insert(instance);
             }
         }
@@ -443,7 +525,11 @@ fn main() {
     eprintln!("mcp-bus-blackboard: posting to the board of {url} (min gap {} s{})", args.gap_ms / 1000, if args.dry { ", dry run" } else { "" });
     let started = Instant::now();
     let mut last_scan = Instant::now();
+    let rescan = rescan_every();
+    let mut last_resolve = Instant::now();
+    let mut idle = Idle::new(args.idle_exit);
     let mut digests: BTreeMap<String, Digest> = BTreeMap::new();
+    let mut code = 0;
     while !STOP.load(Ordering::SeqCst) && args.duration.map_or(true, |d| started.elapsed() < d) {
         match rx.recv_timeout(Duration::from_secs(1)) {
             Ok(Msg::Event(env)) => {
@@ -470,18 +556,55 @@ fn main() {
                 }
             }
         }
-        if from_registry && last_scan.elapsed() >= RESCAN {
+        if from_registry && last_scan.elapsed() >= rescan {
             last_scan = Instant::now();
-            if follow(registry_panels(), &mut followed, &mut instances) {
+            let found = registry_panels();
+            // a panel whose record went away (its game ended) is unsubscribed, not kept forever
+            let live: BTreeSet<&String> = found.iter().map(|(_, e)| e).collect();
+            for gone in followed.iter().filter(|e| !live.contains(e)).cloned().collect::<Vec<_>>() {
+                eprintln!("mcp-bus-blackboard: {gone} left the registry; unsubscribed");
+                subs.drop_endpoint(&gone);
+                followed.remove(&gone);
+            }
+            if follow(found, &mut followed, &mut instances) {
                 let _ = board.announce("", &self_text(&instances, args.gap_ms));
             }
         }
         board.keep_alive();
+        if let Some(down) = board.down_for() {
+            if args.majordomus.is_none() && last_resolve.elapsed() >= RESOLVE_EVERY {
+                last_resolve = Instant::now();
+                match majordomus_url(&args) {
+                    Ok(u) if u.trim_end_matches('/') != board.url() => {
+                        eprintln!("mcp-bus-blackboard: {} does not answer; posting to {u} from now on", board.url());
+                        board.retarget(&u);
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("mcp-bus-blackboard: {e}"),
+                }
+            }
+            if !args.give_up.is_zero() && down >= args.give_up {
+                eprintln!("mcp-bus-blackboard: stopping: {} has not answered for {} s", board.url(), down.as_secs());
+                code = 4;
+                break;
+            }
+        }
+        if let Some(why) = watch.gone() {
+            eprintln!("mcp-bus-blackboard: stopping: {why}");
+            code = 4;
+            break;
+        }
+        if idle.tick(!followed.is_empty(), Instant::now()) {
+            eprintln!("mcp-bus-blackboard: stopping: no panel to follow for {} s", args.idle_exit.unwrap_or_default().as_secs());
+            break;
+        }
     }
     let list = instances.iter().cloned().collect::<Vec<_>>().join(", ");
     let _ = board.announce("", &format!("OpenTTD bus digest (mcp-bus-blackboard) stopped at {}; the openttd:<instance>:* claims of {list} are its last posts", utc_now()));
     board.close();
-    eprintln!("mcp-bus-blackboard: stopped");
+    eprintln!("mcp-bus-blackboard: stopped ({} subscription(s) still running)", subs.running());
+    drop(_pidfile);
+    std::process::exit(code);
 }
 
 #[cfg(test)]
@@ -600,6 +723,78 @@ mod tests {
         let r = rare_text("decision.recorded", Some("1950-03-14"), &json!({"id": "d-1", "action_type": "game.set_pause", "status": "pending"}));
         assert_eq!(r, "1950-03-14 decision recorded: id d-1, action_type game.set_pause, status pending");
         assert!(!self_text(&BTreeSet::from(["panel-8800".to_string()]), 30_000).contains('\n'));
+    }
+
+    /// A PUB socket on a thread of its own, publishing `env` every 20 ms until the returned flag is set.
+    fn publisher(env: Value) -> (String, std::sync::Arc<AtomicBool>, std::thread::JoinHandle<()>) {
+        use zeromq::SocketSend;
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let (ready, ep) = mpsc::channel::<String>();
+        let flag = stop.clone();
+        let handle = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async move {
+                let mut sock = zeromq::PubSocket::new();
+                ready.send(sock.bind("tcp://127.0.0.1:0").await.unwrap().to_string()).unwrap();
+                while !flag.load(Ordering::SeqCst) {
+                    let frames = vec![bytes::Bytes::from("game.month"), bytes::Bytes::from(env.to_string())];
+                    let _ = sock.send(zeromq::ZmqMessage::try_from(frames).unwrap()).await;
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            });
+        });
+        (ep.recv_timeout(Duration::from_secs(5)).unwrap(), stop, handle)
+    }
+
+    fn until(what: &str, mut ok: impl FnMut() -> bool) {
+        let t = Instant::now();
+        while !ok() {
+            assert!(t.elapsed() < Duration::from_secs(10), "{what}: not within 10 s");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn subscriptions_share_one_runtime_and_a_dropped_one_is_aborted() {
+        let (tx, rx) = mpsc::channel::<Msg>();
+        let subs = Subs::start(tx);
+        let (ep, stop, publishing) = publisher(env("game.month", json!({"date": "1950-03-01"})));
+        subs.follow(&ep);
+        let got = rx.recv_timeout(Duration::from_secs(10)).expect("an envelope from the publisher");
+        assert!(matches!(got, Msg::Event(ref v) if v["kind"] == "game.month"));
+        subs.follow(&ep);
+        until("one task per endpoint, a second follow replaces the first", || subs.running() == 1);
+        subs.drop_endpoint(&ep);
+        until("a dropped endpoint's task is gone", || subs.running() == 0);
+        while rx.recv_timeout(Duration::from_millis(200)).is_ok() {}
+        assert!(rx.recv_timeout(Duration::from_millis(300)).is_err(), "nothing arrives from a dropped endpoint");
+        // an endpoint nothing listens on never ends by itself (zeromq retries the connect forever,
+        // which is why a panel gone from the registry must be dropped), and dropping it ends it
+        subs.follow("tcp://127.0.0.1:1");
+        assert!(rx.recv_timeout(Duration::from_secs(1)).is_err());
+        until("the dead endpoint's task runs", || subs.running() == 1);
+        subs.drop_endpoint("tcp://127.0.0.1:1");
+        until("and is aborted when dropped", || subs.running() == 0);
+        // a task whose receiver went away ends on its next envelope
+        subs.follow(&ep);
+        std::thread::sleep(Duration::from_millis(300));
+        drop(rx);
+        std::thread::sleep(Duration::from_millis(300));
+        subs.follow("tcp://127.0.0.1:1");
+        until("a finished task is not counted", || subs.running() == 1);
+        stop.store(true, Ordering::SeqCst);
+        publishing.join().unwrap();
+        drop(subs);
+    }
+
+    #[test]
+    fn the_daemon_flags_parse() {
+        let a = parse(&["--give-up".into(), "5".into(), "--idle-exit".into(), "2".into(), "--exit-with-parent".into(), "--pidfile".into(), "/tmp/x.pid".into()]).unwrap();
+        assert_eq!((a.give_up, a.idle_exit, a.exit_with_parent), (Duration::from_secs(5), Some(Duration::from_secs(2)), true));
+        assert_eq!(a.pidfile.as_deref(), Some(std::path::Path::new("/tmp/x.pid")));
+        let d = parse(&[]).unwrap();
+        assert_eq!((d.give_up, d.idle_exit, d.exit_with_parent, d.pidfile), (GIVE_UP, None, false, None));
+        assert!(parse(&["--give-up".into(), "never".into()]).is_err());
     }
 
     #[test]
