@@ -184,6 +184,8 @@ race, so the workflow keeps the branches current itself:
   step.
 
 Locally, `tools/surfaces/refresh-branch <branch>` does the same without pushing.
+`tools/surfaces/test_refresh_branch.py` runs every path of it against scratch repositories, in
+the Surfaces workflow.
 
 ## Generators
 
