@@ -10,6 +10,15 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
+/// One author per freight-line slot: the planner key's format and rule (src/fr_author.rs), shared
+/// with the panel's rhai_shared.rs.
+#[path = "fr_author.rs"]
+pub mod fr_author;
+
+/// This resolver's name for the planner key `planner.<company>`: while the key names another
+/// writer, a build answer proposes no freight-line slot for that company (`answer_held`).
+pub const WRITER: &str = "intent";
+
 /// Lower-case and strip diacritics, so "nejbližší" and "nejblizsi" match alike.
 pub fn norm(s: &str) -> String {
     s.to_lowercase().chars().map(|c| match c {
@@ -277,14 +286,24 @@ const SLOT_EMPTY: i64 = -1;
 /// which the panel serves at /api/resources/ai and, per company, at /api/bots): the running
 /// company's `settings[] = {name, value}`. An empty map means "the bot is unknown here".
 pub fn bot_settings(bot: &Value) -> BTreeMap<String, i64> {
-    // openttd://ai lists `companies`, the panel's /api/bots lists `running`; a caller may also hand
-    // over one company object directly.
-    let company = ["/companies", "/running"].iter().filter_map(|p| bot.pointer(p))
+    running_company(bot).get("settings").and_then(Value::as_array).into_iter().flatten()
+        .filter_map(|s| Some((s["name"].as_str()?.to_string(), s["value"].as_i64()?))).collect()
+}
+
+/// The company whose settings `bot_settings` reads: openttd://ai lists `companies`, the panel's
+/// /api/bots lists `running`; a caller may also hand over one company object directly.
+fn running_company(bot: &Value) -> Value {
+    ["/companies", "/running"].iter().filter_map(|p| bot.pointer(p))
         .filter_map(Value::as_array).flatten()
         .find(|c| c.get("settings").is_some() && c["running"].as_bool().unwrap_or(true))
-        .cloned().unwrap_or_else(|| bot.clone());
-    company.get("settings").and_then(Value::as_array).into_iter().flatten()
-        .filter_map(|s| Some((s["name"].as_str()?.to_string(), s["value"].as_i64()?))).collect()
+        .cloned().unwrap_or_else(|| bot.clone())
+}
+
+/// The id of that company (openttd://ai: `company`, /api/bots: `id`), the one a build answer is
+/// for and whose planner key it honours; None when the bot is unknown.
+pub fn bot_company(bot: &Value) -> Option<i64> {
+    let c = running_company(bot);
+    c["company"].as_i64().or_else(|| c["id"].as_i64())
 }
 
 /// One route slot the bot declares: the name in front of the role suffixes (`stem`), which pair of
@@ -345,8 +364,10 @@ fn line_of(cand: &Value, industries: &[&Value], plan: &Value) -> Option<(i64, i6
 /// The settings that carry out the best candidate the bot can actually build: a free slot of the
 /// kind the candidate needs (the lowest one), in a mode the bot declares, holding values that are
 /// not already live. Every rejection is named, because a plan whose settings equal the live values
-/// is a no-op dressed up as a build — which is how this defect hid.
-fn build(candidates: &[Value], industries: &[&Value], plan: &Value, bot: &Value) -> Value {
+/// is a no-op dressed up as a build — which is how this defect hid. With `held` (a refusal from
+/// fr_author::refusal: another writer plans this company's freight-line slots) no candidate that
+/// needs a freight-line slot is proposed, each one says why, and the answer carries `held`.
+fn build(candidates: &[Value], industries: &[&Value], plan: &Value, bot: &Value, held: Option<&Value>) -> Value {
     let declared = bot_settings(bot);
     let slots = slots(&declared);
     let mut notes: Vec<String> = Vec::new();
@@ -359,6 +380,11 @@ fn build(candidates: &[Value], industries: &[&Value], plan: &Value, bot: &Value)
             notes.push(what("it names no line the bot could build".into()));
             continue;
         };
+        // A freight line lives in a freight-line slot (the from/to role pair), which has one author.
+        if let Some(h) = held.filter(|_| roles == SLOT_ROLES[0]) {
+            notes.push(what(h["why"].as_str().unwrap_or("another writer plans the freight-line slots").to_string()));
+            continue;
+        }
         // A slot of this kind that already holds exactly this line: proposing it would write the
         // values the bot already runs on.
         if let Some(s) = slots.iter().find(|s| s.roles == roles && s.from == from && s.to == to) {
@@ -402,12 +428,16 @@ fn build(candidates: &[Value], industries: &[&Value], plan: &Value, bot: &Value)
             notes.push(what("its settings already hold these values".into()));
             continue;
         }
-        return json!({"settings": Value::Object(settings), "slot": target.stem, "candidate": i + 1, "how": notes,
+        let mut out = json!({"settings": Value::Object(settings), "slot": target.stem, "candidate": i + 1, "how": notes,
             "execution": "the bot builds it once these settings reach it: openttd.ai.set_setting (approval-gated) or the next start_ai"});
+        if let Some(h) = held { out["held"] = h.clone(); }
+        return out;
     }
     let refused = if candidates.is_empty() { "the planner offered no candidate".to_string() }
         else { format!("none of the {} candidates is buildable by this bot, for the reasons above", candidates.len()) };
-    json!({"settings": Value::Null, "refused": refused, "how": notes})
+    let mut out = json!({"settings": Value::Null, "refused": refused, "how": notes});
+    if let Some(h) = held { out["held"] = h.clone(); }
+    out
 }
 
 fn production(ind: &Value) -> f64 {
@@ -421,6 +451,13 @@ fn dist(a: &Value, b: &Value) -> f64 { (num(a, "x") - num(b, "x")).abs() + (num(
 /// bot can build. `bot` is openttd://ai (or the panel's /api/bots): the declared settings with
 /// their live values, so the answer targets a free route slot instead of overwriting line 1.
 pub fn answer(intent: &Value, world: &Value, plan: &Value, bot: &Value) -> Value {
+    answer_held(intent, world, plan, bot, None)
+}
+
+/// `answer`, honouring the bot company's planner key: `holder` is the key's value (None when it is
+/// unset), checked by fr_author::refusal against WRITER. An unset key answers exactly as `answer`.
+pub fn answer_held(intent: &Value, world: &Value, plan: &Value, bot: &Value, holder: Option<&Value>) -> Value {
+    let held = bot_company(bot).and_then(|c| fr_author::refusal(holder, c, WRITER));
     let industries: Vec<&Value> = world.get("nodes").and_then(Value::as_array).map(|n| n.iter().filter(|x| x["kind"] == "industry").collect()).unwrap_or_default();
     let types: Vec<String> = intent["subjects"].as_array().into_iter().flatten().filter(|s| s["kind"] == "industry_type").filter_map(|s| s["name"].as_str().map(str::to_string)).collect();
     let cargos: Vec<String> = intent["subjects"].as_array().into_iter().flatten().filter(|s| s["kind"] == "cargo").filter_map(|s| s["name"].as_str().map(str::to_string)).collect();
@@ -472,7 +509,7 @@ pub fn answer(intent: &Value, world: &Value, plan: &Value, bot: &Value) -> Value
     let mut out = json!({"how": how, "ordering": ordering, "candidates": candidates, "solver": plan["portfolio"]["solver"], "kernel": plan["portfolio"]["kernel"]});
     if intent["action"] == "build" {
         let cands = out["candidates"].as_array().cloned().unwrap_or_default();
-        let b = build(&cands, &industries, plan, bot);
+        let b = build(&cands, &industries, plan, bot, held.as_ref());
         // Why this candidate and this slot, or why none: in the answer's own `how`.
         for n in b["how"].as_array().into_iter().flatten().filter_map(Value::as_str) {
             out["how"] = json!(format!("{}; {n}", out["how"].as_str().unwrap_or("")));
@@ -697,5 +734,36 @@ mod tests {
         let p = parse("find the nearest coal mine", &vocab, &json!({"towns": []}), &present);
         assert_eq!(p["language"], "english");
         assert_eq!(p["subjects"][0]["name"], "Coal Mine");
+    }
+
+    /// One author per freight-line slot: a planner key naming another writer skips every freight
+    /// candidate with its reason and carries the refusal; a passenger pair (not a freight-line
+    /// slot) is still proposed. Unset or naming this resolver, the answer is exactly as before.
+    #[test]
+    fn a_planner_key_of_another_writer_holds_the_freight_slots_of_a_build_answer() {
+        let plan = json!({"freight": [{"kind": "freight", "producer": {"id": 31}, "acceptor": {"id": 7}, "cargo": "Coal", "cargo_id": 1, "score": 900}],
+            "by_mode": {"rail": [{"mode": "rail", "a": {"id": 2}, "b": {"id": 18}, "score": 100}]}});
+        let b = bot(&[("rail_a", -1), ("rail_b", -1), ("fr_from", -1), ("fr_to", -1), ("fr_cargo", -1)]);
+        let world = json!({"nodes": []});
+        assert_eq!(bot_company(&b), Some(0));
+        let free = answer(&build_intent(), &world, &plan, &b);
+        assert_eq!(free["build"]["settings"], json!({"fr_from": 31, "fr_to": 7, "fr_cargo": 1}));
+        assert_eq!(answer_held(&build_intent(), &world, &plan, &b, None), free, "unset: as before");
+        assert_eq!(answer_held(&build_intent(), &world, &plan, &b, Some(&json!(WRITER))), free, "its own name: as before");
+
+        let held = answer_held(&build_intent(), &world, &plan, &b, Some(&json!("battlebrain")));
+        assert_eq!(held["build"]["settings"], json!({"rail_a": 2, "rail_b": 18}), "the passenger pair, no fr_* slot");
+        assert_eq!(held["build"]["held"]["holder"], "battlebrain");
+        assert_eq!(held["build"]["held"]["key"], "planner.0");
+        assert!(held["how"].as_str().unwrap().contains("candidate 1 skipped: company 0's freight-line slots are planned by battlebrain"), "{}", held["how"]);
+
+        // Only freight candidates: nothing is proposed, and the refusal says why.
+        let only = answer_held(&build_intent(), &world, &freight_plan(), &b, Some(&json!("battlebrain")));
+        assert_eq!(only["build"]["settings"], Value::Null);
+        assert!(only["build"]["refused"].is_string());
+        assert_eq!(only["build"]["held"]["writer"], WRITER);
+        // A bot that is not known has no company, so no key applies: as before.
+        assert_eq!(answer_held(&build_intent(), &world, &plan, &Value::Null, Some(&json!("battlebrain")))["build"]["settings"],
+                   answer(&build_intent(), &world, &plan, &Value::Null)["build"]["settings"]);
     }
 }

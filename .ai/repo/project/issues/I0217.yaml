@@ -1,0 +1,33 @@
+id: I0217
+milestone: algoglyph-is-accountable
+title: "The Director page charts forecast against actual per line, from plan receipts and calibration, each mark leading to its receipt and its line on the map"
+slug: director-forecast-versus-actual
+priority: p3
+profile: implementation
+parallel_safe: false
+objective: "Add a forecast-against-actual view to the Director page (I0209) through components.js ecInit and the chart registry: per line, the estimated build cost against the money spent (I0213's evaluations) and the predicted against the real profit per vehicle month (calibration, GET /api/plan?calibrate=1), with the verdict and measurement quality of each. Every mark opens its plan receipt (I0214) and selects the line in every other view (I0208). The data comes from the store and the committed records, derived, never typed into the page."
+why: "External review 2026-11-22 (digest B-16, its forecast-versus-actual view). Calibration's predicted and real profit per line are computed (tools/research/mcp-rhai/src/calibrate.rs:123-135) and the World page shows them as a back-propagation table (tools/research/mcp-panel/static/world.js:278), with no chart and no build-cost side; build-cost evaluations and receipts do not exist until I0213 and I0214."
+scope:
+  - "tools/research/mcp-panel/static/director.js"
+  - "tools/research/mcp-panel/static/components.js"
+  - "tools/research/mcp-panel/test/**"
+  - "tools/research/mcp-rhai/src/panel.rs"
+non_scope:
+  - "New measurements; the view draws what I0213, I0214 and calibration record"
+depends_on:
+  - I0209
+  - I0213
+  - I0214
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#algoglyph-plans-are-accountable"
+acceptance_criteria:
+  - "The chart is created by ecInit, registered with its address keys and maximizable; a node test builds it from fixture receipts and calibration answers"
+  - "A mark opens its receipt and selects its line across views; a line with NOT VERIFIED shows the reason instead of a value"
+  - "mcp-ui-crawl-check passes on the Director page with the view present"
+validation:
+  - "node --test tools/research/mcp-panel/test/*.test.mjs"
+  - "tools/research/e2e-coverage"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -1,0 +1,46 @@
+id: I0117
+milestone: prismatic-steers-a-company-through-the-bridge
+title: "A live Battlebrain decision is bound to its exact settings, applied under one approval that expires with it, and no other directive may set a freight-line slot"
+slug: battlebrain-executor-binding
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Close the red-team findings of 2026-11-22 before the cutover on :8800. The decision block (battlebrain-decision/v2) carries settings_digest, the digest of the exact settings string, which the executor recomputes. A directive without a decision block may not set any fr_* setting. A live block is applied only through openttd.ai.set_settings (one approval, all settings at once, expiring at the decision's stale date) and refused where the game lacks it. The observation-during-pull check is replaced for live blocks by the snapshot and stale date they carry. battlebrain live clears fr2..fr16 (-1), refuses a fallback solver or a missing kernel, and battlebrain serve refuses a key it has served before (persistent ledger)."
+why: "The Phase 08 red-team review found that a live decision was applied as several separate approvals living ~3.7 game years, with no binding between block and payload, that a blockless directive could set fr_* settings, and that old fr2..fr16 slots and a fallback solver were not guarded."
+scope:
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs"
+  - "tools/research/mcp-rhai/src/panel_decision.rs"
+  - "tools/research/schema/**"
+  - "research/prismatic-bridge/decision-contract.schema.json"
+  - "research/battlebrain/**"
+non_scope:
+  - "The C++ tool openttd.ai.set_settings (its own branch, feature/mcp-ai-set-settings-atomic)"
+  - "The live pull on :8800"
+depends_on:
+  - I0097
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#a-decision-contract-is-defined"
+acceptance_criteria:
+  - "decision_gate refuses a live block whose settings_digest differs from the directive's settings (payload_mismatch) and a blockless directive that sets fr_* (fr_needs_decision); unit tests"
+  - "a live block is refused when the game offers no openttd.ai.set_settings (no_atomic_apply) and otherwise applied through it with expires_tick from valid_until; unit test of the tick arithmetic"
+  - "battlebrain live writes fr2..fr16_from=-1, refuses fallback_solver and missing_kernel; serve refuses a served key; unit tests"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-panel"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+started_at: 2026-11-22T12:35:07Z
+started_event: sha256:c691d57a3796842dd759e9f5c07dcfe1418dbed139fb3cdd90de8d74855d3e02
+updated_at: 2026-11-22T12:35:37Z
+verified_at: 2026-11-22T12:35:22Z
+verified_event: sha256:f851e72a60be64f1a7480e256f0949b055d18e736891f4b3234129f65b344512
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-panel --bin mcp-plan; tools/knowledge/refs check; tools/surfaces/surfaces check; git diff --check"
+    result: "battlebrain 34/34 (settings_digest bound, fr2..fr16 cleared, fallback_solver / missing_kernel / stale_snapshot refused, served key refused again), mcp-panel 229/229 (payload_mismatch, fr_needs_decision, live_expiry at the end of the stale date), mcp-plan 50/50; refs check 0 failures; surfaces 0 findings. NOT RUN: the OpenTTD build of tools/gate.sh change, because the Mac is under the 35 GiB disk floor (31 GiB free after freeing 8.6 GB of my merged build outputs); this change touches no C++. NOT RUN: a live apply through openttd.ai.set_settings (PR #57)."
+    artifact: "feature/battlebrain-executor-binding"
+    commit: 69b92b1e1b0bae810a54679881acd9fa7dab1942
+    recorded_at: 2026-11-22T12:35:37Z

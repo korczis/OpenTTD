@@ -1,0 +1,34 @@
+id: I0175
+milestone: prismatic-closes-one-real-loop
+title: "A plan of dependent steps runs through both executors with a receipt per step, and a partial build is recorded as partial, never as rolled back"
+slug: plan-dag-receipts
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "On top of ADR 0038's plan-level approval and I0187's lifecycle contracts, a plan is a DAG of steps. Each step carries a precondition, re-read from the game before the step posts, an action, and a readback. Each step's receipt moves through DISPATCHED to EXECUTED_UNVERIFIED, VERIFIED_SUCCESS or VERIFIED_FAILURE, or to SKIPPED_PRECONDITION. A step whose dependency failed is not posted. The plan ends applied, partial or failed, with every step listed. A partial build stays in the game and is recorded as an asset (what was built and what it cost), never as rolled back. Both executors in the fork read the same plan schema and emit the same receipts: the panel's /api/decision/pull and tools/research/mcp-human for its rail re-plan."
+why: "External review 2026-11-22 (digest B-17). Verdicts exist per action (src/prismatic_mcp/prismatic_mcp_server.cpp:563 and :780), and the panel maps them to step states (tools/research/mcp-rhai/src/panel_decision.rs:431-452). But a directive's steps are independent settings: no step has a precondition, no step depends on another, and the panel and tools/research/mcp-human share no plan schema. ADR 0038 makes the plan the unit of approval, and its outcome 'is applied, partial or failed, and never hides a failed action' (.ai/repo/adrs/0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md:117), but it defines no step dependencies or preconditions."
+scope:
+  - "tools/research/mcp-rhai/src/plan_dag.rs"
+  - "tools/research/mcp-rhai/src/panel_decision.rs"
+  - "tools/research/mcp-human/src/**"
+  - "tools/research/schema/plan-dag.v1.schema.json"
+  - "research/agent-loop.md"
+non_scope:
+  - "The approval core (ADR 0038 slice 2, branch fix/approval-core) and the request-lifecycle contracts (I0187); this issue builds on them"
+  - "Battlebrain's decision schema (I0095) and its executor binding (I0151)"
+depends_on:
+  - I0187
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
+acceptance_criteria:
+  - "Schema plus fixtures; tests cover a failed dependency that skips its dependants, a precondition that no longer holds, and a partial outcome that lists what was built"
+  - "The panel and mcp-human both pass the same receipt fixture tests"
+  - "One live plan of at least three dependent steps, run on a research server, ends with every receipt in the store"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+  - "cargo test --release -q --manifest-path tools/research/mcp-human/Cargo.toml"
+  - "tools/research/mcp-decision-check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

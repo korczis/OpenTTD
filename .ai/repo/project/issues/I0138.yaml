@@ -1,0 +1,36 @@
+id: I0138
+milestone: the-planner-reads-one-coherent-priced-world
+title: "Every live planner read takes its world at one game tick or refuses: mcp-plan, mcp-intent and algoglyph.track_plan read through openttd.resources.read_many and their answers name the snapshot"
+slug: planner-live-reads-one-tick
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Extend the coherent path PR #44 built for `mcp-plan --capture` to every live planner read. mcp-plan without --capture, mcp-intent and the hub's `algoglyph.track_plan` take their resources from one `openttd.resources.read_many` call (the set derived as in mcp-plan.rs `coherent`, never a second hand list). When the tool is absent, refused or too small, the answer either refuses (default for anything that feeds a decision) or carries `coherent: false` with the reason, by an explicit flag. Every answer carries one snapshot identity `{game_tick, game_date, digest, coherent, coherence}` that a later step can compare against the game."
+why: "External review 2026-11-22 (digest A-07, B-05, C-07). PR #44 (5b81542607) and #39 (9af9ef1977) landed read_many and a coherent capture, but only for --capture: tools/research/mcp-rhai/src/bin/mcp-plan.rs:483 returns `run(&src)` with per-resource reads (from :400) whenever no capture is asked. mcp-intent reads each resource on its own (tools/research/mcp-rhai/src/bin/mcp-intent.rs:20-24). algoglyph.track_plan reads map, map/ways, map/terrain, economy/prices and bridges one call each (tools/research/mcp-rhai/src/hub.rs:1015-1020, hub_algoglyph.rs:26 and :116), although research/mcp-hub.md:91-93 says they must be one moment because terrain slopes are checked against map heights. The answers' `reads` (tools/research/mcp-rhai/src/reads.rs) list URIs, not a tick or digest."
+scope:
+  - "tools/research/mcp-rhai/src/bin/mcp-plan.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-intent.rs"
+  - "tools/research/mcp-rhai/src/hub.rs"
+  - "tools/research/mcp-rhai/src/hub_algoglyph.rs"
+  - "tools/research/mcp-rhai/src/reads.rs"
+  - "research/mcp-hub.md"
+  - "research/prismatic-mcp/07-resource-catalog.md"
+non_scope:
+  - "Changing openttd.resources.read_many in the game (its cap and contract stay as #39 shipped them)"
+  - "Pausing the game to read"
+  - "Re-checking a plan before it applies (I0139)"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "A live mcp-plan run, an mcp-intent answer and a track_plan call against a fake read_many answer each make exactly one read_many call and report coherent: true and one game_tick (unit tests)"
+  - "With read_many absent or refused, a decision-feeding call refuses with a stable code, and the explicit permissive flag yields coherent: false with the reason (unit tests)"
+  - "Every answer carries {game_tick, game_date, digest, coherent, coherence}; the digest is stable across a --snapshot replay"
+  - "research/mcp-hub.md and 07-resource-catalog.md describe the one-tick read of each path"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan --bin mcp-intent --bin mcp-hub"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

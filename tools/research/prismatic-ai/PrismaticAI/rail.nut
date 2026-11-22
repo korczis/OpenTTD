@@ -710,7 +710,9 @@ function PrismaticAI::VerifyRailLine(path, a_end, b_end) {
 		local prev = (i == 0) ? a_end : path[i - 1];
 		local next = (i == n - 1) ? b_end : path[i + 1];
 		if (AIMap.DistanceManhattan(prev, path[i]) != 1 || AIMap.DistanceManhattan(path[i], next) != 1) continue;
-		if (!AIRail.IsRailTile(path[i])) continue; /* a bridge or tunnel head */
+		/* A bridge or tunnel head. A tile whose only piece is gone has no rail at all and is laid
+		 * again below: skipping every tile that is not a rail tile left such a gap for good. */
+		if (AIBridge.IsBridgeTile(path[i]) || AITunnel.IsTunnelTile(path[i])) continue;
 		if (AIRail.AreTilesConnected(prev, path[i], next)) continue;
 		if (AIRail.BuildRail(prev, path[i], next) && AIRail.AreTilesConnected(prev, path[i], next)) {
 			AILog.Info("PrismaticAI: relaid the missing piece at tile " + path[i]);
@@ -1041,8 +1043,13 @@ function PrismaticAI::BuildTrain(line) {
 		AIVehicle.SellVehicle(train);
 		return -1;
 	}
-	AIOrder.AppendOrder(train, line.a, line.flags);
-	AIOrder.AppendOrder(train, line.b, AIOrder.OF_NONE);
+	/* A train started without its orders would wander, earn nothing and never be found again. */
+	if (!AIOrder.AppendOrder(train, line.a, line.flags) || !AIOrder.AppendOrder(train, line.b, AIOrder.OF_NONE)) {
+		AILog.Warning("PrismaticAI: train for " + line.label + " got no orders to tiles " + line.a + " and " + line.b + ": " +
+			AIError.GetLastErrorString() + "; the train is sold");
+		AIVehicle.SellVehicle(train);
+		return -1;
+	}
 	/* The line's trains are this one and its clones (shared orders, lines.nut TrainsOf). */
 	line.first <- train;
 	AIVehicle.StartStopVehicle(train);
@@ -1104,7 +1111,8 @@ function PrismaticAI::PlatformPlan(cargo, supply, dist, platforms, override_len,
  * autorenew (main.nut). */
 function PrismaticAI::KeepLinesServed(reserve) {
 	foreach (i, line in RAIL_LINES) {
-		if (line.restored >= 2 || line.closed || PrismaticAI.LineTarget(i + 1, "trains") == 0) continue;
+		/* A line whose track cannot be repaired or whose trains get lost gets no train (events.nut). */
+		if (line.restored >= 2 || line.closed || PrismaticAI.LineHalted(line) || PrismaticAI.LineTarget(i + 1, "trains") == 0) continue;
 		/* A train of this line: a rail vehicle with orders to both of its stations (two lines may
 		 * share a station since a second platform joins it). */
 		/* Its own trains only (lines.nut TrainsOf): a line sharing both stations with another is not

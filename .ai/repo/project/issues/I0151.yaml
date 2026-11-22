@@ -1,0 +1,33 @@
+id: I0151
+milestone: battlebrain-decides-live-with-rollback
+title: "For a company under a live Battlebrain decision, the only freight-slot write is one openttd.ai.set_settings approval carrying that decision's settings and its stale tick; every other fr_* writer refuses"
+slug: battlebrain-sole-freight-writer
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "The executor (panel_decision.rs) applies a live battlebrain-decision/v1 block as one openttd.ai.set_settings approval (cd63f1ca1d) with expires_tick set from the block's stale date, instead of one set_setting per setting. While a company carries a live decision, panel_bot.rs settings_from_plan, the intent build path and the replan service skip its fr_* slots with a stated reason, and the executor refuses a directive without a decision block for that company. planner v4 stays a candidate generator for it."
+why: "External review 2026-11-22 (digest C-46). I0097 built the gates, serve and rollback, but the executor still applies settings one approval each: cd63f1ca1d (PR #57) explains that a mixed fr_from/fr_to pair nobody chose could result, and `git grep set_settings tools/research/mcp-rhai/src tools/research/mcp-panel/rhai` on origin/master finds no caller. The legacy writers remain (tools/research/mcp-rhai/src/panel_bot.rs:482 and :587 name fr_* slots; replan.rhai:304-307 skips a company only when the shared key planner.<id> names another planner, and nothing on origin/master writes that key), and open PR #55 names exactly this as its gap B2: 'The executor still applies a directive that carries no decision block'. This issue lands after PR #55 and turns that gap into a test."
+scope:
+  - "tools/research/mcp-rhai/src/panel_decision.rs"
+  - "tools/research/mcp-rhai/src/panel_bot.rs"
+  - "tools/research/mcp-rhai/src/intent.rs"
+  - "tools/research/mcp-rhai/src/authority_boundaries.rs"
+  - "tools/research/mcp-panel/rhai/replan.rhai"
+  - "research/battlebrain/README.md"
+non_scope:
+  - "The live run itself (I0152)"
+  - "Changing openttd.ai.set_settings in the game"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "A live block becomes exactly one ai.set_settings submission with expires_tick equal to its stale tick (panel test)"
+  - "settings_from_plan, the intent build and replan leave a Battlebrain-owned company's fr_* slots alone and say why (tests)"
+  - "A directive without a decision block for a Battlebrain-owned company is refused before any step (panel test); PR #55's B2 gap is closed in its rule"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel --bin battlebrain --bin mcp-intent"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

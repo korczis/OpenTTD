@@ -437,7 +437,7 @@ fn get_or<'a>(v: &'a Value, k: &str, default: &'a Value) -> &'a Value {
 }
 
 /// Freight lines handed to the bot at most (fr_*, fr2_* .. fr16_*); bridge 2026-11-17 declares as many.
-pub const MAX_FREIGHT_LINES: usize = 16;
+pub const MAX_FREIGHT_LINES: usize = crate::battlebrain_contract::FREIGHT_SLOTS;
 
 /// Freight lines the planned bot may plan itself once the handed ones are built (bridge own_lines; it
 /// defaults to 0 there, so a bot started without a plan, a duel's baseline, stays unplanned). Held-start
@@ -584,7 +584,7 @@ pub fn settings_from_plan(out: &Value, event: &mut dyn FnMut(String)) -> Planned
     lines.sort_by(|a, b| b.0.total_cmp(&a.0));
     let mut freight = Vec::new();
     for (i, (_, producer, acceptor, cargo, e)) in lines.iter().enumerate() {
-        let prefix = if i == 0 { "fr_".to_string() } else { format!("fr{}_", i + 1) };
+        let prefix = crate::battlebrain_contract::freight_slot_prefix(i + 1);
         freight.push(json!({"slot": prefix, "from": producer, "to": acceptor, "cargo_id": cargo, "cargo": e.get("cargo"),
                             "from_name": e.get("from"), "to_name": e.get("to"), "distance": e.get("distance"),
                             "monthly_profit": e.get("profit"), "score": e.get("score")}));
@@ -878,10 +878,63 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
         Err(e) => g.event("ai", &format!("bot settings from the run refused: {e}")),
     }
     let mut data = bot_settings_event(&mut p, &extra, seq, &from_duels);
+    // One author per freight-line slot: while a company the plan is for is planned by another
+    // writer (its planner key), the plan hands over no fr_* slot, and the event says why.
+    let held = planned_refusals(g);
+    let withheld = hold_freight_slots(&mut p.settings, &mut data["choice"], &held);
+    if !withheld.is_empty() {
+        let why: Vec<&str> = held.iter().filter_map(|h| h["why"].as_str()).collect();
+        g.event("ai", &format!("planner: {} freight-line setting(s) not handed over ({}): {}", withheld.len(), withheld.join(","), why.join("; ")));
+    }
     with_calibration(&mut data, &cal);
     p.bot_settings = data["choice"].clone();
     g.plan("plan.bot_settings", data);
     Some(p)
+}
+
+/// The planned-settings path's name for the planner key `planner.<company>` (src/fr_author.rs).
+pub const PLANNED_WRITER: &str = "panel_bot";
+
+/// The refusals that hold the planned settings' freight-line slots (rhai_shared::fr_refusals,
+/// narrowed by `held_for`). No planner key set, the usual case: empty, and nothing more is read.
+/// When the running companies cannot be read, every refusal holds: the slots are not handed over.
+fn planned_refusals(g: &Arc<Game>) -> Vec<Value> {
+    let held = crate::rhai_shared::fr_refusals(PLANNED_WRITER);
+    if held.is_empty() {
+        return held;
+    }
+    match bots(g) {
+        Ok(b) => held_for(held, &b["running"], &g.args.ai),
+        Err(_) => held,
+    }
+}
+
+/// The refusals for a company the plan is for: one that runs the panel's AI `ai` (any AI company
+/// when `ai` is empty, or when the game does not name a company's AI). The plan is one set of
+/// settings for that AI, so a held company among them holds the plan's freight-line slots.
+pub fn held_for(held: Vec<Value>, running: &Value, ai: &str) -> Vec<Value> {
+    let targets: Vec<i64> = running.as_array().into_iter().flatten()
+        .filter(|r| ai.is_empty() || r["ai"].is_null() || r["ai"] == ai)
+        .filter_map(|r| r["id"].as_i64()).collect();
+    held.into_iter().filter(|h| h["company"].as_i64().is_some_and(|c| targets.contains(&c))).collect()
+}
+
+/// Take every freight-line slot (fr_*, fr2_* .. fr16_*) out of `settings` while `held` names a
+/// refusal, and record it in plan.bot_settings' `choice`: its settings and start_ai without them,
+/// and `held` {by: the refusals, withheld: the setting names}. Answers the names withheld; with no
+/// refusal it changes nothing.
+pub fn hold_freight_slots(settings: &mut Settings, choice: &mut Value, held: &[Value]) -> Vec<String> {
+    if held.is_empty() {
+        return Vec::new();
+    }
+    let is_slot = crate::panel_decision::is_freight_slot_setting;
+    let withheld: Vec<String> = settings.iter().map(|(k, _)| k.clone()).filter(|k| is_slot(k)).collect();
+    settings.0.retain(|(k, _)| !is_slot(k));
+    let (as_object, flat) = settings_json(settings);
+    choice["settings"] = as_object;
+    choice["start_ai"] = json!(flat);
+    choice["held"] = json!({"by": held, "withheld": withheld});
+    withheld
 }
 
 /// "name=value,name=value" with setting names of lower-case letters, digits and _ and whole values.
@@ -1212,5 +1265,43 @@ mod tests {
         let e = bot_settings_event(&mut r, "", None, &off);
         assert_eq!(e["version"]["params"], json!({"max_freight_lines": 16, "own_lines": 8, "PRISMATIC_BOT_SETTINGS": ""}));
         assert_eq!(e["choice"]["own_lines"], 8);
+    }
+
+    /// One author per freight-line slot: no refusal changes nothing (an unset planner key is as
+    /// before); a refusal takes every fr_* slot out of the settings and the start_ai line, keeps
+    /// the rest, and plan.bot_settings says who holds them.
+    #[test]
+    fn a_planner_key_of_another_writer_holds_the_planned_freight_slots_and_says_why() {
+        let mut p = settings_from_plan(&answer(), &mut |_| {});
+        let before = settings_json(&p.settings);
+        let mut choice = p.bot_settings.clone();
+        assert!(hold_freight_slots(&mut p.settings, &mut choice, &[]).is_empty());
+        assert_eq!(settings_json(&p.settings), before, "unset: the settings are exactly as before");
+        assert_eq!(choice, p.bot_settings, "unset: the event is exactly as before");
+        assert!(before.1.contains("fr_from=7") && before.1.contains("fr2_from=8"), "{}", before.1);
+
+        let refusal = crate::rhai_shared::fr_author::refusal(Some(&json!("battlebrain")), 0, PLANNED_WRITER).unwrap();
+        let withheld = hold_freight_slots(&mut p.settings, &mut choice, &[refusal]);
+        assert_eq!(withheld, ["fr_from", "fr_to", "fr_cargo", "fr2_from", "fr2_to", "fr2_cargo"]);
+        let (_, flat) = settings_json(&p.settings);
+        assert!(!flat.contains("fr"), "{flat}");
+        assert!(flat.contains("rail_a=10") && flat.contains("own_lines=8"), "the other settings stay: {flat}");
+        assert_eq!(choice["start_ai"], json!(flat));
+        assert_eq!(choice["held"]["withheld"].as_array().unwrap().len(), 6);
+        assert_eq!(choice["held"]["by"][0]["holder"], "battlebrain");
+        assert!(choice["held"]["by"][0]["why"].as_str().unwrap().contains("planner.0"));
+    }
+
+    /// The plan is for the panel's AI: a held company that runs another AI does not hold it, one
+    /// that runs it (or runs an AI the game does not name) does.
+    #[test]
+    fn only_a_company_of_the_planned_ai_holds_the_plan() {
+        let r = |c: i64| crate::rhai_shared::fr_author::refusal(Some(&json!("battlebrain")), c, PLANNED_WRITER).unwrap();
+        let running = json!([{"id": 0, "ai": "PrismaticAI"}, {"id": 1, "ai": "AdmiralAI"}, {"id": 2, "ai": null}]);
+        let held: Vec<i64> = held_for(vec![r(0), r(1), r(2), r(5)], &running, "PrismaticAI").iter()
+            .map(|h| h["company"].as_i64().unwrap()).collect();
+        assert_eq!(held, [0, 2]);
+        assert_eq!(held_for(vec![r(1)], &running, "").len(), 1, "no AI named: every AI company");
+        assert!(held_for(vec![r(5)], &running, "PrismaticAI").is_empty(), "a company that does not run is no target");
     }
 }
