@@ -45,6 +45,10 @@ flowchart LR
 
 ## Stage by stage
 
+Per capability, with code path, fallback, tests and the record that proves each end-to-end
+status, the same ground is in the [capability matrix](capability-matrix.md); this table stays the
+loop's own view, stage by stage.
+
 | Stage | Status | What exists | What is missing |
 |---|---|---|---|
 | Retrieve | PARTIAL | the panel's `GET /api/evidence?q=&k=` and the `mcp-evidence` CLI (`tools/research/mcp-rhai/src/evidence.rs`): BM25 over every git-tracked text file at `HEAD` (source, tests, rules, ADRs, knowledge, plans, docs, records), in windows of 30 lines; each passage carries its path, lines, source class, commit and file digest, is ranked current code and policy before plans and records, and is checked against the file now (`current`, moved, `stale`, `deleted`); a question no passage covers by half is answered `insufficient evidence`. Alongside it: `majordomus_search` over the `.ai/` layer and the Markdown, `majordomus context resolve` with a sha256 per document, `tools/knowledge/refs check` for every cited path and symbol | lexical, not semantic (no embeddings): recall@5 0.69 and MRR 0.60 on `research/evidence-benchmark.json` v1; uncommitted changes are not indexed; the CLI `majordomus search` reads only the unversioned `.ai/local/` records |

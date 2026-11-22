@@ -11,6 +11,7 @@
 
 #include "../3rdparty/catch2/catch.hpp"
 #include "../core/format.hpp"
+#include "../prismatic_mcp/prismatic_mcp.h"
 #include "../prismatic_mcp/prismatic_mcp_detail.h"
 #include "../prismatic_mcp/prismatic_mcp_menu.h"
 #include "../prismatic_mcp/prismatic_mcp.h"
@@ -855,6 +856,100 @@ TEST_CASE("Every client tool says whether it changes anything", "[prismatic_mcp]
 	}
 }
 
+TEST_CASE("Status capabilities are derived from the tool registry and the process's arming", "[prismatic_mcp]")
+{
+	const json reader = {{"readOnlyHint", true}};
+	const json mutator = {{"readOnlyHint", false}};
+	auto field = [](std::string_view f) {
+		for (size_t i = 0; i < MUTATING_CAPABILITIES.size(); i++) if (MUTATING_CAPABILITIES[i].field == f) return i;
+		FAIL("no capability " << f);
+		return size_t{0};
+	};
+
+	/* A registry with a tool of every mutating kind: not read-only, and each kind is named. */
+	json mutating = json::array({
+		{{"name", "openttd.cmd.Pause"}}, // no annotations: counts as mutating, as the server's own pass would annotate it
+		{{"name", "openttd.api.ScriptCompany.SetLoanAmount"}, {"annotations", mutator}},
+		{{"name", "openttd.ai.list"}, {"annotations", reader}}, // a reader under a mutating prefix makes nothing
+		{{"name", "openttd.ai.stop"}, {"annotations", mutator}},
+		{{"name", "openttd.game.set_pause"}, {"annotations", mutator}},
+		{{"name", "openttd.ui.menu.run"}, {"annotations", mutator}}, // the toolbar menu, not interface input
+		{{"name", "openttd.input.pointer"}, {"annotations", mutator}},
+		{{"name", "openttd.view.zoom"}, {"annotations", mutator}}, // the local viewport: no capability
+	});
+	Capabilities all = CapabilitiesOf(mutating, 0, true);
+	CHECK(all.reads);
+	CHECK_FALSE(all.ReadOnly());
+	for (const auto &r : MUTATING_CAPABILITIES) {
+		INFO(r.field);
+		CHECK(all.mutating[field(r.field)]);
+	}
+	json j = CapabilitiesJson(all);
+	CHECK(j.size() == MUTATING_CAPABILITIES.size() + 1);
+	CHECK(j["reads"] == true);
+	CHECK(j["approval_gated_commands"] == true);
+	CHECK(j["interface_input"] == true);
+	CHECK(CapabilitiesLine(all) == "read_only=false capabilities=reads,approval_gated_commands,script_api,ai_tools,pause,toolbar_menu,interface_input input_armed=true");
+
+	/* The same registry in an unarmed process: the input tools are there but cannot run. */
+	Capabilities unarmed_all = CapabilitiesOf(mutating, 0, false);
+	CHECK_FALSE(unarmed_all.mutating[field("interface_input")]);
+	CHECK(unarmed_all.mutating[field("approval_gated_commands")]);
+	CHECK_FALSE(unarmed_all.ReadOnly());
+
+	/* A registry with no mutating tool is read-only; reads come from a reader tool or a resource. */
+	json readers = json::array({
+		{{"name", "openttd.decision.validate"}, {"annotations", reader}},
+		{{"name", "openttd.ui.windows"}, {"annotations", reader}},
+	});
+	Capabilities ro = CapabilitiesOf(readers, 0, false);
+	CHECK(ro.ReadOnly());
+	CHECK(ro.reads);
+	CHECK(CapabilitiesJson(ro)["approval_gated_commands"] == false);
+	CHECK(CapabilitiesLine(ro) == "read_only=true capabilities=reads input_armed=false");
+	CHECK(CapabilitiesOf(json::array(), 3, false).reads);
+	CHECK(CapabilitiesLine(CapabilitiesOf(json::array(), 0, false)) == "read_only=true capabilities=none input_armed=false");
+
+	/* The real interface tools in an unarmed process (this test binary is not started with
+	 * PRISMATIC_MCP_INPUT=1): no interface input, so read-only; armed, they are interface input. */
+	REQUIRE_FALSE(PrismaticMCP::UI::InputArmed());
+	json ui = json::array();
+	for (const auto &t : PrismaticMCP::View::Tools()) ui.push_back(t);
+	for (const auto &t : PrismaticMCP::UI::Tools()) ui.push_back(t);
+	REQUIRE_FALSE(ui.empty());
+	Capabilities unarmed = CapabilitiesOf(ui, 0, PrismaticMCP::UI::InputArmed());
+	CHECK(unarmed.ReadOnly());
+	CHECK_FALSE(unarmed.input_armed);
+	CHECK_FALSE(unarmed.mutating[field("interface_input")]);
+	Capabilities armed = CapabilitiesOf(ui, 0, true);
+	CHECK(armed.mutating[field("interface_input")]);
+	CHECK_FALSE(armed.ReadOnly());
+}
+
+TEST_CASE("openttd://mcp/status and the status line report the capabilities the server registers", "[prismatic_mcp]")
+{
+	json status = PrismaticMCP::Dispatch({{"jsonrpc", "2.0"}, {"id", 1}, {"method", "resources/read"}, {"params", {{"uri", "openttd://mcp/status"}}}});
+	REQUIRE(status.contains("result"));
+	json d = json::parse(status["result"]["contents"][0]["text"].get<std::string>())["data"];
+	json tools = PrismaticMCP::Dispatch({{"jsonrpc", "2.0"}, {"id", 2}, {"method", "tools/list"}})["result"]["tools"];
+	json resources = PrismaticMCP::Dispatch({{"jsonrpc", "2.0"}, {"id", 3}, {"method", "resources/list"}})["result"]["resources"];
+	Capabilities expected = CapabilitiesOf(tools, resources.size(), PrismaticMCP::UI::InputArmed());
+
+	/* The literal is gone: this build registers approval-gated command tools, so it is not read-only. */
+	CHECK(d["capabilities"] == CapabilitiesJson(expected));
+	CHECK(d["capabilities"]["reads"] == true);
+	CHECK(d["capabilities"]["approval_gated_commands"] == true);
+	CHECK(d["capabilities"]["pause"] == true);
+	CHECK(d["capabilities"]["interface_input"] == false);
+	CHECK(d["read_only"] == false);
+	CHECK(d["read_only"] == expected.ReadOnly());
+	CHECK(d["input_armed"] == false);
+
+	/* The console prints the same derived values, whether or not the server runs. */
+	REQUIRE_FALSE(PrismaticMCP::IsRunning());
+	CHECK(PrismaticMCP::GetStatusLine() == "prismatic_mcp stopped " + CapabilitiesLine(expected));
+}
+
 TEST_CASE("Several resources at one tick: the call is bounded, and a bad uri fails only its own entry", "[prismatic_mcp]")
 {
 	auto known = [](const std::string &u) { return u == "openttd://towns" || u == "openttd://map"; };
@@ -1045,6 +1140,190 @@ TEST_CASE("PrismaticMCP: game text reaches MCP clients as plain text")
 	CHECK(PlainText("  plain   text\t") == "plain text");
 	CHECK(PlainText("") == "");
 	CHECK(PlainText("\xC5\xBD" "abov" "\xC5\x99" "esky") == "\xC5\xBD" "abov" "\xC5\x99" "esky"); /* "Zabovresky" with its UTF-8 diacritics */
+}
+
+TEST_CASE("The in-game approval channel parses one id per line and refuses lists and junk", "[prismatic_mcp]")
+{
+	using V = ChatRequest::Verb;
+	CHECK(ParseChatApproval("hello there").verb == V::None);
+	CHECK(ParseChatApproval("").verb == V::None);
+	CHECK(ParseChatApproval("!approvalsx").verb == V::None);
+	auto list = ParseChatApproval("!approvals");
+	CHECK(list.verb == V::List);
+	CHECK(list.page == 1);
+	auto page = ParseChatApproval("  !approvals   3 ");
+	CHECK(page.verb == V::List);
+	CHECK(page.page == 3);
+	CHECK(ParseChatApproval("!approvals 0").verb == V::Bad);
+	CHECK(ParseChatApproval("!approvals x").verb == V::Bad);
+	CHECK(ParseChatApproval("!approvals 1 2").verb == V::Bad);
+	CHECK(ParseChatApproval("!approvals 100001").verb == V::Bad);
+	auto ok = ParseChatApproval("!approve 42");
+	CHECK(ok.verb == V::Approve);
+	CHECK(ok.id == 42);
+	auto deny = ParseChatApproval("!deny 7");
+	CHECK(deny.verb == V::Deny);
+	CHECK(deny.id == 7);
+	/* One id per line: a list is refused, and so is a line with no id. */
+	auto bulk = ParseChatApproval("!approve 1 2 3");
+	CHECK(bulk.verb == V::Bad);
+	CHECK(bulk.error.find("one id per line") != std::string::npos);
+	CHECK(ParseChatApproval("!approve").verb == V::Bad);
+	CHECK(ParseChatApproval("!deny -3").verb == V::Bad);
+	CHECK(ParseChatApproval("!approve 12a").verb == V::Bad);
+	CHECK(ParseChatApproval("!approve 1234567890123456789").verb == V::Bad);
+	CHECK(ParseChatApproval("!approve 9x").error == "not an approval id: '9x'");
+	CHECK(ParseChatApproval("   !approve   5 ").verb == V::Approve);  /* read as the server reads it, spaces and all */
+	CHECK(ParseChatApproval(" !deny 5").id == 5);
+	CHECK(ParseChatApproval("!deny").error.find("usage: !deny") == 0);
+	CHECK(ParseChatApproval("!deny 1 2").verb == V::Bad);
+	CHECK(ParseChatApproval("!approve 123456789012345678").id == 123456789012345678ULL);  /* 18 digits: the most it reads */
+	CHECK(ParseChatApproval("!Approve 5").verb == V::None);  /* the verbs are exact: anything else is chat */
+}
+
+TEST_CASE("A chat decision names the condition that failed, and only an approver's own input approves", "[prismatic_mcp]")
+{
+	ChatFacts all;
+	all.exists = all.pending = all.chat_decidable = all.valid_company = all.same_company = all.key_registered = true;
+	CHECK(DecideChat(all, true) == ChatVerdict::Allow);
+	CHECK(DecideChat(all, false) == ChatVerdict::Allow);
+
+	auto with = [&](auto change) { ChatFacts f = all; change(f); return f; };
+	CHECK(DecideChat(with([](ChatFacts &f) { f.exists = false; }), true) == ChatVerdict::NoSuchApproval);
+	CHECK(DecideChat(with([](ChatFacts &f) { f.pending = false; }), true) == ChatVerdict::NotPending);
+	CHECK(DecideChat(with([](ChatFacts &f) { f.expired = true; }), true) == ChatVerdict::Expired);
+	CHECK(DecideChat(with([](ChatFacts &f) { f.chat_decidable = false; }), true) == ChatVerdict::ServerOnly);
+	CHECK(DecideChat(with([](ChatFacts &f) { f.chat_decidable = false; }), false) == ChatVerdict::ServerOnly);
+	CHECK(DecideChat(with([](ChatFacts &f) { f.valid_company = false; }), true) == ChatVerdict::Spectator);
+	CHECK(DecideChat(with([](ChatFacts &f) { f.same_company = false; }), false) == ChatVerdict::NotYourCompany);
+	/* Approving needs a registered approver; denying withdraws and needs none. */
+	ChatFacts nobody = with([](ChatFacts &f) { f.key_registered = false; f.key_in_allow_list = false; });
+	CHECK(DecideChat(nobody, true) == ChatVerdict::NotAnApprover);
+	CHECK(DecideChat(nobody, false) == ChatVerdict::Allow);
+	/* A key in the company's allow list is not an approver: an agent's own client playing the
+	 * owner's company is in it, and must never approve (the owner's decision, 2026-11-22). */
+	ChatFacts member = with([](ChatFacts &f) { f.key_registered = false; f.key_in_allow_list = true; });
+	CHECK(DecideChat(member, true) == ChatVerdict::NotAnApprover);
+	CHECK(DecideChat(member, false) == ChatVerdict::Allow);
+	CHECK(DecideChat(with([](ChatFacts &f) { f.key_registered = true; f.key_in_allow_list = false; }), true) == ChatVerdict::Allow);
+	/* Injected input never approves (a script driving the owner's client), but it may withdraw. */
+	CHECK(DecideChat(with([](ChatFacts &f) { f.injecting = true; }), true) == ChatVerdict::Injected);
+	CHECK(DecideChat(with([](ChatFacts &f) { f.injecting = true; }), false) == ChatVerdict::Allow);
+
+	for (ChatVerdict v : {ChatVerdict::Allow, ChatVerdict::NoSuchApproval, ChatVerdict::NotPending, ChatVerdict::Expired, ChatVerdict::ServerOnly,
+			ChatVerdict::Spectator, ChatVerdict::NotYourCompany, ChatVerdict::NotAnApprover, ChatVerdict::Injected}) {
+		CHECK_FALSE(ChatVerdictText(v).empty());
+	}
+	CHECK(ChatVerdictText(ChatVerdict::NotAnApprover).find("approvers add") != std::string_view::npos);
+	CHECK(ChatVerdictText(ChatVerdict::NotAnApprover).find("allow list, is not enough") != std::string_view::npos);
+	CHECK(ChatVerdictText(static_cast<ChatVerdict>(200)) == "refused");
+}
+
+TEST_CASE("A chat line is capped at a UTF-8 boundary, and a newer AI settings plan supersedes the older one", "[prismatic_mcp]")
+{
+	CHECK(CapLine("short", 10) == "short");
+	CHECK(CapLine("0123456789abc", 10) == "0123456...");
+	CHECK(CapLine("ab\xC5\xBD" "cdefgh", 6) == "ab...");  /* never cuts the two bytes of a letter apart */
+	CHECK(CapLine("abcdef", 2) == "ab");                    /* no room for the ellipsis: never over the limit */
+	CHECK(CapLine("\xC5\xBD\xC5\xBD", 3) == "...");
+	CHECK(CapLine("\xC5\xBD\xC5\xBD", 2) == "\xC5\xBD"); /* cut below 3 still at a letter's boundary */
+	CHECK(CapLine("\xC5\xBD\xC5\xBD", 1).empty());
+	CHECK(CapLine("\xE2\x82\xAC\xE2\x82\xAC\xE2\x82\xAC", 7) == "\xE2\x82\xAC...");  /* a three-byte letter kept whole */
+
+	json a = {{"company", 0}, {"settings", {{"x", 1}}}};
+	json b = {{"company", 0}, {"settings", {{"y", 2}}}};
+	json other = {{"company", 1}, {"settings", {{"x", 1}}}};
+	json x2 = {{"company", 0}, {"settings", {{"x", 2}, {"z", 3}}}};
+	CHECK(Supersedes("ai.set_settings", x2, "ai.set_settings", a));          /* both change x */
+	CHECK_FALSE(Supersedes("ai.set_settings", b, "ai.set_settings", a));      /* y and x: nothing shared */
+	CHECK_FALSE(Supersedes("ai.set_settings", other, "ai.set_settings", a));  /* another company */
+	/* One setting and a plan of several supersede each other when they share a setting. */
+	CHECK(Supersedes("ai.set_setting", json{{"company", 0}, {"name", "x"}, {"value", 5}}, "ai.set_settings", a));
+	CHECK(Supersedes("ai.set_settings", a, "ai.set_setting", json{{"company", 0}, {"name", "x"}, {"value", 5}}));
+	CHECK_FALSE(Supersedes("ai.set_setting", json{{"company", 0}, {"name", "q"}, {"value", 5}}, "ai.set_settings", a));
+	CHECK(SettingKeys("ai.set_settings", x2) == std::vector<std::string>{"x", "z"});
+	CHECK(SettingKeys("game.set_pause", json{{"pause", true}}).empty());
+	CHECK(Supersedes("ai.set_setting", json{{"company", 0}, {"name", "n"}, {"value", 2}}, "ai.set_setting", json{{"company", 0}, {"name", "n"}, {"value", 1}}));
+	CHECK_FALSE(Supersedes("ai.set_setting", json{{"company", 0}, {"name", "m"}, {"value", 2}}, "ai.set_setting", json{{"company", 0}, {"name", "n"}, {"value", 1}}));
+	CHECK_FALSE(Supersedes("game.set_pause", json{{"pause", true}}, "game.set_pause", json{{"pause", true}}));
+	CHECK_FALSE(Supersedes("ai.set_settings", json{{"settings", json::object()}}, "ai.set_settings", a));
+	CHECK_FALSE(Supersedes("ai.set_settings", json::array(), "ai.set_settings", a));
+	CHECK_FALSE(Supersedes("ai.set_settings", a, "ai.set_settings", json::array()));            /* an old approval that does not parse */
+	CHECK_FALSE(Supersedes("ai.set_settings", a, "ai.set_settings", json{{"settings", {{"x", 1}}}}));  /* an old one naming no company */
+	CHECK(SettingKeys("ai.set_setting", json{{"name", "n"}, {"value", 1}}) == std::vector<std::string>{"n"});
+	CHECK(SettingKeys("ai.set_setting", json{{"name", 3}}).empty());
+	CHECK(SettingKeys("ai.set_settings", json{{"settings", json::array()}}).empty());
+	CHECK(SettingKeys("ai.set_settings", json::array()).empty());
+}
+
+TEST_CASE("An unanswered approval is settled at its deadline with the operator's standing verdict, keep by default", "[prismatic_mcp]")
+{
+	DeadlinePolicy keep;  /* the policy a server starts with */
+	CHECK(keep.ticks == 30 * DEADLINE_DAY_TICKS);
+	CHECK(keep.verdict == DeadlineVerdict::Keep);
+	CHECK(DeadlineTick(1000, keep.ticks) == std::optional<uint64_t>(1000 + 30 * 74));
+	CHECK_FALSE(DeadlineTick(1000, 0).has_value());
+
+	const uint64_t due = 1000 + keep.ticks;
+	CHECK(DeadlineDue(true, 1000, due - 1, keep, true) == DeadlineAction::None);
+	CHECK(DeadlineDue(true, 1000, due, keep, true) == DeadlineAction::Retire);
+	CHECK(DeadlineDue(true, 1000, due + 5000, keep, false) == DeadlineAction::Retire);
+	/* Decided already: the deadline has nothing to settle. */
+	CHECK(DeadlineDue(false, 1000, due + 1, keep, true) == DeadlineAction::None);
+
+	DeadlinePolicy approve{keep.ticks, DeadlineVerdict::Approve};
+	CHECK(DeadlineDue(true, 1000, due, approve, true) == DeadlineAction::Execute);
+	/* Wider than a chat approver may decide (a server setting, starting an AI): retired, never executed. */
+	CHECK(DeadlineDue(true, 1000, due, approve, false) == DeadlineAction::Retire);
+
+	DeadlinePolicy off{0, DeadlineVerdict::Approve};
+	CHECK(DeadlineDue(true, 1000, UINT64_MAX, off, true) == DeadlineAction::None);
+
+	CHECK(DeadlineVerdictName(DeadlineVerdict::Keep) == "keep");
+	CHECK(DeadlineVerdictName(DeadlineVerdict::Approve) == "approve");
+}
+
+TEST_CASE("The deadline policy is parsed from the console's game days and verdict, and a malformed line changes nothing", "[prismatic_mcp]")
+{
+	auto p = ParseDeadlinePolicy("7", "");
+	REQUIRE(p.has_value());
+	CHECK(p->ticks == 7 * DEADLINE_DAY_TICKS);
+	CHECK(p->verdict == DeadlineVerdict::Keep);
+	CHECK(ParseDeadlinePolicy("30", "keep")->verdict == DeadlineVerdict::Keep);
+	CHECK(ParseDeadlinePolicy("30", "approve")->verdict == DeadlineVerdict::Approve);
+	CHECK(ParseDeadlinePolicy("0", "keep")->ticks == 0);
+	CHECK(ParseDeadlinePolicy("3650", "")->ticks == 3650 * DEADLINE_DAY_TICKS);
+	CHECK_FALSE(ParseDeadlinePolicy("3651", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("-1", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("7d", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("99999", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("7", "yes").has_value());
+}
+
+TEST_CASE("Only an action on one company is decided in the game's chat, classified by the command's own flags and category", "[prismatic_mcp]")
+{
+	json none = json::array();
+	CHECK(ChatScoped("ai.set_setting", none, ""));
+	CHECK(ChatScoped("ai.set_settings", none, ""));
+	/* Starting, stopping or reloading an AI creates, removes or replaces a company: the operator's. */
+	CHECK_FALSE(ChatScoped("ai.stop", none, ""));
+	CHECK_FALSE(ChatScoped("ai.start", none, ""));
+	CHECK_FALSE(ChatScoped("game.set_pause", none, ""));
+	CHECK_FALSE(ChatScoped("api.ScriptCompany.SetName", none, ""));
+	CHECK(ChatScoped("command.RenamePresident", json::array({"str_ctrl"}), "company_setting"));
+	CHECK(ChatScoped("command.BuildRailroadTrack", json::array({"auto", "no_water"}), "landscape_construction"));
+	CHECK_FALSE(ChatScoped("command.Pause", json::array({"server"}), "server_setting"));
+	CHECK_FALSE(ChatScoped("command.ChangeSetting", json::array({"server"}), "server_setting"));
+	CHECK_FALSE(ChatScoped("command.Money", json::array({"offline"}), "cheat"));
+	CHECK_FALSE(ChatScoped("command.FutureCheat", json::array(), "cheat"));  /* the cheat category, whatever its flags */
+	CHECK_FALSE(ChatScoped("command.CreateGoal", json::array({"deity", "str_ctrl"}), "other_management"));
+	/* CompanyControl has no Server flag; its category is what makes it the operator's. */
+	CHECK_FALSE(ChatScoped("command.CompanyControl", json::array({"spectator", "client_id", "no_estimate"}), "server_setting"));
+	CHECK_FALSE(ChatScoped("command.Unknown", json::object(), "company_setting"));
+	CHECK_FALSE(ChatScoped("command.Unknown", none, ""));
+	CHECK(KeyFingerprint("abcdefghijklmnopqrstuvwxyz") == "abcdefghijkl");
+	CHECK(KeyFingerprint("short") == "short");
 }
 
 #endif /* OTTD_PRISMATIC_MCP_SERVER */

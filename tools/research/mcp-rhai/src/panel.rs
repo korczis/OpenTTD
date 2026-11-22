@@ -395,17 +395,6 @@ pub fn redact(line: &str, token: Option<&str>) -> (String, Option<String>) {
     (out, found)
 }
 
-/// "denied #<n>" at the start of a line: an approval withdrawn or refused in the game.
-pub fn denied_id(line: &str) -> Option<i64> {
-    let rest = line.strip_prefix("denied #")?;
-    let n = rest.chars().take_while(char::is_ascii_digit).count();
-    let next = rest[n..].chars().next();
-    if n == 0 || next.map_or(false, |c| c.is_alphanumeric() || c == '_') {
-        return None;
-    }
-    rest[..n].parse().ok()
-}
-
 /// The ~ console's plan verb: "[prismatic-plan] <n> <text>".
 pub fn plan_request(line: &str) -> Option<(i64, String)> {
     let mut from = 0;
@@ -572,10 +561,7 @@ pub fn owner_cookie_name(port: u16) -> String {
 /// A fresh owner secret: 32 bytes of /dev/urandom as hex; None (no secret, so the owner's routes
 /// refuse every caller) when the system's randomness cannot be read. Fails closed, never weak.
 pub fn new_owner_secret() -> Option<String> {
-    let mut b = [0u8; 32];
-    let mut f = std::fs::File::open("/dev/urandom").ok()?;
-    f.read_exact(&mut b).ok()?;
-    Some(b.iter().map(|x| format!("{x:02x}")).collect())
+    crate::web_access::random_hex(32)
 }
 
 /// Whether a request carries the owner secret, in the header or in the page's cookie, compared in
@@ -808,7 +794,12 @@ pub struct Game {
     log: Mutex<Log>,
     events: Mutex<VecDeque<Value>>,
     pub bus: Bus,
-    pending: Mutex<BTreeMap<i64, Value>>,
+    /// The approvals already announced as an event: the queue itself is the game server's
+    /// (openttd://approvals, ADR 0038), and auto-approve takes only these, the panel's own requests.
+    announced: Mutex<HashSet<i64>>,
+    /// Tests stand in for the game server's queue (openttd://approvals) with this.
+    #[cfg(test)]
+    pub test_approvals: Mutex<Vec<Value>>,
     /// The owner secret (see [`owner_gate`]): made at start, printed once on the panel's stdout by
     /// [`Game::start`], never sent to the bus, the store, the event feed or any answer.
     owner_secret: Option<String>,
@@ -840,7 +831,10 @@ impl Game {
             child: Mutex::new(None), running: AtomicBool::new(false),
             console_w: Mutex::new(Console { stdin: None, last: None }),
             token: Mutex::new(None), log: Mutex::new(Log::default()), events: Mutex::new(VecDeque::new()),
-            bus: Bus::new(), pending: Mutex::new(BTreeMap::new()), owner_secret: new_owner_secret(),
+            bus: Bus::new(), announced: Mutex::new(HashSet::new()),
+            #[cfg(test)]
+            test_approvals: Mutex::new(vec![]),
+            owner_secret: new_owner_secret(),
             mcp_up: AtomicBool::new(false), ai_started: AtomicBool::new(false), rpc_id: AtomicU64::new(0),
             server_tools: Mutex::new((vec![], None)), client_tools: Mutex::new((vec![], None)),
             owner_q: Mutex::new(None), plans_seen: Mutex::new(HashSet::new()), history: Mutex::new(VecDeque::new()),
@@ -922,10 +916,6 @@ impl Game {
                 let seq = log.seq;
                 log.lines.push_back((seq, line.clone()));
                 while log.lines.len() > 5000 { log.lines.pop_front(); }
-            }
-            if let Some(id) = denied_id(&line) {
-                // Withdrawn or refused in the game: no longer pending here either.
-                self.pending.lock().unwrap().remove(&id);
             }
             if let Some((n, text)) = plan_request(&line) {
                 if self.plans_seen.lock().unwrap().insert(n) {
@@ -1189,21 +1179,19 @@ impl Game {
     pub fn tool(&self, name: &str, arguments: Value) -> Result<Value, String> {
         let r = self.rpc("tools/call", Some(json!({"name": name, "arguments": arguments})))?;
         let Some(out) = content_json(&r, "/result/content/0/text") else { return Ok(json!({"error": r})) };
-        // Any tool that answers pending_approval is tracked, so the operator sees it with an Approve
-        // button and the panel can resubmit the same call once it is approved.
-        if out.get("status").and_then(Value::as_str) == Some("pending_approval") {
-            if let Some(aid) = out.get("approval_id").filter(|v| !v.is_null()).and_then(|v| py_int(v).ok()) {
-                let fresh = {
-                    let mut p = self.pending.lock().unwrap();
-                    if p.contains_key(&aid) { false } else {
-                        p.insert(aid, json!({"tool": name, "args": arguments, "created": unix_now()}));
-                        true
+        // A request that waits for the operator is announced once; the queue it waits in is the game
+        // server's (openttd://approvals), which the panel reads and never copies (ADR 0038). A request
+        // the server refuses (its queue is full) is an event too, never only a server log line.
+        match out.get("status").and_then(Value::as_str) {
+            Some("pending_approval") => {
+                if let Some(aid) = out.get("approval_id").filter(|v| !v.is_null()).and_then(|v| py_int(v).ok()) {
+                    if self.announced.lock().unwrap().insert(aid) {
+                        self.event("mcp", &format!("{name}({}) -> pending approval #{aid}", py_json(&arguments)));
                     }
-                };
-                if fresh {
-                    self.event("mcp", &format!("{name}({}) -> pending approval #{aid}", py_json(&arguments)));
                 }
             }
+            Some("refused") => self.event("mcp", &format!("{name}({}) -> refused: {}", py_json(&arguments), py_str(out.get("error")))),
+            _ => {}
         }
         Ok(out)
     }
@@ -1264,40 +1252,64 @@ impl Game {
         Ok(out)
     }
 
-    /// Approve pending request `id` in the game's console and resubmit it. `by` is the channel it
-    /// came through (`api`: POST /api/approve, with the approver it declares, if any;
-    /// `auto-approve`: the panel's switch, no person), recorded so every directive step can say
-    /// how its approval was given (research/agent-loop.md, Authorize). POST /api/approve checks the
-    /// owner secret before it gets here ([`owner_gate`]); the declared name is still not checked.
-    /// An owner-only tool ([`OWNER_ONLY_TOOLS`]) is never approved here, whoever asks: the answer
-    /// names the console command to type, and the request stays pending.
+    /// The game server's approval queue (openttd://approvals, ADR 0038): every approval it holds,
+    /// pending first; [] while the server does not answer.
+    pub fn approvals(&self) -> Vec<Value> {
+        #[cfg(test)]
+        if !self.test_approvals.lock().unwrap().is_empty() { return self.test_approvals.lock().unwrap().clone(); }
+        if !self.mcp_up.load(Ordering::SeqCst) { return vec![]; }
+        self.resource("openttd://approvals").ok()
+            .and_then(|r| r.pointer("/data/approvals").and_then(Value::as_array).cloned()).unwrap_or_default()
+    }
+
+    /// Approve `id` through the game's console, the operator's channel. The game server carries it
+    /// out the moment it is approved (ADR 0038): nothing is resubmitted; the panel reads back the
+    /// decision the server recorded for it. `by` is the channel it came through (`api`: POST
+    /// /api/approve, with the approver it declares, if any; `auto-approve`: the panel's switch, no
+    /// person), recorded so every directive step can say how its approval was given
+    /// (research/agent-loop.md, Authorize). POST /api/approve checks the owner secret before it gets
+    /// here ([`owner_gate`]); the declared name is still not checked. An owner-only tool
+    /// ([`OWNER_ONLY_TOOLS`]) is never approved here, whoever asks: the answer names the console
+    /// command to type, and the request stays pending.
     pub fn approve(&self, id: i64, by: Value) -> Result<Value, String> {
         if let Some(refusal) = self.owner_only_pending(id) {
             self.event("operator", &format!("refused to approve #{id} ({}): the owner approves it at the game's console",
                                              py_str(refusal.get("tool"))));
             return Ok(refusal);
         }
-        let Some(info) = self.pending.lock().unwrap().remove(&id) else {
-            return Ok(json!({"error": format!("no pending approval #{id} known to the panel")}));
+        let Some(a) = self.approvals().into_iter().find(|a| a["id"] == json!(id)) else {
+            return Ok(json!({"error": format!("the game server holds no approval #{id}")}));
         };
-        self.console(&format!("prismatic_mcp approve {id}"))?;
+        if a["state"] != json!("pending") || a["expired"] == json!(true) {
+            let st = if a["expired"] == json!(true) { "expired".to_string() } else { py_str(a.get("state")) };
+            return Ok(json!({"error": format!("approval #{id} is {st}, not pending"), "approval": a}));
+        }
         panel_decision::record_approval(id, by.clone());
+        self.console(&format!("prismatic_mcp approve {id}"))?;
         self.event("operator", &format!("approved #{id} in the OpenTTD console ({})", panel_decision::approval_label(&by)));
-        thread::sleep(Duration::from_millis(500));
-        let tool = info["tool"].as_str().unwrap_or("");
-        let out = self.tool(tool, info["args"].clone())?;
-        let opt = |k: &str| out.get(k).map_or(String::new(), |v| py_str(Some(v)));
-        self.event("mcp", &format!("#{id} {tool} resubmitted -> {} {} verdict={}", py_str(out.get("status")), opt("command_result"), opt("verdict")));
-        Ok(out)
+        // The decision the server recorded when it carried the approval out.
+        for _ in 0..20 {
+            thread::sleep(Duration::from_millis(150));
+            let decisions = self.resource("openttd://decisions").ok()
+                .and_then(|r| r.pointer("/data/decisions").and_then(Value::as_array).cloned()).unwrap_or_default();
+            if let Some(d) = decisions.into_iter().find(|d| d["approval_id"] == json!(id)) {
+                let mut out = d.clone();
+                let rejected = d["command_result"] == json!("rejected");
+                out["status"] = json!(if rejected { "rejected" } else { "executed" });
+                self.event("mcp", &format!("#{id} {} -> {} {} verdict={}", py_str(a.get("tool")), py_str(out.get("status")),
+                    py_str(d.get("command_result")), py_str(d.get("verdict"))));
+                return Ok(out);
+            }
+        }
+        Ok(json!({"error": format!("approved #{id} in the console, but the game server recorded no decision for it within 3 s"), "approval_id": id, "pending_decision": true}))
     }
 
+    /// The approvals that wait for the operator, as /api/status and the scripts read them
+    /// (`status().pending`): {id, tool, args, created_tick, expires_tick}, from the server's queue.
     pub fn pending_json(&self) -> Vec<Value> {
-        self.pending.lock().unwrap().iter().map(|(k, v)| {
-            let mut m = Map::new();
-            m.insert("id".into(), json!(k));
-            if let Some(o) = v.as_object() { m.extend(o.clone()); }
-            Value::Object(m)
-        }).collect()
+        self.approvals().into_iter().filter(|a| a["state"] == json!("pending") && a["expired"] != json!(true))
+            .map(|a| json!({"id": a["id"], "tool": a["tool"], "args": a["args"], "created_tick": a["created_tick"], "expires_tick": a["expires_tick"]}))
+            .collect()
     }
 
     /// The refusal for pending approval `id` when its tool is owner-only, else None.
@@ -1311,9 +1323,12 @@ impl Game {
     /// the console however auto-approve was switched on. Returns the ids it approved (or tried to).
     fn auto_approve_once(&self) -> Vec<i64> {
         if !self.auto_approve.load(Ordering::SeqCst) { return vec![]; }
+        // Only the panel's own requests (announced), never another MCP client's, and never an
+        // owner-only one.
+        let announced = self.announced.lock().unwrap().clone();
         let ids: Vec<i64> = self.pending_json().iter()
             .filter(|p| !p["tool"].as_str().is_some_and(owner_only))
-            .filter_map(|p| p["id"].as_i64()).collect();
+            .filter_map(|p| p["id"].as_i64()).filter(|id| announced.contains(id)).collect();
         for &id in &ids {
             let _ = self.approve(id, json!({"channel": "auto-approve"}));
         }
@@ -2343,23 +2358,28 @@ fn h_pause(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     ok(g.set_pause(i.body.get("pause").map_or(true, |v| truthy(Some(v))))?)
 }
 
+/// The HTTP status of an approval's answer: an approval that did not take is an error the owner
+/// sees (the page's one API client shows a non-2xx answer), never a 200 with an error inside. The
+/// status of the decision decides first, since an executed decision carries "error": "".
+pub fn approve_status(out: &Value) -> u16 {
+    let nonempty_error = out.get("error").is_some_and(|e| !e.as_str().is_some_and(str::is_empty));
+    match out.get("status").and_then(Value::as_str) {
+        _ if out.get("refused").is_some() => 403,
+        Some("executed") => 200,
+        Some("rejected") => 422,
+        _ if out.get("pending_decision").is_some() => 504,
+        _ if out.get("approval").is_some() => 409,
+        _ if nonempty_error => 404,
+        _ => 502,
+    }
+}
+
 fn h_approve(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     let declared = i.body.get("by").and_then(Value::as_str).map(|b| b.chars().take(64).collect::<String>());
     let id = py_int(&i.body["id"])?;
     // The owner secret was checked (owner_gate); the name in `by` is declared, not checked.
     let out = g.approve(id, json!({"channel": "api", "declared": declared, "owner_secret": true}))?;
-    // An approval that did not take is an error the owner sees (the page's one API client shows a
-    // non-2xx answer), never a 200 with an error inside: unknown here, or forgotten by the game
-    // server so that the resubmission only asked again (ADR 0038 replaces resubmission altogether).
-    Ok(match out.get("status").and_then(Value::as_str) {
-        _ if out.get("refused").is_some() => (403, out),
-        _ if out.get("error").is_some() && out.get("approval_id").is_none() => (404, out),
-        Some("pending_approval") => (409, json!({"error": format!(
-            "the game server no longer holds approval #{id} (it keeps only the newest); the same change waits again as #{}",
-            py_str(out.get("approval_id"))), "answer": out})),
-        Some("rejected") => (422, out),
-        _ => (200, out),
-    })
+    Ok((approve_status(&out), out))
 }
 
 fn h_bots(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
@@ -2545,7 +2565,7 @@ pub fn routes() -> Vec<Route> {
           s(json!({"ids": {"type": "array", "items": {"type": "integer"}}, "wait": {"type": "number"}}), &["ids"]), h_content_download),
         r("POST", "/api/pause", "pause", "Pause or resume through the approval-gated MCP tool", true,
           s(json!({"pause": {"type": "boolean"}}), &["pause"]), h_pause),
-        r("POST", "/api/approve", "approve", "The owner's approval of a pending decision, then its resubmission. Needs the owner secret mcp-panel printed at start (the cookie ?owner=<secret> sets, or the X-Panel-Owner header), else 401; an owner-only tool (openttd.ai.set_settings, a Battlebrain live decision) is refused with 403 and the console command to type, whoever asks; `by` names the approver it declares (recorded in plan.directive_outcome, not checked)", true,
+        r("POST", "/api/approve", "approve", "The owner's approval of a pending decision, which the game server carries out at once (ADR 0038): the decision it recorded (200), 422 when the game rejected it, 409 for an approval not pending, 404 for one it does not hold, 504 when no decision came. Needs the owner secret mcp-panel printed at start (the cookie ?owner=<secret> sets, or the X-Panel-Owner header), else 401; an owner-only tool (openttd.ai.set_settings, a Battlebrain live decision) is refused with 403 and the console command to type, whoever asks; `by` names the approver it declares (recorded in plan.directive_outcome, not checked)", true,
           s(json!({"id": {"type": "integer"}, "by": st()}), &["id"]), h_approve),
         r("POST", "/api/auto-approve", "autoApprove", "The owner's full-auto switch: on needs the owner secret (as /api/approve), off is open to anyone; it never approves an owner-only tool", false,
           s(json!({"on": {"type": "boolean"}}), &["on"]), h_auto),
@@ -2581,6 +2601,15 @@ pub fn routes() -> Vec<Route> {
           None, h_instances),
         r("GET", "/api/mesh", "mesh", "The Majordomus mesh this repository's server cooperates with (src/panel_mesh_page.rs, read-only): `mesh` (identity, trust policy, providers, tallies), `peers` (machines, runtimes, sessions, claims) and `nodes` (every discovered node with trust, presence and endpoints), read from the Majordomus server ($MAJORDOMUS_URL, else the one `majordomus serve ensure` names for this checkout) /api/v1/mesh, /peers and /nodes unchanged; 200 also when Majordomus is down (`reachable` false, `errors` per part)", false,
           None, crate::panel_mesh_page::h_mesh),
+        // The strategist and the blackboard (src/panel_strategy.rs, research/mechanisms/strategist-and-blackboard.md).
+        r("GET", "/api/strategy", "strategy", "The background strategist: enabled, running, cycles, its configuration (PRISMATIC_STRATEGIST, PRISMATIC_STRATEGY_*), strategy.status, strategy.summary, the last cycle with each part's duration and error (plan, track, towns, tuning), the next run, and the current strategy from the blackboard: portfolio (AlgoGlyph knapsack-dp or the built-in DP, named), AlgoGlyph transport-investment, track-planning of the best rail lines, town warnings per rated company, BattleBrain's tuning proposals, a bot settings suggestion (data only, never applied) and the mesh peers' plans. Reads and computes only; the game is never changed", false,
+          None, crate::panel_strategy::h_strategy),
+        r("POST", "/api/strategy/run", "strategyRun", "Run one strategist cycle now (also with PRISMATIC_STRATEGIST=0): with wait: true the answer is the cycle's record (parts, durations, errors, the plan.strategy event's sequence number), else 202 and the cycle runs in the background; 409 without a game", false,
+          s(json!({"wait": {"type": "boolean"}}), &[]), crate::panel_strategy::h_strategy_run),
+        r("GET", "/api/blackboard", "blackboard", "The panel's blackboard, the shared working state of this instance: one key (?key=, 404 when absent) or every key under ?prefix=, each with its value, writer (by), revision, wall time (written_at), game date and its last values (history; ?history=0 leaves them out). strategy.* is the strategist's, mesh.* what it read from the Majordomus mesh. In the panel's memory: a restarted panel starts empty", false,
+          None, crate::panel_strategy::h_blackboard),
+        r("POST", "/api/blackboard", "blackboardWrite", "Write a blackboard key for scripts, pages and services to share ({key, value, by?}); the reserved strategy.* and mesh.* keys are refused (403). Published as a blackboard.write event", false,
+          s(json!({"key": st(), "value": {}, "by": st()}), &["key", "value"]), crate::panel_strategy::h_blackboard_write),
         r("GET", "/api/battle/contestants", "battleContestants", "The LAN battle's contestants as tools/research/ai-battle/battle.json declares them (src/panel_battle.rs, read-only, read on every request): `file`, `count` and `contestants` in the file's order, each as the file has it (ai, label, source, group) with `settings` made explicit (\"\" for the AI's defaults); the live arena (rhai/arena.rhai) plays this lineup, so it is written in one place. 404 when the file is missing", false,
           None, crate::panel_battle::h_contestants),
         r("POST", "/api/instances/call", "instancesCall", "One MCP JSON-RPC call on a named instance of the cluster (a panel's server or a GUI client)", true,
@@ -3407,8 +3436,10 @@ mod tests {
         // And the observation a directive is bound to (GET /api/bridge/observation; agent loop step 1).
         // And evidence retrieval (GET /api/evidence; research/agent-loop.md, Retrieve).
         // And the store's named queries (GET and POST /api/db/named; sql/queries).
-        // And the LAN battle's contestants the live arena plays (GET /api/battle/contestants; panel_battle.rs).
-        assert_eq!(rs.len(), 77);
+        // And the strategist and its blackboard (GET /api/strategy, POST /api/strategy/run, GET and
+        // POST /api/blackboard; panel_strategy.rs), and the LAN battle's contestants the live arena
+        // plays (GET /api/battle/contestants; panel_battle.rs).
+        assert_eq!(rs.len(), 81);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -3423,7 +3454,7 @@ mod tests {
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
             "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
             "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh",
-            "/api/battle/contestants"].contains(&r.path)));
+            "/api/strategy", "/api/strategy/run", "/api/blackboard", "/api/battle/contestants"].contains(&r.path)));
     }
 
     /// A store with two runs of one instance: the older run's days must not feed the books.
@@ -3727,9 +3758,6 @@ mod tests {
         assert!(find_token_file("Token written to  (mode 0600)").is_none());
         assert_eq!(redact("Token written to /no/such/file (mode 0600)", None).1, None, "an unreadable file yields no token");
         std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(denied_id("denied #12 by the operator"), Some(12));
-        assert_eq!(denied_id("denied #12x"), None);
-        assert_eq!(denied_id("not denied #12"), None);
         assert_eq!(plan_request("dbg: [prismatic-plan] 61206 najdi les"), Some((61206, "najdi les".into())));
         assert_eq!(plan_request("[prismatic-plan] x [prismatic-plan] 7 b"), Some((7, "b".into())));
         assert_eq!(plan_request("[prismatic-plan] 7 "), None);
@@ -3747,6 +3775,9 @@ mod tests {
         assert!(!is_approval_line("prismatic_mcp status"));
         assert!(!is_approval_line("mcpapprove 1"));
         assert!(!is_approval_line("prismatic_mcp deny 3"));
+        // The deadline's standing approve verdict is consent in advance; keep enacts nothing.
+        assert!(is_approval_line("prismatic_mcp approval_deadline 30 approve"));
+        assert!(!is_approval_line("prismatic_mcp approval_deadline 30 keep"));
     }
 
     #[test]
@@ -4010,11 +4041,29 @@ mod tests {
     }
 
     #[test]
+    fn an_approval_answers_by_its_status_before_any_error_field() {
+        // An executed decision carries "error": "": still 200, the page shows success.
+        assert_eq!(approve_status(&json!({"status": "executed", "error": ""})), 200);
+        assert_eq!(approve_status(&json!({"status": "rejected", "error": "not enough money"})), 422);
+        assert_eq!(approve_status(&json!({"refused": "owner_only", "error": "x"})), 403);
+        assert_eq!(approve_status(&json!({"error": "approved #1, but ...", "pending_decision": true})), 504);
+        assert_eq!(approve_status(&json!({"error": "approval #1 is consumed, not pending", "approval": {}})), 409);
+        assert_eq!(approve_status(&json!({"error": "the game server holds no approval #1"})), 404);
+        assert_eq!(approve_status(&json!({"error": ""})), 502);
+        assert_eq!(approve_status(&json!({})), 502);
+    }
+
+    #[test]
     fn owner_only_approvals_are_refused_by_every_panel_channel() {
         let (g, p) = bare_panel("6");
         let secret = g.owner_secret.clone().expect("a secret from /dev/urandom");
         let owner = [(OWNER_HEADER, secret.as_str())];
-        let pend = |id: i64, tool: &str| { g.pending.lock().unwrap().insert(id, json!({"tool": tool, "args": {"company": 1}, "created": 0})); };
+        // The game server's queue, as openttd://approvals answers it; the panel's own requests are announced.
+        let pend = |id: i64, tool: &str| {
+            g.test_approvals.lock().unwrap().push(json!({"id": id, "tool": tool, "args": {"company": 1}, "state": "pending", "expired": false, "created_tick": 0, "expires_tick": 9}));
+            g.announced.lock().unwrap().insert(id);
+        };
+        let pending = |id: i64| g.pending_json().iter().any(|p| p["id"] == json!(id));
         pend(41, "openttd.ai.set_settings");
         pend(42, "openttd.game.set_pause");
         assert!(owner_only("openttd.ai.set_settings") && !owner_only("openttd.ai.set_setting") && !owner_only("openttd.game.set_pause"));
@@ -4022,15 +4071,24 @@ mod tests {
         let (code, out) = post_as(&p, "/api/approve", json!({"id": 41}), &owner);
         assert_eq!((code, out["refused"].clone(), out["console"].clone()), (403, json!("owner_only"), json!("prismatic_mcp approve 41")), "{out}");
         assert!(py_str(out.get("error")).contains("prismatic_mcp approve 41"));
-        assert!(g.pending.lock().unwrap().contains_key(&41), "a refused approval stays pending for the console");
+        assert!(pending(41), "a refused approval stays pending for the console");
         // Any other channel that reaches Game::approve: the same refusal.
         assert_eq!(g.approve(41, json!({"channel": "auto-approve"})).unwrap()["refused"], "owner_only");
         // Auto-approve (as --auto-approve sets it) passes the owner-only one over and tries the rest.
         g.auto_approve.store(true, Ordering::SeqCst);
         assert_eq!(g.auto_approve_once(), vec![42]);
-        assert!(g.pending.lock().unwrap().contains_key(&41));
+        assert!(pending(41));
         g.auto_approve.store(false, Ordering::SeqCst);
         assert!(g.auto_approve_once().is_empty(), "off approves nothing");
+        // Auto-approve takes only the panel's own requests, never another MCP client's.
+        g.test_approvals.lock().unwrap().push(json!({"id": 44, "tool": "openttd.game.set_pause", "args": {}, "state": "pending", "expired": false}));
+        g.auto_approve.store(true, Ordering::SeqCst);
+        assert!(!g.auto_approve_once().contains(&44), "not announced by the panel");
+        g.auto_approve.store(false, Ordering::SeqCst);
+        // Not held, or not pending: 404 and 409, never a 200 with an error inside.
+        assert_eq!(g.approve(99, json!({"channel": "api"})).unwrap()["error"], "the game server holds no approval #99");
+        g.test_approvals.lock().unwrap().push(json!({"id": 45, "tool": "openttd.game.set_pause", "args": {}, "state": "consumed", "expired": false}));
+        assert_eq!(approve_status(&g.approve(45, json!({"channel": "api"})).unwrap()), 409);
         // An ordinary approval with the secret goes through to the console (closed here).
         pend(43, "openttd.game.set_pause");
         let (code, out) = post_as(&p, "/api/approve", json!({"id": 43}), &owner);

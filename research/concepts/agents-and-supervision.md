@@ -57,6 +57,13 @@ Its layer is the [`.ai/`](../../.ai/README.md) directory:
 - A coding session that reads the board therefore sees the running games, without subscribing to
   ZeroMQ.
 
+**What keeps the game agents running.** Reporting to the board is not supervision of the agents
+themselves. `mcp-e2e` restarts the clients and helpers it started whenever one exits. The panel
+restarts a Rhai service that ended with an error, or that passed the stall limit it declares,
+with a growing wait, and gives up after a run of quick failures. Neither one acts in the game.
+[Who keeps what running](../mcp-control.md#who-keeps-what-running) lists what each one notices
+and what it misses.
+
 ## In the real world
 
 - **Teams with many automated workers.** Several agents (or people) change one codebase or one

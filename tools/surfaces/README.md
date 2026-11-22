@@ -180,10 +180,18 @@ race. What keeps it from blocking:
   stops the site and the wiki from deploying, and master's next state is correct.
 - **When a stale count turns a pull request red, its owner refreshes it**:
   `tools/surfaces/refresh-branch <branch>` merges `origin/master` into the branch, resolves a
-  conflict inside a generated region by taking master's side, runs `surfaces sync`, and commits
-  "Doc: [Surfaces] Regenerate derived regions after merging master" only when the sync changed
-  something; `--push` pushes it as a fast-forward, never a force. A conflict anywhere else aborts
-  the merge and leaves the branch to its owner (exit 10).
+  conflict inside a generated region by taking master's side, and runs `surfaces sync` before it
+  commits, so the one merge commit, "Merge origin/master into <branch>", already holds the
+  regenerated regions and a local pre-commit hook that runs `surfaces check` accepts it. A branch
+  that already holds master but has stale regions gets one "Doc: [Surfaces] Regenerate derived
+  regions after merging master" commit. `--push` pushes the result as a fast-forward of what was
+  fetched, never a force. A conflict anywhere else aborts the merge and leaves the branch to its
+  owner (exit 10). It works in a temporary worktree of its own, detached on `origin/<branch>`
+  and removed on every exit, a failure or a signal included, so the checkout it is run from
+  keeps its branch, HEAD and files: run from the shared primary checkout it never detaches
+  master. The result stays in `refs/refresh/<branch>`, which a refresh without `--push` prints,
+  so it can be pushed later (`git push origin refs/refresh/<branch>:refs/heads/<branch>`). The
+  generator reuses the caller's `tools/surfaces/.venv` (`SURFACES_VENV` overrides it).
 - **No CI job pushes to a pull request's branch.** A `refresh` job used to run `refresh-branch
   --push` as github-actions[bot] on every auto-merge branch for each push to master and dispatch
   Surfaces on it, because a push made with `GITHUB_TOKEN` starts no workflow. A bot-pushed head
@@ -194,7 +202,8 @@ race. What keeps it from blocking:
   workflows (an App or PAT token), which is the owner's call.
 
 `tools/surfaces/test_refresh_branch.py` runs every path of `refresh-branch` against scratch
-repositories, and `tools/surfaces/test_surfaces_workflow.py` keeps the workflow from pushing to a
+repositories, including that the calling checkout keeps its branch and that no temporary
+worktree survives a failure or a signal, and `tools/surfaces/test_surfaces_workflow.py` keeps the workflow from pushing to a
 pull request's branch again; both run in the Surfaces workflow.
 
 ## Open findings

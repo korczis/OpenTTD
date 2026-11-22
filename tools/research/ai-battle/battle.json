@@ -155,6 +155,24 @@
         {
           "ai": "AdmiralAI"
         }
+      ],
+      [
+        {
+          "ai": "PrismaticAI",
+          "label": "PrismaticAI sibling A",
+          "settings": "aggressiveness=100,max_routes=30,intercity=1,own_lines=8,cash_reserve=5000,self_steward=1"
+        },
+        {
+          "ai": "PrismaticAI",
+          "label": "PrismaticAI sibling B",
+          "settings": "aggressiveness=100,max_routes=30,intercity=1,own_lines=8,cash_reserve=5000,self_steward=1"
+        },
+        {
+          "ai": "AAAHogEx"
+        },
+        {
+          "ai": "LuDiAI AfterFix"
+        }
       ]
     ]
   },
@@ -255,7 +273,8 @@
       "pressure_low",
       "pressure_mid",
       "pressure_high",
-      "rich_invest_rounds"
+      "rich_invest_rounds",
+      "air_add_full"
     ],
     "narrow": {
       "aggressiveness": [
@@ -341,6 +360,11 @@
       "air_add_waiting": [
         0,
         100,
+        10
+      ],
+      "air_add_full": [
+        0,
+        90,
         10
       ],
       "rail_twin_max": [

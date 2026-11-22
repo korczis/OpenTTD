@@ -1,7 +1,17 @@
 name: Docs checker
 
 on:
+  # Only the files this check reads: a pull request that touches none of them would queue a
+  # runner for a check that cannot change (tools/surfaces/test_checker_workflows.py).
   pull_request:
+    paths:
+    - 'src/**'
+    - 'Doxyfile.in'
+    - 'CMakeLists.txt'
+    - 'cmake/**'
+    - '.github/install-doxygen/**'
+    - '.github/sort_doxygen_warnings.py'
+    - '.github/workflows/docs-checker.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # RESEARCH-ONLY: the full-auto loop. An autonomous agent that plays the OpenTTD game through
 # the embedded MCP server and nothing else: it observes through MCP resources, decides by a
-# policy, and acts only through the decision contract (validate -> submit -> approval ->
-# resubmit -> executed through the command system -> verified against observed state).
+# policy, and acts only through the decision contract (validate -> submit -> approval, which
+# the game server carries out at once through the command system -> verified against observed
+# state; ADR 0038). It submits a decision once and never resubmits it: after an approval the
+# same call would ask for a fresh approval, and approving that would run the action twice.
 #
 # It talks to the control panel's loopback API (tools/research/mcp-panel), which holds the
 # MCP bearer token; the loop never sees it. Approval is the operator's act and never the
@@ -58,39 +60,82 @@ def log(kind, msg, **fields):
     print(json.dumps(line), flush=True)
 
 
+def approval_state(panel, aid):
+    """The approval `aid` in the game server's one queue (openttd://approvals), or None."""
+    approvals = panel.read("openttd://approvals").get("data", {}).get("approvals", [])
+    return next((a for a in approvals if a.get("id") == aid), None)
+
+
+def decision_of(panel, aid):
+    """The decision the game server recorded when it carried out approval `aid`, or None."""
+    decisions = panel.read("openttd://decisions").get("data", {}).get("decisions", [])
+    return next((d for d in decisions if d.get("approval_id") == aid), None)
+
+
+def await_verdict(panel, did):
+    """The decision record once its verdict is taken (the command runs on a later tick)."""
+    rec = {"decision_id": did}
+    deadline = time.time() + 15.0
+    while time.time() < deadline:
+        rec, _ = panel.tool("openttd.decision.get", {"decision_id": did})
+        if rec.get("verdict") != "PENDING_OBSERVATION":
+            break
+        time.sleep(0.5)
+    return rec
+
+
+def report(action, rec):
+    log("decision", "executed" if rec.get("command_result") != "rejected" else "rejected",
+        action=action, approval_id=rec.get("approval_id"), decision_id=rec.get("decision_id"),
+        verdict=rec.get("verdict"), command_result=rec.get("command_result"),
+        verification=rec.get("verification"), error=rec.get("error") or None, cost=rec.get("cost"))
+    return rec
+
+
 def decide(panel, action, wait_s):
-    """One decision through the whole contract. Returns the final tool reply."""
+    """One decision through the whole contract. Returns the decision record, or the reply that
+    says why there is none.
+
+    The decision is submitted once. Approving it (the panel, the console, a client's chat, or the
+    operator's auto-approve) executes it on the game server at once (ADR 0038); the loop only
+    watches the approval in openttd://approvals until it is consumed, denied or expired, then
+    reads the decision recorded with that approval_id. It never resubmits: a resubmit after the
+    approval would ask for a fresh approval and, approved, run the action a second time."""
     check, _ = panel.tool("openttd.decision.validate", {"action": action})
     if not check.get("valid"):
         log("decision", "refused by validation", action=action, errors=check.get("errors"))
         return check
     out, err = panel.tool("openttd.decision.submit", {"action": action})
-    if out.get("status") == "pending_approval":
-        aid = out["approval_id"]
-        log("decision", "waiting for operator approval", action=action, approval_id=aid,
-            hint="approve in the panel or: prismatic_mcp approve %d" % aid, wait_s=wait_s)
-        deadline = time.time() + wait_s
-        while time.time() < deadline:
-            out, err = panel.tool("openttd.decision.submit", {"action": action})
-            if out.get("status") == "executed":
-                break
-            time.sleep(1.0)
     if out.get("status") == "executed":
-        # The verdict is taken when the command has actually run (a later tick on a server).
-        did = out.get("decision_id")
-        rec = out
-        deadline = time.time() + 15.0
-        while time.time() < deadline:
-            rec, _ = panel.tool("openttd.decision.get", {"decision_id": did})
-            if rec.get("verdict") != "PENDING_OBSERVATION":
-                break
-            time.sleep(0.5)
-        log("decision", "executed", action=action, decision_id=did, verdict=rec.get("verdict"),
-            command_result=rec.get("command_result"), verification=rec.get("verification"),
-            error=rec.get("error") or None, cost=rec.get("cost"))
-        return rec
-    log("decision", "not executed", action=action, reply=out)
-    return out
+        return report(action, await_verdict(panel, out.get("decision_id")))
+    if out.get("status") != "pending_approval":
+        log("decision", "not executed", action=action, reply=out)
+        return out
+    aid = out["approval_id"]
+    log("decision", "waiting for operator approval", action=action, approval_id=aid,
+        hint="approve in the panel or: prismatic_mcp approve %d" % aid, wait_s=wait_s)
+    state = "pending"
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        a = approval_state(panel, aid)
+        if a is None:
+            # Dropped from the queue (decided long ago, or a full queue made room): the decision
+            # record, if any, still says what happened.
+            state = "gone"
+            break
+        if a.get("expired"):
+            state = "expired"
+            break
+        state = a.get("state", "pending")
+        if state in ("consumed", "denied", "superseded"):
+            break
+        time.sleep(1.0)
+    rec = decision_of(panel, aid) if state in ("consumed", "approved", "gone") else None
+    if rec is not None:
+        return report(action, await_verdict(panel, rec.get("decision_id")))
+    log("decision", "not executed", action=action, approval_id=aid,
+        approval=state if state != "pending" else "still pending after %.0f s" % wait_s)
+    return {"approval_id": aid, "approval": state, "status": "not_executed"}
 
 
 def observe(panel):

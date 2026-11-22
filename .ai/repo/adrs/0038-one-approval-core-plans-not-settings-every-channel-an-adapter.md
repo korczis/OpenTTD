@@ -75,8 +75,7 @@ Therefore:
 2. **Every channel is an adapter to the one decision function.** None of them decides anything.
    - **Web UI:** POST `/api/approve` sends the console line on the server.
    - **Console:** on the server, `prismatic_mcp approve <plan>` decides. On a network client it
-     posts the research-only game command, which the server carries out for the owner of the
-     plan's company.
+     sends the chat line below (see "How the channels were reduced"; no new game command).
    - **Chat:** `!approve <plan>` and `!deny <plan>`, received by the server, take the same path.
    - **In-game window:** its buttons issue the console line.
 
@@ -124,6 +123,108 @@ peers to be consulted. Each one needs a test that proves it.
 6. **A full queue refuses.** At the cap, a new plan is refused with a reason and an event on the
    bus. A pending plan is never evicted silently.
 
+## How the channels were reduced (slice 2)
+
+The owner asked for every channel (a game command, chat and the web UI), "but rock solid … not
+several parallel implementations … reduce". A client reaches the server through chat, which is
+the protocol's existing client-to-server message. One server-side adapter
+(`PrismaticMCP::ChatApproval`) therefore serves two channels:
+
+- the chat lines `!approvals`, `!approve <id>` and `!deny <id>`;
+- the client console's `prismatic_mcp approvals|approve|deny`, which a network client sends as
+  that same private line. The toolbar's "MCP approvals waiting" item runs this console line, so
+  it comes through here too.
+
+A dedicated command type would have changed the research build's network protocol and added a
+second path to the same decision, so it was not added. A client may decide only approvals whose
+arguments name its own company; anything else is the server operator's. The answer goes to the
+asker alone, and the line is never broadcast.
+
+## Who may approve (security review, 2026-11-22)
+
+An independent security review (session openttd-08) and an adversarial review of slice 2 found
+that matching only the company let any client playing it approve from the chat. In co-play that
+includes the mcp-human who drives the owner's own client, and anyone the server lets into a
+co-play-opened AI company. They also found that the panel's loopback API authenticated no one.
+
+The owner's answers (AskUserQuestion, session b8d35f8c, 2026-11-22, verbatim):
+
+- *Who may approve from inside the game?* "discuss with otheer peers/nodes/ais/llms brings best
+  (hybrid? configuragble? derived? data driven?) solution 100 % test coverage".
+- *The panel's loopback API?* "Approver secret (Recommended)".
+
+The rule below was settled with openttd-08 (no objection) and openttd-b8. The decision itself is
+the pure `detail::DecideChat`, unit-tested branch by branch.
+
+**Who** (declared only, amended 2026-11-22): the client's public key is in the server's approver
+list. The owner decided, in openttd-51's session (relayed by the coordinator): in-game approval
+goes through separate identities. The owner's client is unarmed and registered as an approver,
+agents drive only through their own armed client, and an agent's client is never an approver. A
+company's allow list admits whoever plays that company, an agent's own client included, so it no
+longer counts. It is still read, to say in the refusal and the audit line that the key is a
+member, not an approver.
+
+- The approver list is declared data: `prismatic_mcp approvers add <client id>|remove <key>|list`,
+  kept per server port in `<personal dir>/prismatic_mcp_approvers.<port>.txt` (written atomically,
+  0600). It can name the owner's client even when that client is in no company's allow list
+  (co-play).
+- The allow list (OpenTTD's own access control for a human company) approves nothing since the
+  amendment. Until then it counted for a human company that did not admit anyone (`allow_any`
+  off).
+- A spectator decides nothing.
+
+**What** (data-driven by the command's own flags and category, `detail::ChatScoped`): the chat
+decides only what acts on one company.
+
+- Allowed: `ai.set_setting` and `ai.set_settings`, and a `command.*` that has none of the Server,
+  Offline or Deity flags and is in neither the `server_setting` nor the `cheat` category.
+- The operator's: everything else, including `game.set_pause`, `api.*` and `ai.start`/`ai.stop`/
+  `ai.reload` (they create, remove or replace a company). `CompanyControl` is also the operator's:
+  its category, not its flag, makes it so.
+
+**How**:
+
+- One id per chat line; a list is refused.
+- Every reply is capped below the chat length. `!approvals [page]` answers one machine-readable
+  line per approval (`[approvals] {json}`) and a last count line, so a client's window can show
+  the server's queue.
+- A refusal names the condition that failed.
+- A deny needs only the company. It withdraws and executes nothing, and only a pending approval
+  can be denied.
+- A process whose input is armed for MCP tools (`PRISMATIC_MCP_INPUT=1`) approves nothing.
+  - On a network client, the one chat path (`ClientNetworkGameSocketHandler::SendChat`) refuses
+    an approval line, read as the server reads it.
+  - Any armed process's console refuses `approve` and changes to approvers.
+  - Input a UI tool injects (`PrismaticMCP::UI::InjectingInput()`, the control window's injection
+    scope from PR #66) never approves either, armed or not.
+- Every decision records `approved_via`: the console, or the chat client and company, and
+  whether a registered approver allowed it (a deny also names a company member).
+- A newer pending `ai.set_settings` for a company, or `ai.set_setting` of the same name,
+  withdraws the older one.
+
+**The panel**: approving, and switching auto-approve on, need the panel's per-run owner secret.
+The owner answered "Approver secret", and master already had this mechanism (commit 511f3695e6,
+"Approval is bound to the owner" in research/mcp-control.md). Slice 2 adopted it rather than add a
+second secret:
+
+- mcp-panel prints the secret once at start;
+- the page holds it as an HttpOnly cookie from one visit to `/?owner=<secret>`;
+- curl sends `X-Panel-Owner`;
+- an owner-only tool (`openttd.ai.set_settings`) is approved only at the game's console.
+
+Auto-approve takes only the requests the panel itself submitted, never an owner-only one.
+`/api/console` refuses an approval in any spelling, and `alias`, `exec` and `schedule`. A Rhai
+script or a local agent therefore cannot approve its own request through the panel.
+
+**Next**:
+
+- binding an approval to the current values of the keys it changes;
+- a wall-clock expiry;
+- the per-plan unit itself (`openttd.plan.submit` with a label). Today a plan is one
+  `ai.set_settings`, and supersede goes by a shared setting of the same company;
+- refusing an armed client's own `CompanyAllowListControl` additions. A script driving it could
+  otherwise widen a human company's derived approvers to a second client it controls.
+
 ## Alternatives rejected
 
 - **Keep resubmit-to-execute and teach every channel to resubmit.** This adds a resubmitter per
@@ -136,9 +237,12 @@ peers to be consulted. Each one needs a test that proves it.
 
 - The panel's pending map, its resubmit, and the second origin check are removed. So is the
   rhai scripts' per-setting approval bookkeeping, which becomes a plan submission.
-- A client and a server must run the same research build, because the game command changes the
-  research build's protocol. It is compile-gated with `OPTION_RESEARCH_INSTRUMENTATION`, like the
-  rest of `src/prismatic_mcp/`.
+- The network protocol is unchanged: a client reaches the server's queue through the existing
+  chat message. The approval code is compile-gated with `OPTION_RESEARCH_INSTRUMENTATION`, like
+  the rest of `src/prismatic_mcp/`.
+- A client armed for MCP input (`PRISMATIC_MCP_INPUT=1`, as the owner's co-play client is, so that
+  mcp-human can drive it) cannot approve from its chat or console. That client approves through
+  the panel, with the owner secret, or from an unarmed client.
 - The slices land separately, each through a gated PR:
   1. the web access policy and the one API client;
   2. the approval core and its adapters;

@@ -10,7 +10,27 @@ name: Research Rust
 on:
   push:
     branches: [master]
+  # The same paths as the job's own change check below, so a pull request that touches none of
+  # them queues no runner (tools/surfaces/test_checker_workflows.py keeps the two lists equal).
   pull_request:
+    paths:
+    - 'tools/research/mcp-rhai/**'
+    - 'tools/research/schema/**'
+    - 'tools/research/prismatic-ai/**'
+    - 'tools/research/real-world/**'
+    - 'tools/research/mcp-panel/**'
+    - 'tools/research/town-model/**'
+    - 'research/results/**'
+    - 'research/battlebrain/**'
+    - 'research/prismatic-bridge/**'
+    - 'research/mechanisms/**'
+    - '.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds.md'
+    - 'src/window_type.h'
+    - '.github/workflows/research-rust.yml'
+    - '.gitmodules'
+    - 'tools/research/vendor/**'
+    - 'tools/research/algoglyph-pin'
+    - 'tools/research/test_algoglyph_pin.py'
   # Manual runs. No CI job pushes to a pull request's branch any more (surfaces.yml, the note
   # above `pages`), so nothing dispatches this workflow there.
   workflow_dispatch:
@@ -73,7 +93,7 @@ jobs:
           pattern+='|research/(results|battlebrain|prismatic-bridge|mechanisms)/'
           pattern+='|\.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds\.md$'
           pattern+='|src/window_type\.h$|\.github/workflows/research-rust\.yml$'
-          pattern+='|\.gitmodules$|tools/research/vendor/|tools/research/(test_)?algoglyph[-_]pin(\.py)?$)'
+          pattern+='|\.gitmodules$|tools/research/vendor/|tools/research/(algoglyph-pin|test_algoglyph_pin\.py)$)'
           matched=$(git diff --name-only "$base" HEAD | grep -E "$pattern" || true)
           if [ -n "$matched" ]; then
             echo "Changed since $base:"

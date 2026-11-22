@@ -1,0 +1,85 @@
+#!/usr/bin/env node
+// RESEARCH-ONLY. The Strategy page checked in a real browser
+// (research/mechanisms/strategist-and-blackboard.md): /strategy draws the strategist card with the
+// state GET /api/strategy answers and a row per part of its last cycle, the portfolio, town warning
+// and tuning sections ("Tuning proposals (BattleBrain)"), and the blackboard with one row per key of
+// GET /api/blackboard; a key written through POST /api/blackboard by this check appears with its
+// writer, and opening it shows its value; a write to a reserved strategy.* key is refused (403); a
+// prefix in the address is kept by the filter; the sidebar links the page; the console stays free
+// of errors. Drives the installed Chrome through playwright-core (a dev dependency of
+// tools/research/mcp-panel: npm ci there), so nothing downloads a browser.
+//
+// e2e-covers: panel /strategy
+//
+// Usage: tools/research/mcp-strategy-check http://127.0.0.1:<panel-port>   (exit 0 PASS, 1 FAIL)
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(path.join(here, 'mcp-panel', 'package.json'));
+const { chromium } = require('playwright-core');
+const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+const base = (process.argv[2] || '').replace(/\/$/, '');
+if (!base) { console.error('usage: mcp-strategy-check <panel-url>'); process.exit(2); }
+const checks = [];
+const check = (name, ok, detail = '') => { checks.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); };
+
+const browser = await chromium.launch({ executablePath: CHROME, headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error' && !/404/.test(m.text())) errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  // A key of this check's own, written before the page loads, so the board has at least one row.
+  const key = `check.strategy.${Date.now()}`;
+  const wrote = await fetch(`${base}/api/blackboard`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, value: { from: 'mcp-strategy-check' }, by: 'mcp-strategy-check' }) });
+  check('a script key is written through POST /api/blackboard', wrote.status === 200, String(wrote.status));
+  const refused = await fetch(`${base}/api/blackboard`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: 'strategy.summary', value: 1, by: 'mcp-strategy-check' }) });
+  check('a write to the reserved strategy.* is refused with 403', refused.status === 403, String(refused.status));
+
+  const res = await page.goto(`${base}/strategy`);
+  check('/strategy answers 200 with its title', res && res.status() === 200 && /Strategy/.test(await page.title()), await page.title());
+  const drawn = await page.waitForFunction(() => ['status', 'board'].every((id) => document.querySelector(`#${id} table`)), null, { timeout: 30000 })
+    .then(() => true).catch(() => false);
+  check('the strategist and blackboard cards draw their tables within 30 s', drawn);
+  const facts = await page.evaluate(async (k) => {
+    const s = await (await fetch('/api/strategy')).json();
+    const b = await (await fetch('/api/blackboard?history=0')).json();
+    const text = (id) => document.getElementById(id)?.innerText || '';
+    return {
+      state: s.status?.state, parts: Object.keys(s.last?.parts || {}).length, partRows: document.querySelectorAll('#status tbody tr').length,
+      status: text('status'), tuning: text('tuning'), towns: text('towns'), plan: text('plan'),
+      entries: b.count, boardRows: document.querySelectorAll('#board tbody tr').length, board: text('board'), hasKey: text('board').includes(k),
+      nav: document.querySelectorAll('aside a[href="/strategy"]').length,
+    };
+  }, key);
+  check('the strategist card shows the state /api/strategy answers', !!facts.state && facts.status.includes(facts.state), facts.state);
+  check('a row per part of the last cycle (or none yet)', facts.parts === 0 ? /no cycle yet/.test(facts.status) : facts.partRows === facts.parts,
+    `${facts.partRows}/${facts.parts}`);
+  check('the tuning section is titled Tuning proposals (BattleBrain)', /Tuning proposals \(BattleBrain\)/.test(facts.tuning));
+  check('the portfolio and town sections are drawn', /Portfolio/.test(facts.plan) && /Town warnings/.test(facts.towns));
+  check('the blackboard has a row per key', facts.boardRows === facts.entries && facts.entries > 0, `${facts.boardRows}/${facts.entries}`);
+  check('the key this check wrote is listed with its writer', facts.hasKey && facts.board.includes('mcp-strategy-check'));
+
+  await page.click(`#board button[data-key="${key}"]`);
+  const opened = await page.waitForFunction((k) => document.getElementById('detail')?.innerText.includes(k)
+    && document.getElementById('detail').innerText.includes('mcp-strategy-check'), key, { timeout: 10000 }).then(() => true).catch(() => false);
+  check('opening the key shows its value and writer', opened);
+  check('the open key is kept in the address', new URL(page.url()).searchParams.get('key') === key, page.url());
+
+  await page.goto(`${base}/strategy?prefix=check.`);
+  await page.waitForSelector('#b-prefix', { timeout: 30000 }).catch(() => {});
+  const kept = await page.evaluate(() => [location.search, document.getElementById('b-prefix')?.value,
+    [...document.querySelectorAll('#board button[data-key]')].every((b) => b.dataset.key.startsWith('check.'))]);
+  check('a prefix in the address filters the board', kept[0].includes('prefix=check.') && kept[1] === 'check.' && kept[2], kept.join(' '));
+  check('the sidebar links the page', facts.nav > 0);
+  check('the console has no errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+} finally {
+  await browser.close();
+}
+process.exit(checks.every(Boolean) ? 0 : 1);
