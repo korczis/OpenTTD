@@ -47,7 +47,7 @@ issues, the same derivation `majordomus plan` makes.
 | M1 | [The fork states what it is, and one set of ground rules binds every agent](milestones/the-fork-is-a-governed-research-target.yaml) | 2/2 | — |
 | M2 | [A change is validated at the tier its size needs, and the report cannot round up](milestones/a-change-is-validated-in-cost-tiers.yaml) | 4/4 | — |
 | M3 | [Internal state is observable through gated instrumentation, and every experiment records how it ran](milestones/internals-are-observable-with-recorded-provenance.yaml) | 8/8 | — |
-| M4 | [Prismatic steers a company in a live game through the standalone bridge](milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 7/7 | — |
+| M4 | [Prismatic steers a company in a live game through the standalone bridge](milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 8/8 | — |
 | M5 | [An agent reads and, with approval, changes the game over an embedded MCP server](milestones/an-agent-reaches-the-game-over-mcp.yaml) | 53/53 | — |
 | M6 | [The fork is published, supervised by Majordomus, and current with upstream](milestones/the-fork-is-published-supervised-and-current.yaml) | 7/7 | — |
 | M7 | [NoirGFX: the game in the owner's SIG NIHL noir, from OpenGFX and Kenney models](milestones/the-game-wears-the-owners-noir-style.yaml) | 1/1 | — |
@@ -75,7 +75,7 @@ xychart-beta
     %% series: Issues done | Issues planned
     %% links: milestones/the-fork-is-a-governed-research-target.yaml | milestones/a-change-is-validated-in-cost-tiers.yaml | milestones/internals-are-observable-with-recorded-provenance.yaml | milestones/prismatic-steers-a-company-through-the-bridge.yaml | milestones/an-agent-reaches-the-game-over-mcp.yaml | milestones/the-fork-is-published-supervised-and-current.yaml | milestones/the-game-wears-the-owners-noir-style.yaml | milestones/planning-is-generated-from-recorded-history.yaml | milestones/rhai-is-a-live-ide.yaml | milestones/records-and-status-tell-the-truth.yaml
     y-axis "Issues done" 0 --> 58.3
-    bar [2, 4, 8, 7, 53, 7, 1, 7, 6, 0]
-    line [2, 4, 8, 7, 53, 7, 1, 7, 6, 7]
+    bar [2, 4, 8, 8, 53, 7, 1, 7, 6, 0]
+    line [2, 4, 8, 8, 53, 7, 1, 7, 6, 7]
 ```
 <!-- surfaces:end ai-plan -->
