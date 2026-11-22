@@ -425,9 +425,10 @@ impl Settings {
     }
 }
 
-/// A world-graph id ("industry:12") or a plain number, as the number.
+/// A world-graph id ("industry:12") or a plain number, as the number (the crate's one rule,
+/// battlebrain_contract::graph_number).
 fn num(v: &Value) -> Option<i64> {
-    py_str(Some(v)).rsplit(':').next()?.trim().parse().ok()
+    crate::battlebrain_contract::graph_number(v)
 }
 
 /// `d.get(k, default)`: the value when the key is there (even null), else the default.

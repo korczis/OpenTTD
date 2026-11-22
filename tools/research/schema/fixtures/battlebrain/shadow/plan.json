@@ -1,0 +1,192 @@
+{
+ "freight": [
+  {
+   "acceptor": {
+    "id": "industry:31"
+   },
+   "cargo": "Coal",
+   "cargo_id": 1,
+   "kind": "freight",
+   "mode": "freight_rail",
+   "options": [
+    {
+     "investment": 20000,
+     "mode": "truck",
+     "monthly_profit": 800,
+     "score": 51999
+    },
+    {
+     "build_cost": 60000.0,
+     "investment": 100000,
+     "mode": "freight_rail",
+     "monthly_profit": 1500,
+     "score": 52000,
+     "track": {
+      "money": 50000.0,
+      "status": "found"
+     }
+    }
+   ],
+   "producer": {
+    "id": "industry:12"
+   },
+   "score": 52000
+  },
+  {
+   "acceptor": {
+    "id": "industry:32"
+   },
+   "cargo": "Coal",
+   "cargo_id": 1,
+   "kind": "freight",
+   "mode": "freight_rail",
+   "options": [
+    {
+     "investment": 20000,
+     "mode": "truck",
+     "monthly_profit": 800,
+     "score": 40999
+    },
+    {
+     "build_cost": 36000.0,
+     "investment": 60000,
+     "mode": "freight_rail",
+     "monthly_profit": 3000,
+     "score": 41000,
+     "track": {
+      "money": 30000.0,
+      "status": "found"
+     }
+    }
+   ],
+   "producer": {
+    "id": "industry:13"
+   },
+   "score": 41000
+  },
+  {
+   "acceptor": {
+    "id": "industry:33"
+   },
+   "cargo": "Goods",
+   "cargo_id": 2,
+   "kind": "freight",
+   "mode": "freight_rail",
+   "options": [
+    {
+     "investment": 20000,
+     "mode": "truck",
+     "monthly_profit": 800,
+     "score": 8999
+    },
+    {
+     "build_cost": 24000.0,
+     "investment": 40000,
+     "mode": "freight_rail",
+     "monthly_profit": 900,
+     "score": 9000,
+     "track": {
+      "money": 20000.0,
+      "status": "unreachable"
+     }
+    }
+   ],
+   "producer": {
+    "id": "industry:14"
+   },
+   "score": 9000
+  }
+ ],
+ "model": "v4: synthetic fixture",
+ "portfolio": {
+  "budget_k": 150,
+  "chosen": [
+   {
+    "acceptor": {
+     "id": "industry:31"
+    },
+    "cargo": "Coal",
+    "cargo_id": 1,
+    "kind": "freight",
+    "mode": "freight_rail",
+    "options": [
+     {
+      "investment": 20000,
+      "mode": "truck",
+      "monthly_profit": 800,
+      "score": 51999
+     },
+     {
+      "build_cost": 60000.0,
+      "investment": 100000,
+      "mode": "freight_rail",
+      "monthly_profit": 1500,
+      "score": 52000,
+      "track": {
+       "money": 50000.0,
+       "status": "found"
+      }
+     }
+    ],
+    "producer": {
+     "id": "industry:12"
+    },
+    "score": 52000
+   },
+   {
+    "acceptor": {
+     "id": "industry:32"
+    },
+    "cargo": "Coal",
+    "cargo_id": 1,
+    "kind": "freight",
+    "mode": "freight_rail",
+    "options": [
+     {
+      "investment": 20000,
+      "mode": "truck",
+      "monthly_profit": 800,
+      "score": 40999
+     },
+     {
+      "build_cost": 36000.0,
+      "investment": 60000,
+      "mode": "freight_rail",
+      "monthly_profit": 3000,
+      "score": 41000,
+      "track": {
+       "money": 30000.0,
+       "status": "found"
+      }
+     }
+    ],
+    "producer": {
+     "id": "industry:13"
+    },
+    "score": 41000
+   }
+  ],
+  "input": {
+   "capacity": 150,
+   "values": [
+    52000,
+    41000,
+    9000
+   ],
+   "weights": [
+    100,
+    60,
+    40
+   ]
+  },
+  "investment_k": 160,
+  "kernel": {
+   "id": "knapsack-dp",
+   "plate": "grid",
+   "work": 12
+  },
+  "solver": "algoglyph knapsack-dp",
+  "total_score": 93000
+ },
+ "synthetic": "I0096 test fixture, shaped like an mcp-plan v4 answer; NOT a captured game"
+}

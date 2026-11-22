@@ -1,0 +1,13 @@
+{
+ "case": "a mode outside shadow|live",
+ "expect": "invalid_field",
+ "value": {
+  "decision": "bb:59d4dbf001487c5fd9bd272c276cd823ec9e86df448439032f7d839813f5f029",
+  "idempotency_key": "research-fixture:1:1961-01-02:freight",
+  "mode": "auto",
+  "policy": "freight-margin@1",
+  "schema": "battlebrain-decision/v1",
+  "snapshot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "valid_until": "1961-02-01"
+ }
+}

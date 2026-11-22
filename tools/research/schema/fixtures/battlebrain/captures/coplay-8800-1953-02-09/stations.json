@@ -1,0 +1,5385 @@
+{
+  "availability": "available",
+  "data": {
+    "stations": [
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 78,
+          "y": 97
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 0,
+        "name": "Narfinghill Airport",
+        "owner": 0,
+        "tile": 25938,
+        "town": 14,
+        "x": 82,
+        "y": 101
+      },
+      {
+        "catchment_area": {
+          "h": 17,
+          "w": 16,
+          "x": 150,
+          "y": 225
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 1,
+        "name": "Fondham Airport",
+        "owner": 0,
+        "tile": 60062,
+        "town": 2,
+        "x": 158,
+        "y": 234
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 13,
+          "x": 100,
+          "y": 37
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 2,
+        "name": "Nenham Valley",
+        "owner": 0,
+        "tile": 10600,
+        "town": 1,
+        "x": 104,
+        "y": 41
+      },
+      {
+        "catchment_area": {
+          "h": 15,
+          "w": 15,
+          "x": 241,
+          "y": 134
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 3,
+        "name": "Flutborough West",
+        "owner": 0,
+        "tile": 36856,
+        "town": 5,
+        "x": 248,
+        "y": 143
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 110,
+          "y": 165
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 4,
+        "name": "Slintburg",
+        "owner": 0,
+        "tile": 43121,
+        "town": 10,
+        "x": 113,
+        "y": 168
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 84,
+          "y": 182
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 5,
+        "name": "Flenham",
+        "owner": 0,
+        "tile": 47447,
+        "town": 19,
+        "x": 87,
+        "y": 185
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 48,
+          "y": 188
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 6,
+        "name": "Grontston Airport",
+        "owner": 0,
+        "tile": 49204,
+        "town": 6,
+        "x": 52,
+        "y": 192
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 190,
+          "y": 50
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 7,
+        "name": "Flartbourne Airport",
+        "owner": 0,
+        "tile": 14018,
+        "town": 24,
+        "x": 194,
+        "y": 54
+      },
+      {
+        "catchment_area": {
+          "h": 13,
+          "w": 10,
+          "x": 138,
+          "y": 9
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 8,
+        "name": "Nenham West",
+        "owner": 0,
+        "tile": 3470,
+        "town": 1,
+        "x": 142,
+        "y": 13
+      },
+      {
+        "catchment_area": {
+          "h": 18,
+          "w": 16,
+          "x": 76,
+          "y": 70
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 9,
+        "name": "0001Narfinghill Coal Mine",
+        "owner": 1,
+        "tile": 20048,
+        "town": 14,
+        "x": 80,
+        "y": 78
+      },
+      {
+        "catchment_area": {
+          "h": 14,
+          "w": 10,
+          "x": 77,
+          "y": 238
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 10,
+        "name": "0002Brentston Power Station",
+        "owner": 1,
+        "tile": 62033,
+        "town": 3,
+        "x": 81,
+        "y": 242
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 13,
+          "y": 52
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 11,
+        "name": "Renfingbourne Bridge Airport",
+        "owner": 5,
+        "tile": 14353,
+        "town": 15,
+        "x": 17,
+        "y": 56
+      },
+      {
+        "catchment_area": {
+          "h": 13,
+          "w": 9,
+          "x": 76,
+          "y": 94
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 12,
+        "name": "Narfinghill Central",
+        "owner": 2,
+        "tile": 24913,
+        "town": 14,
+        "x": 81,
+        "y": 97
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 105,
+          "y": 163
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 13,
+        "name": "Slintburg Central",
+        "owner": 2,
+        "tile": 43887,
+        "town": 10,
+        "x": 111,
+        "y": 171
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 66,
+          "y": 26
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 14,
+        "name": "Sindingbury Airport",
+        "owner": 6,
+        "tile": 7750,
+        "town": 13,
+        "x": 70,
+        "y": 30
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 149,
+          "y": 56
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 15,
+        "name": "Chonnton Halt",
+        "owner": 0,
+        "tile": 15513,
+        "town": 20,
+        "x": 153,
+        "y": 60
+      },
+      {
+        "catchment_area": {
+          "h": 16,
+          "w": 12,
+          "x": 105,
+          "y": 161
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 16,
+        "name": "Slintburg East",
+        "owner": 2,
+        "tile": 43375,
+        "town": 10,
+        "x": 111,
+        "y": 169
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 91,
+          "y": 65
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 17,
+        "name": "Tennville",
+        "owner": 2,
+        "tile": 17502,
+        "town": 4,
+        "x": 94,
+        "y": 68
+      },
+      {
+        "catchment_area": {
+          "h": 9,
+          "w": 13,
+          "x": 134,
+          "y": 65
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 18,
+        "name": "0003Sonfingway Coal Mine",
+        "owner": 1,
+        "tile": 17802,
+        "town": 17,
+        "x": 138,
+        "y": 69
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 9,
+          "x": 98,
+          "y": 27
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 19,
+        "name": "0005Harnhall Coal Mine",
+        "owner": 1,
+        "tile": 8038,
+        "town": 9,
+        "x": 102,
+        "y": 31
+      },
+      {
+        "catchment_area": {
+          "h": 15,
+          "w": 12,
+          "x": 223,
+          "y": 211
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 20,
+        "name": "Grinningwell Ridge Airport",
+        "owner": 5,
+        "tile": 56291,
+        "town": 8,
+        "x": 227,
+        "y": 219
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 12,
+          "x": 82,
+          "y": 78
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 21,
+        "name": "Narfinghill Valley",
+        "owner": 4,
+        "tile": 21078,
+        "town": 14,
+        "x": 86,
+        "y": 82
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 12,
+          "x": 38,
+          "y": 51
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 22,
+        "name": "Renfingbourne Bridge Valley",
+        "owner": 4,
+        "tile": 14122,
+        "town": 15,
+        "x": 42,
+        "y": 55
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 155,
+          "y": 56
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 23,
+        "name": "Chonnton",
+        "owner": 5,
+        "tile": 15519,
+        "town": 20,
+        "x": 159,
+        "y": 60
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 18,
+          "y": 117
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 24,
+        "name": "Branwell City Airport",
+        "owner": 5,
+        "tile": 30998,
+        "town": 16,
+        "x": 22,
+        "y": 121
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 56,
+          "y": 162
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 25,
+        "name": "Grontston Woods",
+        "owner": 5,
+        "tile": 42556,
+        "town": 6,
+        "x": 60,
+        "y": 166
+      },
+      {
+        "catchment_area": {
+          "h": 15,
+          "w": 13,
+          "x": 128,
+          "y": 184
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 26,
+        "name": "New Slutway-on-sea Airport",
+        "owner": 6,
+        "tile": 49284,
+        "town": 22,
+        "x": 132,
+        "y": 192
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 153,
+          "y": 56
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 27,
+        "name": "Chonnton East",
+        "owner": 6,
+        "tile": 15517,
+        "town": 20,
+        "x": 157,
+        "y": 60
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 48,
+          "y": 162
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 28,
+        "name": "Grontston North",
+        "owner": 6,
+        "tile": 42548,
+        "town": 6,
+        "x": 52,
+        "y": 166
+      },
+      {
+        "catchment_area": {
+          "h": 17,
+          "w": 15,
+          "x": 19,
+          "y": 130
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 29,
+        "name": "Wunnington Airport",
+        "owner": 7,
+        "tile": 35354,
+        "town": 11,
+        "x": 26,
+        "y": 138
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 133,
+          "y": 61
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 30,
+        "name": "Chonnton Woods",
+        "owner": 4,
+        "tile": 16777,
+        "town": 20,
+        "x": 137,
+        "y": 65
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 133,
+          "y": 26
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 31,
+        "name": "Nenham Transfer",
+        "owner": 4,
+        "tile": 7817,
+        "town": 1,
+        "x": 137,
+        "y": 30
+      },
+      {
+        "catchment_area": {
+          "h": 16,
+          "w": 12,
+          "x": 161,
+          "y": 52
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 32,
+        "name": "Chonnton Airport",
+        "owner": 7,
+        "tile": 15781,
+        "town": 20,
+        "x": 165,
+        "y": 61
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 12,
+          "x": 85,
+          "y": 85
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 33,
+        "name": "Narfinghill West",
+        "owner": 0,
+        "tile": 22873,
+        "town": 14,
+        "x": 89,
+        "y": 89
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 151,
+          "y": 56
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 34,
+        "name": "Chonnton Transfer",
+        "owner": 7,
+        "tile": 15515,
+        "town": 20,
+        "x": 155,
+        "y": 60
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 53,
+          "y": 157
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 35,
+        "name": "Grontston West",
+        "owner": 7,
+        "tile": 41273,
+        "town": 6,
+        "x": 57,
+        "y": 161
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 222,
+          "y": 55
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 36,
+        "name": "Flartbourne Mines",
+        "owner": 4,
+        "tile": 15073,
+        "town": 24,
+        "x": 225,
+        "y": 58
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 188,
+          "y": 52
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 37,
+        "name": "Flartbourne Heights",
+        "owner": 4,
+        "tile": 14271,
+        "town": 24,
+        "x": 191,
+        "y": 55
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 157,
+          "y": 238
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 38,
+        "name": "Fondham South",
+        "owner": 0,
+        "tile": 62113,
+        "town": 2,
+        "x": 161,
+        "y": 242
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 72,
+          "y": 104
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 39,
+        "name": "Narfinghill East",
+        "owner": 0,
+        "tile": 27724,
+        "town": 14,
+        "x": 76,
+        "y": 108
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 154,
+          "y": 191
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 40,
+        "name": "New Slutway-on-sea Woods",
+        "owner": 4,
+        "tile": 49821,
+        "town": 22,
+        "x": 157,
+        "y": 194
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 120,
+          "y": 225
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 41,
+        "name": "Plentbridge Valley",
+        "owner": 4,
+        "tile": 58491,
+        "town": 21,
+        "x": 123,
+        "y": 228
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 109,
+          "y": 167
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 42,
+        "name": "Slintburg Transfer",
+        "owner": 7,
+        "tile": 43632,
+        "town": 10,
+        "x": 112,
+        "y": 170
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 93,
+          "y": 62
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 43,
+        "name": "Tennville Central",
+        "owner": 4,
+        "tile": 16736,
+        "town": 4,
+        "x": 96,
+        "y": 65
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 83,
+          "y": 183
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 44,
+        "name": "Flenham Central",
+        "owner": 4,
+        "tile": 47702,
+        "town": 19,
+        "x": 86,
+        "y": 186
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 85,
+          "y": 183
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 45,
+        "name": "Flenham South",
+        "owner": 7,
+        "tile": 47704,
+        "town": 19,
+        "x": 88,
+        "y": 186
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 107,
+          "y": 162
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 46,
+        "name": "Slintburg Heights",
+        "owner": 5,
+        "tile": 42350,
+        "town": 10,
+        "x": 110,
+        "y": 165
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 175,
+          "y": 238
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 47,
+        "name": "Fondham Valley",
+        "owner": 0,
+        "tile": 62131,
+        "town": 2,
+        "x": 179,
+        "y": 242
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 114,
+          "y": 163
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 48,
+        "name": "Slintburg West",
+        "owner": 5,
+        "tile": 42613,
+        "town": 10,
+        "x": 117,
+        "y": 166
+      },
+      {
+        "catchment_area": {
+          "h": 14,
+          "w": 15,
+          "x": 90,
+          "y": 176
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 49,
+        "name": "Gartston Airport",
+        "owner": 7,
+        "tile": 46945,
+        "town": 18,
+        "x": 97,
+        "y": 183
+      },
+      {
+        "catchment_area": {
+          "h": 15,
+          "w": 16,
+          "x": 90,
+          "y": 59
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 50,
+        "name": "Tennville Airport",
+        "owner": 7,
+        "tile": 16994,
+        "town": 4,
+        "x": 98,
+        "y": 66
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 84,
+          "y": 187
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 51,
+        "name": "Flenham Airport",
+        "owner": 5,
+        "tile": 48984,
+        "town": 19,
+        "x": 88,
+        "y": 191
+      },
+      {
+        "catchment_area": {
+          "h": 17,
+          "w": 16,
+          "x": 91,
+          "y": 55
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 52,
+        "name": "Tennville West",
+        "owner": 5,
+        "tile": 16227,
+        "town": 4,
+        "x": 99,
+        "y": 63
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 208,
+          "y": 207
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 53,
+        "name": "Grinningwell Ridge North",
+        "owner": 7,
+        "tile": 54228,
+        "town": 8,
+        "x": 212,
+        "y": 211
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 49,
+          "y": 184
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 54,
+        "name": "Grontston East",
+        "owner": 2,
+        "tile": 47924,
+        "town": 6,
+        "x": 52,
+        "y": 187
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 183,
+          "y": 16
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 55,
+        "name": "Druham",
+        "owner": 7,
+        "tile": 5307,
+        "town": 12,
+        "x": 187,
+        "y": 20
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 75,
+          "y": 94
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 56,
+        "name": "Narfinghill North",
+        "owner": 5,
+        "tile": 24910,
+        "town": 14,
+        "x": 78,
+        "y": 97
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 112,
+          "y": 162
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 57,
+        "name": "Slintburg Halt",
+        "owner": 6,
+        "tile": 42355,
+        "town": 10,
+        "x": 115,
+        "y": 165
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 82,
+          "y": 95
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 58,
+        "name": "Narfinghill South",
+        "owner": 5,
+        "tile": 25173,
+        "town": 14,
+        "x": 85,
+        "y": 98
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 107,
+          "y": 169
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 59,
+        "name": "Slintburg Exchange",
+        "owner": 6,
+        "tile": 44142,
+        "town": 10,
+        "x": 110,
+        "y": 172
+      },
+      {
+        "catchment_area": {
+          "h": 16,
+          "w": 13,
+          "x": 186,
+          "y": 19
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 60,
+        "name": "Druham Airport",
+        "owner": 5,
+        "tile": 7358,
+        "town": 12,
+        "x": 190,
+        "y": 28
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 193,
+          "y": 18
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 61,
+        "name": "Druham Central",
+        "owner": 6,
+        "tile": 5829,
+        "town": 12,
+        "x": 197,
+        "y": 22
+      },
+      {
+        "catchment_area": {
+          "h": 19,
+          "w": 15,
+          "x": 71,
+          "y": 96
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train",
+          "truck",
+          "bus"
+        ],
+        "id": 62,
+        "name": "0007Narfinghill",
+        "owner": 1,
+        "tile": 26955,
+        "town": 14,
+        "x": 75,
+        "y": 105
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 12,
+          "x": 71,
+          "y": 222
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 63,
+        "name": "Brentston Airport",
+        "owner": 6,
+        "tile": 57931,
+        "town": 3,
+        "x": 75,
+        "y": 226
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 153,
+          "y": 228
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 64,
+        "name": "Fondham",
+        "owner": 5,
+        "tile": 59292,
+        "town": 2,
+        "x": 156,
+        "y": 231
+      },
+      {
+        "catchment_area": {
+          "h": 19,
+          "w": 19,
+          "x": 105,
+          "y": 151
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train",
+          "truck",
+          "bus"
+        ],
+        "id": 65,
+        "name": "0011Slintburg",
+        "owner": 1,
+        "tile": 39789,
+        "town": 10,
+        "x": 109,
+        "y": 155
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 150,
+          "y": 107
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 66,
+        "name": "Sundingham",
+        "owner": 2,
+        "tile": 28313,
+        "town": 0,
+        "x": 153,
+        "y": 110
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 155,
+          "y": 221
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 67,
+        "name": "Fondham Central",
+        "owner": 5,
+        "tile": 57502,
+        "town": 2,
+        "x": 158,
+        "y": 224
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 77,
+          "y": 95
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 68,
+        "name": "Narfinghill Transfer",
+        "owner": 6,
+        "tile": 25168,
+        "town": 14,
+        "x": 80,
+        "y": 98
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 70,
+          "y": 97
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 69,
+        "name": "Narfinghill Halt",
+        "owner": 6,
+        "tile": 25673,
+        "town": 14,
+        "x": 73,
+        "y": 100
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 51,
+          "y": 183
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 70,
+        "name": "Grontston",
+        "owner": 5,
+        "tile": 47670,
+        "town": 6,
+        "x": 54,
+        "y": 186
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 44,
+          "y": 180
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 71,
+        "name": "Grontston Central",
+        "owner": 5,
+        "tile": 46895,
+        "town": 6,
+        "x": 47,
+        "y": 183
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 152,
+          "y": 229
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 72,
+        "name": "Fondham East",
+        "owner": 6,
+        "tile": 59547,
+        "town": 2,
+        "x": 155,
+        "y": 232
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 155,
+          "y": 222
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 73,
+        "name": "Fondham West",
+        "owner": 6,
+        "tile": 57758,
+        "town": 2,
+        "x": 158,
+        "y": 225
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 147,
+          "y": 222
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 74,
+        "name": "Fondham North",
+        "owner": 7,
+        "tile": 57750,
+        "town": 2,
+        "x": 150,
+        "y": 225
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 23,
+          "y": 113
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 75,
+        "name": "Branwell City",
+        "owner": 2,
+        "tile": 29722,
+        "town": 16,
+        "x": 26,
+        "y": 116
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 9,
+          "x": 153,
+          "y": 225
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 76,
+        "name": "Fondham Transfer",
+        "owner": 2,
+        "tile": 58526,
+        "town": 2,
+        "x": 158,
+        "y": 228
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 50,
+          "y": 185
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 77,
+        "name": "Grontston South",
+        "owner": 6,
+        "tile": 48181,
+        "town": 6,
+        "x": 53,
+        "y": 188
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 77,
+          "y": 93
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 78,
+        "name": "Narfinghill Exchange",
+        "owner": 7,
+        "tile": 24656,
+        "town": 14,
+        "x": 80,
+        "y": 96
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 43,
+          "y": 184
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 79,
+        "name": "Grontston Transfer",
+        "owner": 6,
+        "tile": 47918,
+        "town": 6,
+        "x": 46,
+        "y": 187
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 24,
+          "y": 112
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 80,
+        "name": "Branwell City Central",
+        "owner": 5,
+        "tile": 29467,
+        "town": 16,
+        "x": 27,
+        "y": 115
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 74,
+          "y": 100
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 81,
+        "name": "Narfinghill Annexe",
+        "owner": 7,
+        "tile": 26445,
+        "town": 14,
+        "x": 77,
+        "y": 103
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 69,
+          "y": 24
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 82,
+        "name": "Sindingbury",
+        "owner": 5,
+        "tile": 6984,
+        "town": 13,
+        "x": 72,
+        "y": 27
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 79,
+          "y": 31
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 83,
+        "name": "Harnhall",
+        "owner": 5,
+        "tile": 8786,
+        "town": 9,
+        "x": 82,
+        "y": 34
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 196,
+          "y": 54
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 84,
+        "name": "Flartbourne",
+        "owner": 5,
+        "tile": 14791,
+        "town": 24,
+        "x": 199,
+        "y": 57
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 190,
+          "y": 47
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 85,
+        "name": "Flartbourne Central",
+        "owner": 5,
+        "tile": 12993,
+        "town": 24,
+        "x": 193,
+        "y": 50
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 84,
+          "y": 181
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 86,
+        "name": "Flenham West",
+        "owner": 5,
+        "tile": 47191,
+        "town": 19,
+        "x": 87,
+        "y": 184
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 25,
+          "y": 113
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 87,
+        "name": "Branwell City South",
+        "owner": 6,
+        "tile": 29724,
+        "town": 16,
+        "x": 28,
+        "y": 116
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 91,
+          "y": 179
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 88,
+        "name": "Flenham Woods",
+        "owner": 5,
+        "tile": 46686,
+        "town": 19,
+        "x": 94,
+        "y": 182
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 154,
+          "y": 229
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 89,
+        "name": "Fondham Halt",
+        "owner": 7,
+        "tile": 59549,
+        "town": 2,
+        "x": 157,
+        "y": 232
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 19,
+          "y": 50
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 90,
+        "name": "Renfingbourne Bridge",
+        "owner": 5,
+        "tile": 13590,
+        "town": 15,
+        "x": 22,
+        "y": 53
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 19,
+          "y": 57
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 91,
+        "name": "Renfingbourne Bridge Central",
+        "owner": 5,
+        "tile": 15382,
+        "town": 15,
+        "x": 22,
+        "y": 60
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 50,
+          "y": 182
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 92,
+        "name": "Grontston Halt",
+        "owner": 7,
+        "tile": 47413,
+        "town": 6,
+        "x": 53,
+        "y": 185
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 143,
+          "y": 65
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 93,
+        "name": "Sonfingway Mines",
+        "owner": 0,
+        "tile": 17811,
+        "town": 17,
+        "x": 147,
+        "y": 69
+      },
+      {
+        "catchment_area": {
+          "h": 17,
+          "w": 18,
+          "x": 74,
+          "y": 239
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 94,
+        "name": "Brentston South",
+        "owner": 0,
+        "tile": 64086,
+        "town": 3,
+        "x": 86,
+        "y": 250
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 53,
+          "y": 189
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 95,
+        "name": "Grontston Valley",
+        "owner": 7,
+        "tile": 49208,
+        "town": 6,
+        "x": 56,
+        "y": 192
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 133,
+          "y": 184
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 96,
+        "name": "New Slutway-on-sea Central",
+        "owner": 5,
+        "tile": 48008,
+        "town": 22,
+        "x": 136,
+        "y": 187
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 68,
+          "y": 25
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 97,
+        "name": "Sindingbury Central",
+        "owner": 6,
+        "tile": 7239,
+        "town": 13,
+        "x": 71,
+        "y": 28
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 70,
+          "y": 25
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 98,
+        "name": "Sindingbury South",
+        "owner": 7,
+        "tile": 7241,
+        "town": 13,
+        "x": 73,
+        "y": 28
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 69,
+          "y": 18
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 99,
+        "name": "Sindingbury West",
+        "owner": 6,
+        "tile": 5448,
+        "town": 13,
+        "x": 72,
+        "y": 21
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 80,
+          "y": 31
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 100,
+        "name": "Harnhall Central",
+        "owner": 7,
+        "tile": 8787,
+        "town": 9,
+        "x": 83,
+        "y": 34
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 93,
+          "y": 61
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 101,
+        "name": "Tennville Transfer",
+        "owner": 6,
+        "tile": 16480,
+        "town": 4,
+        "x": 96,
+        "y": 64
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 93,
+          "y": 68
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 102,
+        "name": "Tennville Woods",
+        "owner": 6,
+        "tile": 18272,
+        "town": 4,
+        "x": 96,
+        "y": 71
+      },
+      {
+        "catchment_area": {
+          "h": 14,
+          "w": 15,
+          "x": 22,
+          "y": 112
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train",
+          "truck",
+          "bus"
+        ],
+        "id": 103,
+        "name": "0017Branwell City",
+        "owner": 1,
+        "tile": 29984,
+        "town": 16,
+        "x": 32,
+        "y": 117
+      },
+      {
+        "catchment_area": {
+          "h": 19,
+          "w": 15,
+          "x": 44,
+          "y": 174
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train",
+          "truck",
+          "bus"
+        ],
+        "id": 104,
+        "name": "0021Grontston",
+        "owner": 1,
+        "tile": 45616,
+        "town": 6,
+        "x": 48,
+        "y": 178
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 140,
+          "y": 186
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 105,
+        "name": "New Slutway-on-sea Valley",
+        "owner": 5,
+        "tile": 48527,
+        "town": 22,
+        "x": 143,
+        "y": 189
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 88,
+          "y": 58
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 106,
+        "name": "Tennville North",
+        "owner": 5,
+        "tile": 15707,
+        "town": 4,
+        "x": 91,
+        "y": 61
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 150,
+          "y": 106
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 107,
+        "name": "Sundingham Central",
+        "owner": 5,
+        "tile": 28057,
+        "town": 0,
+        "x": 153,
+        "y": 109
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 150,
+          "y": 113
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 108,
+        "name": "Sundingham South",
+        "owner": 5,
+        "tile": 29849,
+        "town": 0,
+        "x": 153,
+        "y": 116
+      },
+      {
+        "catchment_area": {
+          "h": 13,
+          "w": 15,
+          "x": 153,
+          "y": 197
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 109,
+        "name": "0026Fondham Farm",
+        "owner": 1,
+        "tile": 52637,
+        "town": 23,
+        "x": 157,
+        "y": 205
+      },
+      {
+        "catchment_area": {
+          "h": 9,
+          "w": 15,
+          "x": 22,
+          "y": 233
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 110,
+        "name": "0027Brentston Factory",
+        "owner": 1,
+        "tile": 60698,
+        "town": 3,
+        "x": 26,
+        "y": 237
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 221,
+          "y": 242
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 111,
+        "name": "Grinningwell Ridge Woods",
+        "owner": 0,
+        "tile": 63201,
+        "town": 8,
+        "x": 225,
+        "y": 246
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 180,
+          "y": 47
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 112,
+        "name": "Flartbourne Woods",
+        "owner": 0,
+        "tile": 13240,
+        "town": 24,
+        "x": 184,
+        "y": 51
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 18,
+          "y": 51
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 113,
+        "name": "Renfingbourne Bridge East",
+        "owner": 7,
+        "tile": 13845,
+        "town": 15,
+        "x": 21,
+        "y": 54
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 25,
+          "y": 48
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 114,
+        "name": "Renfingbourne Bridge Woods",
+        "owner": 7,
+        "tile": 13084,
+        "town": 15,
+        "x": 28,
+        "y": 51
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 135,
+          "y": 107
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 115,
+        "name": "Sundingham Woods",
+        "owner": 7,
+        "tile": 28555,
+        "town": 0,
+        "x": 139,
+        "y": 111
+      },
+      {
+        "catchment_area": {
+          "h": 13,
+          "w": 18,
+          "x": 48,
+          "y": 4
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 116,
+        "name": "Sindingbury North",
+        "owner": 7,
+        "tile": 2620,
+        "town": 13,
+        "x": 60,
+        "y": 10
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 77,
+          "y": 182
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 117,
+        "name": "Flenham North",
+        "owner": 5,
+        "tile": 47440,
+        "town": 19,
+        "x": 80,
+        "y": 185
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 122,
+          "y": 157
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 118,
+        "name": "Denningbury Central",
+        "owner": 5,
+        "tile": 41085,
+        "town": 7,
+        "x": 125,
+        "y": 160
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 22,
+          "y": 111
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 119,
+        "name": "Branwell City North",
+        "owner": 7,
+        "tile": 29209,
+        "town": 16,
+        "x": 25,
+        "y": 114
+      },
+      {
+        "catchment_area": {
+          "h": 14,
+          "w": 17,
+          "x": 17,
+          "y": 45
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train",
+          "truck",
+          "bus"
+        ],
+        "id": 120,
+        "name": "0028Renfingbourne Bridge",
+        "owner": 1,
+        "tile": 12569,
+        "town": 15,
+        "x": 25,
+        "y": 49
+      },
+      {
+        "catchment_area": {
+          "h": 16,
+          "w": 16,
+          "x": 63,
+          "y": 17
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train",
+          "truck",
+          "bus"
+        ],
+        "id": 121,
+        "name": "0032Sindingbury",
+        "owner": 1,
+        "tile": 5443,
+        "town": 13,
+        "x": 67,
+        "y": 21
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 86,
+          "y": 183
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 122,
+        "name": "Flenham Transfer",
+        "owner": 6,
+        "tile": 47705,
+        "town": 19,
+        "x": 89,
+        "y": 186
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 79,
+          "y": 183
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 123,
+        "name": "Flenham East",
+        "owner": 6,
+        "tile": 47698,
+        "town": 19,
+        "x": 82,
+        "y": 186
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 20,
+          "y": 49
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 124,
+        "name": "Renfingbourne Bridge Transfer",
+        "owner": 6,
+        "tile": 13335,
+        "town": 15,
+        "x": 23,
+        "y": 52
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 20,
+          "y": 56
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 125,
+        "name": "Renfingbourne Bridge South",
+        "owner": 6,
+        "tile": 15127,
+        "town": 15,
+        "x": 23,
+        "y": 59
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 136,
+          "y": 187
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 126,
+        "name": "New Slutway-on-sea",
+        "owner": 6,
+        "tile": 48779,
+        "town": 22,
+        "x": 139,
+        "y": 190
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 123,
+          "y": 156
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 127,
+        "name": "Denningbury",
+        "owner": 6,
+        "tile": 40830,
+        "town": 7,
+        "x": 126,
+        "y": 159
+      },
+      {
+        "catchment_area": {
+          "h": 15,
+          "w": 9,
+          "x": 77,
+          "y": 138
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 128,
+        "name": "0037Flenham Farm",
+        "owner": 1,
+        "tile": 36433,
+        "town": 14,
+        "x": 81,
+        "y": 142
+      },
+      {
+        "catchment_area": {
+          "h": 15,
+          "w": 9,
+          "x": 122,
+          "y": 10
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 129,
+        "name": "0038Nenham Factory",
+        "owner": 1,
+        "tile": 3710,
+        "town": 1,
+        "x": 126,
+        "y": 14
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 114,
+          "y": 169
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 130,
+        "name": "Slintburg South",
+        "owner": 6,
+        "tile": 44149,
+        "town": 10,
+        "x": 117,
+        "y": 172
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 149,
+          "y": 105
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 131,
+        "name": "Sundingham North",
+        "owner": 6,
+        "tile": 27800,
+        "town": 0,
+        "x": 152,
+        "y": 108
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 150,
+          "y": 112
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 132,
+        "name": "Sundingham Transfer",
+        "owner": 6,
+        "tile": 29593,
+        "town": 0,
+        "x": 153,
+        "y": 115
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 62,
+          "y": 22
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 133,
+        "name": "Sindingbury Halt",
+        "owner": 5,
+        "tile": 6465,
+        "town": 13,
+        "x": 65,
+        "y": 25
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 122,
+          "y": 150
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 134,
+        "name": "Denningbury North",
+        "owner": 5,
+        "tile": 39293,
+        "town": 7,
+        "x": 125,
+        "y": 153
+      },
+      {
+        "catchment_area": {
+          "h": 9,
+          "w": 14,
+          "x": 133,
+          "y": 0
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 135,
+        "name": "0039Nenham Coal Mine",
+        "owner": 1,
+        "tile": 1161,
+        "town": 1,
+        "x": 137,
+        "y": 4
+      },
+      {
+        "catchment_area": {
+          "h": 14,
+          "w": 9,
+          "x": 182,
+          "y": 42
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 136,
+        "name": "0040Flartbourne Power Station",
+        "owner": 1,
+        "tile": 11962,
+        "town": 24,
+        "x": 186,
+        "y": 46
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 100,
+          "y": 176
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 137,
+        "name": "Gartston",
+        "owner": 5,
+        "tile": 45927,
+        "town": 18,
+        "x": 103,
+        "y": 179
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 197,
+          "y": 61
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 138,
+        "name": "Flartbourne South",
+        "owner": 5,
+        "tile": 16584,
+        "town": 24,
+        "x": 200,
+        "y": 64
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 107,
+          "y": 170
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 139,
+        "name": "Slintburg Annexe",
+        "owner": 5,
+        "tile": 44398,
+        "town": 10,
+        "x": 110,
+        "y": 173
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 197,
+          "y": 46
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 140,
+        "name": "Flartbourne Valley",
+        "owner": 5,
+        "tile": 12744,
+        "town": 24,
+        "x": 200,
+        "y": 49
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 229,
+          "y": 209
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 141,
+        "name": "Grinningwell Ridge",
+        "owner": 5,
+        "tile": 54504,
+        "town": 8,
+        "x": 232,
+        "y": 212
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 162,
+          "y": 55
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 142,
+        "name": "Chonnton Central",
+        "owner": 5,
+        "tile": 15013,
+        "town": 20,
+        "x": 165,
+        "y": 58
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 22,
+          "y": 140
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 143,
+        "name": "Wunnington",
+        "owner": 5,
+        "tile": 36633,
+        "town": 11,
+        "x": 25,
+        "y": 143
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 154,
+          "y": 226
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 144,
+        "name": "Fondham Exchange",
+        "owner": 2,
+        "tile": 58781,
+        "town": 2,
+        "x": 157,
+        "y": 229
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 121,
+          "y": 157
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 145,
+        "name": "Denningbury East",
+        "owner": 2,
+        "tile": 41084,
+        "town": 7,
+        "x": 124,
+        "y": 160
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 24,
+          "y": 133
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 146,
+        "name": "Wunnington Central",
+        "owner": 5,
+        "tile": 34843,
+        "town": 11,
+        "x": 27,
+        "y": 136
+      },
+      {
+        "catchment_area": {
+          "h": 14,
+          "w": 9,
+          "x": 220,
+          "y": 47
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 147,
+        "name": "0041Flartbourne Coal Mine",
+        "owner": 1,
+        "tile": 13280,
+        "town": 24,
+        "x": 224,
+        "y": 51
+      },
+      {
+        "catchment_area": {
+          "h": 14,
+          "w": 9,
+          "x": 246,
+          "y": 128
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 148,
+        "name": "0042Flutborough Power Station",
+        "owner": 1,
+        "tile": 34042,
+        "town": 5,
+        "x": 250,
+        "y": 132
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 204,
+          "y": 46
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 149,
+        "name": "Flartbourne Transfer",
+        "owner": 5,
+        "tile": 12751,
+        "town": 24,
+        "x": 207,
+        "y": 49
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 87,
+          "y": 17
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 150,
+        "name": "Harnhall Valley",
+        "owner": 6,
+        "tile": 5467,
+        "town": 9,
+        "x": 91,
+        "y": 21
+      },
+      {
+        "catchment_area": {
+          "h": 20,
+          "w": 19,
+          "x": 83,
+          "y": 175
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train",
+          "truck",
+          "bus"
+        ],
+        "id": 151,
+        "name": "0043Flenham",
+        "owner": 1,
+        "tile": 48220,
+        "town": 19,
+        "x": 92,
+        "y": 188
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 86,
+          "y": 33
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 152,
+        "name": "Harnhall South",
+        "owner": 5,
+        "tile": 9305,
+        "town": 9,
+        "x": 89,
+        "y": 36
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 55,
+          "y": 201
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 153,
+        "name": "Grontston Exchange",
+        "owner": 6,
+        "tile": 52539,
+        "town": 6,
+        "x": 59,
+        "y": 205
+      },
+      {
+        "catchment_area": {
+          "h": 16,
+          "w": 16,
+          "x": 144,
+          "y": 224
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train",
+          "truck",
+          "bus"
+        ],
+        "id": 154,
+        "name": "0049Fondham",
+        "owner": 1,
+        "tile": 58516,
+        "town": 2,
+        "x": 148,
+        "y": 228
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 13,
+          "x": 159,
+          "y": 85
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 155,
+        "name": "Sonfingway West",
+        "owner": 7,
+        "tile": 22947,
+        "town": 17,
+        "x": 163,
+        "y": 89
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 210,
+          "y": 170
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 156,
+        "name": "Flutborough",
+        "owner": 5,
+        "tile": 44501,
+        "town": 5,
+        "x": 213,
+        "y": 173
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 209,
+          "y": 163
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 157,
+        "name": "Flutborough Central",
+        "owner": 5,
+        "tile": 42708,
+        "town": 5,
+        "x": 212,
+        "y": 166
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 197,
+          "y": 55
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 158,
+        "name": "Flartbourne Halt",
+        "owner": 6,
+        "tile": 15048,
+        "town": 24,
+        "x": 200,
+        "y": 58
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 190,
+          "y": 48
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 159,
+        "name": "Flartbourne Exchange",
+        "owner": 6,
+        "tile": 13249,
+        "town": 24,
+        "x": 193,
+        "y": 51
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 123,
+          "y": 164
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 160,
+        "name": "Denningbury Woods",
+        "owner": 6,
+        "tile": 42878,
+        "town": 7,
+        "x": 126,
+        "y": 167
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 229,
+          "y": 210
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 161,
+        "name": "Grinningwell Ridge Central",
+        "owner": 6,
+        "tile": 54760,
+        "town": 8,
+        "x": 232,
+        "y": 213
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 229,
+          "y": 217
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 162,
+        "name": "Grinningwell Ridge South",
+        "owner": 6,
+        "tile": 56552,
+        "town": 8,
+        "x": 232,
+        "y": 220
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 194,
+          "y": 24
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 163,
+        "name": "Druham South",
+        "owner": 5,
+        "tile": 7109,
+        "town": 12,
+        "x": 197,
+        "y": 27
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 78,
+          "y": 225
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 164,
+        "name": "Brentston",
+        "owner": 5,
+        "tile": 58449,
+        "town": 3,
+        "x": 81,
+        "y": 228
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 211,
+          "y": 170
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 165,
+        "name": "Flutborough Airport",
+        "owner": 0,
+        "tile": 44759,
+        "town": 5,
+        "x": 215,
+        "y": 174
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 117,
+          "y": 40
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 166,
+        "name": "Nenham Airport",
+        "owner": 0,
+        "tile": 11385,
+        "town": 1,
+        "x": 121,
+        "y": 44
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 71,
+          "y": 228
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 167,
+        "name": "Brentston Central",
+        "owner": 5,
+        "tile": 59210,
+        "town": 3,
+        "x": 74,
+        "y": 231
+      },
+      {
+        "catchment_area": {
+          "h": 14,
+          "w": 18,
+          "x": 92,
+          "y": 172
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train",
+          "truck",
+          "bus"
+        ],
+        "id": 168,
+        "name": "0053Gartston",
+        "owner": 1,
+        "tile": 45152,
+        "town": 18,
+        "x": 96,
+        "y": 176
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 221,
+          "y": 58
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 169,
+        "name": "Flartbourne Annexe",
+        "owner": 0,
+        "tile": 16097,
+        "town": 24,
+        "x": 225,
+        "y": 62
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 201,
+          "y": 228
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 170,
+        "name": "Grinningwell Ridge Heights",
+        "owner": 0,
+        "tile": 59597,
+        "town": 8,
+        "x": 205,
+        "y": 232
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 115,
+          "y": 39
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 171,
+        "name": "Nenham",
+        "owner": 5,
+        "tile": 10870,
+        "town": 1,
+        "x": 118,
+        "y": 42
+      },
+      {
+        "catchment_area": {
+          "h": 15,
+          "w": 9,
+          "x": 67,
+          "y": 30
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 172,
+        "name": "0059Sindingbury Farm",
+        "owner": 1,
+        "tile": 8775,
+        "town": 13,
+        "x": 71,
+        "y": 34
+      },
+      {
+        "catchment_area": {
+          "h": 15,
+          "w": 9,
+          "x": 151,
+          "y": 82
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 173,
+        "name": "0060Sonfingway Factory",
+        "owner": 1,
+        "tile": 22171,
+        "town": 17,
+        "x": 155,
+        "y": 86
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 116,
+          "y": 46
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 174,
+        "name": "Nenham Central",
+        "owner": 5,
+        "tile": 12663,
+        "town": 1,
+        "x": 119,
+        "y": 49
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 88,
+          "y": 59
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 175,
+        "name": "Tennville Halt",
+        "owner": 7,
+        "tile": 15963,
+        "town": 4,
+        "x": 91,
+        "y": 62
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 176,
+          "y": 199
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 176,
+        "name": "Budham",
+        "owner": 5,
+        "tile": 51891,
+        "town": 23,
+        "x": 179,
+        "y": 202
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 63,
+          "y": 22
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 177,
+        "name": "Sindingbury Exchange",
+        "owner": 7,
+        "tile": 6466,
+        "town": 13,
+        "x": 66,
+        "y": 25
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 142,
+          "y": 89
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 178,
+        "name": "Sonfingway",
+        "owner": 5,
+        "tile": 23697,
+        "town": 17,
+        "x": 145,
+        "y": 92
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 206,
+          "y": 206
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 179,
+        "name": "Grinningwell Ridge Transfer",
+        "owner": 0,
+        "tile": 53970,
+        "town": 8,
+        "x": 210,
+        "y": 210
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 127,
+          "y": 238
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 180,
+        "name": "Plentbridge",
+        "owner": 5,
+        "tile": 61826,
+        "town": 21,
+        "x": 130,
+        "y": 241
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 182,
+          "y": 10
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 181,
+        "name": "Druham Lakeside",
+        "owner": 0,
+        "tile": 3770,
+        "town": 12,
+        "x": 186,
+        "y": 14
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 10,
+          "x": 103,
+          "y": 176
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 182,
+        "name": "Gartston Woods",
+        "owner": 5,
+        "tile": 46187,
+        "town": 18,
+        "x": 107,
+        "y": 180
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 135,
+          "y": 186
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 183,
+        "name": "New Slutway-on-sea South",
+        "owner": 7,
+        "tile": 48522,
+        "town": 22,
+        "x": 138,
+        "y": 189
+      },
+      {
+        "catchment_area": {
+          "h": 9,
+          "w": 10,
+          "x": 69,
+          "y": 247
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 184,
+        "name": "Brentston Woods",
+        "owner": 5,
+        "tile": 64329,
+        "town": 3,
+        "x": 73,
+        "y": 251
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 101,
+          "y": 174
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 185,
+        "name": "Gartston West",
+        "owner": 7,
+        "tile": 45416,
+        "town": 18,
+        "x": 104,
+        "y": 177
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 124,
+          "y": 158
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 186,
+        "name": "Denningbury South",
+        "owner": 7,
+        "tile": 41343,
+        "town": 7,
+        "x": 127,
+        "y": 161
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 122,
+          "y": 151
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 187,
+        "name": "Denningbury Transfer",
+        "owner": 7,
+        "tile": 39549,
+        "town": 7,
+        "x": 125,
+        "y": 154
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 15,
+          "x": 58,
+          "y": 0
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 188,
+        "name": "0061Sindingbury Iron Ore Mine",
+        "owner": 1,
+        "tile": 1342,
+        "town": 13,
+        "x": 62,
+        "y": 5
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 227,
+          "y": 211
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 189,
+        "name": "Grinningwell Ridge East",
+        "owner": 7,
+        "tile": 55014,
+        "town": 8,
+        "x": 230,
+        "y": 214
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 234,
+          "y": 211
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 190,
+        "name": "Grinningwell Ridge Halt",
+        "owner": 7,
+        "tile": 55021,
+        "town": 8,
+        "x": 237,
+        "y": 214
+      },
+      {
+        "catchment_area": {
+          "h": 15,
+          "w": 10,
+          "x": 130,
+          "y": 162
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 191,
+        "name": "0062New Slutway-on-sea Steel Mi",
+        "owner": 1,
+        "tile": 42630,
+        "town": 7,
+        "x": 134,
+        "y": 166
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 13,
+          "x": 7,
+          "y": 167
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 192,
+        "name": "Wunnington Heights",
+        "owner": 3,
+        "tile": 43787,
+        "town": 11,
+        "x": 11,
+        "y": 171
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 13,
+          "x": 48,
+          "y": 192
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 193,
+        "name": "Grontston Annexe",
+        "owner": 3,
+        "tile": 50228,
+        "town": 6,
+        "x": 52,
+        "y": 196
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 150,
+          "y": 104
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 194,
+        "name": "Sundingham West",
+        "owner": 7,
+        "tile": 27545,
+        "town": 0,
+        "x": 153,
+        "y": 107
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 150,
+          "y": 114
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 195,
+        "name": "Sundingham Halt",
+        "owner": 7,
+        "tile": 30105,
+        "town": 0,
+        "x": 153,
+        "y": 117
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 197,
+          "y": 52
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 196,
+        "name": "Flartbourne Sidings",
+        "owner": 7,
+        "tile": 14280,
+        "town": 24,
+        "x": 200,
+        "y": 55
+      },
+      {
+        "catchment_area": {
+          "h": 13,
+          "w": 16,
+          "x": 67,
+          "y": 19
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 197,
+        "name": "Sindingbury Sidings",
+        "owner": 6,
+        "tile": 6219,
+        "town": 13,
+        "x": 75,
+        "y": 24
+      },
+      {
+        "catchment_area": {
+          "h": 13,
+          "w": 14,
+          "x": 174,
+          "y": 194
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 198,
+        "name": "Budham Airport",
+        "owner": 6,
+        "tile": 50868,
+        "town": 23,
+        "x": 180,
+        "y": 198
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 190,
+          "y": 49
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 199,
+        "name": "Flartbourne Branch",
+        "owner": 7,
+        "tile": 13505,
+        "town": 24,
+        "x": 193,
+        "y": 52
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 23,
+          "y": 140
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 200,
+        "name": "Wunnington South",
+        "owner": 7,
+        "tile": 36634,
+        "town": 11,
+        "x": 26,
+        "y": 143
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 25,
+          "y": 133
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 201,
+        "name": "Wunnington Valley",
+        "owner": 7,
+        "tile": 34844,
+        "town": 11,
+        "x": 28,
+        "y": 136
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 97,
+          "y": 176
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 202,
+        "name": "Gartston Heights",
+        "owner": 6,
+        "tile": 45924,
+        "town": 18,
+        "x": 100,
+        "y": 179
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 99,
+          "y": 183
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 203,
+        "name": "Gartston East",
+        "owner": 6,
+        "tile": 47718,
+        "town": 18,
+        "x": 102,
+        "y": 186
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 205,
+          "y": 46
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 204,
+        "name": "Upper Flartbourne",
+        "owner": 7,
+        "tile": 12752,
+        "town": 24,
+        "x": 208,
+        "y": 49
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 87,
+          "y": 32
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 205,
+        "name": "Harnhall Transfer",
+        "owner": 7,
+        "tile": 9050,
+        "town": 9,
+        "x": 90,
+        "y": 35
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 161,
+          "y": 56
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 206,
+        "name": "Chonnton Exchange",
+        "owner": 6,
+        "tile": 15268,
+        "town": 20,
+        "x": 164,
+        "y": 59
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 21,
+          "y": 138
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 207,
+        "name": "Wunnington North",
+        "owner": 6,
+        "tile": 36120,
+        "town": 11,
+        "x": 24,
+        "y": 141
+      },
+      {
+        "catchment_area": {
+          "h": 9,
+          "w": 12,
+          "x": 76,
+          "y": 9
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 208,
+        "name": "0063Harnhall Iron Ore Mine",
+        "owner": 1,
+        "tile": 3408,
+        "town": 13,
+        "x": 80,
+        "y": 13
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 27,
+          "y": 145
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 209,
+        "name": "Wunnington Transfer",
+        "owner": 6,
+        "tile": 37918,
+        "town": 11,
+        "x": 30,
+        "y": 148
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 195,
+          "y": 59
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 210,
+        "name": "Flartbourne East",
+        "owner": 7,
+        "tile": 16070,
+        "town": 24,
+        "x": 198,
+        "y": 62
+      },
+      {
+        "catchment_area": {
+          "h": 16,
+          "w": 17,
+          "x": 39,
+          "y": 183
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 211,
+        "name": "0069Grontston",
+        "owner": 1,
+        "tile": 49200,
+        "town": 6,
+        "x": 48,
+        "y": 192
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 198,
+          "y": 46
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 212,
+        "name": "Lower Flartbourne",
+        "owner": 6,
+        "tile": 12745,
+        "town": 24,
+        "x": 201,
+        "y": 49
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 85,
+          "y": 32
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 213,
+        "name": "Harnhall Halt",
+        "owner": 6,
+        "tile": 9048,
+        "town": 9,
+        "x": 88,
+        "y": 35
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 92,
+          "y": 32
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 214,
+        "name": "Harnhall Woods",
+        "owner": 6,
+        "tile": 9055,
+        "town": 9,
+        "x": 95,
+        "y": 35
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 210,
+          "y": 169
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 215,
+        "name": "Flutborough Halt",
+        "owner": 7,
+        "tile": 44245,
+        "town": 5,
+        "x": 213,
+        "y": 172
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 209,
+          "y": 176
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 216,
+        "name": "Flutborough East",
+        "owner": 7,
+        "tile": 46036,
+        "town": 5,
+        "x": 212,
+        "y": 179
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 108,
+          "y": 154
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 217,
+        "name": "Slintburg Airport",
+        "owner": 0,
+        "tile": 40560,
+        "town": 10,
+        "x": 112,
+        "y": 158
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 206,
+          "y": 46
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 218,
+        "name": "Flartbourne Station #218",
+        "owner": 6,
+        "tile": 12753,
+        "town": 24,
+        "x": 209,
+        "y": 49
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 12,
+          "x": 143,
+          "y": 100
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 219,
+        "name": "Sundingham Airport",
+        "owner": 0,
+        "tile": 26771,
+        "town": 0,
+        "x": 147,
+        "y": 104
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 209,
+          "y": 168
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 220,
+        "name": "Flutborough North",
+        "owner": 6,
+        "tile": 43988,
+        "town": 5,
+        "x": 212,
+        "y": 171
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 85,
+          "y": 17
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 221,
+        "name": "Harnhall West",
+        "owner": 0,
+        "tile": 5465,
+        "town": 9,
+        "x": 89,
+        "y": 21
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 209,
+          "y": 175
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 222,
+        "name": "Flutborough Exchange",
+        "owner": 6,
+        "tile": 45780,
+        "town": 5,
+        "x": 212,
+        "y": 178
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 137,
+          "y": 175
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 223,
+        "name": "New Slutway-on-sea West",
+        "owner": 0,
+        "tile": 45965,
+        "town": 22,
+        "x": 141,
+        "y": 179
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 117,
+          "y": 39
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 224,
+        "name": "Nenham South",
+        "owner": 6,
+        "tile": 10872,
+        "town": 1,
+        "x": 120,
+        "y": 42
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 189,
+          "y": 22
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 225,
+        "name": "Druham West",
+        "owner": 6,
+        "tile": 6592,
+        "town": 12,
+        "x": 192,
+        "y": 25
+      },
+      {
+        "catchment_area": {
+          "h": 18,
+          "w": 12,
+          "x": 161,
+          "y": 53
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 226,
+        "name": "0071Chonnton",
+        "owner": 1,
+        "tile": 16549,
+        "town": 20,
+        "x": 165,
+        "y": 64
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 74,
+          "y": 231
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 227,
+        "name": "Brentston Transfer",
+        "owner": 6,
+        "tile": 59981,
+        "town": 3,
+        "x": 77,
+        "y": 234
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 175,
+          "y": 200
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 228,
+        "name": "Budham Central",
+        "owner": 6,
+        "tile": 52146,
+        "town": 23,
+        "x": 178,
+        "y": 203
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 140,
+          "y": 90
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 229,
+        "name": "Sonfingway Central",
+        "owner": 6,
+        "tile": 23951,
+        "town": 17,
+        "x": 143,
+        "y": 93
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 120,
+          "y": 224
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 230,
+        "name": "Plentbridge North",
+        "owner": 6,
+        "tile": 58235,
+        "town": 21,
+        "x": 123,
+        "y": 227
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 128,
+          "y": 236
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 231,
+        "name": "Plentbridge Central",
+        "owner": 6,
+        "tile": 61315,
+        "town": 21,
+        "x": 131,
+        "y": 239
+      },
+      {
+        "catchment_area": {
+          "h": 19,
+          "w": 17,
+          "x": 224,
+          "y": 206
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 232,
+        "name": "0082Grinningwell Ridge",
+        "owner": 1,
+        "tile": 56041,
+        "town": 8,
+        "x": 233,
+        "y": 218
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 17,
+          "x": 144,
+          "y": 230
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 233,
+        "name": "0073Fondham",
+        "owner": 1,
+        "tile": 60052,
+        "town": 2,
+        "x": 148,
+        "y": 234
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 10,
+          "x": 125,
+          "y": 165
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 234,
+        "name": "0067New Slutway-on-sea Steel Mi",
+        "owner": 1,
+        "tile": 43393,
+        "town": 7,
+        "x": 129,
+        "y": 169
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 169,
+          "y": 57
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 235,
+        "name": "Chonnton South",
+        "owner": 5,
+        "tile": 15789,
+        "town": 20,
+        "x": 173,
+        "y": 61
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 133,
+          "y": 166
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 236,
+        "name": "New Slutway-on-sea Transfer",
+        "owner": 5,
+        "tile": 43657,
+        "town": 22,
+        "x": 137,
+        "y": 170
+      },
+      {
+        "catchment_area": {
+          "h": 16,
+          "w": 14,
+          "x": 21,
+          "y": 106
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 237,
+        "name": "0075Branwell City",
+        "owner": 1,
+        "tile": 28187,
+        "town": 16,
+        "x": 27,
+        "y": 110
+      },
+      {
+        "catchment_area": {
+          "h": 13,
+          "w": 13,
+          "x": 74,
+          "y": 94
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 238,
+        "name": "Narfinghill Sidings",
+        "owner": 2,
+        "tile": 24915,
+        "town": 14,
+        "x": 83,
+        "y": 97
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 116,
+          "y": 40
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 239,
+        "name": "Nenham Exchange",
+        "owner": 7,
+        "tile": 11127,
+        "town": 1,
+        "x": 119,
+        "y": 43
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 188,
+          "y": 21
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 240,
+        "name": "Druham North",
+        "owner": 7,
+        "tile": 6335,
+        "town": 12,
+        "x": 191,
+        "y": 24
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 10,
+          "x": 52,
+          "y": 182
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 241,
+        "name": "Grontston Sidings",
+        "owner": 2,
+        "tile": 48439,
+        "town": 6,
+        "x": 55,
+        "y": 189
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 195,
+          "y": 23
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 242,
+        "name": "Druham Transfer",
+        "owner": 7,
+        "tile": 6854,
+        "town": 12,
+        "x": 198,
+        "y": 26
+      },
+      {
+        "catchment_area": {
+          "h": 18,
+          "w": 18,
+          "x": 111,
+          "y": 158
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 243,
+        "name": "0077Denningbury",
+        "owner": 1,
+        "tile": 41593,
+        "town": 7,
+        "x": 121,
+        "y": 162
+      },
+      {
+        "catchment_area": {
+          "h": 16,
+          "w": 13,
+          "x": 13,
+          "y": 45
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 244,
+        "name": "0080Renfingbourne Bridge",
+        "owner": 1,
+        "tile": 12561,
+        "town": 15,
+        "x": 17,
+        "y": 49
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 10,
+          "x": 239,
+          "y": 221
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 245,
+        "name": "Grinningwell Ridge Exchange",
+        "owner": 7,
+        "tile": 57843,
+        "town": 8,
+        "x": 243,
+        "y": 225
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 10,
+          "x": 116,
+          "y": 228
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 246,
+        "name": "Plentbridge Transfer",
+        "owner": 7,
+        "tile": 59512,
+        "town": 21,
+        "x": 120,
+        "y": 232
+      },
+      {
+        "catchment_area": {
+          "h": 17,
+          "w": 12,
+          "x": 80,
+          "y": 28
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 247,
+        "name": "0086Harnhall",
+        "owner": 1,
+        "tile": 9812,
+        "town": 9,
+        "x": 84,
+        "y": 38
+      },
+      {
+        "catchment_area": {
+          "h": 17,
+          "w": 12,
+          "x": 80,
+          "y": 181
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 248,
+        "name": "0088Flenham",
+        "owner": 1,
+        "tile": 48980,
+        "town": 19,
+        "x": 84,
+        "y": 191
+      },
+      {
+        "catchment_area": {
+          "h": 17,
+          "w": 12,
+          "x": 198,
+          "y": 50
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 249,
+        "name": "0090Flartbourne",
+        "owner": 1,
+        "tile": 15562,
+        "town": 24,
+        "x": 202,
+        "y": 60
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 152,
+          "y": 102
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 250,
+        "name": "Sundingham Exchange",
+        "owner": 0,
+        "tile": 27292,
+        "town": 0,
+        "x": 156,
+        "y": 106
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 75,
+          "y": 227
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 251,
+        "name": "Brentston Halt",
+        "owner": 7,
+        "tile": 58958,
+        "town": 3,
+        "x": 78,
+        "y": 230
+      },
+      {
+        "catchment_area": {
+          "h": 11,
+          "w": 12,
+          "x": 129,
+          "y": 239
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "airport"
+        ],
+        "id": 252,
+        "name": "Plentbridge Airport",
+        "owner": 0,
+        "tile": 62341,
+        "town": 21,
+        "x": 133,
+        "y": 243
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 177,
+          "y": 200
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 253,
+        "name": "Budham South",
+        "owner": 7,
+        "tile": 52148,
+        "town": 23,
+        "x": 180,
+        "y": 203
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 10,
+          "x": 242,
+          "y": 217
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 254,
+        "name": "Grinningwell Ridge Sidings",
+        "owner": 0,
+        "tile": 56822,
+        "town": 8,
+        "x": 246,
+        "y": 221
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 139,
+          "y": 90
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 255,
+        "name": "Sonfingway Woods",
+        "owner": 7,
+        "tile": 23950,
+        "town": 17,
+        "x": 142,
+        "y": 93
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 126,
+          "y": 239
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 256,
+        "name": "Plentbridge Woods",
+        "owner": 7,
+        "tile": 62081,
+        "town": 21,
+        "x": 129,
+        "y": 242
+      },
+      {
+        "catchment_area": {
+          "h": 18,
+          "w": 18,
+          "x": 73,
+          "y": 93
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 257,
+        "name": "0092Narfinghill",
+        "owner": 1,
+        "tile": 26707,
+        "town": 14,
+        "x": 83,
+        "y": 104
+      },
+      {
+        "catchment_area": {
+          "h": 19,
+          "w": 18,
+          "x": 132,
+          "y": 178
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "bus",
+          "airport"
+        ],
+        "id": 258,
+        "name": "0095New Slutway-on-sea",
+        "owner": 1,
+        "tile": 48782,
+        "town": 22,
+        "x": 142,
+        "y": 190
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 10,
+          "x": 121,
+          "y": 225
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 259,
+        "name": "Plentbridge Halt",
+        "owner": 0,
+        "tile": 58749,
+        "town": 21,
+        "x": 125,
+        "y": 229
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 115,
+          "y": 226
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 260,
+        "name": "Plentbridge Sidings",
+        "owner": 7,
+        "tile": 58742,
+        "town": 21,
+        "x": 118,
+        "y": 229
+      },
+      {
+        "catchment_area": {
+          "h": 12,
+          "w": 16,
+          "x": 86,
+          "y": 148
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 261,
+        "name": "Slintburg Sidings",
+        "owner": 0,
+        "tile": 39008,
+        "town": 10,
+        "x": 96,
+        "y": 152
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 10,
+          "x": 12,
+          "y": 223
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 262,
+        "name": "Brentston Lakeside",
+        "owner": 7,
+        "tile": 58128,
+        "town": 3,
+        "x": 16,
+        "y": 227
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 10,
+          "x": 11,
+          "y": 220
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 263,
+        "name": "Brentston North",
+        "owner": 0,
+        "tile": 57359,
+        "town": 3,
+        "x": 15,
+        "y": 224
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 10,
+          "x": 93,
+          "y": 150
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 264,
+        "name": "Slintburg Branch",
+        "owner": 7,
+        "tile": 39521,
+        "town": 10,
+        "x": 97,
+        "y": 154
+      },
+      {
+        "catchment_area": {
+          "h": 14,
+          "w": 11,
+          "x": 167,
+          "y": 41
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 265,
+        "name": "0099Chonnton Iron Ore Mine",
+        "owner": 1,
+        "tile": 11691,
+        "town": 20,
+        "x": 171,
+        "y": 45
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 12,
+          "x": 217,
+          "y": 94
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 266,
+        "name": "Flartbourne Station #266",
+        "owner": 4,
+        "tile": 25309,
+        "town": 24,
+        "x": 221,
+        "y": 98
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 12,
+          "x": 156,
+          "y": 93
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 267,
+        "name": "Sundingham Valley",
+        "owner": 4,
+        "tile": 24992,
+        "town": 0,
+        "x": 160,
+        "y": 97
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 10,
+          "x": 92,
+          "y": 142
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 268,
+        "name": "Upper Slintburg",
+        "owner": 6,
+        "tile": 37472,
+        "town": 10,
+        "x": 96,
+        "y": 146
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 10,
+          "x": 4,
+          "y": 223
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 270,
+        "name": "Brentston Annexe",
+        "owner": 6,
+        "tile": 58120,
+        "town": 3,
+        "x": 8,
+        "y": 227
+      },
+      {
+        "catchment_area": {
+          "h": 10,
+          "w": 14,
+          "x": 50,
+          "y": 6
+        },
+        "catchment_radius": 4,
+        "facilities": [
+          "train"
+        ],
+        "id": 271,
+        "name": "0100Sindingbury Steel Mill",
+        "owner": 1,
+        "tile": 2614,
+        "town": 13,
+        "x": 54,
+        "y": 10
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 115,
+          "y": 227
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "truck"
+        ],
+        "id": 272,
+        "name": "Plentbridge Exchange",
+        "owner": 4,
+        "tile": 58998,
+        "town": 21,
+        "x": 118,
+        "y": 230
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 87,
+          "y": 63
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 273,
+        "name": "Tennville East",
+        "owner": 4,
+        "tile": 16986,
+        "town": 4,
+        "x": 90,
+        "y": 66
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 20,
+          "y": 141
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 274,
+        "name": "Wunnington East",
+        "owner": 4,
+        "tile": 36887,
+        "town": 11,
+        "x": 23,
+        "y": 144
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 115,
+          "y": 225
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 275,
+        "name": "Plentbridge Annexe",
+        "owner": 5,
+        "tile": 58486,
+        "town": 21,
+        "x": 118,
+        "y": 228
+      },
+      {
+        "catchment_area": null,
+        "catchment_radius": 0,
+        "facilities": [],
+        "id": 276,
+        "name": "Flenham Exchange",
+        "owner": 0,
+        "tile": 39514,
+        "town": 19,
+        "x": 90,
+        "y": 154
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 93,
+          "y": 69
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 277,
+        "name": "Tennville South",
+        "owner": 4,
+        "tile": 18528,
+        "town": 4,
+        "x": 96,
+        "y": 72
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 89,
+          "y": 182
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 278,
+        "name": "Flenham Annexe",
+        "owner": 4,
+        "tile": 47452,
+        "town": 19,
+        "x": 92,
+        "y": 185
+      },
+      {
+        "catchment_area": null,
+        "catchment_radius": 0,
+        "facilities": [],
+        "id": 279,
+        "name": "Brentston Sidings",
+        "owner": 0,
+        "tile": 62541,
+        "town": 3,
+        "x": 77,
+        "y": 244
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 94,
+          "y": 56
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 280,
+        "name": "Tennville Exchange",
+        "owner": 4,
+        "tile": 15201,
+        "town": 4,
+        "x": 97,
+        "y": 59
+      },
+      {
+        "catchment_area": {
+          "h": 7,
+          "w": 7,
+          "x": 100,
+          "y": 173
+        },
+        "catchment_radius": 3,
+        "facilities": [
+          "bus"
+        ],
+        "id": 281,
+        "name": "Gartston Transfer",
+        "owner": 4,
+        "tile": 45159,
+        "town": 18,
+        "x": 103,
+        "y": 176
+      }
+    ]
+  },
+  "game_date": "1953-02-09",
+  "game_mode": "normal",
+  "game_tick": 85332,
+  "next_cursor": null,
+  "protocol_version": "2025-11-25",
+  "redactions": [],
+  "schema_version": "1.0",
+  "source": "OpenTTD",
+  "source_revision": "20261122-research-coplay-mf7b71d8b3d",
+  "truncated": false
+}

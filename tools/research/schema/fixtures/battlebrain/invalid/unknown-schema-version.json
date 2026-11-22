@@ -1,0 +1,36 @@
+{
+ "case": "a record version nobody knows",
+ "expect": "unknown_schema",
+ "value": {
+  "at": {
+   "date": "1961-01-01",
+   "tick": 74000
+  },
+  "body": {
+   "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "max_age_days": 31,
+   "sources": [
+    {
+     "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "uri": "openttd://world/graph"
+    },
+    {
+     "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "uri": "openttd://companies"
+    }
+   ]
+  },
+  "id": "bb:76337ad2a40c3a385fd670726b38b3e84db0389982678f2616ca1b4023c1f382",
+  "producer": {
+   "id": "mcp-panel",
+   "version": "fixture"
+  },
+  "schema": "battlebrain-record/v2",
+  "scope": {
+   "company": 1,
+   "instance": "research-fixture"
+  },
+  "status": "current",
+  "type": "snapshot"
+ }
+}

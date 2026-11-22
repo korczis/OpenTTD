@@ -651,6 +651,20 @@ pub fn keyed<F: FnOnce() -> Result<(u16, Value), String>>(key: Option<&str>, now
 /// step is tried and published in plan.directive with the state it reached, also when a call fails;
 /// a failed call then answers 502 with the lines so far.
 /// The key it ran under (step 3, `keyed`) is recorded in plan.directive's `inputs.live.key`.
+/// Whether a directive's `decision` block (battlebrain-decision/v1, I0096) lets it be applied. No
+/// block: yes, as before. A block that breaks its contract: 422. A block in mode shadow: 409, always;
+/// a shadow decision never reaches the game. Pure: the caller records and answers the refusal.
+pub fn decision_gate(raw: &Value) -> Result<(), (u16, &'static str, Vec<String>)> {
+    let Some(block) = raw.get("decision") else { return Ok(()) };
+    if let Err(rs) = crate::battlebrain_contract::validate_decision_block(block) {
+        return Err((422, "invalid_decision_block", rs.iter().map(|r| format!("decision.{}: {} ({})", r.path, r.message, r.code)).collect()));
+    }
+    if block["mode"] != "live" {
+        return Err((409, "shadow_refused", vec![format!("decision {} is a {} decision; only live decisions are applied", block["decision"], block["mode"])]));
+    }
+    Ok(())
+}
+
 pub fn pull_with(g: &Arc<Game>, url: &str, key: Option<&str>) -> Result<(u16, Value), String> {
     let since = last().0;
     let raw: Value = match ureq::get(url).timeout(Duration::from_secs(60)).call() {
@@ -670,6 +684,17 @@ pub fn pull_with(g: &Arc<Game>, url: &str, key: Option<&str>) -> Result<(u16, Va
                                    "called_url": url, "raw_response": raw})));
         }
     };
+    // The executor boundary of the Battlebrain decision (I0096): a directive carrying a decision
+    // block is applied only when the block is valid battlebrain-decision/v1 and its mode is live; a
+    // shadow decision is refused here, before any step, whoever submits it.
+    if let Err((status, outcome, errors)) = decision_gate(&raw) {
+        g.event("ai", &format!("Prismatic's directive ({url}) is not applied: {}", errors.join("; ")));
+        let mut data = directive_event(url, &raw, Err(&errors), &ignored, &[]);
+        data["choice"]["outcome"] = json!(outcome);
+        g.plan("plan.directive", data);
+        return Ok((status, json!({"error": "the directive's decision block may not be applied", "errors": errors,
+                                  "called_url": url, "raw_response": raw})));
+    }
     // Bound to what Prismatic observed during this pull, or not applied at all.
     let (_, obs) = last();
     let now = game_time(g).and_then(|(t, _)| Ok((t, identity_digest(&bridge_companies(&g.resource("openttd://companies")?, &json!({}))))));
@@ -741,6 +766,26 @@ pub fn directive_event(url: &str, raw: &Value, d: Result<&Directive, &Vec<String
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_shadow_or_broken_decision_block_never_passes_the_executor() {
+        // I0096: the executor boundary. A directive without a block is unaffected.
+        assert!(decision_gate(&json!({"company_id": 3, "settings": "fr_from=13"})).is_ok());
+        let block = |mode: &str| json!({"schema": "battlebrain-decision/v1", "decision": format!("bb:{}", "1".repeat(64)),
+            "snapshot_digest": format!("sha256:{}", "2".repeat(64)), "idempotency_key": "i:3:1953-02-09:freight-line",
+            "policy": "freight-margin@1", "valid_until": "1953-03-12", "mode": mode});
+        let shadow = decision_gate(&json!({"company_id": 3, "settings": "fr_from=13", "decision": block("shadow")})).unwrap_err();
+        assert_eq!((shadow.0, shadow.1), (409, "shadow_refused"));
+        assert!(decision_gate(&json!({"company_id": 3, "decision": block("live")})).is_ok());
+        let unknown = decision_gate(&json!({"company_id": 3, "decision": block("auto")})).unwrap_err();
+        assert_eq!((unknown.0, unknown.1), (422, "invalid_decision_block"));
+        let mut v2 = block("live");
+        v2["schema"] = json!("battlebrain-decision/v2");
+        assert_eq!(decision_gate(&json!({"company_id": 3, "decision": v2})).unwrap_err().0, 422);
+        let mut nokey = block("live");
+        nokey.as_object_mut().unwrap().remove("idempotency_key");
+        assert_eq!(decision_gate(&json!({"company_id": 3, "decision": nokey})).unwrap_err().0, 422);
+    }
+
     use super::*;
 
     fn cos(rows: &[(i64, bool, &str, i64)]) -> Value {
