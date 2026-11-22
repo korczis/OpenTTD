@@ -1,0 +1,138 @@
+name: Research Rust
+
+# Fork-owned workflow, not part of upstream's CI. Runs the mcp-rhai tests that carry the Battlebrain
+# boundaries (rule project.decision-authority-boundaries, B1-B8 in src/authority_boundaries.rs),
+# the decision contract and executor (battlebrain_contract.rs, bin/battlebrain.rs,
+# panel_decision.rs) and the knapsack checks (cargo.rs), so a pull request cannot merge with them
+# failing. The job always reports, so "Research Rust tests" can be a required check: when no path
+# the tests compile or read changed, it succeeds without building (.ai/repo/workflows/delivery.md).
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  # The Surfaces `refresh` job dispatches this workflow on a branch after it pushes a merge of
+  # master, because a push made with GITHUB_TOKEN starts no workflow; the dispatched run reports
+  # the check on the new head.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-rust-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  MANIFEST: tools/research/mcp-rhai/Cargo.toml
+  RUST_TOOLCHAIN: "1.90.0"
+  # The system libduckdb the `store` feature links (build.rs, Cargo.toml). It must be the DuckDB
+  # release that the locked libduckdb-sys encodes (1.MMmmpp.x, so 1.10506.1 is 1.5.6); the first
+  # step after checkout refuses a mismatch. The digest is the release asset's published SHA-256.
+  DUCKDB_VERSION: "1.5.6"
+  DUCKDB_SHA256: b845005f5132a7d8180057c35e14a7626632258782f871a90861b19c1c03841b
+
+jobs:
+  test:
+    name: Research Rust tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: "Checkout (full history, no blobs: the change set and build.rs read git)"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      # The paths the four test binaries compile or read: the crate and its path dependency, the
+      # schemas and fixtures, PrismaticAI (info.nut), the results and documents the tests open
+      # (research/battlebrain, research/prismatic-bridge, research/results, the bus knowledge
+      # page, research/mechanisms, src/window_type.h, the panel's static and Rhai files, the
+      # town model), and this workflow.
+      - name: Did a path the tests compile or read change?
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          case "$EVENT" in
+            pull_request) base=$(git rev-parse HEAD^1) ;;
+            push) base="$BEFORE" ;;
+            *) base=$(git merge-base origin/master HEAD) ;;
+          esac
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null \
+            || [ "$base" = "$(git rev-parse HEAD)" ]; then
+            echo "No usable base ($EVENT, '$base'): running every test."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          pattern='^(tools/research/(mcp-rhai|schema|prismatic-ai|real-world|mcp-panel|town-model)/'
+          pattern+='|research/(results|battlebrain|prismatic-bridge|mechanisms)/'
+          pattern+='|\.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds\.md$'
+          pattern+='|src/window_type\.h$|\.github/workflows/research-rust\.yml$)'
+          matched=$(git diff --name-only "$base" HEAD | grep -E "$pattern" || true)
+          if [ -n "$matched" ]; then
+            echo "Changed since $base:"
+            echo "$matched"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No path the tests compile or read changed since $base: nothing to test."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: The pinned DuckDB is the one the locked libduckdb-sys encodes
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          lock=$(awk '/^name = "libduckdb-sys"$/ { getline; gsub(/[^0-9.]/, ""); print; exit }' \
+            tools/research/mcp-rhai/Cargo.lock)
+          enc=$(echo "$lock" | cut -d. -f2)
+          want="$((enc / 10000)).$(((enc / 100) % 100)).$((enc % 100))"
+          echo "libduckdb-sys $lock encodes DuckDB $want; the workflow pins $DUCKDB_VERSION."
+          if [ "$want" != "$DUCKDB_VERSION" ]; then
+            echo "::error::Update DUCKDB_VERSION and DUCKDB_SHA256 in research-rust.yml to DuckDB $want."
+            exit 1
+          fi
+
+      - name: Install libduckdb (pinned release, checksum verified)
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          dir="$RUNNER_TEMP/duckdb"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/libduckdb.zip" \
+            "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/libduckdb-linux-amd64.zip"
+          echo "${DUCKDB_SHA256}  $RUNNER_TEMP/libduckdb.zip" | sha256sum -c -
+          unzip -q -o "$RUNNER_TEMP/libduckdb.zip" libduckdb.so duckdb.h -d "$dir"
+          echo "DUCKDB_LIB_DIR=$dir" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$dir" >> "$GITHUB_ENV"
+
+      - name: Install the Rust toolchain
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
+          rustup default "$RUST_TOOLCHAIN"
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo (registry and the crate's target, keyed by Cargo.lock)
+        if: steps.changes.outputs.run == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            tools/research/mcp-rhai/target
+          key: research-rust-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-duckdb${{ env.DUCKDB_VERSION }}-${{ hashFiles('tools/research/mcp-rhai/Cargo.lock') }}
+          restore-keys: |
+            research-rust-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-duckdb${{ env.DUCKDB_VERSION }}-
+
+      - name: Fetch the locked dependencies
+        if: steps.changes.outputs.run == 'true'
+        run: cargo fetch --locked --manifest-path "$MANIFEST"
+
+      - name: cargo test --release (battlebrain, mcp-plan, mcp-intent, mcp-panel; default features)
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          cargo test --release --locked --offline --manifest-path "$MANIFEST" \
+            --bin battlebrain --bin mcp-plan --bin mcp-intent --bin mcp-panel

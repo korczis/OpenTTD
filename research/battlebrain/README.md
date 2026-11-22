@@ -331,3 +331,5 @@ and `intent.rs`, are named gaps there. They stay until the cutover.
 - The planner (`cargo.rs`, `linecost.rs`) still calls `knapsack-dp` and `track-planning` by name.
   Battlebrain checks that the planner's portfolio kernel agrees with the match. The planner's
   track answers name no kernel, so that check does not cover them.
+- The portfolio refuses a `knapsack-dp` answer that fails `domain_check` and records `fallback`
+  and `truncation`, but its candidate cap (40) is not yet read from the plan's params.
