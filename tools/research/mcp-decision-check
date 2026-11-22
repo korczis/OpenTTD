@@ -225,7 +225,14 @@ if [[ -z "${PRISMATIC_DECISION_URL:-}" ]]; then
   echo observe > "$TMP/mode"
 fi
 SEQ0="$(directive_seq)"
-curl -s -m 10 -X POST -H 'Content-Type: application/json' -d '{"on": true}' "$URL/api/auto-approve" > /dev/null
+# Switching auto-approve on is the owner's: this check started the stack, so it holds the owner
+# secret the panel printed once into the launcher's log. Auto-approve never approves an owner-only
+# tool (openttd.ai.set_settings); this directive applies through openttd.ai.set_setting.
+OWNER="$(sed -n 's/^mcp-panel: owner secret \([0-9a-f]*\) .*/\1/p' "$TMP/e2e.log" | head -1)"
+[[ -n "$OWNER" ]] || fail "the panel printed no owner secret into $TMP/e2e.log"
+code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST -H 'Content-Type: application/json' -d '{"on": true}' "$URL/api/auto-approve")"
+[[ "$code" == 401 ]] && pass "auto-approve stays off without the owner secret (401)" || fail "auto-approve on without the owner secret answered $code"
+curl -s -m 10 -X POST -H 'Content-Type: application/json' -H "X-Panel-Owner: $OWNER" -d '{"on": true}' "$URL/api/auto-approve" > /dev/null
 curl -s -m 90 -X POST -H 'Content-Type: application/json' -d "{\"url\": \"$SRC\"}" "$URL/api/decision/pull" > "$TMP/pull.json"
 shape="$(jq -r '(has("called_url") and has("raw_response") and (.applied_rcon.lines | type == "array"))' "$TMP/pull.json" 2>/dev/null || echo false)"
 [[ "$shape" == true ]] \
