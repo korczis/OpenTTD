@@ -11,11 +11,18 @@
 //!   battlebrain snapshot --capture <dir> --instance <name> --company <id> [--max-age-days 31]
 //!                                                     the snapshot record of an `mcp-plan --capture`
 //!   battlebrain shadow --snapshot <record> --plan <mcp-plan answer> --companies <openttd://companies>
-//!                      --company <id> [--margin 0.2] [--reserve 25000]
-//!                                                     policy freight-margin@1 in SHADOW (I0096): the
+//!                      --company <id> [--margin 0.2] [--reserve 25000] [--allow-unpriced]
+//!                                                     policy freight-margin (battlebrain_policy.rs) in SHADOW (I0096): the
 //!                                                     planner's candidate, battlebrain's candidate, a
 //!                                                     decision and a directive block in mode shadow,
 //!                                                     and the comparison; reads files only, never a game
+//!   battlebrain live ... [--max-window-ticks n]       the same decision LIVE (I0097): refused unless the
+//!                                                     snapshot window fits, the policy requires priced lines
+//!                                                     and the companies were read after the snapshot; writes
+//!                                                     the directive (planned_freight_only=1 + one fr_* slot)
+//!   battlebrain serve --directive <file> --port <p>   answer ONE loopback GET with it, then exit
+//!   battlebrain report <result.json>                  the derived summary (.md) of a result record
+//!   battlebrain rollback --company <id>               the directive back to the baseline (planned_freight_only=0)
 //!   battlebrain catalogue --commit <sha> [--kernel <id> --engine <e>] < kernels.json
 //!                                                     the discovered catalogue's digest, from the
 //!                                                     runner's own `flow -- kernels` answer
@@ -132,7 +139,22 @@ pub fn snapshot_from_capture(dir: &std::path::Path, instance: &str, company: i64
 }
 
 /// The shadow run: every record it writes is validated first, and nothing is written if one fails.
+/// The checks a live decision must pass before it is written (I0097; research/battlebrain/README.md,
+/// "Cutover thresholds"). Every one is a parameter recorded in the decision, never a hidden default.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LiveGate {
+    /// The widest game-tick window a snapshot may span (0: one tick, coherent).
+    pub max_window_ticks: u64,
+}
+
 pub fn shadow(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &policy::Params) -> Result<Value, Vec<bb::Refusal>> {
+    run(snapshot, plan, companies, company, p, None)
+}
+
+/// One decision on one snapshot: in shadow (no gate) or live (`gate`), the records, the directive
+/// block, and in live mode the directive itself. Every record is validated before anything is
+/// returned, and nothing is returned if one fails.
+pub fn run(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &policy::Params, gate: Option<&LiveGate>) -> Result<Value, Vec<bb::Refusal>> {
     let refuse = |code: &'static str, msg: String| vec![bb::Refusal::new(code, "", msg)];
     match bb::validate_record(snapshot) {
         Ok("snapshot") => {}
@@ -189,7 +211,8 @@ pub fn shadow(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p
         "goal": "next freight rail line (one fr_* slot) or HOLD", "snapshot": snap_id, "selected": ours_rec["id"],
         "rejected": rejected, "idempotency_key": key, "approval": "operator", "valid_until": valid_until}));
     let block = json!({"schema": bb::DECISION_SCHEMA, "decision": decision["id"], "snapshot_digest": snapshot["body"]["digest"],
-        "idempotency_key": key, "policy": format!("{}@{}", policy::POLICY_ID, policy::POLICY_VERSION), "valid_until": valid_until, "mode": "shadow"});
+        "idempotency_key": key, "policy": format!("{}@{}", policy::POLICY_ID, policy::POLICY_VERSION), "valid_until": valid_until,
+        "mode": if gate.is_some() { "live" } else { "shadow" }});
     let mut records: Vec<Value> = base_rec.iter().cloned().collect();
     if base_rec.as_ref().map(|b| &b["id"]) != Some(&ours_rec["id"]) {
         records.push(ours_rec.clone());
@@ -207,8 +230,39 @@ pub fn shadow(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p
     if !errs.is_empty() {
         return Err(errs);
     }
+    // Live: the gates of the cutover, checked here, before a directive exists at all.
+    let directive = match gate {
+        None => Value::Null,
+        Some(g) => {
+            let mut why = Vec::new();
+            let w = snapshot.pointer("/body/window").cloned().unwrap_or(Value::Null);
+            match (w["tick_from"].as_u64(), w["tick_to"].as_u64()) {
+                (Some(f), Some(t)) if t - f <= g.max_window_ticks => {}
+                (Some(f), Some(t)) => why.push(bb::Refusal::new("incoherent_snapshot", "body.window", format!("the snapshot spans {} ticks, more than the {} this run accepts", t - f, g.max_window_ticks))),
+                _ => why.push(bb::Refusal::new("incoherent_snapshot", "body.window", "the snapshot does not say which ticks it was read between")),
+            }
+            if !p.require_priced {
+                why.push(bb::Refusal::new("unpriced_policy", "params.require_priced", "a live decision needs require_priced: only a line track-planning priced may go live"));
+            }
+            let fresh = companies.get("game_tick").and_then(Value::as_u64);
+            if fresh.map_or(true, |t| t < w["tick_to"].as_u64().unwrap_or(u64::MAX)) {
+                why.push(bb::Refusal::new("stale_companies", "companies.game_tick", "the companies must be read again, after the snapshot, so affordability is checked against money now"));
+            }
+            if !why.is_empty() {
+                return Err(why);
+            }
+            match &choice.selected {
+                None => Value::Null,
+                // planned_freight_only=1 with the slot: the bot builds this line and plans none itself,
+                // so the line has one author (one approval batch for the operator).
+                Some(l) => json!({"company_id": company, "settings": format!("planned_freight_only=1,fr_from={},fr_to={},fr_cargo={}", l.producer, l.acceptor, l.cargo_id), "decision": block}),
+            }
+        }
+    };
     Ok(json!({
-        "mode": "shadow",
+        "mode": if gate.is_some() { "live" } else { "shadow" },
+        "directive": directive,
+        "live_gate": gate.map(|g| json!({"max_window_ticks": g.max_window_ticks})),
         "records": records,
         "directive_block": block,
         "comparison": {
@@ -225,6 +279,83 @@ pub fn shadow(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p
                         "unroutable_lines": policy::lines(&plan["freight"]).iter().filter(|l| l.track.as_deref().is_some_and(|t| t != "found")).count()}
         }
     }))
+}
+
+/// The human summary of a shadow or live result record (`battlebrain-shadow-result/v1`), derived
+/// from it alone: research/results/<id>.md is this function's output for <id>.json, and a test
+/// refuses one that is not.
+pub fn report(rec: &Value) -> String {
+    let c = &rec["comparison"];
+    let pv = &rec["provenance"];
+    let w = &pv["capture"]["window"];
+    let money = |v: &Value| v.as_f64().map_or("-".to_string(), |x| {
+        let s = format!("{}", x.round() as i64);
+        let (neg, d) = s.strip_prefix('-').map_or((false, s.as_str()), |r| (true, r));
+        let mut out = String::new();
+        for (i, ch) in d.chars().enumerate() {
+            if i > 0 && (d.len() - i) % 3 == 0 { out.push(','); }
+            out.push(ch);
+        }
+        if neg { format!("-{out}") } else { out }
+    });
+    let row = |who: &str, l: &Value| -> String {
+        if l.is_null() {
+            return format!("| {who} | HOLD (no line) | - | - | - | - | - | - |");
+        }
+        format!("| {who} | {} → {} (cargo {}) | {} | {} | {} | {} | {} | {} |", l["producer"], l["acceptor"], l["cargo_id"],
+            money(&l["investment"]), money(&l["monthly_profit"]), l["annual_return"], l["payback_months"], money(&l["planner_score"]),
+            l["track"].as_str().unwrap_or("not priced"))
+    };
+    let coherent = w["coherent"].as_bool().unwrap_or(false);
+    let mut out = vec![
+        format!("# {}", rec["id"].as_str().unwrap_or("battlebrain result")),
+        String::new(),
+        "Derived from its .json by `battlebrain report` (tools/research/mcp-rhai/src/bin/battlebrain.rs); do not edit.".into(),
+        String::new(),
+        format!("RESEARCH-ONLY. Mode **{}**: {}. One capture, one company and these parameters only; it does not generalise.",
+            rec["mode"].as_str().unwrap_or("?"),
+            if rec["mode"] == "shadow" { "the decision was never submitted; its directive block says `mode: shadow`, which the executor refuses (`panel_decision.rs` `decision_gate`)" } else { "see the outcome record for what the game did" }),
+        String::new(),
+        format!("- **Capture:** {}, ticks {}-{}: {}.", pv["capture"]["game"].as_str().unwrap_or("a game"), w["tick_from"], w["tick_to"],
+            if coherent { "coherent (one tick)".to_string() } else { "**not coherent**: the game ran while it was read".to_string() }),
+        format!("- **Policy:** `{}` with {}; company {}; budget {} (money + loan headroom - reserve).", c["policy"].as_str().unwrap_or("?"),
+            c["params"], pv["company"], money(&c["budget"])),
+        format!("- **Portfolio solver:** {}; AlgoGlyph commit `{}`.", c["metrics"]["portfolio_solver"].as_str().unwrap_or("?"),
+            pv["algoglyph_commit"].as_str().map_or("?", |a| &a[..a.len().min(10)])),
+        format!("- **Lines:** {} unpriced, {} unroutable, {} rejected with their reasons (see the .json).",
+            c["metrics"]["unpriced_lines"], c["metrics"]["unroutable_lines"], c["rejected"].as_array().map_or(0, Vec::len)),
+        String::new(),
+        "| | line | investment | monthly profit | annual return | payback (months) | planner score | track |".into(),
+        "|---|---|---|---|---|---|---|---|".into(),
+        row("planner v4 (baseline)", &c["baseline"]),
+        row("battlebrain", &c["battlebrain"]),
+        String::new(),
+        format!("**Divergence:** `{}`. {}.", c["divergence"].as_str().unwrap_or("?"), c["reason"].as_str().unwrap_or("")),
+    ];
+    if let Some(f) = rec["findings"].as_array() {
+        out.push(String::new());
+        for x in f {
+            out.push(format!("**Finding:** {}", x.as_str().unwrap_or("")));
+        }
+    }
+    out.join("\n") + "\n"
+}
+
+/// Answer exactly one GET on a loopback port with `body`, then return (`serve --once`): the
+/// directive leaves this process once, whoever asks.
+fn serve_once(port: u16, body: &str) -> Result<String, String> {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind 127.0.0.1:{port}: {e}"))?;
+    let (mut stream, peer) = listener.accept().map_err(|e| e.to_string())?;
+    if !peer.ip().is_loopback() {
+        return Err(format!("refused a non-loopback peer {peer}"));
+    }
+    let mut line = String::new();
+    BufReader::new(&stream).read_line(&mut line).map_err(|e| e.to_string())?;
+    let ok = line.starts_with("GET ");
+    let (status, out) = if ok { ("200 OK", body.to_string()) } else { ("405 Method Not Allowed", "{\"error\":\"GET only\"}".to_string()) };
+    write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}", out.len()).map_err(|e| e.to_string())?;
+    if ok { Ok(line.trim().to_string()) } else { Err(format!("refused {}", line.trim())) }
 }
 
 fn main() {
@@ -297,12 +428,86 @@ fn main() {
                 }
             }
         }
+        Some("report") if args.len() == 2 => match read_json(&args[1]) {
+            Ok(r) => {
+                print!("{}", report(&r));
+                0
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        },
+        Some("live") => {
+            let flag = |name: &str| flag(&args, name);
+            let p = policy::Params {
+                margin: flag("--margin").and_then(|m| m.parse().ok()).unwrap_or(0.2),
+                reserve: flag("--reserve").and_then(|r| r.parse().ok()).unwrap_or(25_000),
+                require_priced: true,
+            };
+            let gate = LiveGate { max_window_ticks: flag("--max-window-ticks").and_then(|t| t.parse().ok()).unwrap_or(0) };
+            match (flag("--snapshot"), flag("--plan"), flag("--companies"), flag("--company").and_then(|c| c.parse::<i64>().ok())) {
+                (Some(s), Some(pl), Some(c), Some(id)) => match (read_json(&s), read_json(&pl), read_json(&c)) {
+                    (Ok(s), Ok(pl), Ok(c)) => match run(&s, &pl, &c, id, &p, Some(&gate)) {
+                        Ok(out) => {
+                            println!("{}", serde_json::to_string_pretty(&out).expect("serialises"));
+                            0
+                        }
+                        Err(rs) => refused(&rs),
+                    },
+                    (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+                        eprintln!("{e}");
+                        1
+                    }
+                },
+                _ => {
+                    eprintln!("battlebrain live --snapshot <record> --plan <file> --companies <fresh read> --company <id> [--margin x] [--reserve n] [--max-window-ticks n]");
+                    2
+                }
+            }
+        }
+        Some("serve") => {
+            let flag = |name: &str| flag(&args, name);
+            match (flag("--directive").map(|f| read_json(&f)), flag("--port").and_then(|p| p.parse::<u16>().ok())) {
+                (Some(Ok(d)), Some(port)) if d.get("company_id").is_some() => match serve_once(port, &d.to_string()) {
+                    Ok(req) => {
+                        println!("{}", json!({"ok": true, "served": req, "port": port}));
+                        0
+                    }
+                    Err(e) => {
+                        eprintln!("serve: {e}");
+                        1
+                    }
+                },
+                (Some(Err(e)), _) => {
+                    eprintln!("{e}");
+                    1
+                }
+                _ => {
+                    eprintln!("battlebrain serve --directive <file with a company_id> --port <p>   (answers one GET on 127.0.0.1, then exits)");
+                    2
+                }
+            }
+        }
+        Some("rollback") => match flag(&args, "--company").and_then(|c| c.parse::<i64>().ok()) {
+            // Back to the verified baseline: the bot plans its own freight lines again. No decision
+            // block: it is an ordinary directive, approved by the operator like every change.
+            Some(id) => {
+                println!("{}", json!({"company_id": id, "settings": "planned_freight_only=0"}));
+                0
+            }
+            None => {
+                eprintln!("battlebrain rollback --company <id>");
+                2
+            }
+        },
         Some("shadow") => {
             let flag = |name: &str| flag(&args, name);
             let files = (flag("--snapshot"), flag("--plan"), flag("--companies"), flag("--company").and_then(|c| c.parse::<i64>().ok()));
             let p = policy::Params {
                 margin: flag("--margin").and_then(|m| m.parse().ok()).unwrap_or(0.2),
                 reserve: flag("--reserve").and_then(|r| r.parse().ok()).unwrap_or(25_000),
+                require_priced: !args.iter().any(|a| a == "--allow-unpriced"),
             };
             match files {
                 (Some(s), Some(pl), Some(c), Some(id)) => match (read_json(&s), read_json(&pl), read_json(&c)) {
@@ -346,7 +551,7 @@ fn main() {
             }
         }
         _ => {
-            eprintln!("battlebrain <schema|validate|id|transition|check|snapshot|shadow|catalogue> ... (see the header of src/bin/battlebrain.rs)");
+            eprintln!("battlebrain <schema|validate|id|transition|check|snapshot|shadow|live|serve|report|rollback|catalogue> ... (see the header of src/bin/battlebrain.rs)");
             2
         }
     };
@@ -363,13 +568,13 @@ mod tests {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))).unwrap();
         v.get("value").cloned().unwrap_or(v)
     }
-    fn run(plan: &Value) -> Result<Value, Vec<bb::Refusal>> {
-        shadow(&fx("valid/snapshot.json"), plan, &fx("shadow/companies.json"), 1, &policy::Params { margin: 0.2, reserve: 25_000 })
+    fn shadow_on(plan: &Value) -> Result<Value, Vec<bb::Refusal>> {
+        shadow(&fx("valid/snapshot.json"), plan, &fx("shadow/companies.json"), 1, &policy::Params { margin: 0.2, reserve: 25_000, require_priced: true })
     }
 
     #[test]
     fn a_shadow_run_writes_valid_records_and_a_shadow_block_only() {
-        let out = run(&fx("shadow/plan.json")).unwrap();
+        let out = shadow_on(&fx("shadow/plan.json")).unwrap();
         assert_eq!(out["mode"], "shadow");
         assert_eq!(out["directive_block"]["mode"], "shadow");
         assert!(bb::validate_decision_block(&out["directive_block"]).is_ok());
@@ -389,12 +594,12 @@ mod tests {
 
     #[test]
     fn replay_is_a_function_of_the_recorded_input_only() {
-        let a = run(&fx("shadow/plan.json")).unwrap();
-        let b = run(&fx("shadow/plan.json")).unwrap();
+        let a = shadow_on(&fx("shadow/plan.json")).unwrap();
+        let b = shadow_on(&fx("shadow/plan.json")).unwrap();
         assert_eq!(a, b, "same recorded input, same records and ids");
         let mut changed = fx("shadow/plan.json");
         changed["freight"][1]["options"][1]["monthly_profit"] = json!(3001);
-        let c = run(&changed).unwrap();
+        let c = shadow_on(&changed).unwrap();
         assert_ne!(a["comparison"]["plan_digest"], c["comparison"]["plan_digest"]);
         assert_ne!(a["records"][1]["id"], c["records"][1]["id"], "a candidate's id follows its input digest");
         assert_eq!(c["records"][1]["body"]["inputs_digest"], c["comparison"]["plan_digest"]);
@@ -404,17 +609,17 @@ mod tests {
     fn a_shadow_run_refuses_inputs_it_cannot_trust() {
         let mut snap = fx("valid/snapshot.json");
         snap["body"]["digest"] = json!("not-a-digest");
-        let e = shadow(&snap, &fx("shadow/plan.json"), &fx("shadow/companies.json"), 1, &policy::Params { margin: 0.2, reserve: 0 }).unwrap_err();
+        let e = shadow(&snap, &fx("shadow/plan.json"), &fx("shadow/companies.json"), 1, &policy::Params { margin: 0.2, reserve: 0, require_priced: true }).unwrap_err();
         assert!(e.iter().any(|r| r.code == "invalid_field" || r.code == "id_mismatch"), "{e:?}");
-        let e = shadow(&fx("valid/snapshot.json"), &fx("shadow/plan.json"), &fx("shadow/companies.json"), 2, &policy::Params { margin: 0.2, reserve: 0 }).unwrap_err();
+        let e = shadow(&fx("valid/snapshot.json"), &fx("shadow/plan.json"), &fx("shadow/companies.json"), 2, &policy::Params { margin: 0.2, reserve: 0, require_priced: true }).unwrap_err();
         assert_eq!(e[0].code, "scope_mismatch");
-        let e = shadow(&fx("valid/decision.json"), &fx("shadow/plan.json"), &fx("shadow/companies.json"), 1, &policy::Params { margin: 0.2, reserve: 0 }).unwrap_err();
+        let e = shadow(&fx("valid/decision.json"), &fx("shadow/plan.json"), &fx("shadow/companies.json"), 1, &policy::Params { margin: 0.2, reserve: 0, require_priced: true }).unwrap_err();
         assert_eq!(e[0].code, "not_a_snapshot");
     }
 
     #[test]
     fn a_hold_is_recorded_as_a_hold_candidate() {
-        let out = shadow(&fx("valid/snapshot.json"), &fx("shadow/plan.json"), &fx("shadow/companies.json"), 1, &policy::Params { margin: 5.0, reserve: 0 }).unwrap();
+        let out = shadow(&fx("valid/snapshot.json"), &fx("shadow/plan.json"), &fx("shadow/companies.json"), 1, &policy::Params { margin: 5.0, reserve: 0, require_priced: true }).unwrap();
         let ours = &out["records"][1];
         assert_eq!(ours["body"]["action"]["kind"], "hold");
         assert_eq!(out["comparison"]["divergence"], "input_model_discrepancy");
@@ -444,6 +649,64 @@ mod tests {
         std::fs::write(d.join("map.json"), json!({"game_tick": 143, "data": {"x": 65}}).to_string()).unwrap();
         assert_eq!(snapshot_from_capture(&d, "fixture", 3, 31).unwrap_err()[0].code, "digest_mismatch");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_live_decision_passes_only_its_gates_and_carries_one_slot() {
+        let p = policy::Params { margin: 0.2, reserve: 25_000, require_priced: true };
+        let mut snap = fx("valid/snapshot.json");
+        snap["body"]["window"] = json!({"tick_from": 74000, "tick_to": 74000, "coherent": true});
+        snap.as_object_mut().unwrap().remove("id");
+        snap["id"] = json!(bb::record_id(&snap));
+        let mut fresh = fx("shadow/companies.json");
+        fresh["game_tick"] = json!(74100);
+        let out = run(&snap, &fx("shadow/plan.json"), &fresh, 1, &p, Some(&LiveGate { max_window_ticks: 0 })).unwrap();
+        assert_eq!(out["mode"], "live");
+        assert_eq!(out["directive_block"]["mode"], "live");
+        assert_eq!(out["directive"]["company_id"], 1);
+        assert_eq!(out["directive"]["settings"], "planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1");
+        assert_eq!(out["directive"]["decision"], out["directive_block"]);
+        assert!(bb::validate_decision_block(&out["directive"]["decision"]).is_ok());
+        // Each gate refuses on its own.
+        let wide = run(&fx("valid/snapshot.json"), &fx("shadow/plan.json"), &fresh, 1, &p, Some(&LiveGate { max_window_ticks: 0 })).unwrap_err();
+        assert!(wide.iter().any(|r| r.code == "incoherent_snapshot"), "{wide:?}");
+        let stale = run(&snap, &fx("shadow/plan.json"), &fx("shadow/companies.json"), 1, &p, Some(&LiveGate { max_window_ticks: 0 })).unwrap_err();
+        assert!(stale.iter().any(|r| r.code == "stale_companies"));
+        let loose = policy::Params { require_priced: false, ..p.clone() };
+        let unpriced = run(&snap, &fx("shadow/plan.json"), &fresh, 1, &loose, Some(&LiveGate { max_window_ticks: 0 })).unwrap_err();
+        assert!(unpriced.iter().any(|r| r.code == "unpriced_policy"));
+        // Shadow mode never writes a directive.
+        assert!(run(&snap, &fx("shadow/plan.json"), &fresh, 1, &p, None).unwrap()["directive"].is_null());
+    }
+
+    #[test]
+    fn a_directive_is_served_once_on_loopback_and_never_twice() {
+        let port = 39_000 + (std::process::id() % 1000) as u16;
+        let t = std::thread::spawn(move || serve_once(port, "{\"company_id\":1}"));
+        let body = (0..50).find_map(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            ureq::get(&format!("http://127.0.0.1:{port}/")).call().ok().and_then(|r| r.into_string().ok())
+        });
+        assert_eq!(body.as_deref(), Some("{\"company_id\":1}"));
+        assert!(t.join().unwrap().unwrap().starts_with("GET "));
+        assert!(ureq::get(&format!("http://127.0.0.1:{port}/")).timeout(std::time::Duration::from_millis(300)).call().is_err(), "served once, then gone");
+    }
+
+    #[test]
+    fn every_committed_result_summary_is_its_records_report() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../research/results");
+        let mut n = 0;
+        for e in std::fs::read_dir(&dir).unwrap().filter_map(Result::ok) {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !(name.starts_with("battlebrain-") && name.ends_with(".json")) {
+                continue;
+            }
+            let rec: Value = serde_json::from_str(&std::fs::read_to_string(e.path()).unwrap()).unwrap();
+            let md = std::fs::read_to_string(e.path().with_extension("md")).unwrap_or_else(|_| panic!("{name}: no .md beside it"));
+            assert_eq!(md, report(&rec), "{name}: regenerate with `battlebrain report {name} > ….md`");
+            n += 1;
+        }
+        assert!(n > 0, "no battlebrain result under research/results");
     }
 
     #[test]
