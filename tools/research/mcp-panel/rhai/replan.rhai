@@ -61,6 +61,10 @@ const ONCE = false;
 
 const TYPES = ["train", "road", "aircraft", "ship"];
 
+// The paths a plan record claims on the mesh, which refuses a claim of none: a plan changes the
+// AI settings PrismaticAI declares there.
+const RECORD_SCOPE = ["tools/research/prismatic-ai/PrismaticAI/info.nut"];
+
 fn bot() {
     for r in api_bots().running ?? [] {
         if r.ai == global::AI { return r; }
@@ -201,12 +205,15 @@ fn model(rec, portfolio, monthly) {
     out
 }
 
-// How many setting changes for this company wait for the owner's approval now (the panel's
-// pending decisions). While any wait, a round proposes nothing new.
+// How many setting changes for this company wait for the owner's approval now (the game server's
+// pending approvals, status().pending; one setting, or a plan of settings). While any wait, a
+// round proposes nothing new.
 fn waiting_for_owner(company) {
     let n = 0;
     for d in status().pending ?? [] {
-        if d.tool == "openttd.ai.set_setting" && (d.args ?? #{}).company == company { n += 1; }
+        let c = (d.args ?? #{}).company;
+        if type_of(c) == "f64" { c = c.to_int(); }
+        if (d.tool == "openttd.ai.set_setting" || d.tool == "openttd.ai.set_settings") && c == company { n += 1; }
     }
     n
 }
@@ -240,7 +247,7 @@ fn say(text) {
 fn record(company, summary) {
     shared_set(`replan.${company}`, summary);
     try {
-        mesh_record_write(#{ kind: "plan", task: `openttd:replan:${company}`, scope: [],
+        mesh_record_write(#{ kind: "plan", task: `openttd:replan:${company}`, scope: global::RECORD_SCOPE,
             title: `replan of company ${company + 1} on ${summary.date}: ${if summary.model.adopt { "switch" } else { "hold" }}`,
             body: to_json(summary) });
     } catch (err) {

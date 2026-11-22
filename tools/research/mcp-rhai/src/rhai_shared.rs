@@ -462,6 +462,35 @@ mod tests {
         assert_eq!(eval_with(&store, &script).0, json!("map"));
     }
 
+    /// replan's plan record claims a path, because the mesh refuses a claim of none (400
+    /// invalid_input "a claim names at least one path"), and every path it claims is in the
+    /// repository.
+    #[test]
+    fn a_replan_record_claims_paths_that_exist() {
+        let written = Rc::new(RefCell::new(Vec::<Value>::new()));
+        let mut e = guard_engine(Rc::new(Shared::default()), Rc::new(RefCell::new(Vec::new())));
+        let w = written.clone();
+        e.register_fn("mesh_record_write", move |m: rhai::Map| -> rhai::Dynamic {
+            w.borrow_mut().push(rhai::serde::from_dynamic(&rhai::Dynamic::from_map(m)).unwrap());
+            rhai::Dynamic::UNIT
+        });
+        e.register_fn("shared_set", |_: &str, _: rhai::Dynamic| rhai::Dynamic::UNIT);
+        e.register_fn("to_json", |_: rhai::Dynamic| String::from("{}"));
+        let script = format!("{}\nrecord(2, #{{ date: \"1950-01-01\", model: #{{ adopt: true }} }});",
+            head_of("replan", "let last = ();"));
+        e.run(&script).unwrap_or_else(|err| panic!("{err}"));
+        let written = written.take();
+        assert_eq!(written.len(), 1, "one record per round");
+        assert_eq!(written[0]["task"], "openttd:replan:2");
+        let scope = written[0]["scope"].as_array().expect("scope is a list");
+        assert!(!scope.is_empty(), "the mesh refuses a claim of no path");
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        for p in scope {
+            let p = p.as_str().expect("a path");
+            assert!(repo.join(p).is_file(), "{p} is not in the repository");
+        }
+    }
+
     /// The key's format lives in fr_author.rhai alone: no other script of the library spells it.
     #[test]
     fn no_other_script_spells_the_planner_key() {
