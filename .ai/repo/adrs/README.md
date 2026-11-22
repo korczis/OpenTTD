@@ -28,9 +28,10 @@ themselves stay hand-written.
 <!-- surfaces:begin ai-adrs as=pie -->
 ```mermaid
 pie showData title Decisions by status
-    %% links: README.md?col=Status&filter=accepted#index | README.md?col=Status&filter=superseded#index
+    %% links: README.md?col=Status&filter=accepted#index | README.md?col=Status&filter=superseded#index | README.md?col=Status&filter=proposed#index
     "accepted" : 36
     "superseded" : 1
+    "proposed" : 1
 ```
 <!-- surfaces:end ai-adrs -->
 
@@ -74,4 +75,5 @@ pie showData title Decisions by status
 | [adr-0036](0036-prismatic-ai-settings-are-tuned-by-a-deterministic-genetic-algorith.md) | accepted | PrismaticAI's settings are tuned by a deterministic genetic algorithm over the LAN battle, and a tuned setting reaches a default only through held-start duels |
 | [adr-0037](0037-battlebrain-in-this-fork-is-the-one-authority-for-the-freigh.md) | accepted | Battlebrain in this fork is the one authority for the freight-line decision; planner and AlgoGlyph only produce candidates, the executor only applies |
 | [adr-0038](0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md) | accepted | One approval core on the game server: a plan is approved as a whole and executes on approval, and every channel (web, console, game command, chat) is an adapter to it |
+| [adr-0039](0039-algoglyph-is-a-git-submodule-pinned-at-one-commit-and-its-ru.md) | proposed | AlgoGlyph is a git submodule pinned at one commit, and its Rust kernels run in-process as native-rust catalogue entries |
 <!-- surfaces:end ai-adrs -->

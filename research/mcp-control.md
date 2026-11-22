@@ -885,10 +885,12 @@ exits 11 while one is stale; `tools/surfaces/surfaces sync` and `check` run them
 - **Portfolio.** From the best option of every passenger and freight candidate, the planner picks
   the set of investments with the highest total score that fits the budget, a 0/1 knapsack with
   money in thousands. When `MCP_ALGOGLYPH_DIR` names a checkout of AlgoGlyph's flow runner,
-  AlgoGlyph's `knapsack-dp` kernel solves it. `mcp-e2e` takes `~/dev/algoglyph-wt/main` (a checkout of
-  origin/main) or `~/dev/algoglyph` (AlgoGlyph's main carries every planner kernel since 1b8e009), else the newest stacked worktree under
-  `~/dev/algoglyph-wt/feature/`. Either way it takes a checkout only when its flow CLI lists
-  `knapsack-dp`, `track-planning`, `transport-investment` and `action-plan`. On 2026-11-17 main and
+  AlgoGlyph's `knapsack-dp` kernel solves it. `mcp-e2e` sets it to the installed checkout that is
+  cleanly at the pinned commit of the submodule `tools/research/vendor/algoglyph`
+  (`tools/research/algoglyph-pin runner`; ADR 0039): the submodule, else `~/dev/algoglyph-wt/main`
+  or `~/dev/algoglyph`. A checkout at any other commit is passed over. The pin record lists the
+  kernels the stack needs (`knapsack-dp`, `track-planning`, `transport-investment`, `action-plan`),
+  and `algoglyph-pin bump` refuses a commit without them. On 2026-11-17 main and
   `exact-prices` gave identical answers on all four kernels. Otherwise the same dynamic programme
   runs built in, and a unit test pins it to AlgoGlyph's answer on a known case. The answer names
   the solver, the kernel (id, plate, work) and its input. `/world` shows the portfolio and its

@@ -32,6 +32,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "algoglyph-kernels"
+version = "0.1.0"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1106,6 +1110,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 name = "mcp-rhai"
 version = "0.1.0"
 dependencies = [
+ "algoglyph-kernels",
  "bytes",
  "duckdb",
  "libc",
