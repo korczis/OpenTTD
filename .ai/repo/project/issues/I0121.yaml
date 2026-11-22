@@ -1,0 +1,32 @@
+id: I0121
+milestone: every-battle-match-explains-itself
+title: "Cross-arena replays run on the original's game build and reproduce it, or the record names the divergence with a desync log"
+slug: cross-arena-replays-identical
+priority: p1
+profile: deep-work
+parallel_safe: false
+objective: "Make a replay comparable: pin the game build per edition (the original's build id from I0120), refuse or flag a replay on a different build, and compare the replay with its original tick by tick using the existing desync facility (`-d desync`) or REF Q samples. Then re-run the four replays of the latest edition on matching builds and record how many are identical and, for each that is not, the first diverging tick and its cause."
+why: "External review 2026-11-22 (digest C-32). research/ai-battle/README.md records 0 of 4 replays identical to their original on another arena (latest record battle-20261122T045411-a80cc94a). The replay hosts ran different game builds (20261119-master-gdf1e05e7d8 vs 20261120-master-m17653b726e), so the non-reproduction may be a build confound rather than nondeterminism; until that is separated the benchmark's cross-machine reproducibility is unknown."
+scope:
+  - "tools/research/ai-battle/battle.py"
+  - "tools/research/test_ai_battle.py"
+  - "research/ai-battle/README.md"
+  - "research/results/**"
+non_scope:
+  - "Fixing nondeterminism inside an AI; a deterministic divergence found in an AI is filed as its own issue"
+depends_on:
+  - I0120
+serves:
+  - "internal-state-is-observable-reproducibly#a-battle-explains-itself"
+acceptance_criteria:
+  - "A replay records its build id beside the original's; a mismatch is refused, or recorded as confounded and excluded from the identical count"
+  - "The four replays of the latest edition are re-run on matching builds; the README states n/4 identical with the first diverging tick for each non-identical one"
+  - "Where a divergence remains on a matching build, a desync log or REF Q diff locating it is committed under research/results/"
+validation:
+  - "python3 -m unittest tools/research/test_ai_battle.py"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

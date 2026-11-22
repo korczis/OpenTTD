@@ -1,0 +1,36 @@
+id: I0164
+milestone: evaluations-are-fair-pre-registered-and-paired
+title: "A pre-registered three-arm experiment compares the unplanned bot, the planned bot and the planned bot steered by Prismatic's live decision, on the same maps, seeds, executor and start"
+slug: three-arm-prismatic-experiment
+priority: p1
+profile: deep-work
+parallel_safe: false
+objective: "Run three arms on the same seed from the same held start, each against the same rival. Arm 1 is PrismaticAI on autopilot without a plan. Arm 2 is the same bot given the planner's portfolio. Arm 3 is arm 2 plus Prismatic's live directive, pulled through the panel's /api/decision/pull each time it is due. The protocol (I0161) fixes the metrics, three paired seeds plus held-out seeds, the repeats and the exclusion rule before the first run. It also names the approval channel arm 3 uses: the recorded auto-approve channel, switched on for the run by the owner, or an operator. Each record names that channel. Arm 3 counts only when it reached a live prismatic_api. Otherwise the run is labelled SIMULATED and excluded. The report lists every failure and exclusion."
+why: "External review 2026-11-22 (digest B-30). research/results/ on origin/master holds 10 ab, 30 ablation, 162 duel, 702 battle, 8 battlebrain-shadow and 2 postmortem files, and none has a Prismatic arm. The decision path has run only against a stand-in (research/agent-loop.md:78-84), and I0092's live check reported 'NOT RUN live (nothing on 4004)'. research/experiment-template.md is a template only."
+scope:
+  - "tools/research/mcp-duel"
+  - "tools/research/test_mcp_duel.py"
+  - "research/results/**"
+  - "research/experiments/**"
+non_scope:
+  - "Editing prismatic-platform; if its decision endpoint does not run, arm 3 is NOT RUN and the issue records what it needs from that repository"
+  - "The freight-line decision, which ADR 0037 gives to Battlebrain (its own comparison is I0154)"
+depends_on:
+  - I0161
+  - I0163
+  - I0168
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#evaluations-are-pre-registered-and-paired"
+acceptance_criteria:
+  - "The protocol's commit precedes every record, and every record names its arm, its approval channel and the Prismatic answer it applied"
+  - "A test excludes a fixture arm-3 record that got no prismatic_api answer and labels it SIMULATED"
+  - "The paired report compares arms 1-2 and 2-3 per metric with intervals, reports the held-out seeds separately, and lists every failed or excluded run"
+validation:
+  - "python3 -m unittest tools/research/test_mcp_duel.py"
+  - "tools/research/preregistration check research/experiments"
+  - "tools/research/paired-report research/experiments/<id>.yaml"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

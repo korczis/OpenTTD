@@ -1,0 +1,37 @@
+id: I0215
+milestone: algoglyph-is-accountable
+title: "Injected faults on the track-plan-to-build path (AlgoGlyph missing, timeout, malformed output, tick change, partial build, command never confirmed) each end in an explicit refusal or mismatch report"
+slug: track-plan-fault-injection
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Add an offline fault suite for the path from algoglyph.track_plan and linecost.rs to mcp-human's rail build, driven by a fake flow runner (a fixture directory set as MCP_ALGOGLYPH_DIR whose `flow` misbehaves on demand) and recorded game answers: (1) no AlgoGlyph checkout, (2) a kernel that outlives the deadline, (3) an answer that is not JSON, is JSON of the wrong shape, or fails its domain check, (4) a world whose tick or tiles changed between the plan's snapshot and the build, (5) a build that stops after some pieces, (6) a command the game accepted whose effect never appears in the read-back. Each case asserts the refusal or mismatch the receipt (I0214) records, and that a fallback is never labelled as the kernel's answer. The live counterpart on a running stack is I0177's chaos check; this suite is the fast, offline one for the track path."
+why: "External review 2026-11-22 (digest A-40). The only failure handling with code is the hub's 120 s kernel timeout (tools/research/mcp-rhai/src/hub_algoglyph.rs:23, :78-80), the missing-checkout error (:60-62) and the answer parser (:87-90, tested at :151 for shape only); mcp-human's kernel falls back to its builtin on any failure (tools/research/mcp-human/src/algoglyph.rs:6-7), and its missing-piece read-back exists (rail.rs:290 `missing`) without a test that a partial build is reported as one. Peers cover parts on other paths: the flow serve's deadline (I0160), domain checks (I0159), a coherent read (I0138), partial plans (I0175) and live chaos (I0177); no test injects these faults on the track plan."
+scope:
+  - "tools/research/mcp-rhai/src/linecost.rs"
+  - "tools/research/mcp-human/src/rail.rs"
+  - "tools/research/mcp-human/src/algoglyph.rs"
+  - "tools/research/mcp-rhai/fixtures/algoglyph-faults/**"
+  - "research/mechanisms/planner-and-algoglyph.md"
+non_scope:
+  - "The live chaos check (I0177)"
+  - "Fixing the kernel; a kernel defect is reported to AlgoGlyph, which is used from outside"
+depends_on:
+  - I0138
+  - I0159
+  - I0160
+  - I0214
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#algoglyph-plans-are-accountable"
+acceptance_criteria:
+  - "Six named cases, each with its expected outcome written in the test before it first runs; all pass offline with no game and no real AlgoGlyph"
+  - "No case yields a priced line or a build step from a failed kernel; a fallback is labelled with its reason in the answer and the receipt"
+  - "A partial build is recorded as partial with the pieces built and the money spent, never as rolled back or complete"
+  - "research/mechanisms/planner-and-algoglyph.md lists the six cases and the outcome each one proves"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml algoglyph_fault"
+  - "cargo test --release -q --manifest-path tools/research/mcp-human/Cargo.toml"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

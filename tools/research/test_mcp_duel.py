@@ -7,10 +7,10 @@ Run: python3 -B tools/research/test_mcp_duel.py
 
 The duel's Python is loaded from the heredoc of tools/research/mcp-duel, so what is tested is what
 runs. A fake panel on 127.0.0.1 answers the routes the duel calls. Its /api/db/query runs each
-statement with the DuckDB CLI on a file made from the store's own schema (`TABLES`, read from
-tools/research/mcp-rhai/sql/tables/*.sql: the sinks the panel's tap and the hub share since I0084)
-and answers it as tools/research/mcp-rhai/src/bus_sinks.rs does: {columns, rows, count, capped}, at
-most QUERY_CAP rows (read from bus_sinks.rs) and `capped` beyond. Its
+statement with the DuckDB CLI on a file made from the store's own schema (`TABLES`: the files of tools/research/mcp-rhai/sql/tables,
+in name order, as the store runs them at every open, sql/README.md) and answers it as
+tools/research/mcp-rhai/src/bus_sinks.rs (the sinks the panel's tap and the hub share since I0084) does: {columns, rows, count, capped}, at most QUERY_CAP rows (read
+from the same source) and `capped` beyond. Its
 POST /api/bus/publish accepts only the kinds panel_events.rs declares external, with the four fields
 refuse_external asks for. The store tests are skipped without a `duckdb` on PATH; the fallback and
 the verdict's pure parts run without it.
@@ -37,7 +37,8 @@ sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 SCRIPT = HERE / "mcp-duel"
-STORE_RS = HERE / "mcp-rhai" / "src" / "bus_sinks.rs"  # the store's schema and query cap (I0084)
+STORE_RS = HERE / "mcp-rhai" / "src" / "bus_sinks.rs"  # the store's query cap (I0084)
+TABLES_DIR = HERE / "mcp-rhai" / "sql" / "tables"  # the store's schema, one file per table
 EVENTS_RS = HERE / "mcp-rhai" / "src" / "panel_events.rs"
 NOTE = ROOT / ".ai" / "repo" / "knowledge" / "curated" / "the-panel-bus-carries-these-event-kinds.md"
 DUCKDB = shutil.which("duckdb")
@@ -53,9 +54,7 @@ def load_duel():
 
 duel = load_duel()
 QUERY_CAP = int(re.search(r"pub const QUERY_CAP: usize = (\d+);", STORE_RS.read_text())[1])
-# The store's tables, one file each since 6ec3577d7b (build.rs embeds sql/tables/*.sql and the
-# store runs them in name order at every open; bus_sinks.rs holds no TABLES string any more).
-TABLES = "\n".join(p.read_text() for p in sorted((HERE / "mcp-rhai" / "sql" / "tables").glob("*.sql")))
+TABLES = "\n".join(f.read_text() for f in sorted(TABLES_DIR.glob("*.sql")))
 EXTERNAL = set(re.findall(r'k\("([a-z._]+)", By::External', EVENTS_RS.read_text()))
 READ_ONLY = ("SELECT", "WITH", "DESCRIBE", "SUMMARIZE", "SHOW")
 

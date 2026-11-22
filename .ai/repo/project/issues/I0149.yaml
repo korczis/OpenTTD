@@ -1,0 +1,33 @@
+id: I0149
+milestone: the-planner-reads-one-coherent-priced-world
+title: "One sentence asking to connect the two largest towns is carried out end to end: towns ranked by population, rail, road and air priced from live costs and the game's quote, one plan approved, built, and the observed diff recorded"
+slug: largest-towns-vertical
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Give the intent resolver a population ordering over openttd://towns ('largest', 'nejvetsi'), so 'connect the two largest towns' selects them by population, not by industry production. For that pair the planner prices each mode it can build (track-planning cost, road and airport costs from economy/prices, revenue from I0144's quote) with payback and a sensitivity band, presents one plan for approval of its exact arguments, executes it through the existing approval path, and records the world before and after."
+why: "External review 2026-11-22 (digest A-28). tools/research/mcp-rhai/src/intent.rs:137 maps 'largest' to most_productive, and :444 sorts by production; `git grep population tools/research/mcp-rhai/src/intent.rs` finds nothing. The mode-choosing planner and calibration exist (I0050, I0053), and one console sentence is carried out with approval (899fd2e14d), but no vertical ranks towns by population and records the observed diff."
+scope:
+  - "tools/research/mcp-rhai/src/intent.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-intent.rs"
+  - "tools/research/mcp-intent-check"
+  - "research/results/**"
+non_scope:
+  - "A forked or cloned simulation of the plan before building"
+depends_on:
+  - I0138
+  - I0144
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "'the two largest towns' resolves to the two most populous towns (unit test on a fixture), in English and Czech"
+  - "The answer prices every buildable mode with payback and a low/high band, and names its snapshot"
+  - "mcp-intent-check runs the sentence on a seeded game, approves, builds and records the before/after diff under research/results/"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-intent"
+  - "tools/research/mcp-intent-check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

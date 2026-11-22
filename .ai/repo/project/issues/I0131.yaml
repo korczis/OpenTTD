@@ -1,0 +1,32 @@
+id: I0131
+milestone: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "PrismaticAI's road search crosses the slopes the game lets a road climb, so hilly maps no longer stop its intercity routes"
+slug: prismatic-ai-road-slopes
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Let RoadStepCost and the road A* accept a sloped tile when the step's direction is one a straight road can be built on (inclined along the axis, or with a foundation the build_on_slopes setting allows), at a higher cost, and verify the laid road with the existing BuildRoadAlong error path."
+why: "External review 2026-11-22 (digest C-30): AAAHogEx builds over harder terrain, while PrismaticAI's road search treats every non-flat tile as impassable (tools/research/prismatic-ai/PrismaticAI/intercity.nut:51-52, the comment citing ERR_LAND_SLOPED_WRONG). The A* expands four neighbours per tile (intercity.nut FindRoadPath) and knows the step direction it needs. The rail search shows that a hilly seed (1807087905) starves the bot (rail.nut:1191-1193 comment)."
+scope:
+  - "tools/research/prismatic-ai/PrismaticAI/intercity.nut"
+  - "research/results/**"
+non_scope:
+  - "Bridges and tunnels for roads"
+  - "The rail pathfinder"
+depends_on:
+  - I0130
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#prismatic-ai-grows-and-recovers"
+acceptance_criteria:
+  - "A sloped tile is passable when a road along the step's axis can be built there (decided from AITile.GetSlope and the step direction, with build_on_slopes read from AIGameSettings), at a cost above a flat tile"
+  - "A road that fails on a slope anyway goes through I0130's cleanup and blacklist"
+  - "On the hilly seed 1807087905 an ablation records more intercity road routes built than before, and the fitness seed still passes"
+validation:
+  - "python3 -m unittest tools/research/test_ai_battle.py"
+  - "python3 tools/research/ai-battle/battle.py fitness"
+  - "python3 tools/research/ai-battle/battle.py check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

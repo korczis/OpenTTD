@@ -1,0 +1,31 @@
+id: I0181
+milestone: every-changed-line-is-tested
+title: "Panel and hub JavaScript is covered by real Playwright end-to-end tests whose V8 coverage feeds the changed-line gate"
+slug: panel-js-v8-coverage
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Run the panel and hub Playwright suites with V8 coverage collection (NODE_V8_COVERAGE for node tests, page.coverage for browser pages), convert it to the gate's common format against tools/research/mcp-panel/static and the hub assets, and make tools/coverage/changed-lines judge changed JavaScript lines by it. Unit tests of helpers do not count for UI code: a changed line in a page script must be run by a real browser test with real clicks."
+why: "Owner order 2026-11-22: UI and browser code is covered by real end-to-end Playwright tests in a real browser, never only by unit tests of its helpers, measured by V8 coverage from the Playwright suite (template: sonic-playground scripts/coverage.mjs). The fork's rule web-ui-is-covered-end-to-end (v2) checks that pages are declared and crawled, but no coverage of page scripts is measured."
+scope:
+  - "tools/coverage/**"
+  - "tools/research/mcp-panel/test/**"
+  - "tools/research/e2e-coverage"
+  - ".ai/repo/rules/project/web-ui-is-covered-end-to-end.v2.md"
+non_scope:
+  - "Rewriting the panel; tests are added where changed lines lack them"
+depends_on:
+  - I0180
+serves:
+  - "openttd-validates-agent-driven-engineering#every-changed-line-is-tested"
+acceptance_criteria:
+  - "A Playwright run produces V8 coverage for every panel and hub page it loads, converted to the gate's format"
+  - "A fixture change to a page script with no browser test fails the gate with file:line; a Playwright test that clicks through it makes it pass"
+  - "The web-ui rule cites the gate as its validator for changed lines"
+validation:
+  - "tools/coverage/changed-lines --base origin/master"
+  - "node --test tools/research/mcp-panel/test/*.test.mjs"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

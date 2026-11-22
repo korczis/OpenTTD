@@ -1,0 +1,30 @@
+id: I0171
+milestone: prismatic-closes-one-real-loop
+title: "A check tells which cross-repository pieces of the decision path are still missing: Prismatic's observed_digest echo, the bridge's operator approval on its main, and tick and digest on the bridge's /companies"
+slug: agent-loop-cross-repo-deps
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "tools/research/agent-loop-deps reads, without changing anything, the state of the other repositories the loop depends on. It prints one OBSERVED line per dependency with its locator: does a live prismatic_api answer echo observed_digest; does openttd-prismatic-bridge's main contain feature/operator-approval (09afefa) and the decision fixes of its origin/main; does the bridge's /companies carry a tick and a digest. research/agent-loop.md's 'What is missing' cells for Decide, Authorize, Observe and Execute come from its output, and a dependency that is met moves its row. For each dependency the issue states what the other repository must do: prismatic-platform echoes observed_digest in /api/openttd/decision; the bridge merges feature/operator-approval into its main; the bridge's /companies adds tick and digest."
+why: "External review 2026-11-22 (digest C-39, B-36). research/agent-loop.md:43: the checked-out bridge is 17 commits behind its origin/main and lacks the decision fixes. :52: the Python bridge's /companies carries no tick or digest. :53: Prismatic does not echo observed_digest. :55: the bridge's operator-approval branch is not on its main. The panel already reads an echoed digest when one is present (tools/research/mcp-rhai/src/panel_decision.rs:230), so the fork's side is ready, but nothing checks the other side."
+scope:
+  - "tools/research/agent-loop-deps"
+  - "tools/research/test_agent_loop_deps.py"
+  - "research/agent-loop.md"
+non_scope:
+  - "Editing openttd-prismatic-bridge or prismatic-platform; merging the bridge's branch is the bridge's own decision (research/agent-loop.md:104-105)"
+  - "The fork's own approval authentication (I0182)"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
+acceptance_criteria:
+  - "Tests on fixture repositories and a fixture server cover met, missing and unreachable for each dependency; unreachable is NOT RUN, never met"
+  - "One run against this Mac's checkouts and services is recorded, and research/agent-loop.md's cells match it"
+  - "The issue's result lists, per unmet dependency, the request to the owning repository"
+validation:
+  - "python3 -m unittest tools/research/test_agent_loop_deps.py"
+  - "tools/research/agent-loop-deps"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

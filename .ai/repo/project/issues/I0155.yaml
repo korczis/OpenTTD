@@ -1,0 +1,30 @@
+id: I0155
+milestone: battlebrain-decides-live-with-rollback
+title: "A red-team review attacks the live decision path (replayed key, stale block, over-wide window, unpriced line, second writer, self-approval) and records each attack and the refusal that stopped it"
+slug: battlebrain-red-team-review
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Run a scripted adversarial review against a seeded test game with Battlebrain live: each attack has a script, an expected refusal code and the observed result; any attack that gets through is filed as an issue before acceptance. A reviewer who did not build the path (another peer or model) signs off on the record."
+why: "External review 2026-11-22 (digest C-49, Phase 08). The refusals exist as unit tests (I0095 codes in research/battlebrain/README.md:72-87; I0097 live gates README:156-167; decision_gate in tools/research/mcp-rhai/src/panel_decision.rs:654-700), but none has been tried against a running game, and no review record exists."
+scope:
+  - "tools/research/battlebrain-red-team"
+  - "research/results/**"
+  - "research/battlebrain/README.md"
+non_scope:
+  - "Fixing what the review finds (each becomes its own issue)"
+depends_on:
+  - I0151
+  - I0152
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "Every attack listed in the title runs and yields its expected refusal code on a seeded game"
+  - "The review record names the reviewer and lists any attack that passed with its filed issue"
+validation:
+  - "tools/research/battlebrain-red-team --test"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -256,6 +256,30 @@ The directive sets `planned_freight_only=1` and one `fr_*` slot.
   key, on or before its stale date in game time.
 - `battlebrain rollback` gives the directive back to the baseline (`planned_freight_only=0`).
 
+## Executor binding after the red-team review (I0117)
+
+The Phase 08 review found four ways a live decision could execute stale, partly or forged. They
+are closed here:
+
+- **The block binds the payload.** `battlebrain-decision/v2` carries `settings_digest`, the digest
+  of the exact settings string, and the executor recomputes it (`payload_mismatch`).
+- **One author per slot.** A directive without a decision block may not set any `fr_*` slot
+  (`fr_needs_decision`). The rollback (`planned_freight_only=0`) and other settings still pass.
+- **One approval that expires.** A live decision is applied only through
+  `openttd.ai.set_settings`: all settings under one approval, applied at once, expiring at the end
+  of the decision's stale date (`live_expiry`). A game without that tool refuses the decision
+  (`no_atomic_apply`).
+- **No leftover slots.** The live directive clears fr2..fr16 (`-1`), so no slot handed over
+  earlier is built beside the decision.
+- **No stale, unbacked or repeated decision.** `battlebrain live` refuses a fallback solver, a
+  missing kernel, and a snapshot older than its `max_age_days` at the fresh read.
+  `battlebrain serve` refuses a key it has served before; its ledger is kept across runs.
+- **Before a live pull,** the shared key `planner.<company>` is set to `battlebrain`, so the
+  replan service stands down.
+
+Still open: the panel's loopback `/api/approve`, `/api/auto-approve` and armed UI input are not
+bound to the owner. That is outside this slice and is the owner's operating rule.
+
 ## Cutover thresholds (the Phase 04 gate)
 
 A decision may go live only when all of these hold. Each one is a correctness or safety

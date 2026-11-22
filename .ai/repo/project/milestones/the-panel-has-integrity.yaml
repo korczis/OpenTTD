@@ -1,0 +1,24 @@
+id: the-panel-has-integrity
+title: "The panel has integrity: every control works, every view is derived"
+slug: the-panel-has-integrity
+order: 190
+priority: p2
+problem: "PR #47 (239a5c5d00) gave the panel one web access policy, one API client that shows every failure and a generic crawl of every control (tools/research/mcp-ui-crawl-check), but its last run was not green (625 PASS, 7 FAIL, 5 SILENT, 611 UNREACHED, recorded only in the PR description), a link is fetched and never followed, so Back/Forward and a deep-link reload are not walked (mcp-ui-crawl-check:15, :155-165), and a disabled control is UNREACHED with no reason shown (:206). The bot-settings card marks a setting `live` from the AI's own in_game flag (static/bots.js:141) even when the binary cannot change it (:196); the one-approval Apply through openttd.ai.set_settings is I0200's. Two form renderers coexist: components.js `schemaFields`/`operationForm` (:58, :199), which ignore minimum, maximum and multipleOf, and bots.js `kindOf`/`controlMarkup` (:27, :89). The cluster is a table with one alive/down badge (static/app.js:58-61, panel.rs:1528-1541) and a registry record can advertise an MCP endpoint on port 0, because the panel writes `args.mcp_port` verbatim once at start (panel.rs:1016-1018, bin/mcp-panel.rs:198-200). Selection lives per page (components.js:49 patchAddress); no pick in the map, a graph, a table or the plan reaches the other views. The planner's candidates, the action-plan DAG, approvals and history are spread over the home and World pages, with no Director view that joins them. Outside the panel, the NoirGFX selection matrix was proven by hand for two cases (research/noirgfx/README.md:44), and the contributor getting-started path (README.md:1161) is executed by no check and never reaches the panel."
+outcome: "The generic crawl reports no DEAD, SILENT, FAIL or UNREACHED control on any panel or hub page against a disposable stack, walks Back/Forward and a deep-link reload for every page and every address-state parameter, and accepts a disabled control only when the control states why. Every bot-settings and hub form is drawn by one schema-driven renderer that honours min, max, step and enum and keeps a draft across refreshes, and the `live` badge appears only when the running binary can apply the change. The cluster shows each instance's separate states (process, endpoint, token, authenticated, catalogue, game) and refuses a port-0 endpoint, as an ECharts topology graph with an accessible table, derived from the registry and probes. One selection model links map, graphs, tables, plan and cluster through the address. A Director page in the one shell joins opportunities, the action-plan DAG, the approval lifecycle and history. The NoirGFX selection matrix and the contributor-to-panel operator path are each executed by a check."
+acceptance_criteria:
+- "tools/research/mcp-ui-crawl-check against a disposable stack and an isolated hub exits 0, its JSON report is committed under research/results/, and it walks Back, Forward and a reload of every page and every address-state parameter"
+- "A disabled control passes the crawl only with a stated reason (title, aria-describedby or a visible note); otherwise it fails"
+- "The bot-settings card and every hub operation form are drawn by one renderer from a JSON Schema that honours minimum, maximum, multipleOf and enum; test/one-kit.test.mjs fails on a second renderer"
+- "A setting is badged live only when the instance publishes openttd.ai.set_setting or set_settings, and every disabled setting says why"
+- "/api/instances reports process, endpoint, token, authenticated, catalogue and game states separately, never advertises port 0, and the cluster card shows them as an ECharts graph of the registry's real relationships with a table of the same rows"
+- "A pick in any registered view updates every other view and the address, and a reload restores it"
+- "A Director page in static/shell.js shows opportunities, the action-plan DAG, the approval lifecycle and history, each mark leading to its page"
+- "noirgfx check --selection runs the eight-case selection matrix in isolated profiles, and an operator-path check runs the getting-started walkthrough from configure to a decided, read-back request and a run record, never approving its own request"
+validation:
+- "node --test tools/research/mcp-panel/test/*.test.mjs"
+- "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+- "tools/research/e2e-coverage"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
