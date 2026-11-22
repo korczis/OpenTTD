@@ -37,9 +37,13 @@
 // ones the bot declares. Edit the constants while it runs; the service reloads within a second.
 import "ttd" as ttd;
 import "build_plan" as bp;
+import "fr_author" as fa;
 
 // The AI whose company is re-planned: the first running company of it (/api/bots).
 const AI = "PrismaticAI";
+// This service's name for the planner key planner.<company> (fr_author.rhai): while the key names
+// another writer (Battlebrain's directive during a cutover), a round proposes nothing.
+const WRITER = "replan";
 // Game months between two plans, and seconds between two looks at the date.
 const EVERY_MONTHS = 1;
 const ROUND_S = 20;
@@ -301,15 +305,15 @@ fn plan_round(b) {
     let diff = changes(settings_of(p.settings), b.settings ?? []);
     let applied = #{ pending: [], refused: [], lines: [] };
     let waiting = waiting_for_owner(b.id);
-    let owner_of = shared_get(`planner.${b.id}`) ?? "replan";
-    if owner_of != "replan" {
+    let held = fa::refusal(b.id, global::WRITER);
+    if type_of(held) != "()" {
         // Another planner holds the company (e.g. Battlebrain's directive): one writer per company.
-        print(`   holding: company ${b.id + 1} is planned by ${owner_of} (shared key planner.${b.id})`);
+        print(`   holding: ${held.why}`);
     } else if waiting > 0 {
         // The owner has not answered the last proposal yet; a new one would only pile up beside it.
         print(`   holding: ${waiting} earlier change(s) for company ${b.id + 1} still wait for the owner's approval`);
     } else if m.adopt && !diff.is_empty() {
-        applied = bp::apply(#{ build: #{ settings: diff } });
+        applied = bp::apply_as(#{ build: #{ settings: diff } }, global::WRITER);
         for l in applied.lines { print(`   ${l}`); }
         say(`new plan for ${b.name}: ${diff.len()} setting(s) wait for your approval (${applied.pending}); ${m.why}`);
     } else if diff.is_empty() {
@@ -321,7 +325,8 @@ fn plan_round(b) {
     let summary = #{ date: r.date, company: b.id, bot: b.name, rank: r.rank, of: r.of, value: r.value, value_by_month: r.months,
                      finances: f, competitors: others, competition: comp, portfolio: chosen,
                      investment_k: portfolio.investment_k, predicted_monthly: monthly, record: rec,
-                     model: m, proposed: diff.keys(), pending: applied.pending, refused: applied.refused };
+                     model: m, proposed: if type_of(held) == "()" { diff.keys() } else { [] }, held: held,
+                     pending: applied.pending, refused: applied.refused };
     record(b.id, summary);
     summary
 }

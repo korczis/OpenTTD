@@ -13,7 +13,9 @@
 // build_plan::apply sends the settings the planner proposed to the running bot through
 // openttd.ai.set_setting, and the answer shown in the game names the approvals now waiting. It
 // approves nothing -- the gate is the owner's setting, and the bot builds after the owner approves.
-// A find sentence is answered and nothing is applied.
+// A find sentence is answered and nothing is applied. While the company's planner key names another
+// planner (fr_author.rhai, e.g. Battlebrain during a cutover), no freight-line slot is sent and the
+// answer shown in the game says who plans them.
 
 import "build_plan" as build_plan;
 
@@ -61,7 +63,10 @@ loop {
             // A build sentence is carried out here, not merely reported: the settings go to the
             // running bot and the answer tells the owner what is waiting for their approval.
             if !("http_error" in r) && (r.intent.action ?? "find") == "build" {
-                let done = build_plan::apply(r.answer);
+                let done = build_plan::apply_as(r.answer, "ask_relay");
+                if !done.withheld.is_empty() && !done.pending.is_empty() {
+                    answer = done.lines[0] + "\n" + answer;
+                }
                 if !done.pending.is_empty() {
                     let ids = "";
                     for id in done.pending { ids += `#${id} `; }

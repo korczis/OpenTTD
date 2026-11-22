@@ -252,4 +252,153 @@ mod tests {
         assert!(matches!(s.set("one.more", json!(1), "w", None), Err(Refused::Invalid(_))));
         assert_eq!(s.set("k0", json!("again"), "w", None), Ok(2), "an existing key still updates");
     }
+
+    #[test]
+    fn the_planner_key_check_reads_this_panels_memory() {
+        let s = Shared::default();
+        assert!(fr_refusal_in(&s, 0, "replan").is_none(), "unset: every writer as before");
+        assert!(fr_refusals_in(&s, "replan").is_empty());
+        s.set("planner.0", json!("battlebrain"), "runbook", Some(0)).unwrap();
+        s.set("planner.1", json!("replan"), "runbook", Some(0)).unwrap();
+        s.set("planner.x", json!("battlebrain"), "runbook", Some(0)).unwrap();
+        s.set("replan.0", json!({"date": "1950-01-01"}), "replan", None).unwrap();
+        assert!(fr_refusal_in(&s, 0, "battlebrain").is_none(), "the holder itself");
+        assert_eq!(fr_refusal_in(&s, 0, "replan").unwrap()["holder"], "battlebrain");
+        let all: Vec<i64> = fr_refusals_in(&s, "panel_bot").iter().map(|r| r["company"].as_i64().unwrap()).collect();
+        assert_eq!(all, [0, 1], "every planner key of a company, none of another prefix");
+        assert_eq!(fr_refusals_in(&s, "replan").len(), 1);
+        s.set("planner.0", Value::Null, "runbook", None).unwrap();
+        assert!(fr_refusal_in(&s, 0, "replan").is_none(), "a null value hands the slots back");
+    }
+
+    // ------------------------------------------------------------- the Rhai side of the same rule
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    const RHAI_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai");
+
+    /// An engine that resolves `import` from mcp-panel/rhai as the panel's does, with `shared_get`
+    /// over `store` and a running PrismaticAI company 0 whose `api_botSetting` calls are recorded.
+    fn guard_engine(store: Rc<Shared>, sent: Rc<RefCell<Vec<String>>>) -> rhai::Engine {
+        let mut e = rhai::Engine::new();
+        e.set_module_resolver(rhai::module_resolvers::FileModuleResolver::new_with_path(RHAI_DIR));
+        e.register_fn("shared_get", move |key: &str| -> rhai::Dynamic {
+            store.get(key).map(|en| rhai::serde::to_dynamic(en.value).unwrap()).unwrap_or(rhai::Dynamic::UNIT)
+        });
+        e.register_fn("env", |_: &str| String::new());
+        e.register_fn("api_bots", || -> rhai::Dynamic {
+            let names = ["fr_from", "fr_to", "fr_cargo", "fr2_from", "rail_a", "own_lines"];
+            rhai::serde::to_dynamic(json!({"running": [{"id": 0, "name": "Prismatic", "ai": "PrismaticAI",
+                "settings": names.iter().map(|n| json!({"name": n, "value": -1})).collect::<Vec<_>>()}]})).unwrap()
+        });
+        e.register_fn("api_botSetting", move |m: rhai::Map| -> rhai::Dynamic {
+            sent.borrow_mut().push(m["name"].to_string());
+            let n = sent.borrow().len() as i64;
+            rhai::serde::to_dynamic(json!({"status": "pending_approval", "approval_id": n})).unwrap()
+        });
+        e
+    }
+
+    fn eval_with(store: &Rc<Shared>, script: &str) -> (Value, Vec<String>) {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let out: rhai::Dynamic = guard_engine(store.clone(), sent.clone()).eval(script).unwrap_or_else(|e| panic!("{e}\n{script}"));
+        (rhai::serde::from_dynamic(&out).unwrap(), sent.take())
+    }
+
+    /// fr_author.rhai and src/fr_author.rs are one rule: the same slots, the same key, the same
+    /// refusal and its words, for an unset key, its own name, another name and a null value.
+    #[test]
+    fn the_rhai_guard_and_the_rust_guard_agree() {
+        let names = ["fr_from", "fr_to", "fr_cargo", "fr2_from", "fr9_to", "fr16_cargo", "fr", "frost", "freight",
+                     "rail_a", "line1_trains", "own_lines", "planned_freight_only"];
+        let store = Rc::new(Shared::default());
+        let script = format!("import \"fr_author\" as fa; let out = []; for n in {names:?} {{ out.push(fa::is_freight_slot(n)); }} out");
+        let (rhai_says, _) = eval_with(&store, &script);
+        let rust_says: Vec<bool> = names.iter().map(|n| crate::panel_decision::is_freight_slot_setting(n)).collect();
+        assert_eq!(rhai_says, json!(rust_says));
+        for holder in [None, Some(json!("replan")), Some(json!("battlebrain")), Some(Value::Null)] {
+            if let Some(h) = &holder { store.set("planner.4", h.clone(), "runbook", None).unwrap(); }
+            let (r, _) = eval_with(&store, "import \"fr_author\" as fa; fa::refusal(4, \"replan\")");
+            let want = fr_refusal_in(&store, 4, "replan").unwrap_or(Value::Null);
+            assert_eq!(r, want, "holder {holder:?}");
+        }
+    }
+
+    /// build_plan::apply_as is the write path of ask_relay, replan and build_plan itself: with the
+    /// company's key unset every proposed setting is sent as before; with another writer's name no
+    /// freight-line slot reaches api_botSetting and the first line says why; with its own name all.
+    #[test]
+    fn build_plan_sends_no_freight_slot_another_planner_holds() {
+        let store = Rc::new(Shared::default());
+        let script = r#"import "build_plan" as bp;
+            let r = bp::apply_as(#{ build: #{ settings: #{ fr_from: 3, fr_to: 18, fr_cargo: 7, rail_a: 2 } } }, "ask_relay");
+            #{ withheld: r.withheld, pending: r.pending.len(), held: r.held, first: r.lines[0] }"#;
+        let (r, sent) = eval_with(&store, script);
+        assert_eq!(sent, ["fr_cargo", "fr_from", "fr_to", "rail_a"], "unset: as before");
+        assert_eq!((r["withheld"].clone(), r["held"].clone()), (json!([]), Value::Null));
+
+        store.set("planner.0", json!("battlebrain"), "runbook", Some(0)).unwrap();
+        let (r, sent) = eval_with(&store, script);
+        assert_eq!(sent, ["rail_a"], "no fr_* slot is sent");
+        assert_eq!(r["withheld"], json!(["fr_cargo", "fr_from", "fr_to"]));
+        assert_eq!(r["held"]["holder"], "battlebrain");
+        assert!(r["first"].as_str().unwrap().contains("planned by battlebrain (shared key planner.0), not by ask_relay"), "{}", r["first"]);
+
+        store.set("planner.0", json!("ask_relay"), "runbook", None).unwrap();
+        assert_eq!(eval_with(&store, script).1.len(), 4, "its own name: as before");
+        store.set("planner.0", json!("battlebrain"), "runbook", None).unwrap();
+        let (_, sent) = eval_with(&store, r#"import "build_plan" as bp; bp::apply(#{ build: #{ settings: #{ fr2_from: 1 } } })"#);
+        assert!(sent.is_empty(), "apply() is apply_as under build_plan's own name");
+    }
+
+    /// The text of a library script up to the line that starts its main loop, so its functions
+    /// can be called without running it.
+    fn head_of(script: &str, main_starts: &str) -> String {
+        let text = std::fs::read_to_string(format!("{RHAI_DIR}/{script}.rhai")).unwrap();
+        text.split(main_starts).next().unwrap().to_string()
+    }
+
+    /// prismatic_tune asks for no freight-line slot of a held company, whatever gene /api/tuning
+    /// names, and notes each one; unset, every change stays.
+    #[test]
+    fn the_live_tuner_asks_for_no_freight_slot_another_planner_holds() {
+        let store = Rc::new(Shared::default());
+        let script = format!("{}\nlet p = #{{ changes: [#{{ name: \"fr_from\", to: 3, stage: \"ga\" }}, #{{ name: \"invest_ppv_div\", to: 5, stage: \"ga\" }}], notes: [] }};
+            let q = own_changes(p, fa::refusal(0, WRITER)); #{{ names: q.changes.map(|x| x.name), notes: q.notes }}",
+            head_of("prismatic_tune", "// ---- main"));
+        let (r, _) = eval_with(&store, &script);
+        assert_eq!((r["names"].clone(), r["notes"].clone()), (json!(["fr_from", "invest_ppv_div"]), json!([])));
+        store.set("planner.0", json!("battlebrain"), "runbook", Some(0)).unwrap();
+        let (r, _) = eval_with(&store, &script);
+        assert_eq!(r["names"], json!(["invest_ppv_div"]));
+        assert!(r["notes"][0].as_str().unwrap().contains("fr_from -> 3 (ga): not asked, company 0's freight-line slots are planned by battlebrain"), "{}", r["notes"]);
+    }
+
+    /// replan stands down on another writer's key and plans on its own name or an unset key.
+    #[test]
+    fn replan_stands_down_for_another_planner_only() {
+        let store = Rc::new(Shared::default());
+        let script = format!("{}\ntype_of(fa::refusal(2, WRITER))", head_of("replan", "let last = ();"));
+        assert_eq!(eval_with(&store, &script).0, json!("()"));
+        store.set("planner.2", json!("replan"), "runbook", Some(0)).unwrap();
+        assert_eq!(eval_with(&store, &script).0, json!("()"));
+        store.set("planner.2", json!("battlebrain"), "runbook", None).unwrap();
+        assert_eq!(eval_with(&store, &script).0, json!("map"));
+    }
+
+    /// The key's format lives in fr_author.rhai alone: no other script of the library spells it.
+    #[test]
+    fn no_other_script_spells_the_planner_key() {
+        let mut stack = vec![std::path::PathBuf::from(RHAI_DIR)];
+        while let Some(d) = stack.pop() {
+            for f in std::fs::read_dir(&d).unwrap().flatten().map(|f| f.path()) {
+                if f.is_dir() { stack.push(f); continue; }
+                if f.extension().and_then(|x| x.to_str()) != Some("rhai") || f.file_name().unwrap() == "fr_author.rhai" { continue; }
+                let code: String = std::fs::read_to_string(&f).unwrap().lines()
+                    .map(|l| l.split("//").next().unwrap_or("")).collect::<Vec<_>>().join("\n");
+                assert!(!code.contains("planner."), "{} spells the planner key; import fr_author instead", f.display());
+            }
+        }
+    }
 }
