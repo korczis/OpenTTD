@@ -27,7 +27,7 @@ session's own prior work, committed as `0a49a3dbb8`).
 | Server stops cleanly | PRESENT_VERIFIED | `stop` → connection refused; game continued |
 | No pool access off main thread | PRESENT_VERIFIED | handlers run inside `Poll()` in `GameLoop()`; no worker thread exists |
 | No mutation off main thread | PRESENT_VERIFIED (vacuous) | no mutation exists yet |
-| No secret in logs | PRESENT_VERIFIED | token only via explicit `prismatic_mcp token`; never in normal logs/cfg |
+| No secret in logs | PRESENT_VERIFIED | token only in the 0600 token file; `prismatic_mcp token` prints its path and fingerprint; never in a console, log or cfg |
 
 **Conclusion:** the Phase-1 baseline is real and usable; no repair needed. There is exactly **one**
 MCP stack (no duplicate to consolidate). Continuation builds on it in place — same module, same

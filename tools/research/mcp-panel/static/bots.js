@@ -1,6 +1,9 @@
 /* My bot: the AI that plays for the owner, its settings and the bots already running. Every field
    comes from what the game declares (GET /api/bots: openttd.ai.list, or the AI's info.nut), never
-   listed by hand, and is laid out by its name:
+   listed by hand. Each setting's control and place come from the game: openttd://ai derives them
+   (`control`, src/prismatic_mcp/prismatic_mcp_ai_control.h), and the game's own settings window
+   draws the same. Only a setting read from an info.nut, with no game to ask, is derived here, by
+   the same rules (controlsOf), which src/tests/prismatic_mcp_ai_controls.json pins for both:
    - `<base><N>_<field>` names with at least two line numbers form one table of lines (the bare
      `<base>_<field>` is line 1), one row per line; a line whose every field is -1 is unused and
      folds away;
@@ -22,54 +25,97 @@ const badge = (tone, text) => `<span class="${UI.badge} ${TONE[tone] || TONE.gra
 /** Which world list a setting picks from, read from its description ("(industry id; -1: none)"). */
 export const pickerOf = (st) => { const m = /\((town|industry|cargo) id/.exec(st.description || ''); return m ? m[1] : null; };
 
-/** The control a setting gets: a boolean flag toggles, labels select, a world id picks from the live
- *  world when the panel has it, a short range slides, anything else is a number. */
-export function kindOf(st, choices = {}) {
-  if ((st.flags || []).includes('boolean')) return 'toggle';
-  if (Object.keys(st.labels || {}).length) return 'select';
-  if (pickerOf(st) && (choices[pickerOf(st)] || []).length) return 'picker';
-  return st.max - st.min > 0 && (st.max - st.min) / (st.step || 1) <= 2000 ? 'range' : 'number';
+/** The control a setting gets by itself, by openttd://ai's rules (AiSettingControl): a boolean flag
+ *  toggles, labels naming integer values select (ascending), a range of at most 2000 steps slides
+ *  (a step of 0 counts as 1), anything else is a number; a range or number whose description names a
+ *  world list carries it as `picker`. */
+export function controlOf(st) {
+  if ((st.flags || []).includes('boolean')) return { kind: 'toggle' };
+  const options = Object.entries(st.labels || {}).filter(([v]) => /^-?\d+$/.test(v))
+    .map(([v, label]) => ({ value: Number(v), label })).sort((a, b) => a.value - b.value);
+  if (options.length) return { kind: 'select', options };
+  const span = st.max - st.min;
+  const bounded = typeof st.min === 'number' && typeof st.max === 'number';
+  const control = { kind: bounded && span > 0 && span / (st.step || 1) <= 2000 ? 'range' : 'number' };
+  if (pickerOf(st)) control.picker = pickerOf(st);
+  return control;
 }
 
-/** Settings laid out by name: { groups: [{ title, settings }], tables: [{ base, fields, rows }] }.
+/** Where a form puts each setting, by name (AiSettingPlaces): {table: {base, line, field}} for a base
+ *  with at least two lines, else {group}, the first word when another setting shares it, else
+ *  "general". A name declared twice is placed by its first declaration. */
+export function placesOf(settings) {
+  const names = [...new Set(settings.map((st) => st.name))];
+  const bases = new Map();
+  for (const name of names) {
+    const m = LINE.exec(name);
+    if (!m) continue;
+    const line = m[2] ? Number(m[2]) : 1;
+    if (!bases.has(m[1])) bases.set(m[1], new Map());
+    const lines = bases.get(m[1]);
+    if (!lines.has(line)) lines.set(line, new Map());
+    lines.get(line).set(m[3], name);
+  }
+  const places = new Map();
+  for (const [base, lines] of bases) {
+    if (lines.size < 2) continue;
+    for (const [line, fields] of lines) for (const [field, name] of fields) places.set(name, { table: { base, line, field } });
+  }
+  const word = (name) => name.split('_')[0];
+  const rest = names.filter((name) => !places.has(name));
+  const sharing = new Map();
+  for (const name of rest) sharing.set(word(name), (sharing.get(word(name)) || 0) + 1);
+  for (const name of rest) places.set(name, { group: sharing.get(word(name)) < 2 ? 'general' : word(name) });
+  return places;
+}
+
+/** Every setting's control as openttd://ai derives it (AddAiSettingControls), for settings that came
+ *  without one (an info.nut). */
+export function controlsOf(settings) {
+  const places = placesOf(settings);
+  return settings.map((st) => ({ ...controlOf(st), ...places.get(st.name) }));
+}
+
+/** The control a setting is drawn with: the game's own, else derived here. */
+const controlFor = (st) => st.control || controlOf(st);
+
+/** The control a setting gets: its kind, or "picker" when it names a world list the panel has. */
+export function kindOf(st, choices = {}) {
+  const c = controlFor(st);
+  return c.picker && (choices[c.picker] || []).length ? 'picker' : c.kind;
+}
+
+/** Settings laid out by their places: { groups: [{ title, settings }], tables: [{ base, fields, rows }] }.
  *  A name the game declares twice is shown once (the first). */
 export function layout(settings) {
   const seen = new Set();
   const list = settings.filter((st) => !seen.has(st.name) && seen.add(st.name));
+  const derived = controlsOf(list);
   const bases = new Map();
-  for (const st of list) {
-    const m = LINE.exec(st.name);
-    if (!m) continue;
-    const n = m[2] ? Number(m[2]) : 1;
-    if (!bases.has(m[1])) bases.set(m[1], new Map());
-    const lines = bases.get(m[1]);
-    if (!lines.has(n)) lines.set(n, {});
-    lines.get(n)[m[3]] = st;
-  }
-  const tables = [];
-  const inTable = new Set();
-  for (const [base, lines] of bases) {
-    if (lines.size < 2) continue;
-    const fields = [];
-    for (const row of lines.values()) for (const f of Object.keys(row)) if (!fields.includes(f)) fields.push(f);
-    const rows = [...lines.entries()].sort((a, b) => a[0] - b[0]).map(([n, cells]) => {
-      for (const st of Object.values(cells)) inTable.add(st.name);
-      return { n, cells, unset: Object.values(cells).every((st) => Number(st.value ?? st.default) === -1) };
-    });
-    tables.push({ base, fields, rows });
-  }
-  const rest = list.filter((st) => !inTable.has(st.name));
-  const word = (st) => st.name.split('_')[0];
-  const count = new Map();
-  for (const st of rest) count.set(word(st), (count.get(word(st)) || 0) + 1);
   const groups = [];
   const general = { title: 'general', settings: [] };
-  for (const st of rest) {
-    if (count.get(word(st)) < 2) { general.settings.push(st); continue; }
-    let g = groups.find((x) => x.title === word(st));
-    if (!g) groups.push(g = { title: word(st), settings: [] });
+  list.forEach((st, i) => {
+    const place = st.control || derived[i];
+    if (place.table) {
+      const { base, line, field } = place.table;
+      if (!bases.has(base)) bases.set(base, new Map());
+      const lines = bases.get(base);
+      if (!lines.has(line)) lines.set(line, {});
+      lines.get(line)[field] = st;
+      return;
+    }
+    if (place.group === 'general') { general.settings.push(st); return; }
+    let g = groups.find((x) => x.title === place.group);
+    if (!g) groups.push(g = { title: place.group, settings: [] });
     g.settings.push(st);
-  }
+  });
+  const tables = [...bases].map(([base, lines]) => {
+    const fields = [];
+    for (const row of lines.values()) for (const f of Object.keys(row)) if (!fields.includes(f)) fields.push(f);
+    const rows = [...lines.entries()].sort((a, b) => a[0] - b[0])
+      .map(([n, cells]) => ({ n, cells, unset: Object.values(cells).every((st) => Number(st.value ?? st.default) === -1) }));
+    return { base, fields, rows };
+  });
   if (general.settings.length) groups.unshift(general);
   return { groups, tables };
 }
@@ -88,6 +134,7 @@ const optionLabel = (kind, o) => (kind === 'town' ? `${o.name} (#${o.id}, ${whol
 /** One setting's control alone (no label): `key` scopes ids and attributes to a bot or the form. */
 export function controlMarkup(st, key, value, { disabled = false, choices = {}, compact = false } = {}) {
   const id = `set-${key}-${st.name}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const control = controlFor(st);
   const kind = kindOf(st, choices);
   const dis = disabled ? 'disabled' : '';
   const attrs = `id="${id}" data-setting="${h(st.name)}" data-kind="${kind}" data-key="${h(key)}" aria-label="${h(st.name)}" title="${h(st.description || st.name)}"`;
@@ -98,10 +145,10 @@ export function controlMarkup(st, key, value, { disabled = false, choices = {}, 
       <span class="ms-3 text-sm text-gray-900 dark:text-gray-300" data-toggle-text>${Number(value) ? 'on' : 'off'}</span></label>`;
   }
   if (kind === 'select') {
-    return `<select class="${INPUT} w-full ${pad}" ${dis} ${attrs}>${Object.entries(st.labels).map(([v, l]) => `<option value="${h(v)}" ${Number(v) === Number(value) ? 'selected' : ''}>${h(l)}</option>`).join('')}</select>`;
+    return `<select class="${INPUT} w-full ${pad}" ${dis} ${attrs}>${control.options.map((o) => `<option value="${h(o.value)}" ${o.value === Number(value) ? 'selected' : ''}>${h(o.label)}</option>`).join('')}</select>`;
   }
   if (kind === 'picker') {
-    const pk = pickerOf(st);
+    const pk = control.picker;
     const opts = choices[pk] || [];
     const known = opts.some((o) => o.id === Number(value));
     return `<select class="${INPUT} w-full ${pad}" ${dis} ${attrs} data-picker="${pk}">

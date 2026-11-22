@@ -76,6 +76,8 @@ mod store_sql;
 mod http_stub;
 #[path = "../panel_town.rs"]
 mod panel_town;
+#[path = "../panel_battle.rs"]
+mod panel_battle;
 
 static STOP: AtomicBool = AtomicBool::new(false);
 

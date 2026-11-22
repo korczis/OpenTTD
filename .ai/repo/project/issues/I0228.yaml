@@ -1,0 +1,35 @@
+id: I0228
+milestone: prismatic-steers-a-company-through-the-bridge
+title: "Kernel contracts are derived from the pinned AlgoGlyph source (algoglyph-kernel-contract/v1, each field with its provenance), and the adapter registry keeps only what the source cannot give"
+slug: algoglyph-derived-contracts
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Derive, inside the fork and without editing AlgoGlyph, every kernel contract field the pinned AlgoGlyph source states: input keys, required keys, JSON types and enums from each kernel's DataForm or fromData (its TypeScript interfaces, its `input` text, its accepted-key list and its validation predicates), output keys and types from its result interface or the object its solve returns, and the keys its tests exercise. Each derived field names the source line or test it comes from; a field with no evidence is absent and listed as such. Write them in the proposal's shape (algoglyph-kernel-contract/v1) as tools/research/schema/derived/algoglyph-contracts.json with a generator (bin algoglyph-contracts, the source root a parameter) and a check that fails when the pinned source and the artifact disagree. The capability matcher reads the derived contract first (engine, input keys and types, output keys) and ADAPTERS only for what no source states (the field mapping, conversions, units, exactness, the domain check), each with its reason."
+why: "The owner's principle for this session: everything derived, nothing hand-typed that data can give. ADAPTERS restated an engine, accepted an opaque input shape for knapsack-dp and never checked an output path; the AlgoGlyph-side fix is a proposal only (research/battlebrain/algoglyph-contract-proposal.md) and AlgoGlyph is never edited by this work."
+scope:
+  - "tools/research/mcp-rhai/src/algoglyph_contracts.rs"
+  - "tools/research/mcp-rhai/src/bin/algoglyph-contracts.rs"
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/schema/derived/**"
+  - "tools/research/schema/capability-match.v1.schema.json"
+  - "research/battlebrain/**"
+  - "tools/gate.sh"
+non_scope:
+  - "Any change in algoglyph or prismatic-platform"
+  - "Pinning AlgoGlyph as a submodule (feature/algoglyph-submodule)"
+  - "Routing the planner's kernel calls through the matcher (feature/planner-kernels-by-capability)"
+depends_on:
+  - I0098
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#a-decision-contract-is-defined"
+acceptance_criteria:
+  - "on the pinned source (algoglyph 1b8e009) the generator derives a contract for every non-graph kernel of the catalogue fixture, knapsack-dp's input {weights: integer[], values: number[], capacity: integer} and output {best, items} and track-planning's required from and to and its output keys among them, each field with a source path:line or test name (unit test)"
+  - "the check fails when the committed artifact differs from what the pinned source derives, or when its commit is not the source's (unit test)"
+  - "the matcher takes engine and key presence from the derived contract, rejects a mapped key the contract lacks or whose type contradicts the requirement, falls back to the catalogue's shape when the contracts are of another commit, and still resolves portfolio-within-budget to knapsack-dp and rail-line-price to track-planning (unit tests)"
+  - "the proposal says which fields are now derived fork-side and which still need AlgoGlyph to publish them"
+validation:
+  - "cargo test --release --offline --no-default-features --manifest-path tools/research/mcp-rhai/Cargo.toml --bin algoglyph-contracts --bin battlebrain"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'

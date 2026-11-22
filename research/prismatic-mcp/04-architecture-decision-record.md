@@ -52,7 +52,7 @@ vendored JSON library and a CSPRNG already exist.
 | 6 | Huge query exceeds frame budget? | Only small bounded resources exposed; high-cardinality ones ship with pagination (staged). |
 | 7 | Request survives a savegame transition wrongly? | `OnGameModeChanged()` hook present; this build rebuilds snapshots per request so none persist. |
 | 8 | Session retains access after disarm? | No arming/mutation yet; token rotation invalidates the bearer immediately. |
-| 9 | Token leaks to logs/cfg? | Never written to cfg or normal logs; only printed on explicit `prismatic_mcp token`. |
+| 9 | Token leaks to logs/cfg? | Never written to cfg or any log, never printed: only to a 0600 token file, whose path and fingerprint `prismatic_mcp token` prints. |
 | 10 | Untrusted browser reaches the listener? | Loopback-only + `Origin` rejection. |
 | 11 | Client invokes a tool for another company? | No company-scoped tool exists yet; will require ownership validation + approval. |
 | 12 | Malformed IDs hit freed pool objects? | Resource reads use `Iterate()`/`GetIfValid`; invalid IDs → typed error, never `Get()` on a bad id. |

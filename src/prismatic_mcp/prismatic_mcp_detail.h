@@ -18,6 +18,7 @@
 #include <string_view>
 #include <vector>
 
+#include "../3rdparty/monocypher/monocypher.h"
 #include "../3rdparty/nlohmann/json.hpp"
 #include "../core/format.hpp"
 
@@ -142,6 +143,35 @@ inline bool ConstantTimeEquals(std::string_view a, std::string_view b)
 	unsigned diff = 0;
 	for (size_t i = 0; i < a.size(); i++) diff |= (unsigned)(a[i] ^ b[i]);
 	return diff == 0;
+}
+
+/**
+ * A short, one-way name for a bearer token that the console may print in its place:
+ * "blake2b:" and the first 8 bytes of BLAKE2b-256 over the token's text, in hex. It lets the
+ * operator tell which token a file holds without the secret reaching the console or its log.
+ * @param token The token in hex.
+ * @return The fingerprint, or empty for an empty token.
+ */
+inline std::string TokenFingerprint(std::string_view token)
+{
+	if (token.empty()) return {};
+	std::array<uint8_t, 32> hash{};
+	crypto_blake2b(hash.data(), hash.size(), reinterpret_cast<const uint8_t *>(token.data()), token.size());
+	std::string out = "blake2b:";
+	for (size_t i = 0; i < 8; i++) out += fmt::format("{:02x}", hash[i]);
+	return out;
+}
+
+/**
+ * The name of the token file `prismatic_mcp start` writes into the personal directory when it is
+ * given no file of its own: one per port, so two servers sharing a personal directory never
+ * overwrite each other's token.
+ * @param port The port the server listens on.
+ * @return The file name, without a directory.
+ */
+inline std::string DefaultTokenFileName(uint16_t port)
+{
+	return fmt::format("prismatic_mcp_token_{}.json", port);
 }
 
 /**

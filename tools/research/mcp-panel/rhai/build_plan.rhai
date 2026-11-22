@@ -66,7 +66,9 @@ fn apply_as(a, writer) {
             out.lines.push(`${name}: refused, the bot declares no such setting`);
             continue;
         }
-        let r = api_botSetting(#{ company: bot.id, name: name, value: settings[name] });
+        // `writer` is named, so the panel checks it against planner.<company> too: a freight-line
+        // slot sent with no writer is refused there (fr_needs_writer).
+        let r = api_botSetting(#{ company: bot.id, name: name, value: settings[name], writer: writer });
         // the gated reply is {status: "pending_approval", approval_id, argument_digest,
         // expires_at_tick, message}. Reading the wrong key here printed "nothing is waiting for
         // you" while three changes waited -- a false clean, so the key is taken from the reply.

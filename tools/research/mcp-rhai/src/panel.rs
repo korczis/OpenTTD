@@ -372,10 +372,19 @@ pub fn find_token(line: &str) -> Option<(usize, usize, String)> {
     None
 }
 
-/// A line as the window shows it: the token line reworded, and the token itself nowhere.
+/// The token file a console line names: "Token written to <path> (mode 0600)", which
+/// `prismatic_mcp start` and `rotate` print in place of the token itself.
+pub fn find_token_file(line: &str) -> Option<&str> {
+    let after = line.find("Token written to ")? + "Token written to ".len();
+    let path = line[after..].trim_end().strip_suffix(" (mode 0600)")?;
+    (!path.is_empty()).then_some(path)
+}
+
+/// A line as the window shows it: the token line reworded, and the token itself nowhere. The
+/// token is the one in the file the line names, or (an older game) the one the line carries.
 pub fn redact(line: &str, token: Option<&str>) -> (String, Option<String>) {
     let mut out = line.to_string();
-    let mut found = None;
+    let mut found = find_token_file(line).and_then(|path| token_file(path).ok()).map(|(_, t)| t);
     if let Some((s, e, t)) = find_token(line) {
         out = format!("{}Bearer token (held by the panel): <REDACTED>{}", &line[..s], &line[e..]);
         found = Some(t);
@@ -2319,7 +2328,15 @@ fn h_catalogue(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
 }
 
 fn h_rpc(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
-    ok(g.rpc(i.body["method"].as_str().unwrap_or(""), i.body.get("params").cloned())?)
+    let method = i.body["method"].as_str().unwrap_or("");
+    // A raw tools/call names no writer: it sets no freight-line slot (panel_bot::raw_call_refusal).
+    if method == "tools/call" {
+        let p = &i.body["params"];
+        if let Some(r) = panel_bot::raw_call_refusal(g, &py_str(p.get("name")), &p["arguments"]) {
+            return Ok(r);
+        }
+    }
+    ok(g.rpc(method, i.body.get("params").cloned())?)
 }
 
 fn h_pause(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
@@ -2358,7 +2375,7 @@ fn h_bot_start(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
 }
 
 fn h_bot_setting(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
-    ok(panel_bot::set_bot_setting(g, &i.body["company"], &py_str(i.body.get("name")), &i.body["value"])?)
+    panel_bot::bot_setting(g, &i.body)
 }
 
 fn h_bot_planned(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
@@ -2518,7 +2535,7 @@ pub fn routes() -> Vec<Route> {
         r("GET", "/api/overview/history", "overviewHistory", "The overview's history kept by the panel: one sample per game day (tick, date, vehicles, towns, per company money, value, loan, net); ?since=<tick> for the newer ones", false, None, h_history),
         r("GET", "/api/catalogue", "catalogue", "MCP initialize, resources/list and tools/list", true, None, h_catalogue),
         r("GET", "/api/resource", "readResource", "Read one MCP resource by ?uri=", true, None, h_resource),
-        r("POST", "/api/rpc", "rpc", "Raw MCP JSON-RPC with the panel's token", true,
+        r("POST", "/api/rpc", "rpc", "Raw MCP JSON-RPC with the panel's token; a tools/call of openttd.ai.set_setting or openttd.ai.set_settings that changes a freight-line slot (fr_*) names no writer and is refused (422 fr_needs_writer)", true,
           s(json!({"method": st(), "params": obj()}), &["method"]), h_rpc),
         r("POST", "/api/console", "console", "One OpenTTD console line as the operator; returns its output", false,
           s(json!({"command": st(), "wait": {"type": "number"}}), &["command"]), h_console),
@@ -2542,8 +2559,8 @@ pub fn routes() -> Vec<Route> {
           s(json!({"ai": st(), "start": {"type": "boolean"}, "track": {"type": "integer", "minimum": 0, "maximum": 16}}), &["ai"]), h_bot_planned),
         r("POST", "/api/bots/start", "botStart", "Start the owner's bot: an AI with a settings map", false,
           s(json!({"ai": st(), "settings": obj()}), &["ai"]), h_bot_start),
-        r("POST", "/api/bots/setting", "botSetting", "Change one setting of a running bot (openttd.ai.set_setting, approval-gated)", true,
-          s(json!({"company": {"type": "integer"}, "name": st(), "value": {"type": "integer"}}), &["company", "name", "value"]), h_bot_setting),
+        r("POST", "/api/bots/setting", "botSetting", "Change one setting of a running bot (openttd.ai.set_setting, approval-gated). A freight-line slot (fr_*, fr2_* .. fr16_*) is sent only when `writer` names who sends it and the company's planner key planner.<company> (/api/rhai/shared) is unset or names that writer: else 422 fr_needs_writer (no writer) or 409 fr_planner_held, and nothing reaches the game", true,
+          s(json!({"company": {"type": "integer"}, "name": st(), "value": {"type": "integer"}, "writer": st()}), &["company", "name", "value"]), h_bot_setting),
         r("GET", "/api/bridge/companies", "bridgeCompanies", "Every company as the bridge's GET /companies answers it (CompanyOut: money, loan, income from the vehicles' profit, company value, vehicle counts), so Prismatic decides from this game with OPENTTD_BRIDGE_URL=<panel>/api/bridge (src/panel_decision.rs); each company's `history` (prismatic-history/v1, I0085) names the bus endpoint and the read-only store query of its samples, to fit from on /api/db/query", true,
           None, h_bridge_companies),
         r("GET", "/api/bridge/observation", "bridgeObservation", "The latest answer of GET /api/bridge/companies as the observation a directive is bound to (research/agent-loop.md step 1): its number, game tick and date, the digest of the companies' identities and the age limit in game days; POST /api/decision/pull refuses a directive not decided from a current observation", false, None, h_bridge_observation),
@@ -2564,6 +2581,8 @@ pub fn routes() -> Vec<Route> {
           None, h_instances),
         r("GET", "/api/mesh", "mesh", "The Majordomus mesh this repository's server cooperates with (src/panel_mesh_page.rs, read-only): `mesh` (identity, trust policy, providers, tallies), `peers` (machines, runtimes, sessions, claims) and `nodes` (every discovered node with trust, presence and endpoints), read from the Majordomus server ($MAJORDOMUS_URL, else the one `majordomus serve ensure` names for this checkout) /api/v1/mesh, /peers and /nodes unchanged; 200 also when Majordomus is down (`reachable` false, `errors` per part)", false,
           None, crate::panel_mesh_page::h_mesh),
+        r("GET", "/api/battle/contestants", "battleContestants", "The LAN battle's contestants as tools/research/ai-battle/battle.json declares them (src/panel_battle.rs, read-only, read on every request): `file`, `count` and `contestants` in the file's order, each as the file has it (ai, label, source, group) with `settings` made explicit (\"\" for the AI's defaults); the live arena (rhai/arena.rhai) plays this lineup, so it is written in one place. 404 when the file is missing", false,
+          None, crate::panel_battle::h_contestants),
         r("POST", "/api/instances/call", "instancesCall", "One MCP JSON-RPC call on a named instance of the cluster (a panel's server or a GUI client)", true,
           s(json!({"name": st(), "method": st(), "params": obj()}), &["name", "method"]), h_instances_call),
         r("GET", "/api/news", "news", "The news the owner's game window has shown, newest first (openttd.view.news.list on the GUI client); ?limit=N", true,
@@ -3224,6 +3243,10 @@ impl Panel {
                     });
                 }
                 if let Some(name) = path.strip_prefix("/api/tools/") {
+                    // A raw tool call names no writer: it sets no freight-line slot (panel_bot.rs).
+                    if let Some(r) = panel_bot::raw_call_refusal(g, name, &body) {
+                        return Ok(r);
+                    }
                     let out = g.tool(name, or_empty(&body))?;
                     return Ok((rpc_status(&out), out));
                 }
@@ -3384,7 +3407,8 @@ mod tests {
         // And the observation a directive is bound to (GET /api/bridge/observation; agent loop step 1).
         // And evidence retrieval (GET /api/evidence; research/agent-loop.md, Retrieve).
         // And the store's named queries (GET and POST /api/db/named; sql/queries).
-        assert_eq!(rs.len(), 76);
+        // And the LAN battle's contestants the live arena plays (GET /api/battle/contestants; panel_battle.rs).
+        assert_eq!(rs.len(), 77);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -3398,7 +3422,8 @@ mod tests {
             "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query", "/api/db/named",
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
             "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
-            "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh"].contains(&r.path)));
+            "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh",
+            "/api/battle/contestants"].contains(&r.path)));
     }
 
     /// A store with two runs of one instance: the older run's days must not feed the books.
@@ -3688,6 +3713,20 @@ mod tests {
         assert_eq!(found.as_deref(), Some(tok));
         assert_eq!(redact(&format!("echo {tok}"), Some(tok)).0, "echo <REDACTED>");
         assert!(find_token("Bearer token (x): abc").is_none(), "too short for a token");
+        // The game prints only where the token is; the panel reads it from that file.
+        let dir = std::env::temp_dir().join(format!("mcp-panel-token-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("prismatic_mcp_token_8731.json");
+        std::fs::write(&file, format!("{{\"agent_token\":\"{tok}\",\"endpoint\":\"http://127.0.0.1:8731/mcp\"}}\n")).unwrap();
+        let said = format!("Token written to {} (mode 0600)", file.display());
+        assert_eq!(find_token_file(&said), Some(file.to_str().unwrap()));
+        let (line, found) = redact(&said, None);
+        assert_eq!(found.as_deref(), Some(tok), "the token comes from the file the line names");
+        assert_eq!(line, said, "a line without the token is shown as it is");
+        assert!(find_token_file("MCP server stopped: the token file /x could not be written with mode 0600.").is_none());
+        assert!(find_token_file("Token written to  (mode 0600)").is_none());
+        assert_eq!(redact("Token written to /no/such/file (mode 0600)", None).1, None, "an unreadable file yields no token");
+        std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(denied_id("denied #12 by the operator"), Some(12));
         assert_eq!(denied_id("denied #12x"), None);
         assert_eq!(denied_id("not denied #12"), None);
@@ -4095,6 +4134,87 @@ mod tests {
         assert_eq!(books_from_caller(&body(json!({"cash": 5, "max_loan": 9}))), json!({"cash": "caller", "loan": "missing", "max_loan": "caller"}));
     }
 
+    /// A game's MCP server for the live path: openttd://game/state at `tick`, one AI company 1,
+    /// openttd.ai.set_settings offered; every set_settings call is kept in `calls`.
+    fn fake_game(tick: i64, date: &str, calls: Arc<Mutex<Vec<Value>>>) -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let date = date.to_string();
+        thread::spawn(move || for mut c in l.incoming().flatten() {
+            let Some(req) = read_request(&mut c) else { continue };
+            let call: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+            let res = |v: Value| json!({"jsonrpc": "2.0", "id": 1, "result": {"contents": [{"text": v.to_string()}]}});
+            let out = match call["method"].as_str().unwrap_or("") {
+                "tools/list" => json!({"jsonrpc": "2.0", "id": 1, "result": {"tools": [{"name": "openttd.ai.set_settings"}]}}),
+                "resources/read" => match call["params"]["uri"].as_str().unwrap_or("") {
+                    "openttd://game/state" => res(json!({"game_tick": tick, "game_date": date})),
+                    // The game's own envelope (prismatic_mcp_server.cpp: env["data"] = {companies}).
+                    "openttd://companies" => res(json!({"game_tick": tick, "data": {"companies": [{"id": 1, "is_ai": true, "name": "A"}]}})),
+                    other => res(json!({"error": format!("no {other}")})),
+                },
+                _ => {
+                    calls.lock().unwrap().push(call["params"].clone());
+                    json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": json!({"ok": true, "applied": 17}).to_string()}]}})
+                }
+            };
+            hub::respond(c, 200, "application/json", out.to_string().as_bytes());
+        });
+        port
+    }
+
+    #[test]
+    fn a_rollback_is_applied_through_the_live_path_and_never_in_a_world_behind_its_snapshot() {
+        // battlebrain rollback's directive (I0117 round 2), served once like any decision.
+        let snap: Value = serde_json::from_str(&std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../schema/fixtures/battlebrain/valid/snapshot.json")).unwrap()).unwrap();
+        let out = crate::battlebrain_contract::rollback_directive(&snap["value"], 1, None, "test").unwrap();
+        let directive = out["directive"].clone();
+        let key = directive["decision"]["idempotency_key"].as_str().unwrap().to_string();
+        let tick = snap["value"]["at"]["tick"].as_i64().unwrap();
+        let serve = |d: Value| {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/decision", l.local_addr().unwrap());
+            thread::spawn(move || for mut c in l.incoming().flatten() {
+                if read_request(&mut c).is_none() { continue }
+                hub::respond(c, 200, "application/json", d.to_string().as_bytes());
+            });
+            url
+        };
+        let panel_on = |game_port: u16, port: &str| {
+            let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", port, "--mcp-port", &game_port.to_string()].map(String::from)).unwrap();
+            let g = Game::new(args);
+            g.mcp_up.store(true, Ordering::SeqCst);
+            *g.token.lock().unwrap() = Some("t".into());
+            (g.clone(), Panel { game: g, routes: routes() })
+        };
+        // The world is the snapshot's or later: one set_settings, every slot cleared, under one approval.
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (_, p) = panel_on(fake_game(tick + 74, "1961-01-02", calls.clone()), "5");
+        let (code, res) = post_to(&p, "/api/decision/pull", json!({"url": serve(directive.clone()), "key": key}));
+        assert_eq!(code, 200, "{res}");
+        let seen = calls.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert_eq!(seen[0]["name"], "openttd.ai.set_settings");
+        let settings = &seen[0]["arguments"]["settings"];
+        assert_eq!(settings["planned_freight_only"], 0);
+        assert_eq!(settings["fr_from"], -1);
+        assert_eq!(settings[format!("{}from", crate::battlebrain_contract::freight_slot_prefix(crate::battlebrain_contract::FREIGHT_SLOTS))], -1);
+        assert!(seen[0]["arguments"]["expires_tick"].as_i64().unwrap() > tick + 74);
+        // An earlier save reloaded (its date still before valid_until): refused before any call.
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (g, p) = panel_on(fake_game(tick - 1, "1961-01-01", calls.clone()), "6");
+        let since = g.bus.seq();
+        // (A key's answer is kept for KEY_TTL, so this pull uses its own decision: a rollback of the rollback.)
+        let again = crate::battlebrain_contract::rollback_directive(&snap["value"], 1, Some(&directive["decision"]), "test").unwrap();
+        let again_key = again["directive"]["decision"]["idempotency_key"].as_str().unwrap().to_string();
+        let (code, res) = post_to(&p, "/api/decision/pull", json!({"url": serve(again["directive"].clone()), "key": again_key}));
+        assert_eq!(code, 409, "{res}");
+        assert!(res["error"].as_str().unwrap().contains("behind the snapshot"), "{res}");
+        assert!(calls.lock().unwrap().is_empty(), "nothing set in a world behind the snapshot");
+        let ev = g.bus.since(since, &kinds_of("plan.directive"), 10);
+        assert_eq!(ev.last().unwrap()["data"]["choice"]["outcome"], "world_changed");
+    }
+
     #[test]
     fn a_directive_decided_without_an_observation_is_refused_and_published() {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -4116,5 +4236,42 @@ mod tests {
         assert_eq!(ev.len(), 1, "the refusal is on the bus");
         let choice = &ev[0]["data"]["choice"];
         assert_eq!((choice["accepted"].clone(), choice["outcome"].clone()), (json!(false), json!("stale")));
+    }
+
+    /// A freight-line slot reaches the game through the panel only from a request that names its
+    /// writer (POST /api/bots/setting {writer}); the raw MCP routes name none, so they set no slot.
+    /// Every refusal is answered before the game is asked and is an event; any other setting, and a
+    /// named writer while no planner key is set, goes on to the game (none here: its own error).
+    #[test]
+    fn a_freight_slot_is_sent_only_by_a_named_writer() {
+        let (g, p) = bare_panel("5");
+        let since = g.bus.seq();
+        let (code, out) = post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_from", "value": 3}));
+        assert_eq!((code, out["outcome"].as_str()), (422, Some("fr_needs_writer")), "{out}");
+        assert!(out["error"].as_str().unwrap().starts_with("fr_from not sent: a change of company 0's freight-line slots names its writer"), "{out}");
+        let ev = g.bus.since(since, &kinds_of("panel.ai"), 10);
+        assert!(ev.iter().any(|e| e["data"]["text"].as_str().unwrap_or("").contains("fr_from not sent")), "the refusal is an event: {ev:?}");
+        assert_eq!(post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_to", "value": 3, "writer": " "})).0, 422, "a blank writer is none");
+        // Named, no planner key set: on to the game, which this panel has none of.
+        let (code, out) = post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_from", "value": 3, "writer": "owner"}));
+        assert_eq!((code, out["fallback"].as_str()), (200, Some("start")), "{out}");
+        let (code, out) = post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "rail_a", "value": 3}));
+        assert_eq!((code, out["fallback"].as_str()), (200, Some("start")), "not a slot: as before, no writer needed: {out}");
+        assert_eq!(post_to(&p, "/api/bots/setting", json!({"company": 0, "name": "fr_from", "value": 3, "writer": 7})).0, 400, "a writer is a string");
+
+        let raw = [("/api/tools/openttd.ai.set_setting", json!({"company": 0, "name": "fr16_cargo", "value": 1})),
+                   ("/api/tools/openttd.ai.set_settings", json!({"company": 0, "settings": {"rail_a": 1, "fr2_to": 9}})),
+                   ("/api/rpc", json!({"method": "tools/call", "params": {"name": "openttd.ai.set_settings",
+                                                                          "arguments": {"company": 0, "settings": {"fr_from": 1}}}}))];
+        for (path, body) in raw {
+            let (code, out) = post_to(&p, path, body);
+            assert_eq!((code, out["outcome"].as_str()), (422, Some("fr_needs_writer")), "{path}: {out}");
+            assert!(out["governed"].as_str().unwrap().contains("POST /api/decision/pull"), "{out}");
+        }
+        // The same routes without a slot go on to the game, as before (no token here: 502).
+        assert_eq!(post_to(&p, "/api/tools/openttd.ai.set_setting", json!({"company": 0, "name": "rail_a", "value": 1})).0, 502);
+        assert_eq!(post_to(&p, "/api/rpc", json!({"method": "tools/call", "params": {"name": "openttd.ai.set_setting",
+                                                                                     "arguments": {"company": 0, "name": "rail_a", "value": 1}}})).0, 502);
+        assert_eq!(post_to(&p, "/api/rpc", json!({"method": "tools/list"})).0, 502);
     }
 }

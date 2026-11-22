@@ -46,7 +46,7 @@
   },
   "plan_digest": "sha256:1d938277435b73c2ea61dc0fe0aad1d4b48d9295ed63e619f0cc4bcd836d4694",
   "policy": "freight-margin@2",
-  "reason": "the planner's line fails freight-margin@1 on the same snapshot: investment 127603 exceeds what the company can spend and keep the reserve (125011)",
+  "reason": "the planner's line fails freight-margin@2 on the same snapshot: investment 127603 exceeds what the company can spend and keep the reserve (125011)",
   "rejected": [
    {
     "line": {
@@ -638,8 +638,9 @@
   "snapshot": "bb:f8055f6fad1b63e5eae91f5de7162f55b30003b7e30c438d6beb722a9ba9cc76",
   "snapshot_digest": "sha256:7683d924549b7721d92d2731b3e216dc82f3d311d03fd3a8cd2210e08b182967"
  },
+ "directive": null,
  "directive_block": {
-  "decision": "bb:06be4d4ceaa3e9054e665a3c9d09a5fa460763651d5f7d74d3bd46414705b614",
+  "decision": "bb:4f70ad38c3ceb93a1e909f240c5715f3a8e5c8573d6fb202095c1fd11f9a2dfb",
   "idempotency_key": "coplay-8800:3:1953-02-09:freight-line",
   "mode": "shadow",
   "policy": "freight-margin@2",
@@ -649,6 +650,7 @@
  },
  "findings": [],
  "id": "battlebrain-shadow-20261122T084607Z-coplay-8800-freight-margin-2",
+ "live_gate": null,
  "mode": "shadow",
  "provenance": {
   "algoglyph_commit": "1b8e009059c299b29d7a829d2d51d4e057304d4d",
@@ -666,7 +668,8 @@
   "company_note": "an AI company the owner does not play; the same company on all three captures",
   "fork_commit": "a5ea892a26be8b41471667daa6031c285c17dfde",
   "replay": "mcp-plan --snapshot tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1953-02-09 --limit 40 --track 16 --params '{\"budget\":300000}' (twice: byte-identical)",
-  "shadow": "battlebrain shadow --snapshot tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1953-02-09/snapshot-company-3.json --plan tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1953-02-09/plan.json --companies tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1953-02-09/companies.json --company 3 (on both replays: byte-identical)"
+  "shadow": "battlebrain shadow --snapshot tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1953-02-09/snapshot-company-3.json --plan tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1953-02-09/plan.json --companies tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1953-02-09/companies.json --company 3 (on both replays: byte-identical)",
+  "rerecorded": "2026-11-22, Phase 06 regression gate (battlebrain_regression.rs): the same shadow command on the same capture at 3dbdba818d. The recorded reason named freight-margin@1, a label written before fcac673236 made the reason name the running policy; with it the decision record's id changed. The lines, the budget, the divergence and the decision are unchanged."
  },
  "records": [
   {
@@ -785,7 +788,7 @@
     "rejected": [
      {
       "candidate": "bb:45c5548fb03ed80fd10c193ca578464715c86a1a3085f1d2f119dd1f8c6fcb7d",
-      "reason": "input_model_discrepancy: the planner's line fails freight-margin@1 on the same snapshot: investment 127603 exceeds what the company can spend and keep the reserve (125011)"
+      "reason": "input_model_discrepancy: the planner's line fails freight-margin@2 on the same snapshot: investment 127603 exceeds what the company can spend and keep the reserve (125011)"
      }
     ],
     "selected": "bb:b31fbf7e5ce13864797f13a664419a7bf3e7194b65d1712ba72f57360d12f376",
@@ -797,7 +800,7 @@
     "bb:b31fbf7e5ce13864797f13a664419a7bf3e7194b65d1712ba72f57360d12f376",
     "bb:45c5548fb03ed80fd10c193ca578464715c86a1a3085f1d2f119dd1f8c6fcb7d"
    ],
-   "id": "bb:06be4d4ceaa3e9054e665a3c9d09a5fa460763651d5f7d74d3bd46414705b614",
+   "id": "bb:4f70ad38c3ceb93a1e909f240c5715f3a8e5c8573d6fb202095c1fd11f9a2dfb",
    "producer": {
     "id": "battlebrain",
     "version": "0.1.0"
