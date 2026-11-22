@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Strategy · OpenTTD MCP</title>
+  <meta name="description" content="The background strategist and the panel's blackboard">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 antialiased" data-page="strategy" data-description="The background strategist recomputes the long-term plan (portfolio, investment, rail lines, town warnings, BattleBrain's proposals) and keeps it on the panel's blackboard, which scripts, routes and pages share; it reads and computes, never changes the game.">
+  <script src="/static/shell.js"></script>
+
+  <main class="pb-16">
+    <section id="status" data-nav="Strategist" class="scroll-mt-20"></section>
+    <p id="summary" class="mb-4 text-sm text-gray-500 dark:text-gray-400"></p>
+    <section id="plan" data-nav="Portfolio" class="scroll-mt-20"></section>
+    <section id="investment" data-nav="Investment" class="scroll-mt-20"></section>
+    <section id="track" data-nav="Rail lines on the map" class="scroll-mt-20"></section>
+    <section id="towns" data-nav="Town warnings" class="scroll-mt-20"></section>
+    <section id="tuning" data-nav="Tuning proposals" class="scroll-mt-20"></section>
+    <section id="suggestion" class="scroll-mt-20"></section>
+    <section id="peers" data-nav="Mesh peers" class="scroll-mt-20"></section>
+    <section id="board" data-nav="Blackboard" class="scroll-mt-20"></section>
+    <section id="detail" class="scroll-mt-20"></section>
+  </main>
+
+  <script src="/vendor/flowbite.min.js"></script>
+  <script type="module" src="/static/strategy.js"></script>
+</body>
+</html>

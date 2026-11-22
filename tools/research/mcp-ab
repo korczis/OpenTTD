@@ -63,6 +63,9 @@ cleanup() {
 # stop when the run ends (an exec here once left every finished run's stacks running).
 trap cleanup EXIT INT TERM
 
+# No background strategist (research/mechanisms/strategist-and-blackboard.md): its MCP reads and
+# console line would change a measured run's timing. A caller's own value wins.
+export PRISMATIC_STRATEGIST="${PRISMATIC_STRATEGIST:-0}"
 echo "==> A (planner's air pair) on :$A_PANEL, B (no planner) on :$B_PANEL, seed $SEED, $MONTHS months"
 "$ROOT_DIR/tools/research/mcp-e2e" --no-gui --no-browser --seed "$SEED" --panel-port "$A_PANEL" \
   --mcp-port "$(free)" --game-port "$(free)" > "$TMP/a.log" 2>&1 &
