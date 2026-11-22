@@ -87,7 +87,7 @@ This runs both the C++ unit tests (`src/tests/`, Catch2-based, see `src/tests/CM
 
 For this fork's own layered validation (smoke/change/full — see [AGENTS.md](./AGENTS.md)), use `tools/gate.sh` instead of calling cmake/ctest by hand; it wraps exactly these commands with the right tier of cost for the situation.
 
-Documentation is published from the repository, never by hand: after editing Markdown or an `.ai/` record, run `tools/surfaces/surfaces sync` (regenerates the tables between `surfaces:begin`/`surfaces:end` markers) and `tools/surfaces/surfaces check` (the pre-commit hook runs it too). See [`tools/surfaces/README.md`](./tools/surfaces/README.md).
+Documentation is published from the repository, never by hand: after editing Markdown or an `.ai/` record, run `tools/surfaces/surfaces sync` (runs every generator `surfaces.toml` declares, then regenerates the tables between `surfaces:begin`/`surfaces:end` markers) and `tools/surfaces/surfaces check` (the pre-commit hook runs it too). See [`tools/surfaces/README.md`](./tools/surfaces/README.md).
 
 There is no separate lint step beyond compiler warnings (build is warning-heavy: `-Wall -Wextra -Wcast-qual -Wundef ...`) and the coding-style/commit-message checks enforced by CI and the git hooks described below.
 

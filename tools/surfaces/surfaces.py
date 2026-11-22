@@ -49,13 +49,16 @@ GENERATED_ROOT = "target/web"  # the root Majordomus discovers surface.json decl
 
 DEFAULTS = {
     "sources": {"include": ["**/*.md"], "exclude": []},
-    "check": {"exclude": [], "front_matter_exclude": []},
+    "check": {"exclude": [], "front_matter_exclude": [], "libraries": {}},
     "flags": {"exclude": []},
     "site": {"out": f"{GENERATED_ROOT}/site", "mount": "/site"},
     "wiki": {"out": f"{GENERATED_ROOT}/wiki", "mount": "/wiki"},
     "regions": {"report": f"{GENERATED_ROOT}/markdown"},
     "facts": {"items": []},
+    "generators": {"items": []},
 }
+# Set while a declared generator runs, so a generator that calls surfaces again does not recurse.
+NESTED_ENV = "SURFACES_GENERATING"
 
 REGION_RE = re.compile(
     r"(<!-- surfaces:begin (?P<name>[a-z0-9-]+)(?P<args>(?: [a-z0-9_-]+=[^ >]+)*) -->\n)"
@@ -509,11 +512,14 @@ class Links:
         if problem or target is None:
             return href
         suffix = f"#{frag}" if frag else ""
+        query = href.partition("#")[0].partition("?")[2]
         tdoc = self.docs.get(target) or (
             target in self.repo.dirs and self.docs.get(posixpath.join(target, "README.md"))
         )
         if tdoc and not image:
-            return posixpath.relpath(tdoc.page, posixpath.dirname(doc.page) or ".") + suffix
+            # A query (a chart's ?col=&filter=) reaches the page, where the site filters a table.
+            return posixpath.relpath(tdoc.page, posixpath.dirname(doc.page) or ".") \
+                + (f"?{query}" if query else "") + suffix
         if image or target in self.repo.tracked and re.search(r"\.(png|jpe?g|gif|svg|webp)$", target, re.I):
             return self.repo.raw(target)
         if target in self.repo.dirs:
@@ -670,6 +676,81 @@ def check_diagrams(doc: Doc, tokens) -> list[Finding]:
     return found
 
 
+GENERATED_RE = re.compile(r"<!-- ?(?:surfaces:begin ([a-z0-9-]+)|([A-Za-z0-9_-]+):begin)\b.*?-->(.*?)"
+                          r"<!-- ?(?:surfaces:end \1|\2:end)\b.*?-->", re.S)
+
+
+def check_charts(doc: Doc, tokens, links: "Links | None" = None) -> list[Finding]:
+    """A Mermaid chart (xychart, pie, sankey, ...) plots numbers, so it is generated: it must sit
+    inside a generated region (a surfaces region or another tool's begin/end markers)."""
+    spans = []
+    for m in GENERATED_RE.finditer(doc.body):
+        a = doc.body[: m.start()].count("\n")
+        spans.append((a, a + m[0].count("\n")))
+    found = []
+    for tok in tokens:
+        if tok.type != "fence" or tok.info.strip().split(" ")[0].lower() != "mermaid" or not tok.map:
+            continue
+        body = re.sub(r"\A\s*---\n.*?\n---\n", "", tok.content, flags=re.S)
+        kind = (body.strip().split() or [""])[0]
+        marks = re.search(r"^\s*%% links: (.*)$", tok.content, re.M)
+        if links and kind in CHART_KINDS and marks:
+            for target in marks[1].split(" | "):
+                if (why := links.problem(doc, target.strip())):
+                    found.append(Finding("chart", doc.path, tok.map[0] + 1 + doc.offset,
+                                         f"a chart links a mark to nothing: {why}"))
+        if kind in CHART_KINDS and not any(a <= tok.map[0] <= b for a, b in spans):
+            found.append(Finding("chart", doc.path, tok.map[0] + 1 + doc.offset,
+                                 f"a hand-typed {kind} chart: generate it in a region (facts, ai-*, "
+                                 "table-chart, or a tool's own markers; rule project.docs-are-derived-and-current)"))
+    return found
+
+
+def mermaid_chart_spec(src: str) -> dict | None:
+    """The data of a Mermaid pie or xychart, so the site can draw it as an interactive ECharts
+    chart (tooltip, zoom, bar/line switch, data view, image export). None for any other diagram,
+    or a chart this reader does not understand: that one stays a Mermaid diagram."""
+    body = re.sub(r"\A\s*---\n.*?\n---\n", "", src, flags=re.S).strip()
+    names = re.search(r"^\s*%% series: (.*)$", body, re.M)
+    marks = re.search(r"^\s*%% links: (.*)$", body, re.M)
+    lines = [l.strip() for l in body.splitlines() if l.strip() and not l.strip().startswith("%%")]
+    if not lines:
+        return None
+    try:
+        if lines[0].startswith("pie"):
+            m = re.search(r"\btitle\s+(.*)", lines[0])
+            spec = {"kind": "pie", "title": m[1] if m else "", "items": []}
+            for l in lines[1:]:
+                if l.startswith("title "):
+                    spec["title"] = l[6:].strip()
+                elif (m := re.fullmatch(r'"(.*)"\s*:\s*(-?[\d.]+)', l)):
+                    spec["items"].append([m[1], float(m[2])])
+            if marks:
+                spec["links"] = marks[1].split(" | ")
+            return spec if spec["items"] else None
+        if lines[0].split()[0] == "xychart-beta":
+            spec = {"kind": "xy", "title": "", "labels": [], "y": "", "series": []}
+            for l in lines[1:]:
+                word = l.split()[0]
+                if word == "title":
+                    spec["title"] = l[5:].strip().strip('"')
+                elif word == "x-axis":
+                    spec["labels"] = json.loads("[" + re.search(r"\[(.*)\]", l)[1] + "]")
+                elif word == "y-axis":
+                    m = re.match(r'y-axis\s+"([^"]*)"', l)
+                    spec["y"] = m[1] if m else ""
+                elif word in ("bar", "line"):
+                    spec["series"].append({"type": word, "data": json.loads("[" + re.search(r"\[(.*)\]", l)[1] + "]")})
+            for x, name in zip(spec["series"], names[1].split(" | ") if names else []):
+                x["name"] = name
+            if marks:
+                spec["links"] = marks[1].split(" | ")
+            return spec if spec["series"] and spec["labels"] else None
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
 def render_html(md: MarkdownIt, links: Links, doc: Doc, tokens) -> str:
     for tok, attr, _ in walk_links(tokens):
         if attr:
@@ -687,6 +768,21 @@ def render_html(md: MarkdownIt, links: Links, doc: Doc, tokens) -> str:
 
     def fence(self, tokens, idx, options, env):
         tok = tokens[idx]
+        if tok.info.strip().split(" ")[0] == "mermaid" and (spec := mermaid_chart_spec(tok.content)):
+            if spec.get("links"):
+                spec["links"] = [links.site(doc, t.strip()) for t in spec["links"]]
+            return (
+                '<figure class="diagram not-format relative my-6 rounded-lg border border-gray-200 '
+                'bg-white p-4 dark:border-gray-700 dark:bg-gray-800">'
+                '<button type="button" class="maximize absolute right-2 top-2 z-10 rounded-lg p-1.5 '
+                'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700" '
+                'aria-label="Maximize">&#x26F6;</button>'
+                f'<div id="chart-{idx}" class="chart" style="height:380px" data-chart="inline" '
+                f'data-option="{html.escape(json.dumps(spec), quote=True)}"></div>'
+                '<details class="mt-2 text-sm text-gray-500 dark:text-gray-400"><summary>Source '
+                f'(generated Mermaid, as GitHub shows it)</summary><pre class="chart-source">{html.escape(tok.content)}</pre>'
+                '</details></figure>'
+            )
         if tok.info.strip().split(" ")[0] == "mermaid":
             src = html.escape(tok.content)
             return (
@@ -769,17 +865,220 @@ def rel_md(doc: Doc, target: str) -> str:
     return posixpath.relpath(target, posixpath.dirname(doc.path) or ".")
 
 
+# Charts a region draws: Mermaid, so GitHub, the wiki and the site render them natively, and the
+# site puts each in a card that maximizes. Only a region may carry one (check_charts).
+CHART_PALETTE = "#d11f1a, #8a8a8a, #0b0b0b, #ece4d6"
+CHART_KINDS = ("xychart-beta", "pie", "sankey-beta", "quadrantChart", "radar-beta")
+
+
+def mermaid_label(text: str) -> str:
+    return plain(str(text)).replace('"', "'")
+
+
+def mermaid_links(links: list[str] | None) -> list[str]:
+    """A Mermaid comment the site reads back: one link target per bar or slice, in order, so every
+    mark opens its page (GitHub ignores the comment)."""
+    return [f"    %% links: {' | '.join(links)}"] if links else []
+
+
+def mermaid_num(v: float) -> str:
+    """A number as Mermaid parses it: plain digits, never an exponent (1.044e+08 is a parse error)."""
+    if float(v).is_integer():
+        return str(int(v))
+    return f"{v:.6f}".rstrip("0").rstrip(".")
+
+
+def mermaid_pie(title: str, items: list[tuple[str, float]], links: list[str] | None = None) -> str:
+    lines = ["```mermaid", f"pie showData title {mermaid_label(title)}"] + mermaid_links(links)
+    lines += [f'    "{mermaid_label(k)}" : {mermaid_num(v)}' for k, v in items if v]
+    return "\n".join(lines + ["```"])
+
+
+def mermaid_bars(title: str, labels: list[str], series: list[tuple[str, list[float]]],
+                 links: list[str] | None = None) -> str:
+    """A bar per label for the first series, a line for each further one."""
+    top = max([v for _, vals in series for v in vals] + [1])
+    xs = ", ".join(f'"{mermaid_label(l)}"' for l in labels)
+    lines = ["```mermaid", "---", "config:", "  xyChart:", "    width: 900", "    height: 360",
+             "  themeVariables:", "    xyChart:", f'      plotColorPalette: "{CHART_PALETTE}"', "---",
+             "xychart-beta", f'    title "{mermaid_label(title)}"', f"    x-axis [{xs}]",
+             f"    %% series: {' | '.join(mermaid_label(n) for n, _ in series)}", *mermaid_links(links),
+             f'    y-axis "{mermaid_label(series[0][0])}" 0 --> {mermaid_num(float(f"{top * 1.1:.3g}"))}']
+    for i, (_, vals) in enumerate(series):
+        lines.append(f"    {'bar' if i == 0 else 'line'} [{', '.join(mermaid_num(v) for v in vals)}]")
+    return "\n".join(lines + ["```"])
+
+
+def counted(values) -> list[tuple[str, float]]:
+    out: dict[str, float] = {}
+    for v in values:
+        out[str(v or "unknown")] = out.get(str(v or "unknown"), 0) + 1
+    return sorted(out.items(), key=lambda kv: -kv[1])
+
+
+NUMBER_RE = re.compile(r"^\s*(-?[\d,]*\.?\d+)\s*([kKMG]?)")
+
+
+def number(cell: str) -> float | None:
+    m = NUMBER_RE.match(plain(cell))
+    if not m:
+        return None
+    return float(m[1].replace(",", "")) * {"": 1, "k": 1e3, "K": 1e3, "M": 1e6, "G": 1e9}[m[2]]
+
+
+def markdown_tables(text: str) -> list[tuple[list[str], list[list[str]]]]:
+    """The pipe tables of a Markdown text, as (header, rows)."""
+    tables, block = [], []
+    for line in text.splitlines() + [""]:
+        if line.strip().startswith("|"):
+            block.append(line.strip())
+            continue
+        if len(block) >= 2 and re.fullmatch(r"\|[\s:|-]+\|", block[1]):
+            cells = lambda l: [c.strip() for c in re.split(r"(?<!\\)\|", l.strip("|"))]  # noqa: E731
+            tables.append((cells(block[0]), [cells(l) for l in block[2:]]))
+        block = []
+    return tables
+
+
 class Regions:
     """Generators for the regions a document may carry. Each derives, none is hand-written."""
 
     def __init__(self, repo: Repo, docs: dict[str, Doc], layer: Layer):
         self.repo, self.docs, self.layer = repo, docs, layer
 
-    def render(self, name: str, args: dict, doc: Doc) -> str:
+    pos: int = 0  # where in the document's text the region being rendered ends
+
+    def render(self, name: str, args: dict, doc: Doc, pos: int = 0) -> str:
         fn = getattr(self, "gen_" + name.replace("-", "_"), None)
         if fn is None:
             raise KeyError(name)
+        self.pos = pos
         return fn(args, doc).strip()
+
+    def table_link(self, doc: Doc, region: str, match: dict, column: str, value: str) -> str:
+        """Where the table a chart summarises lives: the document that carries that table region
+        (this one first), at the heading before it, filtered on the site to rows whose `column`
+        is `value` (?col=&filter=, read by app.js; GitHub ignores the query)."""
+        def has_table(d: Doc) -> re.Match | None:
+            for m in REGION_RE.finditer(d.text):
+                a = parse_args(m["args"])
+                if region == "ai-rules":
+                    a.setdefault("origin", "project")
+                if m["name"] == region and "as" not in a and all(a.get(k) == v for k, v in match.items()):
+                    return m
+            return None
+        order = [doc] + [d for d in self.docs.values() if d.path != doc.path]
+        for d in order:
+            m = has_table(d)
+            if not m:
+                continue
+            line = d.text[: m.start()].count("\n") - d.offset
+            tokens, seen, slug = markdown().parse(d.body), {}, ""
+            for i, tok in enumerate(tokens):
+                if tok.type != "heading_open":
+                    continue
+                base = github_slug(inline_text(tokens[i + 1]))
+                n = seen.get(base, 0)
+                seen[base] = n + 1
+                if tok.map and tok.map[0] < line:
+                    slug = base if n == 0 else f"{base}-{n}"
+            q = urllib.parse.urlencode({"col": column, "filter": value})
+            return f"{rel_md(doc, d.path) if d.path != doc.path else posixpath.basename(d.path)}?{q}" \
+                + (f"#{slug}" if slug else "")
+        return ""
+
+    def pie_by(self, doc: Doc, title: str, region: str, match: dict, column: str, values) -> str:
+        items = counted(values)
+        # A value the records leave empty is counted as "unknown"; its table cell is empty.
+        links = [self.table_link(doc, region, match, column, "" if k == "unknown" else k) for k, _ in items]
+        return mermaid_pie(title, items, links if all(links) else None)
+
+    def gen_toc(self, args: dict, doc: Doc) -> str:
+        """The headings that follow the region, down to `depth` (default 3), nested by level,
+        each linked with the anchor GitHub and the site give it."""
+        depth = int(args.get("depth", 3))
+        start = doc.text[: self.pos].count("\n") - doc.offset
+        tokens = markdown().parse(doc.body)
+        seen: dict[str, int] = {}
+        entries = []
+        for i, tok in enumerate(tokens):
+            if tok.type != "heading_open":
+                continue
+            text = inline_text(tokens[i + 1])
+            base = github_slug(text)
+            n = seen.get(base, 0)
+            seen[base] = n + 1
+            level = int(tok.tag[1])
+            if tok.map and tok.map[0] >= start and 2 <= level <= depth:
+                entries.append((level, text, base if n == 0 else f"{base}-{n}"))
+        if not entries:
+            return "No heading follows this region."
+        top = min(level for level, _, _ in entries)
+        label = lambda t: t.replace("[", "\\[").replace("]", "\\]")  # noqa: E731
+        return "\n".join(f"{'    ' * (level - top)}- [{label(text)}](#{slug})"
+                         for level, text, slug in entries)
+
+    def gen_include(self, args: dict, doc: Doc) -> str:
+        """The body of a marked region of another document, its relative links rewritten for this
+        one. `region=NAME` finds `<!-- NAME:begin -->` ... `<!-- NAME:end -->` (any tool's marker)
+        or a surfaces region of that generator; HTML comment lines inside are dropped."""
+        src, name = args.get("src", "").strip("/"), args.get("region", "")
+        if not src or not name:
+            raise ValueError("include needs src=<document> and region=<name>")
+        if src == doc.path:
+            raise ValueError("include cannot read its own document")
+        body = self.region_body(src, name)
+        base = posixpath.dirname(src)
+
+        def relink(target: str, _image: bool) -> str:
+            if not target or target.startswith(("#", "/")) or SCHEME_RE.match(target):
+                return target
+            path, _, frag = target.partition("#")
+            resolved = posixpath.normpath(posixpath.join(base, path)) if path else src
+            return rel_md(doc, resolved) + (f"#{frag}" if frag else "")
+
+        return rewrite_source_links(body, relink)
+
+    def region_body(self, src: str, name: str) -> str:
+        source = self.docs.get(src)
+        if source is None:
+            raise ValueError(f"{src} is not a published document")
+        rx = re.compile(
+            rf"<!-- (?:{re.escape(name)}:begin|surfaces:begin {re.escape(name)})\b[^>]*-->\n(.*?)"
+            rf"<!-- (?:{re.escape(name)}:end|surfaces:end {re.escape(name)})\b[^>]*-->", re.S)
+        m = rx.search(source.text)
+        if m is None:
+            raise ValueError(f"{src} has no region '{name}'")
+        return "".join(line for line in m[1].splitlines(keepends=True)
+                       if not re.fullmatch(r"\s*<!--.*-->\s*", line))
+
+    def gen_table_chart(self, args: dict, doc: Doc) -> str:
+        """A bar chart of one column of a table, from a region of a document (`src`, `region`,
+        default this document's own regions are not read) or from a whole document: `label` and
+        `value` name the columns (an underscore stands for a space), `line` a second value column
+        drawn as a line. Numbers may carry k, M or G."""
+        src = args.get("src", "").strip("/")
+        if not src or (src == doc.path and not args.get("region")):
+            raise ValueError("table-chart needs src=<document> (its own only with region=<name>)")
+        text = self.region_body(src, args["region"]) if args.get("region") else self.docs[src].text \
+            if src in self.docs else None
+        if text is None:
+            raise ValueError(f"table-chart: {src} is not a published document")
+        want = [args.get(k, "").replace("_", " ").lower() for k in ("label", "value", "line")]
+        for header, rows in markdown_tables(text):
+            cols = [h.lower() for h in header]
+            if want[0] in cols and want[1] in cols and (not want[2] or want[2] in cols):
+                li, vi = cols.index(want[0]), cols.index(want[1])
+                ri = cols.index(want[2]) if want[2] else None
+                rows = [r for r in rows if len(r) == len(header) and number(r[vi]) is not None]
+                if not rows:
+                    break
+                series = [(header[vi], [number(r[vi]) for r in rows])]
+                if ri is not None:
+                    series.append((header[ri], [number(r[ri]) or 0 for r in rows]))
+                title = f"{header[vi]} by {header[li].lower()}" + (f" (line: {header[ri]})" if ri is not None else "")
+                return mermaid_bars(title, [r[li] for r in rows], series)
+        raise ValueError(f"table-chart: no table in {src} with columns {', '.join(w for w in want if w)}")
 
     def gen_docs_index(self, args: dict, doc: Doc) -> str:
         prefix = args.get("dir", "").strip("/")
@@ -793,6 +1092,9 @@ class Regions:
         return table(["Document", "What it is"], rows)
 
     def gen_ai_features(self, args: dict, doc: Doc) -> str:
+        if args.get("as") == "pie":
+            return self.pie_by(doc, "Features by status", "ai-features", {}, "Status",
+                               (f.get("status") for f in self.layer.features))
         rows = [
             [f"[{f.get('short_title') or f.get('title')}]({rel_md(doc, f['path'])})",
              f.get("status", ""), f.get("headline") or f.get("summary", "")]
@@ -801,6 +1103,9 @@ class Regions:
         return table(["Feature", "Status", "What it gives"], rows)
 
     def gen_ai_adrs(self, args: dict, doc: Doc) -> str:
+        if args.get("as") == "pie":
+            return self.pie_by(doc, "Decisions by status", "ai-adrs", {}, "Status",
+                               (a.get("status") for a in self.layer.adrs))
         rows = [
             [f"[{a.get('id', '')}]({rel_md(doc, a['path'])})", a.get("status", ""),
              a.get("title", "")]
@@ -810,6 +1115,9 @@ class Regions:
 
     def gen_ai_rules(self, args: dict, doc: Doc) -> str:
         origin = args.get("origin", "project")
+        if args.get("as") == "pie":
+            return self.pie_by(doc, f"Rules ({origin}) by class", "ai-rules", {"origin": origin}, "Class",
+                               (r.get("class") for r in self.layer.rules if origin == "all" or r["origin"] == origin))
         rows = [
             [f"[{r.get('id', '')}]({rel_md(doc, r['path'])})", r.get("class", ""),
              r.get("statement") or r.get("title", "")]
@@ -819,16 +1127,27 @@ class Regions:
         return table(["Rule", "Class", "Statement"], rows)
 
     def gen_ai_plan(self, args: dict, doc: Doc) -> str:
+        if args.get("as") == "bar":
+            labels, done, total, links = [], [], [], []
+            for n, m in enumerate(self.layer.milestones, 1):
+                issues = [i for i in self.layer.issues if i.get("milestone") == m.get("id")]
+                labels.append(f"M{n}")
+                links.append(rel_md(doc, m["path"]))
+                done.append(sum(i["status"] == "done" for i in issues))
+                total.append(len(issues))
+            return mermaid_bars("Issues done (bar) and planned (line) per milestone, in plan order",
+                                labels, [("Issues done", done), ("Issues planned", total)], links)
         rows = []
-        for m in self.layer.milestones:
+        for n, m in enumerate(self.layer.milestones, 1):
             issues = [i for i in self.layer.issues if i.get("milestone") == m.get("id")]
             done = sum(i["status"] == "done" for i in issues)
             rows.append([
+                f"M{n}",
                 f"[{m.get('title', m.get('id'))}]({rel_md(doc, m['path'])})",
                 f"{done}/{len(issues)}",
                 ", ".join(i["id"] for i in issues if i["status"] != "done") or "—",
             ])
-        return table(["Milestone", "Issues done", "Open issues"], rows)
+        return table(["#", "Milestone", "Issues done", "Open issues"], rows)
 
     # A fact is a number counted from the tracked files on every sync, never typed. surfaces.toml
     # declares what to count (the one choice data cannot make); the region shows how it was counted.
@@ -860,7 +1179,8 @@ class Regions:
                 label = f"[{label}]({rel_md(doc, item['link'])})"
             rows.append((n, label, how, item))
         if args.get("as") == "pie":
-            lines = ["```mermaid", f"pie showData title {args.get('title', 'Counted from the sources')}"]
+            title = "Counted from the sources" + (f": {args['group']}" if args.get("group") else "")
+            lines = ["```mermaid", f"pie showData title {title}"]
             lines += [f'    "{plain(i.get("short", i["label"]))}" : {n}' for n, _, _, i in rows]
             return "\n".join(lines + ["```"])
         if args.get("as") == "line":
@@ -915,9 +1235,12 @@ def sync_regions(repo: Repo, docs: dict[str, Doc], layer: Layer, write: bool) ->
                 return m[0]  # an example inside a code block, not a region
             line = doc.text[: m.start()].count("\n") + 1
             try:
-                body = gens.render(m["name"], parse_args(m["args"]), doc)
+                body = gens.render(m["name"], parse_args(m["args"]), doc, m.end(1))
             except KeyError:
                 findings.append(Finding("region", doc.path, line, f"unknown generator '{m['name']}'"))
+                return m[0]
+            except ValueError as err:
+                findings.append(Finding("region", doc.path, line, str(err)))
                 return m[0]
             fresh = m[1] + body + "\n" + m[5]
             state = "current" if fresh == m[0] else "stale"
@@ -1741,11 +2064,84 @@ def check_doc_flags(tools: dict[str, list[Tool]], doc: Doc) -> list[Finding]:
     return sorted(found, key=lambda f: f.line)
 
 
+LIB_IMPORT_RE = re.compile(r"""(?:\bfrom\s+|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"]([^'"]+)['"]""")
+LIB_SCRIPT_RE = re.compile(r"""<script[^>]*\ssrc=["']([^"']+)["']""", re.I)
+
+
+def check_libraries(repo: Repo, cfg: dict) -> list[Finding]:
+    """One visualization layer per kind of view: a library `[check] libraries` maps to the one used
+    instead is a finding wherever a tracked manifest depends on it, a page loads it or code imports
+    it (rule project.docs-are-derived-and-current, the owner's library order)."""
+    banned = cfg["check"]["libraries"]
+    if not banned:
+        return []
+    found = []
+
+    def hit(name: str) -> str | None:
+        low = name.lower().rsplit("/", 1)[-1]
+        for lib in banned:
+            full = name.lower()
+            if full == lib or full.startswith(lib + "/") or f"/{lib}@" in full or f"/{lib}/" in full \
+                    or re.match(rf"{re.escape(lib)}([.@-]|$)", low):
+                return lib
+        return None
+
+    for path in sorted(repo.tracked):
+        if matches(path, cfg["sources"]["exclude"]) or not (repo.root / path).is_file():
+            continue
+        name = posixpath.basename(path)
+        if name == "package.json":
+            data = json.loads((repo.root / path).read_text() or "{}")
+            deps = [d for k in ("dependencies", "devDependencies", "peerDependencies") for d in data.get(k, {})]
+            found += [(path, 1, d, hit(d)) for d in deps if hit(d)]
+        elif name.endswith((".html", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".heex")) and not name.endswith(".min.js"):
+            text = (repo.root / path).read_text(errors="replace")
+            for rx in (LIB_SCRIPT_RE, LIB_IMPORT_RE):
+                for m in rx.finditer(text):
+                    if (lib := hit(m[1])):
+                        found.append((path, text[: m.start()].count("\n") + 1, m[1], lib))
+    return [Finding("library", path, line, f"{what}: use {banned[lib]} instead of {lib} "
+                    "(one layer per kind of view; [check] libraries in surfaces.toml)")
+            for path, line, what, lib in found]
+
+
+def run_generators(root: Path, cfg: dict, mode: str) -> list[Finding]:
+    """Run each generator `surfaces.toml` declares, its `sync` command (regenerate in place) or
+    its `check` command (fail while its output is stale). They own derived text the regions do
+    not: another tool's markers, a generated file. One `surfaces sync` then regenerates every
+    derived document, and `surfaces check` (commit hook, gate, CI) proves every one current."""
+    if os.environ.get(NESTED_ENV):
+        return []
+    findings = []
+    env = dict(os.environ, **{NESTED_ENV: "1"})
+    for g in cfg["generators"]["items"]:
+        cmd = g.get(mode)
+        if not cmd:
+            continue
+        argv = cmd if isinstance(cmd, list) else cmd.split()
+        where = (g.get("outputs") or [CONFIG_FILE])[0]
+        try:
+            r = subprocess.run(argv, cwd=root, env=env, capture_output=True, text=True)
+        except OSError as err:
+            findings.append(Finding("generate", where, 0, f"{g.get('id', '?')}: {argv[0]}: {err}"))
+            continue
+        if r.returncode != 0:
+            tail = " ".join((r.stdout + "\n" + r.stderr).split())[-300:]
+            hint = "run tools/surfaces/surfaces sync" if g.get("sync") else "fix its source"
+            findings.append(Finding("generate", where, 0,
+                                    f"{g.get('id', '?')}: `{' '.join(argv)}` exited {r.returncode} "
+                                    f"({hint}): {tail}"))
+    return findings
+
+
 def run_check(repo: Repo, cfg: dict, docs: dict[str, Doc], layer: Layer) -> list[Finding]:
-    findings, _ = sync_regions(repo, docs, layer, write=False)
+    findings = run_generators(repo.root, cfg, "check")
+    region_findings, _ = sync_regions(repo, docs, layer, write=False)
+    findings += region_findings
     for path, why in sorted(FRONT_ERRORS.items()):
         if not matches(path, cfg["check"]["front_matter_exclude"]):
             findings.append(Finding("front", path, 1, f"front matter does not parse, so the page shows it as text: {why}"))
+    findings += check_libraries(repo, cfg)
     tools = load_tools(repo, cfg)
     findings += check_tool_headers(tools)
     for path, doc in docs.items():
@@ -1760,6 +2156,7 @@ def run_check(repo: Repo, cfg: dict, docs: dict[str, Doc], layer: Layer) -> list
             continue
         findings += check_links(md, links, doc, parsed[path])
         findings += check_diagrams(doc, parsed[path])
+        findings += check_charts(doc, parsed[path], links)
     for name in ("site", "wiki"):
         out = Path(cfg[name]["out"])
         if out.is_absolute() or out.parts[:2] != tuple(GENERATED_ROOT.split("/")):
@@ -1789,9 +2186,10 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="surfaces", description=__doc__.split("\n\n")[0])
     ap.add_argument("--repo", default=None, help="repository root (default: the git toplevel of the cwd)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("check", help="fail on a stale region, a broken link or anchor (exit 10)")
-    s = sub.add_parser("sync", help="regenerate the Markdown regions in place")
-    s.add_argument("--check", action="store_true", help="write nothing; exit 11 when a region would change")
+    sub.add_parser("check", help="fail on a stale region or generator output, a broken link or anchor (exit 10)")
+    s = sub.add_parser("sync", help="run every declared generator, then regenerate the Markdown regions in place")
+    s.add_argument("--check", action="store_true",
+                   help="write nothing; exit 11 when a region or a generator's output would change")
     s = sub.add_parser("site", help="build the static site")
     s.add_argument("--out", default=None)
     s.add_argument("--no-assets", action="store_true", help="skip the CSS/JS build (HTML only)")
@@ -1804,6 +2202,9 @@ def main(argv: list[str]) -> int:
     root = Path(git(start, "rev-parse", "--show-toplevel").strip())
     os.chdir(root)
     cfg = load_config(root)
+    generated: list[Finding] = []
+    if args.cmd == "sync":  # generators first: they may write documents the regions then read
+        generated = run_generators(root, cfg, "check" if args.check else "sync")
     repo = load_repo(root)
     docs = load_docs(repo, cfg)
     layer = load_layer(repo)
@@ -1820,16 +2221,20 @@ def main(argv: list[str]) -> int:
         return EXIT_FINDINGS if findings else EXIT_OK
     if args.cmd == "sync":
         findings, report = sync_regions(repo, docs, layer, write=not args.check)
+        findings = generated + findings
         for f in findings:
             print(f)
         if not args.check:
             write_region_report(repo, cfg, report)
         stale = sum(r["state"] == "stale" for r in report)
         verb = "would change" if args.check else "regenerated"
-        print(f"surfaces sync: {len(report)} region(s), {stale} {verb}")
-        if any(f.message.startswith("unknown generator") for f in findings):
+        gens = len([g for g in cfg["generators"]["items"] if g.get("check" if args.check else "sync")])
+        print(f"surfaces sync: {gens} generator(s), {len(generated)} failed; "
+              f"{len(report)} region(s), {stale} {verb}")
+        if any(f.kind == "region" and "is stale" not in f.message for f in findings) \
+                or (generated and not args.check):
             return EXIT_FINDINGS
-        return EXIT_DRIFT if args.check and stale else EXIT_OK
+        return EXIT_DRIFT if args.check and (stale or generated) else EXIT_OK
     if args.cmd == "site":
         out = Path(args.out or cfg["site"]["out"]).resolve()
         Site(repo, cfg, docs, layer, out).build(assets=not args.no_assets)
