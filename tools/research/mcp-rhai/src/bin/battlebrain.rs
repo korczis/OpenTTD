@@ -22,7 +22,10 @@
 //!                                                     the directive (planned_freight_only=1 + one fr_* slot)
 //!   battlebrain serve --directive <file> --port <p>   answer ONE loopback GET with it, then exit
 //!   battlebrain report <result.json>                  the derived summary (.md) of a result record
-//!   battlebrain rollback --company <id>               the directive back to the baseline (planned_freight_only=0)
+//!   battlebrain rollback --snapshot <record> --company <id> [--of <live directive>]
+//!                                                     the baseline back as a keyed LIVE decision of its
+//!                                                     own (planned_freight_only=0, every slot cleared),
+//!                                                     served and applied like any live decision
 //!   battlebrain catalogue --commit <sha> [--kernel <id> --engine <e>] < kernels.json
 //!                                                     the discovered catalogue's digest, from the
 //!                                                     runner's own `flow -- kernels` answer
@@ -287,14 +290,10 @@ pub fn run(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &
     // cleared (-1), and planned_freight_only=1 so the bot builds this line and plans none itself.
     // The block names their digest; the executor recomputes it (I0117).
     let settings = choice.selected.as_ref().map_or(String::new(), |l| {
-        let mut s = format!("planned_freight_only=1,{p}from={},{p}to={},{p}cargo={}", l.producer, l.acceptor, l.cargo_id, p = bb::freight_slot_prefix(1));
-        for i in 2..=bb::FREIGHT_SLOTS {
-            s.push_str(&format!(",{}from=-1", bb::freight_slot_prefix(i)));
-        }
-        s
+        format!("planned_freight_only=1,{p}from={},{p}to={},{p}cargo={},{}", l.producer, l.acceptor, l.cargo_id, bb::cleared_slots(2), p = bb::freight_slot_prefix(1))
     });
     let block = json!({"schema": bb::DECISION_SCHEMA, "decision": decision["id"], "snapshot_digest": snapshot["body"]["digest"],
-        "idempotency_key": key, "policy": format!("{}@{}", policy::POLICY_ID, policy::POLICY_VERSION), "valid_until": valid_until,
+        "snapshot_tick": at["tick"], "idempotency_key": key, "policy": format!("{}@{}", policy::POLICY_ID, policy::POLICY_VERSION), "valid_until": valid_until,
         "settings_digest": bb::settings_digest(&settings), "mode": if gate.is_some() { "live" } else { "shadow" }});
     let mut records: Vec<Value> = base_rec.iter().cloned().collect();
     if base_rec.as_ref().map(|b| &b["id"]) != Some(&ours_rec["id"]) {
@@ -439,17 +438,20 @@ pub fn report(rec: &Value) -> String {
 /// Answer exactly one GET on a loopback port with `body`, then return (`serve --once`): the
 /// directive leaves this process once, whoever asks.
 /// The ledger of idempotency keys `serve` has handed out, one per line, kept across runs so the
-/// same live decision is never served twice (`$BATTLEBRAIN_STATE_DIR`, else
-/// ~/.local/state/battlebrain/served-keys).
-fn served_ledger() -> std::path::PathBuf {
-    let dir = std::env::var_os("BATTLEBRAIN_STATE_DIR").map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state/battlebrain"));
-    dir.join("served-keys")
+/// same live decision is never served twice: `$BATTLEBRAIN_STATE_DIR/served-keys`, else
+/// `$HOME/.local/state/battlebrain/served-keys`. Both must be absolute paths; a relative one would
+/// put the ledger wherever the command happens to run, so it is refused.
+fn served_ledger(state_dir: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> Result<std::path::PathBuf, String> {
+    let absolute = |p: std::path::PathBuf, what: &str| if p.is_absolute() { Ok(p) } else { Err(format!("{what} must be an absolute path, not {:?}", p)) };
+    match (state_dir, home) {
+        (Some(d), _) if !d.is_empty() => absolute(d.into(), "BATTLEBRAIN_STATE_DIR").map(|d| d.join("served-keys")),
+        (_, Some(h)) if !h.is_empty() => absolute(std::path::PathBuf::from(h), "HOME").map(|h| h.join(".local/state/battlebrain/served-keys")),
+        _ => Err("neither BATTLEBRAIN_STATE_DIR nor HOME is set, so the served-key ledger has no place".into()),
+    }
 }
 
-/// Refuse a key already served; otherwise record it first, then serve.
-fn claim_key(ledger: &std::path::Path, key: &str) -> Result<(), String> {
-    use std::io::Write;
+/// Refuse a key already served (checked before anything is bound).
+fn unserved_key(ledger: &std::path::Path, key: &str) -> Result<(), String> {
     if key.is_empty() || key.contains('\n') {
         return Err("a live directive needs a one-line idempotency key".into());
     }
@@ -457,6 +459,14 @@ fn claim_key(ledger: &std::path::Path, key: &str) -> Result<(), String> {
     if seen.lines().any(|l| l == key) {
         return Err(format!("key {key:?} was served before ({}); a decision is served once", ledger.display()));
     }
+    Ok(())
+}
+
+/// Record a key as served: called once a loopback GET has been accepted, before the answer is
+/// written, so a failed bind or a refused peer never burns it, and a key is never served unrecorded.
+fn record_key(ledger: &std::path::Path, key: &str) -> Result<(), String> {
+    use std::io::Write;
+    unserved_key(ledger, key)?;
     if let Some(d) = ledger.parent() {
         std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
     }
@@ -464,7 +474,9 @@ fn claim_key(ledger: &std::path::Path, key: &str) -> Result<(), String> {
     writeln!(f, "{key}").map_err(|e| e.to_string())
 }
 
-fn serve_once(port: u16, body: &str) -> Result<String, String> {
+/// Bind, accept one loopback GET, run `accepted` (it records the key; an error answers 503 and
+/// serves nothing), then answer with `body`.
+fn serve_once(port: u16, body: &str, accepted: impl FnOnce() -> Result<(), String>) -> Result<String, String> {
     use std::io::{BufRead, BufReader, Write};
     let listener = std::net::TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind 127.0.0.1:{port}: {e}"))?;
     let (mut stream, peer) = listener.accept().map_err(|e| e.to_string())?;
@@ -474,9 +486,38 @@ fn serve_once(port: u16, body: &str) -> Result<String, String> {
     let mut line = String::new();
     BufReader::new(&stream).read_line(&mut line).map_err(|e| e.to_string())?;
     let ok = line.starts_with("GET ");
+    if ok {
+        if let Err(e) = accepted() {
+            let out = "{\"error\":\"the directive could not be recorded as served\"}";
+            let _ = write!(stream, "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}", out.len());
+            return Err(e);
+        }
+    }
     let (status, out) = if ok { ("200 OK", body.to_string()) } else { ("405 Method Not Allowed", "{\"error\":\"GET only\"}".to_string()) };
     write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}", out.len()).map_err(|e| e.to_string())?;
     if ok { Ok(line.trim().to_string()) } else { Err(format!("refused {}", line.trim())) }
+}
+
+/// `battlebrain rollback`: the snapshot record in `snapshot` (a bare record or a {"value": ...}
+/// fixture) and, with `of`, the live directive file whose decision is rolled back.
+fn rollback_from_files(snapshot: &str, company: i64, of: Option<&str>) -> Result<Value, Vec<bb::Refusal>> {
+    let unreadable = |e: String| vec![bb::Refusal::new("unreadable", "", e)];
+    let snap = read_json(snapshot).map_err(unreadable)?;
+    let snap = snap.get("value").cloned().unwrap_or(snap);
+    let block = match of {
+        Some(f) => Some(read_json(f).map_err(unreadable)?.get("decision").cloned()
+            .ok_or_else(|| vec![bb::Refusal::new("missing_field", "decision", format!("{f} carries no decision block to roll back"))])?),
+        None => None,
+    };
+    bb::rollback_directive(&snap, company, block.as_ref(), env!("CARGO_PKG_VERSION"))
+}
+
+/// `battlebrain serve`: refuse a key served before (checked before binding), then answer one
+/// loopback GET with the directive, recording its key once the GET is accepted.
+fn serve_directive(d: &Value, port: u16, ledger: &std::path::Path) -> Result<String, String> {
+    let key = d.pointer("/decision/idempotency_key").and_then(Value::as_str).unwrap_or_default().to_string();
+    unserved_key(ledger, &key)?;
+    serve_once(port, &d.to_string(), || record_key(ledger, &key))
 }
 
 /// `--catalogue <file>` on a run: attach the capability matches, or nothing without the flag.
@@ -598,8 +639,8 @@ fn main() {
         Some("serve") => {
             let flag = |name: &str| flag(&args, name);
             match (flag("--directive").map(|f| read_json(&f)), flag("--port").and_then(|p| p.parse::<u16>().ok())) {
-                (Some(Ok(d)), Some(port)) if d.get("company_id").is_some() => match claim_key(&served_ledger(), d.pointer("/decision/idempotency_key").and_then(Value::as_str).unwrap_or_default())
-                    .and_then(|_| serve_once(port, &d.to_string())) {
+                (Some(Ok(d)), Some(port)) if d.get("company_id").is_some() => match served_ledger(std::env::var_os("BATTLEBRAIN_STATE_DIR"), std::env::var_os("HOME"))
+                    .and_then(|ledger| serve_directive(&d, port, &ledger)) {
                     Ok(req) => {
                         println!("{}", json!({"ok": true, "served": req, "port": port}));
                         0
@@ -619,18 +660,25 @@ fn main() {
                 }
             }
         }
-        Some("rollback") => match flag(&args, "--company").and_then(|c| c.parse::<i64>().ok()) {
-            // Back to the verified baseline: the bot plans its own freight lines again. No decision
-            // block: it is an ordinary directive, approved by the operator like every change.
-            Some(id) => {
-                println!("{}", json!({"company_id": id, "settings": "planned_freight_only=0"}));
-                0
+        Some("rollback") => {
+            // Back to the verified baseline, as a keyed live decision of its own (I0117 round 2): a
+            // blockless directive would need an observation during the pull that serve never makes,
+            // and it would leave the slots set. Served and applied like any live decision.
+            let flag = |name: &str| flag(&args, name);
+            match (flag("--snapshot"), flag("--company").and_then(|c| c.parse::<i64>().ok())) {
+                (Some(snap), Some(id)) => match rollback_from_files(&snap, id, flag("--of").as_deref()) {
+                    Ok(out) => {
+                        println!("{}", serde_json::to_string_pretty(&out).expect("serialises"));
+                        0
+                    }
+                    Err(rs) => refused(&rs),
+                },
+                _ => {
+                    eprintln!("battlebrain rollback --snapshot <record> --company <id> [--of <the live directive rolled back>]");
+                    2
+                }
             }
-            None => {
-                eprintln!("battlebrain rollback --company <id>");
-                2
-            }
-        },
+        }
         Some("shadow") => {
             let flag = |name: &str| flag(&args, name);
             let files = (flag("--snapshot"), flag("--plan"), flag("--companies"), flag("--company").and_then(|c| c.parse::<i64>().ok()));
@@ -857,11 +905,131 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("battlebrain-ledger-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let ledger = dir.join("served-keys");
-        assert!(claim_key(&ledger, "coplay:0:1963-03-01:freight-line").is_ok());
-        assert!(claim_key(&ledger, "coplay:0:1963-03-01:freight-line").unwrap_err().contains("served before"));
-        assert!(claim_key(&ledger, "another").is_ok());
-        assert!(claim_key(&ledger, "").is_err());
+        assert!(unserved_key(&ledger, "coplay:0:1963-03-01:freight-line").is_ok());
+        assert!(record_key(&ledger, "coplay:0:1963-03-01:freight-line").is_ok());
+        assert!(unserved_key(&ledger, "coplay:0:1963-03-01:freight-line").unwrap_err().contains("served before"));
+        assert!(record_key(&ledger, "coplay:0:1963-03-01:freight-line").unwrap_err().contains("served before"));
+        assert!(record_key(&ledger, "another").is_ok());
+        assert!(unserved_key(&ledger, "").is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_ledger_lives_at_an_absolute_path_or_nowhere() {
+        let os = |s: &str| Some(std::ffi::OsString::from(s));
+        assert_eq!(served_ledger(os("/var/bb"), os("/home/x")).unwrap(), Path::new("/var/bb/served-keys"));
+        assert_eq!(served_ledger(None, os("/home/x")).unwrap(), Path::new("/home/x/.local/state/battlebrain/served-keys"));
+        assert_eq!(served_ledger(os(""), os("/home/x")).unwrap(), Path::new("/home/x/.local/state/battlebrain/served-keys"), "an empty dir is unset");
+        assert!(served_ledger(os("state"), os("/home/x")).unwrap_err().contains("BATTLEBRAIN_STATE_DIR must be an absolute path"));
+        assert!(served_ledger(None, os("rel")).unwrap_err().contains("HOME must be an absolute path"));
+        assert!(served_ledger(None, None).is_err());
+        assert!(served_ledger(None, os("")).is_err());
+    }
+
+    #[test]
+    fn a_key_is_recorded_only_once_a_get_is_accepted() {
+        let dir = std::env::temp_dir().join(format!("battlebrain-accept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ledger = dir.join("served-keys");
+        // A port that cannot be bound (taken here) burns no key.
+        let taken = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = taken.local_addr().unwrap().port();
+        assert!(serve_once(port, "{}", || record_key(&ledger, "k:rollback")).unwrap_err().starts_with("bind"));
+        assert!(unserved_key(&ledger, "k:rollback").is_ok(), "a failed bind burns no key");
+        drop(taken);
+        // An accepted GET records it before the answer.
+        let port = 38_000 + (std::process::id() % 1000) as u16;
+        let l2 = ledger.clone();
+        let t = std::thread::spawn(move || serve_once(port, "{\"company_id\":1}", || record_key(&l2, "k:rollback")));
+        let body = (0..50).find_map(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            ureq::get(&format!("http://127.0.0.1:{port}/")).call().ok().and_then(|r| r.into_string().ok())
+        });
+        assert_eq!(body.as_deref(), Some("{\"company_id\":1}"));
+        assert!(t.join().unwrap().is_ok());
+        assert!(unserved_key(&ledger, "k:rollback").unwrap_err().contains("served before"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rollback_is_read_from_its_files_and_served_once_by_its_key() {
+        let dir = std::env::temp_dir().join(format!("battlebrain-rollback-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let snap = Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain/valid/snapshot.json");
+        let snap = snap.to_str().unwrap();
+        let out = rollback_from_files(snap, 1, None).unwrap();
+        let of = dir.join("live.json");
+        std::fs::write(&of, out["directive"].to_string()).unwrap();
+        let again = rollback_from_files(snap, 1, Some(of.to_str().unwrap())).unwrap();
+        assert!(again["directive"]["decision"]["idempotency_key"].as_str().unwrap().ends_with(":rollback:rollback"));
+        std::fs::write(&of, "{}").unwrap();
+        assert_eq!(rollback_from_files(snap, 1, Some(of.to_str().unwrap())).unwrap_err()[0].code, "missing_field");
+        assert_eq!(rollback_from_files("/nonexistent/snapshot.json", 1, None).unwrap_err()[0].code, "unreadable");
+        assert_eq!(rollback_from_files(snap, 1, Some("/nonexistent/live.json")).unwrap_err()[0].code, "unreadable");
+        // Served once: the second serve is refused before anything is bound.
+        let ledger = dir.join("served-keys");
+        let d = out["directive"].clone();
+        let port = 37_000 + (std::process::id() % 1000) as u16;
+        let (d2, l2) = (d.clone(), ledger.clone());
+        let t = std::thread::spawn(move || serve_directive(&d2, port, &l2));
+        let body = (0..50).find_map(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            ureq::get(&format!("http://127.0.0.1:{port}/")).call().ok().and_then(|r| r.into_json::<Value>().ok())
+        });
+        assert_eq!(body.as_ref(), Some(&d));
+        assert!(t.join().unwrap().is_ok());
+        assert!(serve_directive(&d, port, &ledger).unwrap_err().contains("served before"));
+        // A GET whose key cannot be recorded is answered 503 and serves nothing.
+        let port = port + 1;
+        let t = std::thread::spawn(move || serve_once(port, "{\"company_id\":1}", || Err("disk full".into())));
+        let status = (0..50).find_map(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            match ureq::get(&format!("http://127.0.0.1:{port}/")).call() {
+                Err(ureq::Error::Status(code, _)) => Some(code),
+                Ok(r) => Some(r.status()),
+                Err(_) => None,
+            }
+        });
+        assert_eq!(status, Some(503));
+        assert_eq!(t.join().unwrap().unwrap_err(), "disk full");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rollback_is_a_keyed_live_decision_that_clears_every_slot() {
+        let (snap, _) = live_inputs();
+        let p = policy::Params { margin: 0.2, reserve: 25_000, require_priced: true };
+        let mut fresh = fx("shadow/companies.json");
+        fresh["game_tick"] = json!(74100);
+        fresh["game_date"] = json!("1961-01-02");
+        let live = run(&snap, &fx("shadow/plan.json"), &fresh, 1, &p, Some(&LiveGate { max_window_ticks: 0 })).unwrap();
+        let prior = &live["directive"]["decision"];
+        let out = bb::rollback_directive(&snap, 1, Some(prior), "test").unwrap();
+        let d = &out["directive"];
+        let block = &d["decision"];
+        assert_eq!(d["company_id"], 1);
+        let settings = d["settings"].as_str().unwrap();
+        assert!(settings.starts_with("planned_freight_only=0,fr_from=-1,fr2_from=-1,"), "{settings}");
+        assert!(settings.ends_with(&format!("{}from=-1", bb::freight_slot_prefix(bb::FREIGHT_SLOTS))));
+        assert_eq!(block["mode"], "live");
+        assert_eq!(block["idempotency_key"], json!(format!("{}:rollback", prior["idempotency_key"].as_str().unwrap())));
+        assert_eq!(block["settings_digest"], json!(bb::settings_digest(settings)));
+        assert_eq!(block["snapshot_tick"], snap["at"]["tick"]);
+        assert!(bb::validate_decision_block(block).is_ok());
+        for r in out["records"].as_array().unwrap() {
+            assert!(bb::validate_record(r).is_ok(), "{r}");
+        }
+        let dec = &out["records"][1];
+        assert!(dec["derived_from"].as_array().unwrap().contains(&prior["decision"]), "the rollback names the decision it reverses");
+        assert_eq!(dec["body"]["policy"]["params"]["rolls_back"], prior["decision"]);
+        // Without --of it is keyed by the snapshot; a shadow block is never rolled back.
+        let own = bb::rollback_directive(&snap, 1, None, "test").unwrap();
+        assert!(own["directive"]["decision"]["idempotency_key"].as_str().unwrap().ends_with(":rollback"));
+        let mut shadow = prior.clone();
+        shadow["mode"] = json!("shadow");
+        assert_eq!(bb::rollback_directive(&snap, 1, Some(&shadow), "test").unwrap_err()[0].code, "not_live");
+        assert_eq!(bb::rollback_directive(&snap, 2, None, "test").unwrap_err()[0].code, "scope_mismatch");
     }
 
     #[test]
@@ -884,7 +1052,7 @@ mod tests {
     #[test]
     fn a_directive_is_served_once_on_loopback_and_never_twice() {
         let port = 39_000 + (std::process::id() % 1000) as u16;
-        let t = std::thread::spawn(move || serve_once(port, "{\"company_id\":1}"));
+        let t = std::thread::spawn(move || serve_once(port, "{\"company_id\":1}", || Ok(())));
         let body = (0..50).find_map(|_| {
             std::thread::sleep(std::time::Duration::from_millis(20));
             ureq::get(&format!("http://127.0.0.1:{port}/")).call().ok().and_then(|r| r.into_string().ok())
