@@ -30,6 +30,7 @@ flowchart LR
 | 11-21 23:35 | The orchestrator, on another Mac (192.168.100.110), starts again. | PID 14474, up 6 h 37 min at 11-22 06:00 |
 | 11-22 05:50 | This Mac and lundra are paused: the battle binary is no longer executable, so the probe reports `no-binary`. 7 matches on lundra are stopped. | ~/ttd-battle/PAUSED.txt on each host |
 | 11-22 05:58 | The owner runs a stop script. `battle.py run` gets SIGTERM, and 27 matches on its own host stop. | the script's output |
+| 11-22 10:30 | On the owner's word, this Mac and then lundra (10:32) are back in the tournament: the battle binary is executable again and `PAUSED.txt` is removed. | ctime of `~/ttd-battle/openttd-src/build/openttd` on each host |
 
 The cost: load 60 to 86 on 18 cores, swap 35 of 37 GB, and free disk under the 35 GiB floor. Three
 mcp-duel stacks broke when their planner failed under the load. A prismatic-platform push and the
@@ -82,10 +83,6 @@ Each new test fails against the code before the fix.
   issue on 2026-11-22: prismatic-majordomus I4674, the registration and stop half. Its detection
   half is I4668 (prismatic-majordomus #3104): doctor names heavy process groups that nothing
   accounts for.
-- **The paused arenas.** This Mac and lundra stay out of the tournament until someone makes their
-  battle binary executable again (`chmod +x ~/ttd-battle/openttd-src/build/openttd`). The reason
-  is written in `~/ttd-battle/PAUSED.txt` on each machine. With the guards in place, a host comes
-  back `busy` while it is over its floors.
 - **Validation of these fixes:** `tools/gate.sh change` was not run on this Mac, which was over its
   floors. It ran on lundra (Linux, 8 cores) instead. On master c2d7d5f: change PASS, ctest 98/98
   with the regression cases. On 9d4fd64 (the ASCII and gate fixes): change PASS (98/98) and research
