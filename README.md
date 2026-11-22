@@ -656,7 +656,7 @@ from the code. The right-hand column says what was counted.
 | **37** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **105** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **90** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
-| **874** | published documents on the site and the wiki | published documents under `/` |
+| **876** | published documents on the site and the wiki | published documents under `/` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
@@ -1326,6 +1326,7 @@ those files:
 |---|---|---|
 | [project.a-tuning-claim-needs-held-start-pairs](.ai/repo/rules/project/a-tuning-claim-needs-held-start-pairs.v1.md) | advisory | Change a default of the bot or the planner on the strength of a measurement only when held-start duel pairs on three seeds favour it beyond the rival's spread, and record the pairs; report anything less as inconclusive. |
 | [project.battle-records-are-reproducible](.ai/repo/rules/project/battle-records-are-reproducible.v1.md) | blocking | Publish AI-battle results only as records written by battle.py report from a committed edition, never edit a record or its derived Markdown by hand, and keep battle.py check passing. |
+| [project.decision-authority-boundaries](.ai/repo/rules/project/decision-authority-boundaries.v1.md) | blocking | Do not add a second writer of an executable decision, a path from a kernel output to a game, a command path from the blackboard, a hand copy of the MCP or kernel catalogue, or a fallback labelled as the kernel; keep cargo test --bin battlebrain and tools/gate.sh change passing, and when a boundary must move, edit its named list, this rule and ADR 0037 in the same change. |
 | [project.docs-are-derived-and-current](.ai/repo/rules/project/docs-are-derived-and-current.v1.md) | blocking | Derive every number, table, list and chart from the sources; infer what can be inferred instead of declaring it; keep code generic (no instance named where data can give it); draw every Markdown diagram in Mermaid; and keep the gates that prove this, surfaces check, e2e-coverage, readme-scoreboard and diagrams-check, passing on every change. |
 | [project.extend-and-integrate-before-adding](.ai/repo/rules/project/extend-and-integrate-before-adding.v1.md) | blocking | Extend the existing piece before writing a parallel one, integrate with what exists (the store and its views, the Rhai library, AlgoGlyph through the hub, the MCP catalogue, the blackboard and the mesh), and leave no second implementation behind. |
 | [project.game-state-mutates-only-through-commands](.ai/repo/rules/project/game-state-mutates-only-through-commands.v1.md) | blocking | Change vehicles, companies, map tiles or any other persistent game state only through a registered command issued with Command<>::Post, never by writing a pool from a research hook, the MCP server or any other side channel. |
@@ -1353,7 +1354,7 @@ those files:
 ```mermaid
 pie showData title Rules (project) by class
     %% links: README.md?col=Class&filter=blocking#06-ground-rules-short-version | README.md?col=Class&filter=advisory#06-ground-rules-short-version
-    "blocking" : 21
+    "blocking" : 22
     "advisory" : 2
 ```
 <!-- surfaces:end ai-rules -->

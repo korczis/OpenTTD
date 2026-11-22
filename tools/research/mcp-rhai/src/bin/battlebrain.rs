@@ -43,6 +43,11 @@
 mod battlebrain_contract;
 #[path = "../battlebrain_policy.rs"]
 mod battlebrain_policy;
+// The architecture boundaries around this authority, as tests over the tree (rule
+// project.decision-authority-boundaries); compiled into this binary's tests only.
+#[cfg(test)]
+#[path = "../authority_boundaries.rs"]
+mod authority_boundaries;
 
 use battlebrain_contract as bb;
 use battlebrain_policy as policy;

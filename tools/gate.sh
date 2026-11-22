@@ -47,6 +47,11 @@ Usage: $SELF <smoke|change|research|full> [options]
             file this change touches (tools/knowledge/refs impact HEAD)
             and how many src/ files no subsystem map tracks
             (tools/knowledge/refs coverage src/, informational).
+            Always proves the decision-authority boundaries (cargo test
+            --bin battlebrain, offline; rule project.decision-authority-
+            boundaries) and, after the build, that the default binary
+            carries no research string (NOT RUN, so PARTIAL, when build/
+            is configured with a research option ON).
             When the change touches tools/research/real-world, also runs its
             cargo tests and replays the Brno snapshot against its recorded
             hashes (offline). When it touches a file of COVERAGE_TABLE (the
@@ -409,6 +414,46 @@ real_world_tests() {
   "$dir/rw-scenario" replay --snapshot "$dir/fixtures/brno/snapshot.json" --expect "$dir/fixtures/brno/SHA256SUMS" >/dev/null
 }
 
+# The architecture boundaries around the one decision authority (rule
+# project.decision-authority-boundaries, ADR 0037): B1-B8 as source scans and contract tests,
+# compiled into battlebrain's tests (tools/research/mcp-rhai/src/authority_boundaries.rs). Offline,
+# and built like the post-mortem check (release, no store feature, the same RUSTFLAGS), so the two
+# share one set of dependencies.
+authority_boundaries() {
+  echo "==> cargo test --bin battlebrain (rule project.decision-authority-boundaries: one decision writer, B1-B8)"
+  RUSTFLAGS="${RUSTFLAGS:--C target-cpu=native}" cargo test --quiet --release --offline \
+    --no-default-features \
+    --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain
+}
+
+# B8 of that rule on the binary itself: a default build carries no research code. Checked on the
+# build this tier just made when its cache says both research options are OFF; otherwise NOT RUN,
+# so PARTIAL, never PASS.
+default_build_free_of_research() {
+  local dir="$1" bin="$1/openttd" cache="$1/CMakeCache.txt" n
+  if [[ ! -f "$cache" ]]; then
+    echo "default build free of research code: NOT RUN -- $dir is not configured"
+    return "$EXIT_PARTIAL"
+  fi
+  if ! grep -qE '^OPTION_RESEARCH_INSTRUMENTATION:BOOL=OFF$' "$cache" \
+    || ! grep -qE '^OPTION_PRISMATIC_MCP_SERVER:BOOL=OFF$' "$cache"; then
+    echo "default build free of research code: NOT RUN -- $dir is configured with a research option ON"
+    return "$EXIT_PARTIAL"
+  fi
+  [[ -f "$bin" ]] || bin="$dir/openttd.exe"
+  if [[ ! -f "$bin" ]]; then
+    echo "default build free of research code: NOT RUN -- no $dir/openttd binary"
+    return "$EXIT_PARTIAL"
+  fi
+  echo "==> strings $bin: a default build must carry no research string (rule project.decision-authority-boundaries, B8)"
+  # grep -c reads all of its input: grep -q would stop early and strings would die of SIGPIPE.
+  n="$(strings "$bin" | grep -cE '^research_status|RESEARCH-ONLY' || true)"
+  if [[ "$n" -ne 0 ]]; then
+    echo "error: $bin is a default build and carries $n research string(s)" >&2
+    return 1
+  fi
+}
+
 cmd_smoke() {
   local ctest_regex=""
   while [[ $# -gt 0 ]]; do
@@ -460,6 +505,7 @@ cmd_change() {
       --no-default-features \
       --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battle-postmortem -- check
   fi
+  authority_boundaries
   echo "==> tools/knowledge/refs check"
   tools/knowledge/refs check
   echo "==> tools/research/e2e-coverage (rule project.web-ui-is-covered-end-to-end: every web UI page has a browser check)"
@@ -488,6 +534,8 @@ cmd_change() {
   cmake --build build -j"$JOBS"
 
   run_ctest build || status=$(worst "$status" $?)
+  # A failure outranks a PARTIAL: neither may hide the other's worse result (`worst`).
+  default_build_free_of_research build || status=$(worst "$status" $?)
 
   echo "==> git status --porcelain (review below for unwanted generated files)"
   git status --porcelain
