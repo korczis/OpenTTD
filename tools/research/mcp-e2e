@@ -33,6 +33,9 @@
 #                                left; a click answers or stops it; 0 makes every question wait)]
 #                               [--gfx NAME (default OpenGFX: the GUI client's base graphics set,
 #                                forced on every start, so no saved choice changes it; e.g. NoirGFX)]
+#                               [--coplay (the GUI client plays the bot's company together with the
+#                                bot instead of watching: the server opens it with `research_coplay
+#                                allow`, the client joins it, research/coplay.md)]
 # Stop with Ctrl-C: the panel stops the server, and the GUI client is closed.
 set -euo pipefail
 
@@ -41,7 +44,7 @@ BIN="$ROOT_DIR/build-gate-research/openttd"
 PANEL_PORT=8800 MCP_PORT=8731 GAME_PORT=3979 SEED="$RANDOM"
 GUI=1 BROWSER=1 AUTO=() WINDOW="" DIRECTOR=1 VIEW_PORT="" INSTANCES=1 EXTRA_PIDS=() ARM_INPUT=0 PLAN=() NULL_CLIENT=0
 PANEL_IMPL="${MCP_PANEL:-rust}"
-ASK_COUNTDOWN=10 GFX=OpenGFX
+ASK_COUNTDOWN=10 GFX=OpenGFX COPLAY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -63,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     --null-client) NULL_CLIENT=1; shift ;;
     --ask-countdown) ASK_COUNTDOWN="${2:?--ask-countdown needs seconds (0 = off)}"; shift 2 ;;
     --gfx) GFX="${2:?--gfx needs a base graphics set name}"; shift 2 ;;
+    --coplay) COPLAY=1; shift ;;
     -h|--help) sed -n '2,/^# Stop with/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "mcp-e2e: unknown option: $1" >&2; exit 2 ;;
   esac
@@ -210,7 +214,27 @@ if [[ "$GUI" == 1 ]]; then
   if [[ "$ASK_COUNTDOWN" -gt 0 ]]; then
     printf 'mcp view.ask.auto answer=yes countdown=%s\n' "$ASK_COUNTDOWN" >> "$CPD/scripts/autoexec.scr"
   fi
-  echo "==> GUI client ($RES, fullscreen=$FULL, graphics $GFX, own MCP on 127.0.0.1:$VIEW_PORT) joining 127.0.0.1:$GAME_PORT as a spectator"
+  # Co-play (research/coplay.md): the client joins the bot's own company, which the server opens
+  # for it, so the owner and the bot play one company. The company is the running bot's, read from
+  # the game (/api/bots), never assumed; without --coplay the client watches as a spectator.
+  JOIN=255 AS="as a spectator"
+  if [[ "$COPLAY" == 1 ]]; then
+    BOT_COMPANY=""
+    for ((i = 0; i < 120; i++)); do
+      BOT_COMPANY="$(curl -s "$URL/api/bots" | jq -r '.running[0].id // empty' 2>/dev/null || true)"
+      [[ -n "$BOT_COMPANY" ]] && break
+      sleep 1
+    done
+    [[ -n "$BOT_COMPANY" ]] || { echo "mcp-e2e: --coplay: no bot company appeared in 120 s" >&2; exit 1; }
+    JOIN=$((BOT_COMPANY + 1))
+    OPENED="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"command\":\"research_coplay allow $JOIN\"}" "$URL/api/console" \
+      | jq -r '.output[]? | select(startswith("research_coplay"))' 2>/dev/null || true)"
+    grep -Eq "open=\[([0-9]+,)*$JOIN(,[0-9]+)*\]" <<<"$OPENED" \
+      || { echo "mcp-e2e: --coplay: the server did not open company $JOIN (${OPENED:-no answer}; a build without research_coplay?)" >&2; exit 1; }
+    sed -i '' 's/^client_name = owner-view$/client_name = owner/' "$TMP/client.cfg"
+    AS="into the bot's company $JOIN (co-play: $OPENED)"
+  fi
+  echo "==> GUI client ($RES, fullscreen=$FULL, graphics $GFX, own MCP on 127.0.0.1:$VIEW_PORT) joining 127.0.0.1:$GAME_PORT $AS"
   if [[ "$ASK_COUNTDOWN" -gt 0 ]]; then
     echo "    the bot's questions confirm themselves with yes after ${ASK_COUNTDOWN} s (--ask-countdown 0 makes them wait)"
   fi
@@ -220,15 +244,17 @@ if [[ "$GUI" == 1 ]]; then
     while kill -0 "$PANEL_PID" 2>/dev/null; do
       # -I on every start: the client saves its config on exit, so a set picked once in Game
       # Options would otherwise stick to every later start of this run.
-      HOME="$CHOME" PRISMATIC_MCP_INPUT="$ARM_INPUT" "$BIN" -c "$TMP/client.cfg" -I "$GFX" -r "$RES" -n "127.0.0.1:$GAME_PORT#255" >> "$TMP/client.log" 2>&1 &
+      HOME="$CHOME" PRISMATIC_MCP_INPUT="$ARM_INPUT" "$BIN" -c "$TMP/client.cfg" -I "$GFX" -r "$RES" -n "127.0.0.1:$GAME_PORT#$JOIN" >> "$TMP/client.log" 2>&1 &
       CPID=$!
       # Bring it to the front (a full-screen window opens on a Space of its own on macOS), and
       # attach it to the panel, which shows and drives its view.
       for ((j = 0; j < 30; j++)); do [[ -s "$VIEW_TOKEN" ]] && break; sleep 1; done
       osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $CPID) to true" >/dev/null 2>&1 || true
       curl -s -X POST -H 'Content-Type: application/json' -d "{\"token_file\":\"$VIEW_TOKEN\"}" "$URL/api/view/attach" >/dev/null || true
-      wait "$CPID"
-      echo "client exited with $?; restarting in 3 s" >> "$TMP/client.log"
+      # `|| rc=$?`: under set -e a crashed client (wait returns 134) used to end this loop, so the
+      # supervisor stopped restarting exactly when it was needed (seen 2026-11-22).
+      rc=0; wait "$CPID" || rc=$?
+      echo "client exited with $rc; restarting in 3 s" >> "$TMP/client.log"
       rm -f "$VIEW_TOKEN"
       sleep 3
     done
@@ -287,8 +313,8 @@ if [[ "$GUI" == 0 && "$NULL_CLIENT" == 1 ]]; then
       CPID=$!
       for ((j = 0; j < 60; j++)); do [[ -s "$NULL_TOKEN" ]] && break; sleep 1; done
       curl -s -X POST -H 'Content-Type: application/json' -d "{\"token_file\":\"$NULL_TOKEN\"}" "$URL/api/view/attach" >/dev/null || true
-      wait "$CPID"
-      echo "client exited with $?; restarting in 3 s" >> "$TMP/null-client.log"
+      rc=0; wait "$CPID" || rc=$?   # a crash must not end the loop under set -e (see the GUI loop)
+      echo "client exited with $rc; restarting in 3 s" >> "$TMP/null-client.log"
       rm -f "$NULL_TOKEN"
       sleep 3
     done

@@ -618,7 +618,7 @@ from the code. The right-hand column says what was counted.
 | **35** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **93** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **89** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
-| **861** | published documents on the site and the wiki | published documents under `/` |
+| **862** | published documents on the site and the wiki | published documents under `/` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
@@ -1238,6 +1238,7 @@ itself (generated):
 | [Experiment report: baseset-prerequisite-macos](research/baseset-prerequisite-macos.md) | The four regression ctest cases (regression_regression, regression_stationlist, regression_gs, regression_gs_compat) require a base graphics set to be installed, even though they run headless (-vnull -snull -mnull).... |
 | [Battle brain and live tuner](research/battle-brain.md) | RESEARCH-ONLY. Self-improvement in two loops, both fed from the LAN battle's recorded data: |
 | [Battle post-mortem](research/battle-postmortem.md) | RESEARCH-ONLY. After each round of the LAN AI battle, the post-mortem answers where each contestant loses, and PrismaticAI above all. battle.py already writes a post-mortem per match into its machine store.... |
+| [Co-play: the owner and the bot in one company](research/coplay.md) | RESEARCH-ONLY, UNSTABLE. A server-side join policy behind OPTION_RESEARCH_INSTRUMENTATION. Default off. |
 | [Duel evidence audit and a frozen duel set](research/duel-evidence-audit.md) | RESEARCH-ONLY. What the recorded duels (research/results/duel-.json) hold constant and what they let vary, and one set of duels run with every input frozen and named. Tool: tools/research/mcp-duel; scoreboard:... |
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |
 | [Incident 2026-11-19 to 11-22: an unowned AI battle held three machines, and master's CI broke twice](research/incident-2026-11-19-ai-battle-overload.md) | Post-mortem. Two failures overlapped. For three days the AI battle tournament held this Mac and the Linux build host at their limits, and nobody on either machine could tell whose processes they were. In the same... |
