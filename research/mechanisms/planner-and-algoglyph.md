@@ -112,8 +112,8 @@ quarter before) and a rating of 360 (+107). Sindingbury Transport earned 71,323 
 company 1 earned 33,873; company 1 led for road vehicles and aircraft. Its record was 12 of 12
 lines earning, so a new line paid with at least 0.85 at the 90 % lower bound, and 18 settings were
 proposed, each waiting for approval. The round in January 1954 found the plan equal to the live
-settings. In that round track-planning found a route on the map for none of the 21 rail lines, so
-no line went to the bot unpriced and the round held. Mesh records: NOT RUN, because the panel had
+settings. <!-- open-finding kind=failed -->In that round track-planning found a route on the map for none of the 21 rail lines, so
+no line went to the bot unpriced and the round held.<!-- /open-finding --> <!-- open-finding kind=not-run -->Mesh records: NOT RUN, because the panel had
 no `$MAJORDOMUS_URL`.
 
 On 2026-11-22 the first version proposed again every round. The plan's `fr*` slots changed

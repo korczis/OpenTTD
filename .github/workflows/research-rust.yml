@@ -11,9 +11,8 @@ on:
   push:
     branches: [master]
   pull_request:
-  # The Surfaces `refresh` job dispatches this workflow on a branch after it pushes a merge of
-  # master, because a push made with GITHUB_TOKEN starts no workflow; the dispatched run reports
-  # the check on the new head.
+  # Manual runs. No CI job pushes to a pull request's branch any more (surfaces.yml, the note
+  # above `pages`), so nothing dispatches this workflow there.
   workflow_dispatch:
 
 permissions:

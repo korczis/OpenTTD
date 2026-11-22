@@ -55,10 +55,13 @@ scraping the token; the developer accidentally enabling a remote bind.
 
 ## Residual risks (honestly stated)
 
-- **Token visibility to the local operator.** `prismatic_mcp token` prints the token to the in-game
-  console by design (the operator needs it to configure a client). Any process that can read that
-  console output can read the token. Acceptable for a single-developer local research workflow;
-  documented, not hidden.
+- **Token visibility to the local operator.** The token is never printed to any console, so it
+  cannot reach a console log, a redirected stdout or a remote (rcon/admin) caller (red-team
+  finding 8). It lives only in a 0600 token file (`start`'s own, else
+  `prismatic_mcp_token_<port>.json` in the personal directory), created empty and restricted
+  before the token is written; `prismatic_mcp token` prints the path and a one-way `blake2b:`
+  fingerprint, and `rotate` rewrites the file. Any process running as the same user can still
+  read that file: the residual risk is the user account, not the console.
 - **No session table yet.** This build is effectively stateless per request (auth on every call). `DELETE`
   and token rotation are honored, but per-session scoping/expiry (mission §11.4) is staged for Phase G.
 - **No rate limiting beyond connection/size caps.** A local authenticated client could issue many

@@ -41,6 +41,10 @@ from pathlib import Path
 import yaml
 from markdown_it import MarkdownIt
 
+sys.dont_write_bytecode = True  # no __pycache__ beside the sources, which the next sync would read
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import findings  # noqa: E402 - the open-findings region's generator, a module of its own
+
 EXIT_OK, EXIT_USAGE, EXIT_FINDINGS, EXIT_DRIFT = 0, 2, 10, 11
 HERE = Path(__file__).resolve().parent
 CONFIG_FILE = "surfaces.toml"
@@ -57,6 +61,7 @@ DEFAULTS = {
     "facts": {"items": []},
     "generators": {"items": []},
     "pages": {"items": []},
+    "findings": dict(findings.DEFAULTS),
 }
 # Set while a declared generator runs, so a generator that calls surfaces again does not recurse.
 NESTED_ENV = "SURFACES_GENERATING"
@@ -1217,6 +1222,21 @@ class Regions:
         if args.get("as") == "line":
             return " · ".join(f"**{n:,}** {label}" for n, label, _, _ in rows)
         return table(["Count", "What", "Counted from"], [[f"**{n:,}**", label, how] for n, label, how, _ in rows])
+
+    def gen_open_findings(self, args: dict, doc: Doc) -> str:
+        """What the records say is missing, blocked, handed off, not run or failed
+        (tools/surfaces/findings.py, declared in [findings]); `as=pie` counts them by kind, each
+        slice opening the table filtered to that kind. A malformed marker or declaration fails."""
+        cfg = load_config(self.repo.root)["findings"]
+        if getattr(self, "_findings", None) is None:
+            self._findings = findings.collect(self.repo.root, sorted(self.repo.tracked), cfg)
+        result = self._findings
+        if result.errors:
+            raise ValueError("open findings: " + "; ".join(result.errors))
+        if args.get("as") == "pie":
+            return self.pie_by(doc, "Open findings by kind", "open-findings", {}, "Kind",
+                               [f.kind for f in result.findings])
+        return findings.render(result, cfg, lambda path: rel_md(doc, path))
 
     def gen_surfaces(self, args: dict, doc: Doc) -> str:
         r = self.repo
