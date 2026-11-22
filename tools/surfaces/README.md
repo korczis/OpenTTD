@@ -176,8 +176,11 @@ race, so the workflow keeps the branches current itself:
 - **On every same-repository pull request, and on every push to the default branch for each open
   pull request with auto-merge**, the `refresh` job runs `tools/surfaces/refresh-branch --push
   <branch>`. It merges `origin/master` into the branch, resolves a conflict inside a generated
-  region by taking master's side, runs `surfaces sync`, and commits "Doc: [Surfaces] Regenerate
-  derived regions after merging master" only when the sync changed something. A conflict
+  region by taking master's side, and runs `surfaces sync` before it commits, so the one merge
+  commit, "Merge origin/master into <branch>", already holds the regenerated regions and a local
+  pre-commit hook that runs `surfaces check` accepts it. A branch that already holds master but has
+  stale regions gets one "Doc: [Surfaces] Regenerate derived regions after merging master" commit.
+  A conflict
   anywhere else aborts the merge and leaves the branch to its owner (exit 10).
 - **The push is a fast-forward of what was fetched, never a force.** When the owner pushed in the
   meantime it is refused, and the next push to master retries.
