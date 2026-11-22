@@ -57,6 +57,14 @@ flowchart LR
   | `advice` | the news of type advice: a lost or stuck vehicle, one that loses money, an old one, a failed order or renewal |
   | `plan_decisions` | every `plan.*` decision with its choice and version |
   | `kind_month` | how many events of each kind each game month raised |
+  | `schema_doc` | the store describing itself: every table, view and column with its comment |
+
+- **The store documents itself.** Every base table and column carries a `COMMENT ON` from
+  `TABLE_DOCS` in `bus_sinks.rs`, written at every open, and every view carries its own. An agent
+  or a script learns the store with one query: `SELECT * FROM schema_doc` (also
+  `GET /api/db/query?sql=...`, Rhai `api_dbQuery(#{sql: "SELECT * FROM schema_doc"})`).
+  `GET /api/db/tables` carries the same comments. A test fails when a column of a table lacks its
+  documentation, or when `schema_doc` has a row without a comment.
 
 - **Read-only queries.** Only SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW, one statement; the
   connection also runs without external access. While the panel runs it holds the file's lock, so

@@ -224,7 +224,65 @@ pub const VIEWS: &[View] = &[
            comment: "How many events of each kind each game month of each run raised.",
            select: "SELECT instance, run_ms, substr(game_date, 1, 7) AS month, kind, count(*) AS n
                     FROM run_events WHERE game_date IS NOT NULL GROUP BY ALL" },
+    View { name: "schema_doc",
+           comment: "The store describing itself: every table, view and column with its comment. Start here: SELECT * FROM schema_doc.",
+           select: "SELECT 'table' AS kind, table_name AS name, NULL AS column_name, NULL AS type, comment
+                    FROM duckdb_tables() WHERE schema_name = 'main'
+                    UNION ALL SELECT 'view', view_name, NULL, NULL, comment
+                    FROM duckdb_views() WHERE schema_name = 'main' AND NOT internal
+                    UNION ALL SELECT 'column', table_name, column_name, data_type, comment
+                    FROM duckdb_columns() WHERE schema_name = 'main'" },
 ];
+
+/// One base table's documentation: what a row is, and each column's meaning. The store writes it
+/// with COMMENT ON TABLE and COMMENT ON COLUMN at every open, so `schema_doc` answers from the file.
+pub struct TableDoc {
+    pub name: &'static str,
+    pub comment: &'static str,
+    pub columns: &'static [(&'static str, &'static str)],
+}
+
+/// The tables of ADR 0033, documented; a test fails when a column of `TABLES` has no entry.
+pub const TABLE_DOCS: &[TableDoc] = &[
+    TableDoc { name: "runs", comment: "One row per start of a publisher (a panel or the hub) on this file.",
+               columns: &[("instance", "the publisher, e.g. panel-8800 or hub-8790"),
+                          ("session", "the Claude or Majordomus session that started it, or null"),
+                          ("seed", "the game's map seed, or null for a publisher without a game"),
+                          ("started_ms", "when it started, Unix milliseconds; run_spans calls it run_ms"),
+                          ("panel_port", "the panel's HTTP port, or null"),
+                          ("mcp_port", "the game's MCP port, or null"),
+                          ("game_port", "the game's network port, or null")] },
+    TableDoc { name: "events", comment: "Every bus event in bus order (envelope prismatic-bus/v1); the kinds are the KINDS table of panel_events.rs, listed by GET /api/bus.",
+               columns: &[("instance", "the instance the event is about"),
+                          ("seq", "the publisher's sequence number, increasing within a run"),
+                          ("ts_ms", "when it was published, Unix milliseconds"),
+                          ("kind", "the event kind, e.g. game.month, news.shown, plan.portfolio"),
+                          ("game_tick", "the game's tick when it was published, or null"),
+                          ("game_date", "the game's date YYYY-MM-DD, or null"),
+                          ("data", "the payload as JSON; read fields with data->>'field'")] },
+    TableDoc { name: "samples", comment: "One row per company per game.sample: the company's money, loan, value and fleet at that moment.",
+               columns: &[("instance", "the instance sampled"),
+                          ("ts_ms", "when, Unix milliseconds"),
+                          ("game_tick", "the game's tick"),
+                          ("game_date", "the game's date YYYY-MM-DD"),
+                          ("company", "the company id, 0-based (company 1 in the game is 0)"),
+                          ("name", "the company's name then"),
+                          ("money", "cash, in the game's internal currency"),
+                          ("loan", "the loan"),
+                          ("value", "the company value as the game computes it"),
+                          ("net", "money minus loan"),
+                          ("vehicles", "the number of vehicles")] },
+];
+
+/// The comments of every base table and column.
+pub fn table_docs_sql() -> String {
+    let q = |s: &str| s.replace('\'', "''");
+    TABLE_DOCS.iter().map(|t| {
+        let mut sql = format!("COMMENT ON TABLE {} IS '{}';\n", t.name, q(t.comment));
+        for (c, doc) in t.columns { sql += &format!("COMMENT ON COLUMN {}.{} IS '{}';\n", t.name, c, q(doc)); }
+        sql
+    }).collect()
+}
 
 /// The statements that (re)create every view with its comment.
 pub fn views_sql() -> String {
@@ -295,6 +353,7 @@ pub mod db {
 
         fn init(conn: Connection, instance: &str) -> Result<Store, String> {
             conn.execute_batch(TABLES).map_err(e)?;
+            conn.execute_batch(&super::table_docs_sql()).map_err(|err| format!("table docs: {err}"))?;
             conn.execute_batch(&super::views_sql()).map_err(|err| format!("views: {err}"))?;
             Ok(Store { conn, instance: instance.to_string() })
         }
@@ -645,7 +704,15 @@ pub fn tables(sinks: Option<&Sinks>) -> (u16, Value) {
         let into = if row[3].as_str() == Some("VIEW") { &mut views } else { &mut tables };
         into.entry(name).or_default().push(json!({"name": row[1], "type": row[2]}));
     }
-    let tables: Vec<Value> = tables.into_iter().map(|(name, columns)| json!({"name": name, "columns": columns})).collect();
+    let tables: Vec<Value> = tables.into_iter().map(|(name, columns)| {
+        let doc = TABLE_DOCS.iter().find(|t| t.name == name);
+        let columns: Vec<Value> = columns.into_iter().map(|mut c| {
+            let about = doc.and_then(|t| t.columns.iter().find(|(n, _)| c["name"].as_str() == Some(*n))).map(|(_, d)| *d);
+            c["comment"] = json!(about);
+            c
+        }).collect();
+        json!({"name": name, "comment": doc.map(|t| t.comment), "columns": columns})
+    }).collect();
     let views: Vec<Value> = VIEWS.iter().map(|v| json!({"name": v.name, "comment": v.comment,
                                                         "columns": views.remove(v.name).unwrap_or_default()})).collect();
     (200, json!({"store": sinks.map_or(json!("off"), Sinks::store_status), "tables": tables, "views": views}))
@@ -754,6 +821,13 @@ mod tests {
         assert_eq!(q("SELECT count(*) FROM news"), json!([[2]]));
         assert_eq!(q("SELECT decision, choice->>'k' FROM plan_decisions"), json!([["bot.portfolio", "1"]]));
         assert_eq!(q("SELECT kind, n FROM kind_month ORDER BY kind"), json!([["news.shown", 2], ["plan.portfolio", 1]]));
+        // The store documents itself: every table, view and base-table column has its comment.
+        let undocumented = q("SELECT name, column_name FROM schema_doc WHERE (comment IS NULL OR comment = '')
+                              AND (kind <> 'column' OR name IN ('runs', 'events', 'samples'))");
+        assert_eq!(undocumented, json!([]), "schema_doc rows without a comment");
+        assert_eq!(q("SELECT count(*) FROM schema_doc WHERE kind = 'view'"), json!([[VIEWS.len()]]));
+        assert_eq!(q("SELECT comment FROM schema_doc WHERE kind = 'column' AND name = 'samples' AND column_name = 'company'"),
+                   json!([["the company id, 0-based (company 1 in the game is 0)"]]));
         // Reopening recreates them: a changed definition reaches old files.
         assert!(r.query("SELECT comment FROM duckdb_views() WHERE view_name = 'company_latest'").unwrap()["rows"][0][0]
                 .as_str().is_some_and(|c| c.contains("rank")));
@@ -767,6 +841,16 @@ mod tests {
         }
         let sql = views_sql();
         assert_eq!(sql.matches("CREATE OR REPLACE VIEW").count(), VIEWS.len());
+        // Every column TABLES creates has its documentation, and nothing documents a column it lacks.
+        #[cfg(feature = "store")]
+        for t in TABLE_DOCS {
+            let ddl = db::TABLES.split("CREATE TABLE IF NOT EXISTS ").find(|s| s.starts_with(&format!("{}(", t.name)))
+                .unwrap_or_else(|| panic!("TABLES lacks {}", t.name));
+            let cols: Vec<&str> = ddl[t.name.len() + 1..ddl.find(");").unwrap()].split(',')
+                .map(|c| c.split_whitespace().next().unwrap()).collect();
+            let documented: Vec<&str> = t.columns.iter().map(|(c, _)| *c).collect();
+            assert_eq!(cols, documented, "TABLE_DOCS for {} must list its columns in order", t.name);
+        }
     }
 
     #[cfg(feature = "store")]
