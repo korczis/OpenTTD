@@ -327,13 +327,31 @@ What `hoards` found at once on the fitness seed (930967890), with the bot's rich
   was laying a rail line per heartbeat, months each. Building is spending, so a window whose
   station count grows is not a hoard (`hoarding`, test `test_a_company_that_builds_stations_is_not_hoarding`).
 - `PrismaticAI self-steward` held 27 vehicles and built nothing while its money rose from 485k to
-  1.1M (1963-65). That is a real hoard and it is older than this check: its route builds failed
-  (air routes "not built", own lines "no freight route built"), and `InvestSurplus` found no route
-  earning enough per vehicle, so more purchases per heartbeat (`rich_invest_rounds`) changed
-  nothing. `fitness.must_not_hoard` therefore holds `PrismaticAI` and `PrismaticAI planned` to
-  spend, and leaves self-steward out until its spending is fixed; its `hoards` still shows in the
-  fitness table, in live alerts and in records. Removing it from `must_not_hoard` was not
-  weakening a check: the check is new, and the finding is the reason it is narrower.
+  1.1M (1963-65). That was a tree of the rich growth before it merged (`4c1dc9c355`): its route
+  builds failed (air routes "not built", own lines "no freight route built"), and `InvestSurplus`
+  found no route earning enough per vehicle. `fitness.must_not_hoard` was therefore first left
+  without self-steward.
+
+**Self-steward is held to spend (2026-11-22).** The merged bot does not hoard on the fitness seed.
+At `2301e263c1` its fitness value is 1,328,890 with 33 vehicles. `battle.py ablate` with the same
+seed, field and settings gives the same value and logs every quarter. From 1963-07 to 1966-01 its
+money rose from 0.54M to 1.03M. In every two-year window its fleet grew by 17% or more (24 to 33
+vehicles) and its stations grew too (29 to 37), so no window is a hoard. In the windows where its
+money doubled (1960-62), its fleet grew by half or more. The lineup is now in
+`fitness.must_not_hoard`, and the fitness check passes with it there. No line of the bot changed
+(test `test_the_merged_self_steward_bot_spends_on_the_fitness_seed`). On seed 31337 with the same
+field and years, neither self-steward (58 vehicles, 2.61M) nor the default (46 vehicles, 2.31M)
+has a `hoards` window.
+
+The money is still not fully at work: every lineup ends the six years with 0.88M to 2.27M in
+the bank. The cause is the heartbeat's rhythm. From 1963 on, a heartbeat lasts about a game year,
+because one own freight line takes that long: finding and laying 120 to 240 tiles of track, and
+twice the search when no double-track path exists. The self-steward bot had 9 heartbeats in six
+years. Its sinks run once a heartbeat: `InvestSurplus` (at most `rich_invest_rounds` purchases,
+4, and it used all 4 in 1965), `SelfSteward` (meant to run once a game month; it made two changes
+in the whole match), twins and platforms. A fix would spend between heartbeats, and it would
+change every lineup: all four are self-steward (`autopilot` sets it) and rich on this seed. So it
+needs held start pairs (rule `project.a-tuning-claim-needs-held-start-pairs`), not this check.
 
 ## Self-tuning (genetic algorithm)
 

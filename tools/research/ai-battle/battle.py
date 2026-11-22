@@ -2528,8 +2528,8 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
         if c["key"] not in fit.get("must_be_healthy", []):
             bad = [b for b in bad if b.startswith("squirrel")]
         # Hoarding fails only the contestants held to spend (must_not_hoard, default: every healthy
-        # one): the self-steward lineup hoarded on the fitness seed before the check existed, a
-        # finding recorded in research/ai-battle/README.md, not a pass.
+        # one). The self-steward lineup was left out while a pre-merge tree of the rich growth
+        # hoarded on the fitness seed; the merged bot does not (research/ai-battle/README.md).
         elif c["key"] not in fit.get("must_not_hoard", fit.get("must_be_healthy", [])):
             bad = [b for b in bad if not b.startswith("hoards")]
         fails += [f"{c['key']}: {b}" for b in bad]
