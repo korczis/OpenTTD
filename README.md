@@ -654,9 +654,9 @@ from the code. The right-hand column says what was counted.
 | **12** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **17** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **37** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
-| **104** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
+| **105** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **90** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
-| **873** | published documents on the site and the wiki | published documents under `/` |
+| **874** | published documents on the site and the wiki | published documents under `/` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
@@ -1332,6 +1332,7 @@ those files:
 | [project.long-runs-are-owned-bounded-and-stoppable](.ai/repo/rules/project/long-runs-are-owned-bounded-and-stoppable.v1.md) | blocking | Before a job runs unattended or on another machine, make it write who owns it and how to stop it on every host, refuse new work over the host's load ceiling or under its 35 GiB disk floor, and honour a PAUSED file on the host and a STOP file beside it. |
 | [project.mcp-surfaces-are-derived](.ai/repo/rules/project/mcp-surfaces-are-derived.v1.md) | blocking | Derive every surface of the MCP integration from the live catalogue and the one route table; do not hand-list tools, routes, functions or settings in a second place. |
 | [project.never-report-unrun-validation-as-pass](.ai/repo/rules/project/never-report-unrun-validation-as-pass.v1.md) | blocking | Report every validation layer with the command that ran and its exit status, mark a layer that did not run as NOT RUN, and never round PARTIAL or ambiguous up to PASS. |
+| [project.new-code-is-covered](.ai/repo/rules/project/new-code-is-covered.v1.md) | blocking | Ship tests that run every line you add or modify; for a file of COVERAGE_TABLE, let tools/gate.sh change run cargo llvm-cov and refuse any counted line of its criterion no test ran, restructure a line a test cannot reach so its logic is testable, and exempt only what still cannot run, in COVERAGE_EXEMPT, with its written reason. |
 | [project.no-commit-without-current-instruction](.ai/repo/rules/project/no-commit-without-current-instruction.v1.md) | blocking | Commit, push, rewrite history or force-push only on an explicit, current instruction from the owner that covers this change. |
 | [project.no-upstream-interaction](.ai/repo/rules/project/no-upstream-interaction.v1.md) | blocking | Never push to, open an issue against, or open a pull request against OpenTTD/OpenTTD; keep every commit, branch and experiment in korczis/OpenTTD, and keep the upstream remote fetch-only. |
 | [project.panel-charts-go-through-one-layer](.ai/repo/rules/project/panel-charts-go-through-one-layer.v1.md) | blocking | Create a panel chart only through components.js ecInit, register it with its parameters and drill target, keep its parameters in the address, make its card maximizable, and commit a static/app.css rebuilt from input.css and the current markup. |
@@ -1352,7 +1353,7 @@ those files:
 ```mermaid
 pie showData title Rules (project) by class
     %% links: README.md?col=Class&filter=blocking#06-ground-rules-short-version | README.md?col=Class&filter=advisory#06-ground-rules-short-version
-    "blocking" : 20
+    "blocking" : 21
     "advisory" : 2
 ```
 <!-- surfaces:end ai-rules -->
@@ -1542,7 +1543,7 @@ Milestones of the plan with the issues done and still open, derived from the iss
 | M1 | [The fork states what it is, and one set of ground rules binds every agent](.ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml) | 2/2 | — |
 | M2 | [A change is validated at the tier its size needs, and the report cannot round up](.ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml) | 4/4 | — |
 | M3 | [Internal state is observable through gated instrumentation, and every experiment records how it ran](.ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml) | 8/8 | — |
-| M4 | [Prismatic steers a company in a live game through the standalone bridge](.ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 9/9 | — |
+| M4 | [Prismatic steers a company in a live game through the standalone bridge](.ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 10/10 | — |
 | M5 | [An agent reads and, with approval, changes the game over an embedded MCP server](.ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml) | 53/53 | — |
 | M6 | [The fork is published, supervised by Majordomus, and current with upstream](.ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml) | 7/7 | — |
 | M7 | [NoirGFX: the game in the owner's SIG NIHL noir, from OpenGFX and Kenney models](.ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml) | 1/1 | — |
@@ -1568,8 +1569,8 @@ xychart-beta
     %% series: Issues done | Issues planned
     %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml | .ai/repo/project/milestones/records-and-status-tell-the-truth.yaml
     y-axis "Issues done" 0 --> 58.3
-    bar [2, 4, 8, 9, 53, 7, 1, 7, 6, 0]
-    line [2, 4, 8, 9, 53, 7, 1, 7, 6, 7]
+    bar [2, 4, 8, 10, 53, 7, 1, 7, 6, 0]
+    line [2, 4, 8, 10, 53, 7, 1, 7, 6, 7]
 ```
 <!-- surfaces:end ai-plan -->
 

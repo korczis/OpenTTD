@@ -47,6 +47,7 @@ mod battlebrain_policy;
 use battlebrain_contract as bb;
 use battlebrain_policy as policy;
 use serde_json::{json, Value};
+use std::fmt::Write as _;
 use std::io::Read;
 
 /// The value after `--name` in the arguments.
@@ -54,9 +55,9 @@ fn flag(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
 }
 
-/// Print refusals as the structured answer every subcommand gives, and the exit code 1.
-fn refused(rs: &[bb::Refusal]) -> i32 {
-    println!("{}", json!({"ok": false, "refusals": rs.iter().map(bb::Refusal::to_json).collect::<Vec<_>>()}));
+/// Write refusals as the structured answer every subcommand gives, and the exit code 1.
+fn refused(out: &mut String, rs: &[bb::Refusal]) -> i32 {
+    let _ = writeln!(out, "{}", json!({"ok": false, "refusals": rs.iter().map(bb::Refusal::to_json).collect::<Vec<_>>()}));
     1
 }
 
@@ -173,7 +174,7 @@ pub fn attach_capabilities(out: &mut Value, plan: &Value, cat: &bb::Catalogue) -
 
 /// The match table of every capability against a catalogue (Markdown), and whether every
 /// capability resolved to a kernel. research/battlebrain/README.md carries it for the fixture.
-pub fn match_table(cat: &bb::Catalogue) -> (String, bool) {
+pub fn match_table(cat: &bb::Catalogue, adapters: &[bb::Adapter]) -> (String, bool) {
     let mut ok = true;
     let fields = |fs: &[bb::Field]| fs.iter().map(|f| match f.unit {
         Some(u) => format!("`{}`: {} ({u})", f.name, f.kind),
@@ -191,7 +192,7 @@ pub fn match_table(cat: &bb::Catalogue) -> (String, bool) {
         "|---|---|---|---|---|---|".to_string(),
     ]);
     for c in bb::CAPABILITIES {
-        let m = bb::match_capability(c.id, cat, bb::ADAPTERS);
+        let m = bb::match_capability(c.id, cat, adapters);
         let d = &m.decision;
         for k in d["candidates"].as_array().into_iter().flatten() {
             let verdict = if m.chosen.as_deref() == k["kernel"].as_str() {
@@ -211,7 +212,7 @@ pub fn match_table(cat: &bb::Catalogue) -> (String, bool) {
     }
     out.push(String::new());
     out.push(format!("Every other kernel of the catalogue was considered and has no adapter for that capability ({}).",
-        bb::CAPABILITIES.iter().map(|c| format!("`{}`: {}", c.id, bb::match_capability(c.id, cat, bb::ADAPTERS).decision["unadapted"].as_array().map_or(0, Vec::len))).collect::<Vec<_>>().join(", ")));
+        bb::CAPABILITIES.iter().map(|c| format!("`{}`: {}", c.id, bb::match_capability(c.id, cat, adapters).decision["unadapted"].as_array().map_or(0, Vec::len))).collect::<Vec<_>>().join(", ")));
     (out.join("\n") + "\n", ok)
 }
 
@@ -262,13 +263,14 @@ pub fn run(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &
             json!({"action": {"kind": "hold"}, "assumptions": ["no freight rail line clears the margin and the reserve"]})),
     };
     let (class, why) = policy::divergence(base.as_ref(), choice.selected.as_ref(), choice.budget, p);
+    // The planner's candidate and battlebrain's are records of two producers, so their ids always
+    // differ, also when both name one line: the planner's is rejected with the divergence class
+    // (`same` included), and both are written.
     let mut derived = vec![json!(snap_id), ours_rec["id"].clone()];
     let mut rejected = Vec::new();
     if let Some(b) = &base_rec {
-        if b["id"] != ours_rec["id"] {
-            derived.push(b["id"].clone());
-            rejected.push(json!({"candidate": b["id"], "reason": format!("{class}: {why}")}));
-        }
+        derived.push(b["id"].clone());
+        rejected.push(json!({"candidate": b["id"], "reason": format!("{class}: {why}")}));
     }
     let max_age = snapshot.pointer("/body/max_age_days").and_then(Value::as_i64).unwrap_or(1);
     let date = at["date"].as_str().unwrap_or_default();
@@ -292,19 +294,10 @@ pub fn run(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &
         "idempotency_key": key, "policy": format!("{}@{}", policy::POLICY_ID, policy::POLICY_VERSION), "valid_until": valid_until,
         "settings_digest": bb::settings_digest(&settings), "mode": if gate.is_some() { "live" } else { "shadow" }});
     let mut records: Vec<Value> = base_rec.iter().cloned().collect();
-    if base_rec.as_ref().map(|b| &b["id"]) != Some(&ours_rec["id"]) {
-        records.push(ours_rec.clone());
-    }
+    records.push(ours_rec.clone());
     records.push(decision.clone());
-    let mut errs = Vec::new();
-    for r in &records {
-        if let Err(e) = bb::validate_record(r) {
-            errs.extend(e);
-        }
-    }
-    if let Err(e) = bb::validate_decision_block(&block) {
-        errs.extend(e);
-    }
+    let errs: Vec<bb::Refusal> = records.iter().filter_map(|r| bb::validate_record(r).err()).flatten()
+        .chain(bb::validate_decision_block(&block).err().into_iter().flatten()).collect();
     if !errs.is_empty() {
         return Err(errs);
     }
@@ -437,8 +430,13 @@ pub fn report(rec: &Value) -> String {
 /// same live decision is never served twice (`$BATTLEBRAIN_STATE_DIR`, else
 /// ~/.local/state/battlebrain/served-keys).
 fn served_ledger() -> std::path::PathBuf {
-    let dir = std::env::var_os("BATTLEBRAIN_STATE_DIR").map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state/battlebrain"));
+    served_ledger_in(std::env::var_os("BATTLEBRAIN_STATE_DIR"), std::env::var_os("HOME"))
+}
+
+/// The ledger's path for a state directory, else for a home directory.
+fn served_ledger_in(state_dir: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> std::path::PathBuf {
+    let dir = state_dir.map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(home.unwrap_or_default()).join(".local/state/battlebrain"));
     dir.join("served-keys")
 }
 
@@ -459,13 +457,17 @@ fn claim_key(ledger: &std::path::Path, key: &str) -> Result<(), String> {
     writeln!(f, "{key}").map_err(|e| e.to_string())
 }
 
+/// Only a loopback peer is answered. The listener binds 127.0.0.1, so this holds already; it is
+/// checked again so that a change of the bind address cannot hand a decision to the network.
+fn loopback_only(peer: std::net::SocketAddr) -> Result<(), String> {
+    if peer.ip().is_loopback() { Ok(()) } else { Err(format!("refused a non-loopback peer {peer}")) }
+}
+
 fn serve_once(port: u16, body: &str) -> Result<String, String> {
     use std::io::{BufRead, BufReader, Write};
     let listener = std::net::TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind 127.0.0.1:{port}: {e}"))?;
     let (mut stream, peer) = listener.accept().map_err(|e| e.to_string())?;
-    if !peer.ip().is_loopback() {
-        return Err(format!("refused a non-loopback peer {peer}"));
-    }
+    loopback_only(peer)?;
     let mut line = String::new();
     BufReader::new(&stream).read_line(&mut line).map_err(|e| e.to_string())?;
     let ok = line.starts_with("GET ");
@@ -482,16 +484,17 @@ fn with_catalogue(out: &mut Value, plan: &Value, file: Option<String>) -> Result
     }
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+/// The command line: every subcommand, its output and its exit code. `main` only hands it the
+/// process's arguments and stdin and prints what it wrote, so the tests run every subcommand.
+fn cli(args: &[String], stdin: &mut dyn Read, out: &mut String, err: &mut String) -> i32 {
     let code = match args.first().map(String::as_str) {
         Some("schema") => match args.get(1).and_then(|n| bb::schema(n)) {
             Some(s) => {
-                println!("{}", serde_json::to_string_pretty(&s).expect("a schema serialises"));
+                let _ = writeln!(out, "{}", serde_json::to_string_pretty(&s).expect("a schema serialises"));
                 0
             }
             None => {
-                eprintln!("battlebrain schema <record|invocation|decision|match>");
+                let _ = writeln!(err, "battlebrain schema <record|invocation|decision|match>");
                 2
             }
         },
@@ -499,37 +502,37 @@ fn main() {
             let answers: Vec<Value> = args[1..].iter().map(|p| validate(p)).collect();
             let ok = answers.iter().all(|a| a["ok"] == true);
             for a in &answers {
-                println!("{a}");
+                let _ = writeln!(out, "{a}");
             }
             if ok { 0 } else { 1 }
         }
         Some("id") if args.len() == 2 => match read_json(&args[1]) {
             Ok(f) => {
-                println!("{}", bb::record_id(f.get("value").unwrap_or(&f)));
+                let _ = writeln!(out, "{}", bb::record_id(f.get("value").unwrap_or(&f)));
                 0
             }
             Err(e) => {
-                eprintln!("{e}");
+                let _ = writeln!(err, "{e}");
                 1
             }
         },
         Some("transition") if args.len() == 4 => match bb::transition(&args[1], &args[2], &args[3]) {
             Ok(()) => {
-                println!("{}", json!({"ok": true}));
+                let _ = writeln!(out, "{}", json!({"ok": true}));
                 0
             }
-            Err(r) => refused(&[r]),
+            Err(r) => refused(out, &[r]),
         },
         Some("check") if args.len() == 4 => match (read_json(&args[2]), read_json(&args[3])) {
             (Ok(i), Ok(o)) => match bb::domain_check(&args[1], &i, &o) {
                 Ok(()) => {
-                    println!("{}", json!({"ok": true}));
+                    let _ = writeln!(out, "{}", json!({"ok": true}));
                     0
                 }
-                Err(r) => refused(&[r]),
+                Err(r) => refused(out, &[r]),
             },
             (Err(e), _) | (_, Err(e)) => {
-                eprintln!("{e}");
+                let _ = writeln!(err, "{e}");
                 1
             }
         },
@@ -540,25 +543,25 @@ fn main() {
                     let age = flag("--max-age-days").and_then(|a| a.parse().ok()).unwrap_or(31);
                     match snapshot_from_capture(std::path::Path::new(&dir), &instance, company, age) {
                         Ok(r) => {
-                            println!("{}", serde_json::to_string_pretty(&r).expect("serialises"));
+                            let _ = writeln!(out, "{}", serde_json::to_string_pretty(&r).expect("serialises"));
                             0
                         }
-                        Err(rs) => refused(&rs),
+                        Err(rs) => refused(out, &rs),
                     }
                 }
                 _ => {
-                    eprintln!("battlebrain snapshot --capture <dir> --instance <name> --company <id> [--max-age-days 31]");
+                    let _ = writeln!(err, "battlebrain snapshot --capture <dir> --instance <name> --company <id> [--max-age-days 31]");
                     2
                 }
             }
         }
         Some("report") if args.len() == 2 => match read_json(&args[1]) {
             Ok(r) => {
-                print!("{}", report(&r));
+                let _ = write!(out, "{}", report(&r));
                 0
             }
             Err(e) => {
-                eprintln!("{e}");
+                let _ = writeln!(err, "{e}");
                 1
             }
         },
@@ -572,20 +575,20 @@ fn main() {
             let gate = LiveGate { max_window_ticks: flag("--max-window-ticks").and_then(|t| t.parse().ok()).unwrap_or(0) };
             match (flag("--snapshot"), flag("--plan"), flag("--companies"), flag("--company").and_then(|c| c.parse::<i64>().ok())) {
                 (Some(s), Some(pl), Some(c), Some(id)) => match (read_json(&s), read_json(&pl), read_json(&c)) {
-                    (Ok(s), Ok(pl), Ok(c)) => match run(&s, &pl, &c, id, &p, Some(&gate)).and_then(|mut out| with_catalogue(&mut out, &pl, flag("--catalogue")).map(|_| out)) {
-                        Ok(out) => {
-                            println!("{}", serde_json::to_string_pretty(&out).expect("serialises"));
+                    (Ok(s), Ok(pl), Ok(c)) => match run(&s, &pl, &c, id, &p, Some(&gate)).and_then(|mut r| with_catalogue(&mut r, &pl, flag("--catalogue")).map(|_| r)) {
+                        Ok(r) => {
+                            let _ = writeln!(out, "{}", serde_json::to_string_pretty(&r).expect("serialises"));
                             0
                         }
-                        Err(rs) => refused(&rs),
+                        Err(rs) => refused(out, &rs),
                     },
                     (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
-                        eprintln!("{e}");
+                        let _ = writeln!(err, "{e}");
                         1
                     }
                 },
                 _ => {
-                    eprintln!("battlebrain live --snapshot <record> --plan <file> --companies <fresh read> --company <id> [--margin x] [--reserve n] [--max-window-ticks n]");
+                    let _ = writeln!(err, "battlebrain live --snapshot <record> --plan <file> --companies <fresh read> --company <id> [--margin x] [--reserve n] [--max-window-ticks n]");
                     2
                 }
             }
@@ -596,20 +599,20 @@ fn main() {
                 (Some(Ok(d)), Some(port)) if d.get("company_id").is_some() => match claim_key(&served_ledger(), d.pointer("/decision/idempotency_key").and_then(Value::as_str).unwrap_or_default())
                     .and_then(|_| serve_once(port, &d.to_string())) {
                     Ok(req) => {
-                        println!("{}", json!({"ok": true, "served": req, "port": port}));
+                        let _ = writeln!(out, "{}", json!({"ok": true, "served": req, "port": port}));
                         0
                     }
                     Err(e) => {
-                        eprintln!("serve: {e}");
+                        let _ = writeln!(err, "serve: {e}");
                         1
                     }
                 },
                 (Some(Err(e)), _) => {
-                    eprintln!("{e}");
+                    let _ = writeln!(err, "{e}");
                     1
                 }
                 _ => {
-                    eprintln!("battlebrain serve --directive <file with a company_id> --port <p>   (answers one GET on 127.0.0.1, then exits)");
+                    let _ = writeln!(err, "battlebrain serve --directive <file with a company_id> --port <p>   (answers one GET on 127.0.0.1, then exits)");
                     2
                 }
             }
@@ -618,11 +621,11 @@ fn main() {
             // Back to the verified baseline: the bot plans its own freight lines again. No decision
             // block: it is an ordinary directive, approved by the operator like every change.
             Some(id) => {
-                println!("{}", json!({"company_id": id, "settings": "planned_freight_only=0"}));
+                let _ = writeln!(out, "{}", json!({"company_id": id, "settings": "planned_freight_only=0"}));
                 0
             }
             None => {
-                eprintln!("battlebrain rollback --company <id>");
+                let _ = writeln!(err, "battlebrain rollback --company <id>");
                 2
             }
         },
@@ -636,20 +639,20 @@ fn main() {
             };
             match files {
                 (Some(s), Some(pl), Some(c), Some(id)) => match (read_json(&s), read_json(&pl), read_json(&c)) {
-                    (Ok(s), Ok(pl), Ok(c)) => match shadow(&s, &pl, &c, id, &p).and_then(|mut out| with_catalogue(&mut out, &pl, flag("--catalogue")).map(|_| out)) {
-                        Ok(out) => {
-                            println!("{}", serde_json::to_string_pretty(&out).expect("serialises"));
+                    (Ok(s), Ok(pl), Ok(c)) => match shadow(&s, &pl, &c, id, &p).and_then(|mut r| with_catalogue(&mut r, &pl, flag("--catalogue")).map(|_| r)) {
+                        Ok(r) => {
+                            let _ = writeln!(out, "{}", serde_json::to_string_pretty(&r).expect("serialises"));
                             0
                         }
-                        Err(rs) => refused(&rs),
+                        Err(rs) => refused(out, &rs),
                     },
                     (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
-                        eprintln!("{e}");
+                        let _ = writeln!(err, "{e}");
                         1
                     }
                 },
                 _ => {
-                    eprintln!("battlebrain shadow --snapshot <record> --plan <file> --companies <file> --company <id> [--margin x] [--reserve n]");
+                    let _ = writeln!(err, "battlebrain shadow --snapshot <record> --plan <file> --companies <file> --company <id> [--margin x] [--reserve n]");
                     2
                 }
             }
@@ -657,7 +660,7 @@ fn main() {
         Some("catalogue") => {
             let flag = |name: &str| flag(&args, name);
             let mut text = String::new();
-            let _ = std::io::stdin().read_to_string(&mut text);
+            let _ = stdin.read_to_string(&mut text);
             match serde_json::from_str::<Value>(&text).map_err(|e| e.to_string()).and_then(|v| {
                 bb::Catalogue::from_runner(&v, &flag("--commit").unwrap_or_default()).map_err(|r| format!("{}: {}", r.code, r.message))
             }) {
@@ -665,12 +668,12 @@ fn main() {
                     let kernel = flag("--kernel");
                     let found = kernel.as_deref().map(|k| cat.engine(k).map(str::to_string));
                     let engine = found.clone().flatten();
-                    println!("{}", json!({"digest": cat.digest, "commit": cat.commit, "kernels": cat.kernels.len(),
+                    let _ = writeln!(out, "{}", json!({"digest": cat.digest, "commit": cat.commit, "kernels": cat.kernels.len(),
                         "kernel": kernel, "engine": engine, "known": found.map(|f| f.is_some())}));
                     if flag("--engine").is_some() && engine != flag("--engine") { 1 } else { 0 }
                 }
                 Err(e) => {
-                    eprintln!("catalogue: {e}");
+                    let _ = writeln!(err, "catalogue: {e}");
                     1
                 }
             }
@@ -680,41 +683,49 @@ fn main() {
                 let matches: Vec<bb::Match> = bb::CAPABILITIES.iter().map(|c| bb::match_capability(c.id, &cat, bb::ADAPTERS)).collect();
                 let ok = matches.iter().all(|m| m.chosen.is_some());
                 if args.iter().any(|a| a == "--json") {
-                    println!("{}", serde_json::to_string_pretty(&matches.iter().map(|m| &m.decision).collect::<Vec<_>>()).expect("serialises"));
+                    let _ = writeln!(out, "{}", serde_json::to_string_pretty(&matches.iter().map(|m| &m.decision).collect::<Vec<_>>()).expect("serialises"));
                 } else if let Some(s) = flag(&args, "--snapshot") {
                     let snap = match read_json(&s) {
                         Ok(v) => v.get("value").cloned().unwrap_or(v),
                         Err(e) => {
-                            eprintln!("{e}");
-                            std::process::exit(1);
+                            let _ = writeln!(err, "{e}");
+                            return 1;
                         }
                     };
                     if let Err(rs) = bb::validate_record(&snap).and_then(|k| if k == "snapshot" { Ok(()) } else { Err(vec![bb::Refusal::new("not_a_snapshot", "type", format!("--snapshot is a {k} record"))]) }) {
-                        std::process::exit(refused(&rs));
+                        return refused(out, &rs);
                     }
-                    let until = add_days(snap["at"]["date"].as_str().unwrap_or_default(), snap["body"]["max_age_days"].as_i64().unwrap_or(1)).unwrap_or_default();
+                    let until = bb::add_days(snap["at"]["date"].as_str().unwrap_or_default(), snap["body"]["max_age_days"].as_i64().unwrap_or(1)).unwrap_or_default();
                     let recs: Vec<Value> = matches.iter().map(|m| bb::match_record(m, &snap["scope"], &snap["at"], &[snap["id"].clone()], &until)).collect();
                     let errs: Vec<bb::Refusal> = recs.iter().filter_map(|r| bb::validate_record(r).err()).flatten().collect();
                     if !errs.is_empty() {
-                        std::process::exit(refused(&errs));
+                        return refused(out, &errs);
                     }
-                    println!("{}", serde_json::to_string_pretty(&recs).expect("serialises"));
+                    let _ = writeln!(out, "{}", serde_json::to_string_pretty(&recs).expect("serialises"));
                 } else {
-                    print!("{}", match_table(&cat).0);
+                    let _ = write!(out, "{}", match_table(&cat, bb::ADAPTERS).0);
                 }
                 if ok { 0 } else { 1 }
             }
-            Some(Err(rs)) => refused(&rs),
+            Some(Err(rs)) => refused(out, &rs),
             None => {
-                eprintln!("battlebrain capabilities --catalogue <file with kernels and commit> [--json | --snapshot <record>]");
+                let _ = writeln!(err, "battlebrain capabilities --catalogue <file with kernels and commit> [--json | --snapshot <record>]");
                 2
             }
         },
         _ => {
-            eprintln!("battlebrain <schema|validate|id|transition|check|snapshot|shadow|live|serve|report|rollback|catalogue|capabilities> ... (see the header of src/bin/battlebrain.rs)");
+            let _ = writeln!(err, "battlebrain <schema|validate|id|transition|check|snapshot|shadow|live|serve|report|rollback|catalogue|capabilities> ... (see the header of src/bin/battlebrain.rs)");
             2
         }
     };
+    code
+}
+
+fn main() {
+    let (mut out, mut err) = (String::new(), String::new());
+    let code = cli(&std::env::args().skip(1).collect::<Vec<_>>(), &mut std::io::stdin(), &mut out, &mut err);
+    print!("{out}");
+    eprint!("{err}");
     std::process::exit(code);
 }
 
@@ -917,6 +928,7 @@ mod tests {
         snap["id"] = json!(bb::record_id(&snap));
         let mut fresh = fx("shadow/companies.json");
         fresh["game_tick"] = json!(74100);
+        fresh["game_date"] = json!("1961-01-02");
         (snap, fresh)
     }
 
@@ -953,7 +965,8 @@ mod tests {
         let live = || run(&snap, &plan, &fresh, 1, &p, Some(&gate)).unwrap();
         let mut ok = live();
         attach_capabilities(&mut ok, &plan, &real_catalogue()).unwrap();
-        assert_eq!(ok["directive"]["settings"], "planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1");
+        // The line, and every other freight slot cleared (I0117).
+        assert!(ok["directive"]["settings"].as_str().unwrap().starts_with("planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1,fr2_from=-1,"));
         // The runner no longer lists track-planning: nothing may price the line.
         let (k, commit) = {
             let v: Value = serde_json::from_str(&std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain/catalogue.json")).unwrap()).unwrap();
@@ -963,12 +976,17 @@ mod tests {
         let e = attach_capabilities(&mut live(), &plan, &expired).unwrap_err();
         assert_eq!((e[0].code, e[0].path.as_str()), ("capability_unmatched", "rail-line-price"));
         assert!(e[0].message.starts_with("kernel_expired"));
-        // The planner fell back to its built-in knapsack: not the catalogue's kernel.
+        // The planner fell back to its built-in knapsack: the live gate refuses it before any match.
         let mut builtin = plan.clone();
         builtin["portfolio"]["kernel"] = Value::Null;
-        let out = run(&snap, &builtin, &fresh, 1, &p, Some(&gate)).unwrap();
-        let e = attach_capabilities(&mut out.clone(), &builtin, &real_catalogue()).unwrap_err();
+        assert!(run(&snap, &builtin, &fresh, 1, &p, Some(&gate)).unwrap_err().iter().any(|r| r.code == "missing_kernel"));
+        // The planner names another kernel than the catalogue's match: the match refuses it.
+        let mut other = plan.clone();
+        other["portfolio"]["kernel"]["id"] = json!("greedy-knapsack");
+        let out = run(&snap, &other, &fresh, 1, &p, Some(&gate)).unwrap();
+        let e = attach_capabilities(&mut out.clone(), &other, &real_catalogue()).unwrap_err();
         assert_eq!(e[0].code, "capability_mismatch");
+        assert!(e[0].message.contains("\"greedy-knapsack\""), "{}", e[0].message);
         // In shadow the same disagreement is recorded, not refused.
         let mut sh = shadow_on(&builtin).unwrap();
         attach_capabilities(&mut sh, &builtin, &real_catalogue()).unwrap();
@@ -981,7 +999,7 @@ mod tests {
         let (begin, end) = ("<!-- battlebrain capabilities:begin -->\n", "<!-- battlebrain capabilities:end -->");
         let i = readme.find(begin).expect("README has the capabilities markers") + begin.len();
         let j = readme[i..].find(end).expect("an end marker") + i;
-        let (table, ok) = match_table(&real_catalogue());
+        let (table, ok) = match_table(&real_catalogue(), bb::ADAPTERS);
         assert!(ok, "every capability resolves on the real catalogue");
         assert_eq!(&readme[i..j], table, "regenerate with `battlebrain capabilities --catalogue tools/research/schema/fixtures/battlebrain/catalogue.json`");
     }
@@ -999,6 +1017,225 @@ mod tests {
                 assert!(!code.contains(n), "{f} contains {n}");
             }
         }
+    }
+
+    /// Run the command line as `main` does, on `stdin`: its exit code, stdout and stderr.
+    fn cli_run(args: &[&str], stdin: &str) -> (i32, String, String) {
+        let (mut out, mut err) = (String::new(), String::new());
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        let code = cli(&args, &mut stdin.as_bytes(), &mut out, &mut err);
+        (code, out, err)
+    }
+
+    /// A fixture's path, as the command line takes it.
+    fn path(rel: &str) -> String {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain").join(rel).display().to_string()
+    }
+
+    /// A scratch directory of this test process, `name` inside it, empty.
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("battlebrain-cli-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// `v` written as `name` into `dir`, its path returned.
+    fn put(dir: &Path, name: &str, v: &Value) -> String {
+        let f = dir.join(name);
+        std::fs::write(&f, v.to_string()).unwrap();
+        f.display().to_string()
+    }
+
+    #[test]
+    fn the_contract_subcommands_answer_and_refuse_with_their_exit_codes() {
+        let d = scratch("contract");
+        let missing = d.join("missing.json").display().to_string();
+        assert_eq!(cli_run(&["schema", "record"], "").0, 0);
+        assert!(cli_run(&["schema", "record"], "").1.contains("battlebrain-record"));
+        assert_eq!(cli_run(&["schema", "nope"], "").0, 2);
+        // validate: every kind of file, a refused one, an unreadable one and an invocation's catalogue.
+        let (code, out, _) = cli_run(&["validate", &path("valid/decision.json"), &path("valid/decision-block.json"), &path("valid/invocation-knapsack.json")], "");
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("\"kind\":\"decision-block\"") && out.contains("\"kind\":\"invocation\""), "{out}");
+        let mut bare = fx("valid/invocation-knapsack.json");
+        bare.as_object_mut().unwrap().remove("catalogue");
+        let mut bad_cat: Value = serde_json::from_str(&std::fs::read_to_string(path("valid/invocation-knapsack.json")).unwrap()).unwrap();
+        bad_cat["catalogue"]["commit"] = json!("main");
+        let (code, out, _) = cli_run(&["validate", &path("invalid/unknown-type.json"), &missing, &put(&d, "bare.json", &bare), &put(&d, "bad-cat.json", &bad_cat)], "");
+        assert_eq!(code, 1);
+        for want in ["invalid_field", "unreadable", "no_catalogue", "invalid_catalogue"] {
+            assert!(out.contains(want), "{want}: {out}");
+        }
+        // id, transition and check.
+        let (code, out, _) = cli_run(&["id", &path("valid/decision.json")], "");
+        assert_eq!((code, out.trim()), (0, fx("valid/decision.json")["id"].as_str().unwrap()));
+        assert_eq!(cli_run(&["id", &missing], "").0, 1);
+        assert_eq!(cli_run(&["transition", "candidate", "proposed", "selected"], "").0, 0);
+        assert!(cli_run(&["transition", "candidate", "selected", "proposed"], "").1.contains("illegal_transition"));
+        let input = put(&d, "input.json", &json!({"weights": [3, 4, 5], "values": [30.0, 50.0, 60.0], "capacity": 8}));
+        let good = put(&d, "good.json", &json!({"result": {"best": 90.0, "items": [0, 2]}}));
+        let over = put(&d, "over.json", &json!({"result": {"best": 110.0, "items": [1, 2]}}));
+        assert_eq!(cli_run(&["check", "knapsack-dp", &input, &good], "").0, 0);
+        assert!(cli_run(&["check", "knapsack-dp", &input, &over], "").1.contains("invalid_output"));
+        assert_eq!(cli_run(&["check", "knapsack-dp", &input, &missing], "").0, 1);
+        // Anything else is a usage error.
+        assert_eq!(cli_run(&["validate"], "").0, 2);
+        assert!(cli_run(&[], "").2.starts_with("battlebrain <schema|"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_run_subcommands_write_their_records_or_refuse() {
+        let d = scratch("runs");
+        let missing = d.join("missing.json").display().to_string();
+        // snapshot from a capture, refused on a changed schema, and its usage.
+        let towns = json!({"game_tick": 100, "game_date": "1953-02-09", "data": []});
+        std::fs::write(d.join("towns.json"), towns.to_string()).unwrap();
+        let capture = |schema: &str| json!({"schema": schema, "window": {"tick_from": 100, "tick_to": 100, "date_from": "1953-02-09", "coherent": true},
+            "resources": [{"uri": "openttd://towns", "ok": true, "file": "towns.json", "digest": bb::digest(&towns)}]});
+        put(&d, "capture.json", &capture("mcp-plan-capture/v1"));
+        let dir = d.display().to_string();
+        let (code, out, _) = cli_run(&["snapshot", "--capture", &dir, "--instance", "t", "--company", "1", "--max-age-days", "7"], "");
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(serde_json::from_str::<Value>(&out).unwrap()["body"]["max_age_days"], 7);
+        put(&d, "capture.json", &capture("mcp-plan-capture/v2"));
+        assert!(cli_run(&["snapshot", "--capture", &dir, "--instance", "t", "--company", "1"], "").1.contains("unknown_schema"));
+        assert_eq!(cli_run(&["snapshot", "--capture", &dir], "").0, 2);
+        // shadow and live, with and without the catalogue.
+        let (snap, fresh) = live_inputs();
+        let (snap, fresh) = (put(&d, "snap.json", &snap), put(&d, "fresh.json", &fresh));
+        let (plan, companies) = (path("shadow/plan.json"), path("shadow/companies.json"));
+        let cat = path("catalogue.json");
+        let shadow_args = ["shadow", "--snapshot", &snap, "--plan", &plan, "--companies", &companies, "--company", "1"];
+        let (code, out, _) = cli_run(&shadow_args, "");
+        assert_eq!((code, serde_json::from_str::<Value>(&out).unwrap()["mode"].clone()), (0, json!("shadow")));
+        let mut with_cat = shadow_args.to_vec();
+        with_cat.extend(["--catalogue", &cat, "--margin", "0.3", "--reserve", "1000", "--allow-unpriced"]);
+        let out: Value = serde_json::from_str(&cli_run(&with_cat, "").1).unwrap();
+        assert_eq!(out["comparison"]["params"], json!({"margin": 0.3, "reserve": 1000, "require_priced": false}));
+        assert!(out["capabilities"]["matches"].is_array());
+        assert!(cli_run(&["shadow", "--snapshot", &snap, "--plan", &plan, "--companies", &companies, "--company", "2"], "").1.contains("scope_mismatch"));
+        assert_eq!(cli_run(&["shadow", "--snapshot", &missing, "--plan", &plan, "--companies", &companies, "--company", "1"], "").0, 1);
+        assert_eq!(cli_run(&["shadow"], "").0, 2);
+        let live_args = ["live", "--snapshot", &snap, "--plan", &plan, "--companies", &fresh, "--company", "1", "--catalogue", &cat, "--max-window-ticks", "0"];
+        let (code, out, _) = cli_run(&live_args, "");
+        assert_eq!(code, 0, "{out}");
+        let live: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(live["directive"]["company_id"], 1);
+        assert!(cli_run(&["live", "--snapshot", &snap, "--plan", &plan, "--companies", &companies, "--company", "1"], "").1.contains("stale_companies"));
+        assert_eq!(cli_run(&["live", "--snapshot", &snap, "--plan", &missing, "--companies", &fresh, "--company", "1"], "").0, 1);
+        assert_eq!(cli_run(&["live", "--snapshot", &snap], "").0, 2);
+        assert_eq!(cli_run(&["live", "--snapshot", &snap, "--plan", &plan, "--companies", &fresh, "--company", "1", "--catalogue", &missing], "").0, 1,
+                   "an unreadable catalogue refuses the run");
+        // report and rollback.
+        let result = put(&d, "result.json", &json!({"id": "r", "mode": "live", "comparison": {"baseline": null, "battlebrain": null}}));
+        let (code, out, _) = cli_run(&["report", &result], "");
+        assert_eq!(code, 0);
+        assert!(out.contains("| planner v4 (baseline) | HOLD (no line) |") && !out.contains("**Finding:**"), "{out}");
+        assert_eq!(cli_run(&["report", &missing], "").0, 1);
+        assert_eq!(cli_run(&["rollback", "--company", "3"], "").1.trim(), r#"{"company_id":3,"settings":"planned_freight_only=0"}"#);
+        assert_eq!(cli_run(&["rollback"], "").0, 2);
+        // serve: a directive once, never its key twice; an unreadable directive; the usage.
+        std::env::set_var("BATTLEBRAIN_STATE_DIR", d.join("state"));
+        let directive = put(&d, "directive.json", &live["directive"]);
+        let port = 38_000 + (std::process::id() % 1000) as u16;
+        let client = std::thread::spawn(move || (0..100).find_map(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            ureq::get(&format!("http://127.0.0.1:{port}/")).call().ok().and_then(|r| r.into_string().ok())
+        }));
+        let (code, out, _) = cli_run(&["serve", "--directive", &directive, "--port", &port.to_string()], "");
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(serde_json::from_str::<Value>(&client.join().unwrap().unwrap()).unwrap(), live["directive"]);
+        let (code, _, err) = cli_run(&["serve", "--directive", &directive, "--port", &port.to_string()], "");
+        assert!(code == 1 && err.contains("served before"), "{err}");
+        assert_eq!(cli_run(&["serve", "--directive", &missing, "--port", "1"], "").0, 1);
+        assert_eq!(cli_run(&["serve", "--directive", &result, "--port", "1"], "").0, 2, "a directive names its company");
+        std::env::remove_var("BATTLEBRAIN_STATE_DIR");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_catalogue_subcommands_digest_match_and_refuse() {
+        let d = scratch("catalogue");
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(path("catalogue.json")).unwrap()).unwrap();
+        let (kernels, commit) = (v["kernels"].to_string(), v["commit"].as_str().unwrap().to_string());
+        let (code, out, _) = cli_run(&["catalogue", "--commit", &commit, "--kernel", "knapsack-dp", "--engine", "grid"], &kernels);
+        let answer: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!((code, answer["known"].clone(), answer["engine"].clone()), (0, json!(true), json!("grid")), "{out}");
+        assert_eq!(cli_run(&["catalogue", "--commit", &commit, "--kernel", "knapsack-dp", "--engine", "numeric"], &kernels).0, 1);
+        assert!(cli_run(&["catalogue", "--commit", "main"], &kernels).2.starts_with("catalogue: invalid_catalogue"));
+        assert_eq!(cli_run(&["catalogue", "--commit", &commit], "not json").0, 1);
+        // capabilities: the table, the decisions, the records of a snapshot, and each refusal.
+        let cat = path("catalogue.json");
+        assert!(cli_run(&["capabilities", "--catalogue", &cat], "").1.starts_with("| capability | goal |"));
+        let (code, out, _) = cli_run(&["capabilities", "--catalogue", &cat, "--json"], "");
+        assert_eq!((code, serde_json::from_str::<Value>(&out).unwrap().as_array().unwrap().len()), (0, bb::CAPABILITIES.len()));
+        let snap = path("valid/snapshot.json");
+        let recs: Value = serde_json::from_str(&cli_run(&["capabilities", "--catalogue", &cat, "--snapshot", &snap], "").1).unwrap();
+        assert!(recs.as_array().unwrap().iter().all(|r| bb::validate_record(r) == Ok("inference")));
+        assert!(cli_run(&["capabilities", "--catalogue", &cat, "--snapshot", &path("valid/decision.json")], "").1.contains("not_a_snapshot"));
+        let mut unnamed = fx("valid/snapshot.json");
+        unnamed.as_object_mut().unwrap().remove("id");
+        assert!(cli_run(&["capabilities", "--catalogue", &cat, "--snapshot", &put(&d, "unnamed.json", &unnamed)], "").1.contains("derived_from"),
+                "a snapshot without its id cannot be derived from");
+        let missing = d.join("missing.json").display().to_string();
+        assert_eq!(cli_run(&["capabilities", "--catalogue", &cat, "--snapshot", &missing], "").0, 1);
+        assert!(cli_run(&["capabilities", "--catalogue", &missing], "").1.contains("unreadable"));
+        assert_eq!(cli_run(&["capabilities"], "").0, 2);
+        let mut expired = v.clone();
+        expired["kernels"].as_array_mut().unwrap().retain(|k| k["id"] != "track-planning");
+        let (code, out, _) = cli_run(&["capabilities", "--catalogue", &put(&d, "expired.json", &expired)], "");
+        assert_eq!(code, 1, "a refused capability fails the command");
+        assert!(out.contains("rejected: kernel_absent") && out.contains("**refused** `kernel_expired`"), "{out}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_tie_leaves_every_compatible_kernel_unchosen_in_the_table() {
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(path("catalogue.json")).unwrap()).unwrap();
+        let mut kernels = v["kernels"].as_array().unwrap().clone();
+        kernels.push(json!({"id": "knapsack-twin", "engine": "grid", "input": "the kernel's data form"}));
+        let cat = bb::Catalogue::from_runner(&json!(kernels), v["commit"].as_str().unwrap()).unwrap();
+        let knapsack = bb::ADAPTERS.iter().find(|a| a.kernel == "knapsack-dp").unwrap();
+        let twin = bb::Adapter { kernel: "knapsack-twin", ..*knapsack };
+        let (table, ok) = match_table(&cat, &[*knapsack, twin]);
+        assert!(!ok);
+        assert_eq!(table.matches("compatible, not chosen").count(), 2, "{table}");
+        assert!(table.contains("**refused** `ambiguous_capability`"));
+    }
+
+    #[test]
+    fn a_run_refuses_an_unknown_company_and_records_that_break_their_contract() {
+        let p = policy::Params { margin: 0.2, reserve: 25_000, require_priced: true };
+        let none = json!({"companies": [{"id": 7, "money": 1, "loan": 0, "max_loan": 0}]});
+        assert_eq!(shadow(&fx("valid/snapshot.json"), &fx("shadow/plan.json"), &none, 1, &p).unwrap_err()[0].code, "unknown_company");
+        let mut nameless = fx("shadow/plan.json");
+        nameless["model"] = json!(":v4");
+        let e = shadow(&fx("valid/snapshot.json"), &nameless, &fx("shadow/companies.json"), 1, &p).unwrap_err();
+        assert!(e.iter().any(|r| r.path == "producer.version"), "the planner's candidate names no model version: {e:?}");
+        // Live: a HOLD writes no directive; a window wider than the gate is named with its width.
+        let (snap, fresh) = live_inputs();
+        let hold = run(&snap, &fx("shadow/plan.json"), &fresh, 1, &policy::Params { margin: 50.0, ..p.clone() }, Some(&LiveGate { max_window_ticks: 0 })).unwrap();
+        assert!(hold["directive"].is_null() && hold["mode"] == "live");
+        let mut wide = snap.clone();
+        wide["body"]["window"] = json!({"tick_from": 73000, "tick_to": 74000, "coherent": false});
+        wide.as_object_mut().unwrap().remove("id");
+        wide["id"] = json!(bb::record_id(&wide));
+        let e = run(&wide, &fx("shadow/plan.json"), &fresh, 1, &p, Some(&LiveGate { max_window_ticks: 10 })).unwrap_err();
+        assert!(e.iter().any(|r| r.message.contains("spans 1000 ticks, more than the 10")), "{e:?}");
+    }
+
+    #[test]
+    fn the_ledger_and_the_peer_check_hold_without_a_network() {
+        assert_eq!(served_ledger_in(Some("/s".into()), Some("/h".into())), PathBuf::from("/s/served-keys"));
+        assert_eq!(served_ledger_in(None, Some("/h".into())), PathBuf::from("/h/.local/state/battlebrain/served-keys"));
+        assert!(served_ledger().ends_with("served-keys"));
+        assert!(loopback_only("127.0.0.1:1".parse().unwrap()).is_ok());
+        assert_eq!(loopback_only("192.0.2.1:80".parse().unwrap()).unwrap_err(), "refused a non-loopback peer 192.0.2.1:80");
+        assert!(claim_key(Path::new("/"), "k").is_err(), "a ledger path with no parent directory cannot be written");
+        let report = report(&json!({"id": "r", "mode": "shadow", "comparison": {}, "findings": ["one"]}));
+        assert!(report.contains("**Finding:** one") && report.contains("never submitted"));
     }
 
     #[test]
