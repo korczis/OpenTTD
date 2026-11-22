@@ -13,8 +13,8 @@ typed decision/approval/mutation layer and a provenance trace. Console command `
   `openttd.decision.submit`, `openttd.decision.list_action_types`, `openttd.game.set_pause` via
   `tools/list`/`tools/call`.
 - **Two-phase, digest-bound approval**: submit → `pending_approval` (+ FNV-1a argument digest); operator
-  `prismatic_mcp approve <id>`; resubmit → executes via `Command<Commands::Pause>::Post` on the main
-  thread. Approval is **one-time** (replay → new pending) and **argument-bound** (changed args → new
+  `prismatic_mcp approve <id>`; the resubmit then executed it via `Command<Commands::Pause>::Post` on
+  the main thread. Since ADR 0038, the approval itself executes it and nothing is resubmitted. Approval is **one-time** (replay → new pending) and **argument-bound** (changed args → new
   digest → not covered).
 - **Observed delta + honest verdict**: after execution the tool reads `_pause_mode`; it reports
   `EXECUTED_UNVERIFIED` when the effect isn't yet observable (dedicated = networked = deferred command)

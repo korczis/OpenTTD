@@ -44,7 +44,7 @@ and OpenMSX for sound and music), and `PrismaticAI` in `~/Documents/OpenTTD/ai/`
 |---|---|
 | Stat cards, companies, decisions | `openttd://game/state`, `openttd://companies`, `openttd://decisions`, every second |
 | Pause / Resume | `openttd.game.set_pause` through the approval flow; pending approvals get an Approve button |
-| Auto-approve (full auto) | the operator's switch: the panel approves its own pending decisions, never an owner-only one; off by default, and switching it on needs the owner secret (see [Approval is bound to the owner](#approval-is-bound-to-the-owner)) |
+| Auto-approve (full auto) | the operator's switch: the panel approves the pending decisions it submitted itself (never another MCP client's), never an owner-only one; off by default, and switching it on needs the owner secret (see [Approval is bound to the owner](#approval-is-bound-to-the-owner)) |
 | MCP catalogue | `resources/list` and `tools/list`; click a resource to read it |
 | Scripts (`/scripts`, `/scripts/<name>`) | The Rhai library as a workspace: every script with its header comment, imports and importers; an editor with Rhai highlighting, line numbers, an outline and a live parse check; Save (only text that parses), Run once (streamed), and Start/Stop as a service whose log streams and which reloads within a second when its file or a library it imports changes ([`research/rail-steward.md`](rail-steward.md), `src/panel_scripts.rs`) |
 | Towns (`/towns`) | The [town-authority model](mechanisms/town-authority.md) derived from the engine sources (likes and dislikes, gates with removal thresholds by tolerance, town actions, links, relations, each rule with its source `path:line`) and, with a game connected, the live towns with one company's rating, band and `town_lib.rhai` advice; a company selector kept in the address (`src/panel_town.rs`, `tools/research/mcp-towns-check`) |
@@ -61,7 +61,7 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/rpc` | `{"method", "params"}` | raw MCP JSON-RPC with the panel's token |
 | `POST /api/console` | `{"command"}` | one OpenTTD console line and its output |
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
-| `POST /api/approve` | `{"id"}` | the owner's approval, then the resubmission; 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an id the panel does not hold, 409 when the game server no longer holds it, 422 when the game rejected it |
+| `POST /api/approve` | `{"id"}` | the owner's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it, 504 when no decision came |
 | `POST /api/auto-approve` | `{"on": bool}` | `on: true` needs the owner secret (401 without it); `on: false` is open to anyone |
 | `POST /api/rhai` | `{"script"}` | a Rhai script's output |
 | `POST /api/rhai/stream` | `{"script"}` | the same, streamed line by line (SSE `out`, `err`, `exit`) |
@@ -484,8 +484,10 @@ after an hour is closed as `expired`, never as applied. Each settled step says h
 given (`approved_by`): `{channel: "api", declared, owner_secret: true}` for `POST /api/approve`
 (the owner secret was checked; `by` names the approver the caller declares, and nothing checks the
 name), `{channel:
-"auto-approve"}` for the panel's switch, where no person approved, or `{channel: "outside the
-panel"}` for one approved elsewhere, as in the game's console.
+"auto-approve"}` for the panel's switch, where no person approved, or, for one approved
+elsewhere, the channel the game server recorded in the decision's `approved_via` (`{channel:
+"console"}`, `{channel: "chat client 3 company 0 key ... (registered approver)"}`), and
+`{channel: "outside the panel"}` from a server that does not record it.
 
 With `$MAJORDOMUS_URL` (this checkout's Majordomus server, loopback) and `$MAJORDOMUS_SESSION` set,
 the panel also mirrors each `plan.directive` as a typed `decision` record of the Majordomus mesh and
@@ -1600,15 +1602,14 @@ What this does not stop, measured honestly:
   from "any loopback request" to "a secret only the panel's launcher saw". It is not a sandbox
   between processes of one user. The guarantee is the owner-only set, which no HTTP caller can
   approve.
-- **Armed UI input reaches the console.** `mcp-e2e --arm-input` lets a process type into the GUI
-  client's window, and so into its `~` console. On a network client that console approves only
-  the client's own MCP server's queue. Once the approval core (ADR 0038) forwards console
-  approvals to the server, armed input reaches the server's queue too. The in-game control window
-  of PR 66, still open, refuses injected Approve clicks. Typed console lines are not refused.
+- **Armed UI input approves nothing** (ADR 0038). A process armed with `mcp-e2e --arm-input` can
+  type into the GUI client's window and its `~` console. Such a client never sends an approval:
+  `ClientNetworkGameSocketHandler::SendChat` refuses the line. Its console refuses `approve` and
+  changes to approvers, and so does any input a UI tool injects (`InjectingInput()`). The owner's
+  armed co-play client therefore approves through the panel or from an unarmed client.
 - **The page URL with `?owner=` lands in the browser's history.**
-- **Until the approval core lands, a console approval only marks the request approved.** The
-  action runs when its caller resubmits it (ADR 0038, defect 2). An owner-only request approved at
-  the console therefore needs its caller's resubmission, or the approval core, to execute.
+- **A console approval executes at once** (ADR 0038): an owner-only request approved at the
+  game's console runs then, with no caller resubmitting it.
 
 `cargo test --release --offline --bin mcp-panel` covers every refusal (`owner_only_approvals_are_refused_by_every_panel_channel`,
 `approving_and_auto_approve_on_need_the_owner_secret`, `console_lines_are_read_as_the_game_reads_them_and_no_spelling_approves`,

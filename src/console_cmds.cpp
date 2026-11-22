@@ -56,6 +56,7 @@
 #include "prismatic_mcp/prismatic_mcp_registry.h"
 #include "prismatic_mcp/prismatic_mcp_console.h"
 #include "prismatic_mcp/prismatic_mcp_menu.h"
+#include "prismatic_mcp/prismatic_mcp_ui.h"
 #include "prismatic_mcp/prismatic_mcp_detail.h"
 #include "3rdparty/nlohmann/json.hpp"
 #include <filesystem>
@@ -1955,7 +1956,7 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 {
 	if (argv.size() < 2) {
 		IConsolePrint(CC_HELP, "RESEARCH-ONLY/UNSTABLE: control the embedded loopback MCP server.");
-		IConsolePrint(CC_HELP, "Usage: 'prismatic_mcp <status|start [port] [token-file]|stop|endpoint|token|rotate|approvals|approve <id> [<id> ...]|deny <id> [<id> ...]|deny all|decisions [n]>'.");
+		IConsolePrint(CC_HELP, "Usage: 'prismatic_mcp <status|start [port] [token-file]|stop|endpoint|token|rotate|approvals|approve <id> [<id> ...]|deny <id> [<id> ...]|deny all|approvers [add <client id>|remove <key>]|decisions [n]>'.");
 		IConsolePrint(CC_HELP, "One line settles several decisions. 'deny all' is allowed because a denial enacts nothing; an approval executes, so you name every id you approve.");
 		return true;
 	}
@@ -2032,6 +2033,75 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 				_prismatic_mcp_token_file.clear();
 			}
 		}
+		return true;
+	}
+	/* On a network client the approvals live on the server, not in this game's own MCP server:
+	 * 'approvals', 'approve <id>' and 'deny <id>' go to it as one private chat line each, the approval
+	 * channel from inside the game (ADR 0038), and its answer comes back as a private message. An id
+	 * this game's own MCP server holds pending stays local, so a local approval is never mistaken
+	 * for the server's of the same number. One id per line, as the server accepts it. */
+	if ((sub == "approvals" || sub == "approve" || sub == "deny") && _networking && !_network_server) {
+		std::vector<std::string> lines;
+		if (sub == "approvals") {
+			lines.push_back(argv.size() > 2 ? fmt::format("!approvals {}", argv[2]) : std::string("!approvals"));
+		} else {
+			/* A script can type into a client whose input is armed for MCP tools, so no approval
+			 * leaves it; a denial, which only withdraws, may. */
+			if (sub == "approve" && (PrismaticMCP::UI::InputArmed() || PrismaticMCP::UI::InjectingInput())) {
+				IConsolePrint(CC_ERROR, "Refused: this client's input is armed for MCP tools (PRISMATIC_MCP_INPUT=1), so an approval cannot come from it. Approve in the panel, or from a client that is not armed.");
+				return true;
+			}
+			for (size_t i = 2; i < argv.size(); i++) {
+				/* 'local:<id>' is this game's own MCP server's approval; a bare id is the server's. */
+				std::string_view arg = argv[i];
+				if (arg.starts_with("local:")) {
+					auto id = ParseInteger<uint64_t>(arg.substr(6));
+					std::string message = id.has_value() ? std::string() : fmt::format("not an approval id: '{}'", arg);
+					bool done = id.has_value() && (sub == "approve" ? PrismaticMCP::ApproveById(*id, message, "console (this client)") : PrismaticMCP::DenyById(*id, message));
+					IConsolePrint(done ? CC_INFO : CC_ERROR, "{} (this game's own): {}", arg, message);
+					continue;
+				}
+				if (auto id = ParseInteger<uint64_t>(arg); id.has_value() && PrismaticMCP::HoldsPending(*id)) {
+					IConsolePrint(CC_WARNING, "This game's own MCP server also holds #{}: the server's #{} is asked; 'local:{}' decides this game's own.", *id, *id, *id);
+				}
+				lines.push_back(fmt::format("!{} {}", sub, arg));
+			}
+		}
+		for (const auto &line : lines) {
+			NetworkClientSendChat(NetworkAction::ChatClient, NetworkChatDestinationType::Client, to_underlying(ClientID::Server), line);
+			IConsolePrint(CC_INFO, "Sent to the server: '{}'. Its answer arrives as a private message.", line);
+		}
+		return true;
+	}
+	/* The server's operator registers who may approve from inside the game (ADR 0038): a client's
+	 * key by its client id (it need not be in any company's allow list), listed and removed by key. */
+	/* An armed process (PRISMATIC_MCP_INPUT=1) takes keystrokes from scripts: its console neither
+	 * approves nor changes who may (ADR 0038). A denial, which only withdraws, stays open. */
+	if ((PrismaticMCP::UI::InputArmed() || PrismaticMCP::UI::InjectingInput()) && (sub == "approve" || (sub == "approvers" && argv.size() >= 3))) {
+		IConsolePrint(CC_ERROR, "Refused: this input may come from a script (the process is armed for MCP tools, PRISMATIC_MCP_INPUT=1, or a UI tool is injecting it), so the console does not approve or change approvers. Use the panel or an unarmed console.");
+		return true;
+	}
+	if (sub == "approvers" && (_network_server || !_networking)) {
+		if (argv.size() >= 4 && argv[2] == "add") {
+			auto cid = ParseInteger<uint32_t>(argv[3]);
+			const NetworkClientInfo *ci = cid.has_value() ? NetworkClientInfo::GetByClientID(static_cast<ClientID>(*cid)) : nullptr;
+			if (ci == nullptr || ci->public_key.empty()) { IConsolePrint(CC_ERROR, "No connected client #{} with a key ('clients' lists them).", argv[3]); return true; }
+			std::vector<std::string> approvers = PrismaticMCP::Approvers();
+			bool known = std::ranges::find(approvers, ci->public_key) != approvers.end();
+			if (known) IConsolePrint(CC_INFO, "Client #{} ({}) already is an approver.", argv[3], ci->client_name);
+			else if (PrismaticMCP::AddApprover(ci->public_key)) IConsolePrint(CC_INFO, "Client #{} ({}) is an approver now.", argv[3], ci->client_name);
+			else IConsolePrint(CC_ERROR, "Could not save the approvers file; client #{} was not added.", argv[3]);
+			return true;
+		}
+		if (argv.size() >= 4 && argv[2] == "remove") {
+			std::string removed = PrismaticMCP::RemoveApprover(argv[3]);
+			if (removed.empty()) IConsolePrint(CC_ERROR, "No single approver's key starts with '{}' (give at least 8 characters of one key; 'prismatic_mcp approvers' lists them).", argv[3]);
+			else IConsolePrint(CC_INFO, "Removed the approver {}.", removed);
+			return true;
+		}
+		auto keys = PrismaticMCP::Approvers();
+		if (keys.empty()) IConsolePrint(CC_INFO, "No approvers registered: 'prismatic_mcp approvers add <client id>'. A company's allow list approves for it as well.");
+		for (const auto &k : keys) IConsolePrint(CC_INFO, "approver {}", k);
 		return true;
 	}
 	if (sub == "approvals") {
@@ -2180,9 +2250,9 @@ void McpCallTool(const std::string &tool, const ConsoleJson &args)
 {
 	ConsoleJson out = McpToolText(McpCall("tools/call", {{"name", tool}, {"arguments", args}}));
 	if (out.is_object() && out.value("status", "") == "pending_approval") {
-		IConsolePrint(CC_WARNING, "{} waits for approval #{}: approve it with 'mcp approve {}' (or deny with 'mcp deny {}').",
+		IConsolePrint(CC_WARNING, "{} waits for approval #{}: approve it with 'prismatic_mcp approve {}' (or deny with 'prismatic_mcp deny {}').",
 			tool, out["approval_id"].get<uint64_t>(), out["approval_id"].get<uint64_t>(), out["approval_id"].get<uint64_t>());
-		IConsolePrint(CC_WARNING, "After approving, repeat the same command to execute it.");
+		IConsolePrint(CC_WARNING, "Approving carries it out; do not repeat the command (that asks for a fresh approval).");
 		return;
 	}
 	McpPrint(out, out.is_object() && out.contains("error") ? CC_ERROR : CC_INFO);

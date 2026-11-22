@@ -45,6 +45,10 @@ nlohmann::json Tools();
  */
 std::optional<nlohmann::json> Call(const std::string &name, const nlohmann::json &args);
 
+/** Whether this process's input is armed for MCP tools (PRISMATIC_MCP_INPUT=1): then a script can
+ * type into its chat and console, so an approval may not leave it that way (ADR 0038). */
+bool InputArmed();
+
 /**
  * Whether the input being handled right now was injected by a UI tool (openttd.input.*, and the
  * openttd.ui.* tools that press, choose, type, close or click a tile) rather than typed or clicked
