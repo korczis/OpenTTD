@@ -1977,7 +1977,7 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 			/* The token goes into a file only, never onto a console line: a launcher reads it from the
 			 * file it passes, the operator from the per-port file in the personal directory. */
 			std::string path = argv.size() >= 4 ? std::string{argv[3]}
-				: FioGetDirectory(SP_PERSONAL_DIR, BASE_DIR) + PrismaticMCP::detail::DefaultTokenFileName(port == 0 ? PrismaticMCP::DEFAULT_PORT : port);
+				: _personal_dir + PrismaticMCP::detail::DefaultTokenFileName(port == 0 ? PrismaticMCP::DEFAULT_PORT : port);
 			if (PrismaticMcpWriteTokenFile(path)) {
 				_prismatic_mcp_token_file = path;
 				IConsolePrint(CC_INFO, "Token written to {} (mode 0600)", path);

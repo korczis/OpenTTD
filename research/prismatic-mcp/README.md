@@ -63,8 +63,9 @@ curl -s http://127.0.0.1:8731/mcp -H "Authorization: Bearer $TOKEN" \
 
 The token is never printed, to the local console or a remote one, and never written to
 `openttd.cfg` or a log: only to the 0600 token file `{"agent_token","endpoint"}` — the one
-`start` is given, else `prismatic_mcp_token_<port>.json` in the personal directory (on macOS
-`~/Documents/OpenTTD/`). `prismatic_mcp token` prints that path and a `blake2b:` fingerprint, so
+`start` is given, else `prismatic_mcp_token_<port>.json` in the personal directory, where
+`openttd.cfg` and `secrets.cfg` live (the directory of `-c <cfg>` when one is given; by default
+`~/Documents/OpenTTD/` on macOS, `~/.local/share/openttd/` on Linux). `prismatic_mcp token` prints that path and a `blake2b:` fingerprint, so
 the operator can tell which token a file holds without seeing it.
 
 Bearer token via a header only — never in the URL. The endpoint refuses any request carrying an
