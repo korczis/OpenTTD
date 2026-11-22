@@ -566,6 +566,7 @@ struct PendingApproval {
 	std::string mcp_tool;        ///< the MCP tool as it was called (openttd.ai.set_setting), for openttd://approvals
 	std::string mcp_args;        ///< its arguments as called, serialized
 	uint64_t superseded_by = 0;  ///< the newer approval that withdrew this one (state Denied), else 0
+	std::string settled_by;      ///< "deadline keep" / "deadline approve" when the deadline settled it, else empty
 	uint64_t created_tick = 0;
 	uint64_t expiry_tick = 0;
 	ApprovalState state = ApprovalState::Pending;
@@ -600,6 +601,8 @@ uint64_t _next_decision_id = 1;
 constexpr size_t MAX_APPROVALS = 64;
 constexpr size_t MAX_PROVENANCE = 128;
 constexpr uint64_t APPROVAL_TTL_TICKS = 100000; ///< generous; the operator approves interactively
+/** The operator's deadline policy (detail::DeadlinePolicy): one game month, verdict keep, until changed. */
+detail::DeadlinePolicy _deadline_policy;
 
 /** FNV-1a 64-bit digest of tool+args, via the shared pure helper. */
 std::string ArgDigest(std::string_view tool, const json &args)
@@ -668,10 +671,14 @@ json ResourceApprovals()
 			arr.push_back({{"id", a.id}, {"action", a.tool}, {"tool", a.mcp_tool},
 				{"args", json::parse(a.mcp_args.empty() ? a.canonical_args : a.mcp_args, nullptr, false)},
 				{"state", a.superseded_by != 0 ? "superseded" : st}, {"superseded_by", a.superseded_by}, {"expired", a.state == ApprovalState::Pending && now > a.expiry_tick},
-				{"created_tick", a.created_tick}, {"expires_tick", a.expiry_tick}});
+				{"created_tick", a.created_tick}, {"expires_tick", a.expiry_tick},
+				{"deadline_tick", detail::DeadlineTick(a.created_tick, _deadline_policy.ticks).value_or(0)},
+				{"settled_by", a.settled_by}});
 		}
 	}
-	env["data"] = json{{"approvals", std::move(arr)}, {"capacity", MAX_APPROVALS}};
+	env["data"] = json{{"approvals", std::move(arr)}, {"capacity", MAX_APPROVALS},
+		{"deadline", {{"ticks", _deadline_policy.ticks}, {"days", _deadline_policy.ticks / detail::DEADLINE_DAY_TICKS},
+			{"verdict", detail::DeadlineVerdictName(_deadline_policy.verdict)}}}};
 	return env;
 }
 
@@ -1578,6 +1585,8 @@ void OnGameModeChanged()
 /** The tick the last poll saw; a smaller one means another world (detail::WorldChanged). */
 static uint64_t _last_poll_tick = 0;
 
+static void SettleDueApprovals(); // below, with the approvers
+
 void Poll()
 {
 	if (!_mcp.running || _mcp.listeners.empty()) return;
@@ -1622,6 +1631,9 @@ void Poll()
 
 	/* Service existing connections. */
 	for (auto &c : _mcp.conns) ServiceConnection(c);
+
+	/* An approval nobody answered is settled at its deadline, so no requester waits forever. */
+	SettleDueApprovals();
 
 	/* Reap closed connections. */
 	_mcp.conns.erase(
@@ -1683,8 +1695,11 @@ std::string ListApprovals()
 			a.state == ApprovalState::Approved ? "APPROVED" :
 			a.state == ApprovalState::Denied ? "DENIED" : "CONSUMED";
 		bool expired = now > a.expiry_tick && a.state == ApprovalState::Pending;
-		s += fmt::format("#{} {} {}tool={} args={} expires_tick={}\n", a.id, st, expired ? "(EXPIRED) " : "",
-			a.tool, a.args_summary, a.expiry_tick);
+		auto due = detail::DeadlineTick(a.created_tick, _deadline_policy.ticks);
+		s += fmt::format("#{} {} {}tool={} args={} expires_tick={}{}{}\n", a.id, st, expired ? "(EXPIRED) " : "",
+			a.tool, a.args_summary, a.expiry_tick,
+			a.state == ApprovalState::Pending && due.has_value() ? fmt::format(" deadline_tick={} ({})", *due, detail::DeadlineVerdictName(_deadline_policy.verdict)) : "",
+			a.settled_by.empty() ? "" : " settled_by=" + a.settled_by);
 	}
 	return s;
 }
@@ -1892,6 +1907,60 @@ bool ChatApproval(uint32_t client_id, int company, std::string_view key, bool in
 	}
 	replies.push_back(detail::CapLine(m, max));
 	return true;
+}
+
+/**
+ * The approval deadline (detail::DeadlineDue, research/mechanisms/approval-gate.md "The deadline"):
+ * every pending approval past it is settled with the operator's standing verdict, on the main thread
+ * once a poll. Keep retires it unanswered, enacting nothing; approve executes it through the one
+ * execution path (ApproveById), and only when a chat approver could have decided it. Each settled
+ * approval says so in the log and in openttd://approvals (settled_by).
+ */
+static void SettleDueApprovals()
+{
+	if (_deadline_policy.ticks == 0) return;
+	const uint64_t now = (uint64_t)TimerGameTick::counter;
+	const uint64_t days = _deadline_policy.ticks / detail::DEADLINE_DAY_TICKS;
+	for (auto &a : _approvals) {
+		/* Due at all? ChatDecidable reads the command catalogue, so it is asked only of a due one. */
+		if (detail::DeadlineDue(a.state == ApprovalState::Pending, a.created_tick, now, _deadline_policy, false) == detail::DeadlineAction::None) continue;
+		if (detail::DeadlineDue(true, a.created_tick, now, _deadline_policy, ChatDecidable(a)) == detail::DeadlineAction::Execute) {
+			a.settled_by = "deadline approve";
+			std::string message;
+			bool executed = ApproveById(a.id, message, "deadline (the operator's standing verdict: approve)");
+			Debug(Facility::Net, Severity::Error, "[prismatic-mcp] deadline: approval #{} unanswered after {} game day(s): {}", a.id, days, message);
+			if (executed || a.state != ApprovalState::Pending) continue;
+			/* Refused (expired, say): retired, never tried again at every poll. */
+			a.settled_by = "deadline keep (approve refused: " + message + ")";
+		} else {
+			a.settled_by = "deadline keep";
+		}
+		a.state = ApprovalState::Denied;
+		Debug(Facility::Net, Severity::Error, "[prismatic-mcp] deadline: approval #{} ({}) retired unanswered after {} game day(s); nothing enacted",
+			a.id, a.tool, days);
+	}
+}
+
+bool SetApprovalDeadline(std::string_view days, std::string_view verdict, std::string &message)
+{
+	auto policy = detail::ParseDeadlinePolicy(days, verdict);
+	if (!policy.has_value()) {
+		message = "Usage: prismatic_mcp approval_deadline <game days 0-3650, 0 = off> [keep|approve]";
+		return false;
+	}
+	_deadline_policy = *policy;
+	message = DescribeApprovalDeadline();
+	return true;
+}
+
+std::string DescribeApprovalDeadline()
+{
+	if (_deadline_policy.ticks == 0) return "approval deadline: off (a pending approval waits until it expires)";
+	return fmt::format("approval deadline: {} game day(s), then {} ({})", _deadline_policy.ticks / detail::DEADLINE_DAY_TICKS,
+		detail::DeadlineVerdictName(_deadline_policy.verdict),
+		_deadline_policy.verdict == detail::DeadlineVerdict::Approve
+			? "executes what a chat approver may decide, retires the rest"
+			: "retires it unanswered, enacting nothing");
 }
 
 bool DenyById(uint64_t id, std::string &message)

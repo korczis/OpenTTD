@@ -1956,7 +1956,7 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 {
 	if (argv.size() < 2) {
 		IConsolePrint(CC_HELP, "RESEARCH-ONLY/UNSTABLE: control the embedded loopback MCP server.");
-		IConsolePrint(CC_HELP, "Usage: 'prismatic_mcp <status|start [port] [token-file]|stop|endpoint|token|rotate|approvals|approve <id> [<id> ...]|deny <id> [<id> ...]|deny all|approvers [add <client id>|remove <key>]|decisions [n]>'.");
+		IConsolePrint(CC_HELP, "Usage: 'prismatic_mcp <status|start [port] [token-file]|stop|endpoint|token|rotate|approvals|approve <id> [<id> ...]|deny <id> [<id> ...]|deny all|approvers [add <client id>|remove <key>]|approval_deadline [<game days> [keep|approve]]|decisions [n]>'.");
 		IConsolePrint(CC_HELP, "One line settles several decisions. 'deny all' is allowed because a denial enacts nothing; an approval executes, so you name every id you approve.");
 		return true;
 	}
@@ -2077,7 +2077,9 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 	 * key by its client id (it need not be in any company's allow list), listed and removed by key. */
 	/* An armed process (PRISMATIC_MCP_INPUT=1) takes keystrokes from scripts: its console neither
 	 * approves nor changes who may (ADR 0038). A denial, which only withdraws, stays open. */
-	if ((PrismaticMCP::UI::InputArmed() || PrismaticMCP::UI::InjectingInput()) && (sub == "approve" || (sub == "approvers" && argv.size() >= 3))) {
+	/* A standing 'approve' verdict for the deadline is consent given in advance: refused here like 'approve'. */
+	bool standing_approval = sub == "approval_deadline" && argv.size() >= 4 && argv[3] == "approve";
+	if ((PrismaticMCP::UI::InputArmed() || PrismaticMCP::UI::InjectingInput()) && (sub == "approve" || standing_approval || (sub == "approvers" && argv.size() >= 3))) {
 		IConsolePrint(CC_ERROR, "Refused: this input may come from a script (the process is armed for MCP tools, PRISMATIC_MCP_INPUT=1, or a UI tool is injecting it), so the console does not approve or change approvers. Use the panel or an unarmed console.");
 		return true;
 	}
@@ -2102,6 +2104,20 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 		auto keys = PrismaticMCP::Approvers();
 		if (keys.empty()) IConsolePrint(CC_INFO, "No approvers registered: 'prismatic_mcp approvers add <client id>'. A company's allow list approves for it as well.");
 		for (const auto &k : keys) IConsolePrint(CC_INFO, "approver {}", k);
+		return true;
+	}
+	/* The approval deadline (research/mechanisms/approval-gate.md "The deadline"): an approval
+	 * nobody answers is settled after this many game days with the operator's standing verdict, so
+	 * no requester waits forever. With no argument it only says what is in force. It is this game's
+	 * own MCP server's policy; a network client's console sets its client's, never the server's. */
+	if (sub == "approval_deadline") {
+		if (argv.size() < 3) {
+			IConsolePrint(CC_INFO, "{}", PrismaticMCP::DescribeApprovalDeadline());
+			return true;
+		}
+		std::string message;
+		bool ok = PrismaticMCP::SetApprovalDeadline(argv[2], argv.size() > 3 ? std::string_view(argv[3]) : std::string_view(), message);
+		IConsolePrint(ok ? CC_INFO : CC_ERROR, "{}", message);
 		return true;
 	}
 	if (sub == "approvals") {

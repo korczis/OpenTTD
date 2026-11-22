@@ -104,6 +104,15 @@ bool AddApprover(std::string_view key);
 std::string RemoveApprover(std::string_view key_or_prefix);
 /** Deny a pending mutation by id. */
 bool DenyById(uint64_t id, std::string &message);
+/**
+ * The approval deadline: after `days` game days unanswered (0: off) a pending approval is settled
+ * with the operator's standing verdict, "keep" (retire it, enacting nothing; the default) or
+ * "approve" (execute it when a chat approver could decide it, else retire it). False and a usage
+ * line in `message` for a malformed policy; else the policy now in force.
+ */
+bool SetApprovalDeadline(std::string_view days, std::string_view verdict, std::string &message);
+/** The approval deadline in force, as one console line. */
+std::string DescribeApprovalDeadline();
 /** Machine-readable summary of the decision/provenance trace for the console. */
 std::string DecisionTrace(int max_rows);
 

@@ -81,13 +81,42 @@ that only the owner turns auto-approve on, never an agent on an inference, is re
 The full contract, with every field, is
 [`16-decision-contract.md`](../prismatic-mcp/16-decision-contract.md).
 
+### The deadline
+
+An approval nobody answers no longer waits until it expires (`APPROVAL_TTL_TICKS`, about 3.7 game
+years). In the owner's game of 2026-11-22, `replan.rhai` filed about twenty settings a month and held
+every later plan while they waited, so the company stopped building. Now the server settles each
+pending approval at its deadline with the operator's standing verdict. It does so on the main thread,
+once a poll (`SettleDueApprovals`), and every channel sees the result, because they all read the one
+queue:
+
+| Verdict | At the deadline |
+|---|---|
+| `keep` (the default) | retired unanswered (`denied`, `settled_by: deadline keep`): nothing is enacted, the game keeps what it has, and the requester may ask again |
+| `approve` | executed through the one execution path, recorded with `approved_via: deadline (...)`, but only when a chat approver could decide it (`detail::ChatScoped`: one company's own AI, or a company-level command); anything wider is retired as under `keep` |
+
+- **The default:** one game month (30 days), which is the cadence `replan.rhai` plans at, with the
+  verdict `keep`. So a plan nobody answered is settled before the next one is asked for, and
+  nothing is ever enacted that someone did not decide.
+- **Changing it:** `prismatic_mcp approval_deadline <game days> [keep|approve]` (0 days turns the
+  deadline off). With no argument the command prints the policy in force. `approve` is consent given
+  in advance, so it is refused where `approve` is refused: an armed console (`PRISMATIC_MCP_INPUT=1`)
+  and the panel's `POST /api/console` (`is_approval_line`). The owner types it at the server's own
+  console.
+- **Where you see it:** `openttd://approvals` gives each approval its `deadline_tick` and
+  `settled_by`, and the queue its `deadline` (`ticks`, `days`, `verdict`). `prismatic_mcp approvals`
+  prints `deadline_tick=` on a pending row and `settled_by=` on a settled one, and the log says
+  `[prismatic-mcp] deadline: ...` for each approval it settles.
+- **Not yet:** a deadline tuned from data, for example from how long the owner takes to answer,
+  measured in the DuckDB store. It is fixed until then.
+
 ## Where it lives
 
 | File | What it holds |
 |---|---|
 | [`src/prismatic_mcp/prismatic_mcp_server.cpp`](../../src/prismatic_mcp/prismatic_mcp_server.cpp) | `ValidateAction`, the approval store, `ExecuteAction`, `Conclude`, the trace |
-| [`src/prismatic_mcp/prismatic_mcp_detail.h`](../../src/prismatic_mcp/prismatic_mcp_detail.h) | `ACTION_TYPES`, the pure `ClassifySubmit` state machine |
-| [`src/console_cmds.cpp`](../../src/console_cmds.cpp) | `prismatic_mcp approvals`, `approve`, `deny`, `decisions` |
+| [`src/prismatic_mcp/prismatic_mcp_detail.h`](../../src/prismatic_mcp/prismatic_mcp_detail.h) | `ACTION_TYPES`, the pure `ClassifySubmit` state machine, the deadline's `DeadlineDue` and `ParseDeadlinePolicy` |
+| [`src/console_cmds.cpp`](../../src/console_cmds.cpp) | `prismatic_mcp approvals`, `approve`, `deny`, `approval_deadline`, `decisions` |
 | [`tools/research/mcp-rhai/src/panel.rs`](../../tools/research/mcp-rhai/src/panel.rs) | pending list, `/api/approve`, `/api/auto-approve`, the console refusal |
 | [`tools/research/mcp-panel/rhai/ttd.rhai`](../../tools/research/mcp-panel/rhai/ttd.rhai) | `ttd::set_pause`, which waits for the approval and never approves itself |
 
@@ -96,9 +125,12 @@ The full contract, with every field, is
 - Catch2 case "The approval state machine binds to canonical args, executes once, refuses replay
   and changed args" and "ArgDigest is deterministic and argument-binding" in
   [`src/tests/test_prismatic_mcp.cpp`](../../src/tests/test_prismatic_mcp.cpp), run by
-  `tools/gate.sh research`.
+  `tools/gate.sh research`. The deadline has two cases of its own: "An unanswered approval is
+  settled at its deadline with the operator's standing verdict, keep by default" and "The deadline
+  policy is parsed from the console's game days and verdict, and a malformed line changes nothing".
 - `tools/research/mcp-live-check` approves and denies real mutations over HTTP.
-- `cargo test` in `tools/research/mcp-rhai` covers `is_approval_line` and that
+- `cargo test` in `tools/research/mcp-rhai` covers `is_approval_line` (including the deadline's
+  standing `approve` verdict) and that
   `--auto-approve` parses (`panel.rs` tests).
 - `tools/research/mcp-carryout-check` checks that a planned change reaches the bot and that
   nothing is applied behind the owner's back.
