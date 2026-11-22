@@ -23,7 +23,13 @@ shrinks by being edited.
 
 The tests are in `tools/research/mcp-rhai/src/authority_boundaries.rs`, compiled into the
 `battlebrain` binary's tests. `tools/gate.sh change` runs them (offline) and checks the default
-binary it just built (B8).
+binary it just built (B8). CI runs them too: the job "Research Rust tests"
+(`.github/workflows/research-rust.yml`) runs `cargo test --release` for `battlebrain`, `mcp-plan`,
+`mcp-intent` and `mcp-panel` on every pull request and push to master, so the B1-B8 tests, the
+contract and executor tests and the knapsack checks fail a pull request, not only a local gate.
+The job skips the build when no path the tests compile or read changed. B8's gate steps on a built
+game binary (`default_build_free_of_research`, `tools/gate.sh research`) stay local: CI does not
+build the game.
 
 # Required behaviour
 
@@ -97,6 +103,11 @@ What is not machine-checked, and why:
 cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-plan
 tools/gate.sh change
 ```
+
+In CI: the "Research Rust tests" check of `.github/workflows/research-rust.yml` on the pull
+request (`gh pr checks <n> -R korczis/OpenTTD`). It blocks a merge once it is a required check of
+`master` (`.ai/repo/workflows/delivery.md`); until the owner adds it, a red run is visible on the
+pull request but does not stop auto-merge.
 
 # Related
 

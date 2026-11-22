@@ -72,7 +72,9 @@ keeps it so.
 - The two options themselves in `cmake/Options.cmake`, which default OFF: they are the gate.
 
 Guarded on 2026-11-22 (red-team finding 9), so a default build no longer has them:
-`WID_TN_PRISMATIC` (and with it `WID_TN_END` is upstream's again), `WindowClass::PrismaticAsk`,
+`WID_TN_PRISMATIC` (and with it `WID_TN_END` is upstream's again), `WindowClass::PrismaticAsk`
+and `WindowClass::PrismaticControl` (the latter landed unguarded while this was in review, and
+`research_code_is_guarded` refused it),
 the `MenuClickPrismatic`/`ToolbarPrismaticClick` stubs and their table entries in
 `src/toolbar_gui.cpp`, and the `WID_TN_PRISMATIC`/`PrismaticAsk` script-API constants that put
 both names into every default binary. Neither enum is saved or sent over the network: windows

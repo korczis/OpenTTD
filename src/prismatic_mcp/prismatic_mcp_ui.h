@@ -45,6 +45,26 @@ nlohmann::json Tools();
  */
 std::optional<nlohmann::json> Call(const std::string &name, const nlohmann::json &args);
 
+/**
+ * Whether the input being handled right now was injected by a UI tool (openttd.input.*, and the
+ * openttd.ui.* tools that press, choose, type, close or click a tile) rather than typed or clicked
+ * by a person. A window whose buttons consent on the owner's behalf (the
+ * approvals of the Prismatic control window) refuses a click while this is true: no script, bot
+ * or MCP client approves its own request by driving the owner's mouse.
+ */
+bool InjectingInput();
+
+/** Marks the input handled during its lifetime as injected (Call() holds one around every UI tool; tests hold one to act as a script). */
+class InjectionScope {
+public:
+	explicit InjectionScope(bool on = true);
+	~InjectionScope();
+	InjectionScope(const InjectionScope &) = delete;
+	InjectionScope &operator=(const InjectionScope &) = delete;
+private:
+	bool previous;
+};
+
 } // namespace PrismaticMCP::UI
 
 #endif /* OTTD_PRISMATIC_MCP_SERVER */

@@ -18,7 +18,35 @@ allows auto-merge since then (`allow_auto_merge: true`).
 | let it merge itself | `gh pr merge <n> -R korczis/OpenTTD --auto --merge` |
 | tell the peers | the board (`majordomus_announce`) and a message to the sessions working on the same paths |
 
-GitHub merges the pull request as soon as the required check is green; nothing waits on the
+## The checks a pull request runs
+
+| Check (job name) | Workflow | What it proves |
+|---|---|---|
+| Check and build | `.github/workflows/surfaces.yml` | derived regions current, links and anchors resolve, the site and wiki build, the web UI's own tests |
+| Research Rust tests | `.github/workflows/research-rust.yml` | `cargo test --release --locked` for `battlebrain`, `mcp-plan`, `mcp-intent` and `mcp-panel` with default features: the boundaries B1-B8 of rule `project.decision-authority-boundaries`, the decision contract and executor, the knapsack checks |
+
+Research Rust runs on every pull request, every push to master and on dispatch. Its one job
+always reports: its first step diffs the change (a pull request's merge commit against its first
+parent, a push against the commit before it, a dispatch against its merge base with master) and,
+when no path the four test binaries compile or read changed, succeeds without building. That
+keeps it safe to require without blocking unrelated pull requests. It links the system libduckdb
+of the `store` feature (`tools/research/mcp-rhai/build.rs`) from DuckDB's pinned release
+archive, verified by SHA-256, and refuses to run when the locked `libduckdb-sys` encodes another
+DuckDB version. Every action is pinned by commit SHA. After the Surfaces `refresh` job pushes a
+merge of master onto a branch, it dispatches both workflows, because a push made with
+`GITHUB_TOKEN` starts none.
+
+Only "Check and build" is required until the owner adds the second check:
+
+```bash
+gh api -X POST repos/korczis/OpenTTD/branches/master/protection/required_status_checks/contexts \
+  -f 'contexts[]=Research Rust tests'
+```
+
+Until then a red Research Rust run is visible on the pull request but does not stop auto-merge,
+so look at it before enabling auto-merge.
+
+GitHub merges the pull request as soon as the required checks are green; nothing waits on the
 session. When master moves first and the branch conflicts, the pull request stays open: merge
 master into the branch again, re-run the gate and push; auto-merge stays enabled.
 

@@ -1355,17 +1355,31 @@ static CallBackFunction MenuClickNothing(int)
  * OPTION_PRISMATIC_MCP_SERVER, like WID_TN_PRISMATIC, the last index of the tables below. */
 static CallBackFunction MenuClickPrismatic(int index)
 {
-	if (PrismaticMCP::Menu::Run(index)) {
-		Window *w = FindWindowById(WindowClass::MainToolbar, 0);
-		if (w != nullptr) ShowQueryString({}, STR_PRISMATIC_MCP_ASK_CAPTION, 256, w, CS_ALPHANUMERAL, {});
+	namespace M = PrismaticMCP::Menu;
+	Window *w = FindWindowById(WindowClass::MainToolbar, 0);
+	/* A group row or Back replaces the open list in place (it persists), so a submenu never opens a
+	 * second list under the cursor, which a new list in drag mode would select without a click. */
+	auto group = M::GroupOfRow(index);
+	if (group.has_value() || index == M::MENU_BACK_ROW) {
+		DropDownList list = M::DropDown(group.value_or(std::string_view{}));
+		if (w != nullptr && w->FindChildWindow(WindowClass::DropdownMenu) != nullptr) {
+			ReplaceDropDownList(w, std::move(list));
+		} else if (w != nullptr) {
+			/* With toolbar_dropdown_autoselect the list closed on release: open the submenu anew. */
+			ShowDropDownList(w, std::move(list), -1, WID_TN_PRISMATIC, 140, GetToolbarDropDownOptions());
+		}
+		return CallBackFunction::None;
 	}
+	/* An item: the persisting list closes, then the item runs as a click on it does. */
+	if (w != nullptr) CloseWindowByClass(WindowClass::DropdownMenu);
+	if (M::Run(index) && w != nullptr) ShowQueryString({}, STR_PRISMATIC_MCP_ASK_CAPTION, 256, w, CS_ALPHANUMERAL, {});
 	return CallBackFunction::None;
 }
 
 /* RESEARCH-ONLY: open the fork's own menu, see MenuClickPrismatic. */
 static CallBackFunction ToolbarPrismaticClick(Window *w)
 {
-	ShowDropDownList(w, PrismaticMCP::Menu::DropDown(), -1, WID_TN_PRISMATIC, 140, GetToolbarDropDownOptions());
+	ShowDropDownList(w, PrismaticMCP::Menu::DropDown(), -1, WID_TN_PRISMATIC, 140, GetToolbarDropDownOptions(DropDownOption::Persist));
 	return CallBackFunction::None;
 }
 #endif /* OTTD_PRISMATIC_MCP_SERVER */
