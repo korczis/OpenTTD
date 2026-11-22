@@ -15,10 +15,11 @@
 // 3. Every approval the check left pending is denied again (`prismatic_mcp deny <id>` through POST
 //    /api/console), so the stack is left as it was found.
 //
-// Approving needs the panel's approver secret (ADR 0038): it is read from
-// $PRISMATIC_STATE_DIR/approver-<panel port>.secret (default ~/.local/state/prismatic-mcp) and sent
-// as X-Approver-Secret on every POST; the browser opens <panel>/approver?secret=<s> first, which
-// sets the cookie mcp_approver_<port> for the page. Without the file part 1 is NOT RUN.
+// Approving needs the panel's owner secret, which mcp-panel prints once when it starts
+// ("mcp-panel: owner secret <s> ...", in the stack's log). Give it with --owner <s> or
+// PANEL_OWNER_SECRET; it is sent as X-Panel-Owner on every POST, and the browser opens
+// <panel>/?owner=<s> first, which sets the page's cookie mcp_owner_<port>. Without it part 1 and
+// the full-queue part are NOT RUN.
 //
 // The chat channel ('!approve <id>' from a client, and the client console that sends it) needs
 // second client processes that join a company and send console lines after joining (on_client.scr
@@ -27,27 +28,26 @@
 //
 // e2e-covers: panel /
 //
-// Usage: tools/research/mcp-approval-check <panel-url>   (a disposable stack: it pauses the game
+// Usage: tools/research/mcp-approval-check <panel-url> [--owner <secret>]   (a disposable stack: it pauses the game
 //        and fills the approval queue; tools/research/mcp-e2e --no-gui on free ports; the owner's
 //        live panel, port 8800, is refused)
 // Exit 0 when every check passes, 1 otherwise, 2 on bad usage. Drives the installed Chrome through
 // playwright-core (npm ci in tools/research/mcp-panel); CHROME overrides its path.
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 const { chromium } = createRequire(path.join(here, 'mcp-panel', 'package.json'))('playwright-core');
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const base = (process.argv[2] || '').replace(/\/$/, '');
-if (!base || base.startsWith('--')) { console.error('usage: mcp-approval-check <panel-url>'); process.exit(2); }
+const argv = process.argv.slice(2);
+const opt = (n) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] || '' : '');
+const base = (argv.find((a, i) => !a.startsWith('--') && argv[i - 1] !== '--owner') || '').replace(/\/$/, '');
+if (!base) { console.error('usage: mcp-approval-check <panel-url> [--owner <secret>]'); process.exit(2); }
 const url = new URL(base);
 const port = url.port || (url.protocol === 'https:' ? '443' : '80');
 if (port === '8800') { console.error('mcp-approval-check: refusing :8800, the owner\'s live panel; run it against a disposable stack'); process.exit(2); }
-const secretFile = path.join(process.env.PRISMATIC_STATE_DIR || path.join(os.homedir(), '.local', 'state', 'prismatic-mcp'), `approver-${port}.secret`);
-const secret = (() => { try { return fs.readFileSync(secretFile, 'utf8').trim(); } catch { return ''; } })();
-const auth = secret ? { 'X-Approver-Secret': secret } : {};
+const secret = opt('--owner') || process.env.PANEL_OWNER_SECRET || '';
+const auth = secret ? { 'X-Panel-Owner': secret } : {};
 
 const results = [];
 const check = (name, ok, detail = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); };
@@ -68,11 +68,11 @@ try {
 
   // 1. Pause -> Approve -> paused, then Resume -> Approve -> running, through the page's controls.
   if (!secret) {
-    console.log(`NOT RUN the web channel's Approve: no approver secret at ${secretFile}`);
+    console.log('NOT RUN the web channel\'s Approve: no owner secret (--owner or PANEL_OWNER_SECRET)');
   } else {
-    await page.goto(`${base}/approver?secret=${encodeURIComponent(secret)}`, { waitUntil: 'load' });
-    const cookie = (await context.cookies(base)).some((c) => c.name === `mcp_approver_${port}`);
-    check(`opening /approver?secret= gives the page the approver cookie (mcp_approver_${port})`, cookie);
+    await page.goto(`${base}/?owner=${encodeURIComponent(secret)}`, { waitUntil: 'load' });
+    const cookie = (await context.cookies(base)).some((c) => c.name === `mcp_owner_${port}`);
+    check(`opening /?owner= gives the page the owner cookie (mcp_owner_${port})`, cookie);
     await page.goto(base + '/', { waitUntil: 'load' });
     for (const [button, want] of [['#btn-pause', true], ['#btn-resume', false]]) {
       const before = new Set((await queue()).map((a) => a.id));

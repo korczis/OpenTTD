@@ -67,10 +67,12 @@ each pending approval with an Approve button. `/api/status` `pending` (and `stat
 Rhai) lists them as `{id, tool, args, created_tick, expires_tick}`. `POST /api/approve {id}` types
 the approval into the game's console, where the server executes it, and answers with the decision
 the server recorded for it (ADR 0038); it resubmits nothing. `POST /api/approve` and
-`POST /api/auto-approve` need the panel's approver secret, as the cookie `mcp_approver_<port>` or
-the header `X-Approver-Secret`; the secret is in `$PRISMATIC_STATE_DIR/approver-<panel port>.secret`
-(default `~/.local/state/prismatic-mcp`). `POST /api/auto-approve {on}` is the owner's full-auto
-switch: while it is on, a loop approves every pending id once a second. It starts off unless the
+`POST /api/auto-approve {on: true}` need the panel's owner secret, which mcp-panel prints once at
+start: the page holds it as the cookie `mcp_owner_<port>` after one visit to `/?owner=<secret>`,
+and curl sends `X-Panel-Owner` ([mcp-control.md](../mcp-control.md#approval-is-bound-to-the-owner)).
+An owner-only tool (`openttd.ai.set_settings`) is approved only at the game's console.
+`POST /api/auto-approve {on}` is the owner's full-auto switch: while it is on, a loop approves the
+panel's own pending requests once a second, never an owner-only one. It starts off unless the
 owner passes `--auto-approve`. `POST /api/console` refuses any line that would approve, so an agent
 that can type console lines still cannot approve through them (`is_approval_line`). The convention
 that only the owner turns auto-approve on, never an agent on an inference, is recorded in

@@ -197,11 +197,19 @@ decides only what acts on one company.
 - A newer pending `ai.set_settings` for a company, or `ai.set_setting` of the same name,
   withdraws the older one.
 
-**The panel**: approving, and the auto-approve switch, need a per-run approver secret. The panel
-writes it to a 0600 file and gives it to a browser through a one-time link as an HttpOnly cookie.
-Auto-approve takes only the requests the panel itself submitted. `/api/console` refuses any line
-that mentions approving, and any `alias` or `exec` line. A Rhai script or a local agent therefore
-cannot approve its own request through the panel.
+**The panel**: approving, and switching auto-approve on, need the panel's per-run owner secret.
+The owner answered "Approver secret", and master already had this mechanism (commit 511f3695e6,
+"Approval is bound to the owner" in research/mcp-control.md). Slice 2 adopted it rather than add a
+second secret:
+
+- mcp-panel prints the secret once at start;
+- the page holds it as an HttpOnly cookie from one visit to `/?owner=<secret>`;
+- curl sends `X-Panel-Owner`;
+- an owner-only tool (`openttd.ai.set_settings`) is approved only at the game's console.
+
+Auto-approve takes only the requests the panel itself submitted, never an owner-only one.
+`/api/console` refuses an approval in any spelling, and `alias`, `exec` and `schedule`. A Rhai
+script or a local agent therefore cannot approve its own request through the panel.
 
 **Next**:
 
@@ -229,7 +237,7 @@ cannot approve its own request through the panel.
   the rest of `src/prismatic_mcp/`.
 - A client armed for MCP input (`PRISMATIC_MCP_INPUT=1`, as the owner's co-play client is, so that
   mcp-human can drive it) cannot approve from its chat or console. That client approves through
-  the panel, with the approver secret, or from an unarmed client.
+  the panel, with the owner secret, or from an unarmed client.
 - The slices land separately, each through a gated PR:
   1. the web access policy and the one API client;
   2. the approval core and its adapters;

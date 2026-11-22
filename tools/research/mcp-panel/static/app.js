@@ -16,27 +16,12 @@ const tag = (text, tone) => `<span class="${UI.badge} ${TONE[tone]}">${esc(text)
 const money = (v) => (typeof v === 'number' ? v.toLocaleString('en') : v ?? '-');
 
 /* ---- markup from what the panel answers (pure) --------------------------------------------- */
-/** Why Approve is off in a browser without the approver secret, and where the owner finds the link. */
-const approverHint = (file) => `Approve needs the approver link the panel printed when it started (also in ${file || 'its approver file'}): open it once in this browser.`;
-/** The note above the approvals when this browser does not hold the approver secret (status.approver
- *  false); none when it does, or when an older panel does not say. */
-const approverNoteHtml = (s) => (s.approver === false ? `
-    <div class="p-4 mb-3 text-sm rounded-lg ${TONE.yellow}" role="alert">
-      <span class="font-medium">Read-only here.</span> ${esc(approverHint(s.approver_file))}
-    </div>` : '');
-/** The decisions waiting for the owner, each with its Approve: disabled, with the reason as its
- *  title, when this browser does not hold the approver secret (the panel would answer 403). */
-const pendingHtml = (pending, who = {}) => {
-  const off = who.approver === false;
-  const button = (id) => (off
-    ? `<button data-approve="${id}" type="button" disabled title="${esc(approverHint(who.approver_file))}" class="shrink-0 ${UI.primary}">Approve</button>`
-    : `<button data-approve="${id}" type="button" class="shrink-0 ${UI.primary}">Approve</button>`);
-  return pending.length ? pending.map((p) => `
+/** The decisions waiting for the owner, each with its Approve. */
+const pendingHtml = (pending) => (pending.length ? pending.map((p) => `
     <li class="flex items-center justify-between gap-2 p-2 border border-gray-200 rounded-lg dark:border-gray-700">
       <span class="min-w-0 font-mono break-all">#${p.id} ${esc(p.tool)}(${esc(JSON.stringify(p.args))})</span>
-      ${button(p.id)}
-    </li>`).join('') : '<li>none</li>';
-};
+      <button data-approve="${p.id}" type="button" class="shrink-0 ${UI.primary}">Approve</button>
+    </li>`).join('') : '<li>none</li>');
 /** A game string as a person reads it: OpenTTD's formatting codes (font, colour, sprites: the
  *  private use area its strings carry them in) and control characters dropped, line breaks folded
  *  into one space. */
@@ -100,10 +85,7 @@ async function refreshStatus() {
   const s = await api('/api/status');
   $('endpoint').textContent = `${s.endpoint} · game 127.0.0.1:${s.game_port}`;
   $('auto').checked = !!s.auto_approve;
-  // The switch approves on the owner's behalf, so it needs the approver secret as Approve does.
-  $('auto').disabled = s.approver === false;
-  $('approver-note').innerHTML = approverNoteHtml(s);
-  $('pending').innerHTML = pendingHtml(s.pending, s);
+  $('pending').innerHTML = pendingHtml(s.pending);
   $('events').innerHTML = eventsHtml(s.events);
   return s;
 }
@@ -448,7 +430,7 @@ globalThis.document && liveImage($('live-img'), $('live-msg'));
 
 if (typeof module !== 'undefined') {
   module.exports = {
-    money, gameText, approverHint, approverNoteHtml, pendingHtml, eventsHtml, fleetText, companiesHtml, decisionsHtml, clusterHtml, newsHtml,
+    money, gameText, pendingHtml, eventsHtml, fleetText, companiesHtml, decisionsHtml, clusterHtml, newsHtml,
     townOptions, asksHtml, planSummary, planStepsHtml, planGraphOption, contentRowsHtml, highlightJson,
     lineClass, consoleHtml, tailNames, NOTABLE, toastHtml, HELP,
   };

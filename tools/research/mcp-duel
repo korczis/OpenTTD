@@ -32,14 +32,48 @@
 # 11 while a page is stale. `tools/surfaces/surfaces sync` runs the first, `surfaces check` the second
 # (surfaces.toml, generator duel-charts), so a change of the charts reaches every page in one commit.
 #
+# Battlebrain held-start pairs (research/battlebrain/experiment-freight-margin.md, Phase 06; RESEARCH-ONLY).
+# Two flags make a duel one arm of such a pair. Neither one decides anything:
+# - `--capture-at-start DIR` captures the held start, after company A is founded and before B is:
+#   the game is still paused then. It runs mcp-plan with the panel's own planner arguments (from its
+#   plan.portfolio event) plus `--capture DIR`, and writes DIR/plan.json and DIR/held-start.json.
+#   `battlebrain snapshot` and `battlebrain live` decide on that capture later, offline.
+# - `--directive FILE` takes a `battlebrain live` answer, and its directive's settings become A's
+#   extra settings, verbatim. The flag refuses a shadow answer, a HOLD, and a directive that leaves
+#   any other fr*_from slot to the planner. It cannot be combined with --bot-settings.
+# `pair-check A_LIVE B_LIVE` (no game) says whether both arms' captures led to the same decision.
+#
 # Usage: tools/research/mcp-duel [--months 24] [--seed N] [--label text] [--opponent AI]
-#                               [--bot-settings k=v,...]
+#                               [--bot-settings k=v,... | --directive FILE] [--capture-at-start DIR]
 #        tools/research/mcp-duel --render [--check]
-# Exit: 0 the duel completed (whoever won) or the pages are current, 1 the stack did not come up,
-# 2 bad arguments, 11 (--render --check) a page's charts are stale.
+#        tools/research/mcp-duel pair-check <arm P live.json> <arm BB live.json>
+# Exit: 0 the duel completed (whoever won), the pages are current or the pair's decisions agree,
+# 1 the stack did not come up, the capture failed or the pair's decisions differ, 2 bad arguments,
+# 11 (--render --check) a page's charts are stale.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MONTHS=24 SEED="$RANDOM" LABEL="" OPPONENT="PrismaticAI" BOT_SETTINGS="" RENDER="" CHECK=""
+MONTHS=24 SEED="$RANDOM" LABEL="" OPPONENT="PrismaticAI" BOT_SETTINGS="" RENDER="" CHECK="" CAPTURE="" DIRECTIVE=""
+# One function of the duel's Python (the heredoc below, as test_mcp_duel.py loads it), run on its own:
+# `duel_py <name> <args...>` calls cli_<name>(root, *args) and exits with what it returns.
+duel_py() {
+  python3 -I - "$ROOT_DIR" "$@" <<'CALL'
+import re
+import sys
+import types
+from pathlib import Path
+
+root = Path(sys.argv[1])
+script = root / "tools" / "research" / "mcp-duel"
+mod = types.ModuleType("mcp_duel")
+exec(compile(re.search(r"<<'PY'\n(.*?)\nPY\n", script.read_text(), re.S)[1], f"{script} (heredoc)", "exec"), mod.__dict__)
+sys.exit(getattr(mod, "cli_" + sys.argv[2].replace("-", "_"))(root, *sys.argv[3:]))
+CALL
+}
+if [[ "${1:-}" == "pair-check" ]]; then
+  [[ $# -eq 3 ]] || { echo "usage: mcp-duel pair-check <arm P live.json> <arm BB live.json>" >&2; exit 2; }
+  duel_py pair-check "$2" "$3"
+  exit $?
+fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --months) MONTHS="${2:?}"; shift 2 ;;
@@ -47,15 +81,27 @@ while [[ $# -gt 0 ]]; do
     --label) LABEL="${2:?}"; shift 2 ;;
     --opponent) OPPONENT="${2:?}"; shift 2 ;;
     --bot-settings) BOT_SETTINGS="${2:?}"; shift 2 ;;
+    --capture-at-start) CAPTURE="${2:?}"; shift 2 ;;
+    --directive) DIRECTIVE="${2:?}"; shift 2 ;;
     --render) RENDER=1; shift ;;
     --check) CHECK=1; shift ;;
     -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
-    *) echo "usage: mcp-duel [--months N] [--seed N] [--label text] [--opponent AI] [--bot-settings k=v,...] | --render [--check]" >&2; exit 2 ;;
+    *) echo "usage: mcp-duel [--months N] [--seed N] [--label text] [--opponent AI] [--bot-settings k=v,... | --directive FILE] [--capture-at-start DIR] | --render [--check] | pair-check A B" >&2; exit 2 ;;
   esac
 done
 if [[ -n "$CHECK" && -z "$RENDER" ]]; then
   echo "mcp-duel: --check goes with --render" >&2; exit 2
 fi
+if [[ -n "$DIRECTIVE" ]]; then
+  if [[ -n "$BOT_SETTINGS" ]]; then
+    echo "mcp-duel: --directive and --bot-settings exclude each other (the directive is the arm's only settings)" >&2; exit 2
+  fi
+  BOT_SETTINGS="$(duel_py directive-settings "$DIRECTIVE")" || exit 2
+fi
+if [[ -n "$CAPTURE" && "${PRISMATIC_START_PAUSED:-2}" -lt 2 ]]; then
+  echo "mcp-duel: --capture-at-start needs the held start (PRISMATIC_START_PAUSED >= 2): the game must still be paused after A is founded" >&2; exit 2
+fi
+export DUEL_CAPTURE_DIR="$CAPTURE" DUEL_DIRECTIVE="$DIRECTIVE"
 if [[ -n "$RENDER" ]]; then
   # The duel's own Python (the heredoc below, as test_mcp_duel.py loads it), run for its pages only:
   # no stack, no game, nothing but research/results read and (without --check) its pages written.
@@ -94,6 +140,12 @@ for ((i = 0; i < 240; i++)); do
   sleep 2
 done
 curl -s "http://127.0.0.1:$PANEL/api/status" | grep -q '"ai_started": true' || { echo "mcp-duel: the stack did not come up ($TMP)" >&2; exit 1; }
+
+# A is founded and B is not, so the held game is still paused: capture its start (Battlebrain pairs).
+if [[ -n "$CAPTURE" ]]; then
+  echo "==> capturing the held start into $CAPTURE (mcp-plan with the panel's planner arguments)"
+  duel_py capture-at-start "$PANEL" "$CAPTURE" || { echo "mcp-duel: the held start was not captured ($CAPTURE)" >&2; exit 1; }
+fi
 
 # Company B: the opponent AI with its own defaults (start_ai with no settings starts a new AI
 # company). An AI the game does not have is refused here, before any month is played.
@@ -204,7 +256,7 @@ class StoreOff(Exception):
 
 
 def valid_instance(name):
-    """An instance name as the registry writes it (kernel_feed.rs valid_instance), so it can stand
+    """An instance name as the registry writes it (letters, digits, `-`, `_`, `.`), so it can stand
     in a quoted literal of a read-only statement."""
     return bool(name) and len(name) <= 64 and all(c.isascii() and (c.isalnum() or c in "-_.") for c in name)
 
@@ -815,11 +867,170 @@ Both compete for the same towns and industries. {values}
 """
 
 
+# ---------------------------------------------------------------------- Battlebrain held-start pairs
+# RESEARCH-ONLY (research/battlebrain/experiment-freight-margin.md, Phase 06). Arm P is a duel whose
+# held start is captured (--capture-at-start); battlebrain decides on that capture offline
+# (`battlebrain snapshot`, `battlebrain live`); arm BB is a duel of the same seed started with that
+# decision's settings (--directive) and captured too; `pair-check` says whether battlebrain decides
+# the same on both captures. Nothing here decides a line or approves anything.
+
+class PairRefused(Exception):
+    """An arm of a pair cannot be run or read as asked; the message says why."""
+
+
+def planner_args(events):
+    """The arguments the panel ran its planner with, after `--panel <url>` (panel_bot.rs `planned`:
+    plan.portfolio's inputs.live.planner.args), from the newest such event; None without one."""
+    for e in reversed(events or []):
+        if e.get("kind") != "plan.portfolio":
+            continue
+        args = ((((e.get("data") or {}).get("inputs") or {}).get("live") or {}).get("planner") or {}).get("args")
+        if isinstance(args, list) and args and all(isinstance(a, str) for a in args):
+            return args
+    return None
+
+
+def ai_companies(companies_resource):
+    """The ids of the AI companies in an openttd://companies answer."""
+    d = companies_resource.get("data", companies_resource)
+    rows = d.get("companies", []) if isinstance(d, dict) else d
+    return [c["id"] for c in rows if isinstance(c, dict) and c.get("is_ai") in (True, 1, "true")]
+
+
+def capture_at_start(panel, out_dir, exe, run=subprocess.run):
+    """Capture the held start: mcp-plan `exe` with the panel's own planner arguments and --capture,
+    while A is founded and B is not (the game is paused). Writes plan.json (the planner's answer) and
+    held-start.json beside the capture, and returns the latter."""
+    args = planner_args(panel.get("/api/events?kinds=plan.portfolio&limit=500").get("events", []))
+    if args is None:
+        raise PairRefused("the panel published no plan.portfolio event with its planner's arguments")
+    if "--capture" in args or "--snapshot" in args:
+        raise PairRefused(f"the panel's planner arguments already name a capture or snapshot: {args}")
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    argv = [str(exe), "--panel", panel.base, *args, "--capture", str(out)]
+    r = run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1500)
+    if r.returncode != 0:
+        raise PairRefused(f"mcp-plan exited {r.returncode}: {(r.stderr or '').strip()[-400:]}")
+    try:
+        json.loads(r.stdout)
+        manifest = json.loads((out / "capture.json").read_text())
+        companies_read = json.loads((out / "companies.json").read_text())
+    except (ValueError, OSError) as e:
+        raise PairRefused(f"the capture is incomplete: {e}")
+    (out / "plan.json").write_text(r.stdout)
+    ai = ai_companies(companies_read)
+    held = {"schema": "duel-held-start/v1", "planner_args": args, "window": manifest.get("window"),
+            "coherence": manifest.get("coherence"), "ai_companies": ai,
+            "company": ai[0] if len(ai) == 1 else None,
+            "note": "captured after A was founded and before B was; decide with `battlebrain snapshot "
+                    "--capture <dir> --company <company>` then `battlebrain live`"}
+    (out / "held-start.json").write_text(json.dumps(held, indent=1) + "\n")
+    return held
+
+
+def fr_slots(info_nut):
+    """The bot's freight-line slots (fr_from, fr2_from, ...), read from PrismaticAI's info.nut."""
+    slots = ["fr_from"] if 'name = "fr_from"' in info_nut else []
+    m = re.search(r'for \(local i = 2; i <= (\d+); i\+\+\) \{\s*AddSetting\(\{\s*name = "fr" \+ i \+ "_from"', info_nut)
+    return slots + ([f"fr{i}_from" for i in range(2, int(m[1]) + 1)] if m else [])
+
+
+def directive_settings(answer, slots):
+    """Arm BB's extra settings: the directive of a `battlebrain live` answer, verbatim. Refused for a
+    shadow answer, a HOLD (no directive), settings without planned_freight_only=1, and a directive
+    that leaves any other slot of `slots` to the planner (the arm would not be battlebrain's alone)."""
+    if answer.get("mode") != "live":
+        raise PairRefused(f"not a battlebrain live answer (mode {answer.get('mode')!r})")
+    d = answer.get("directive")
+    if not d:
+        raise PairRefused("battlebrain holds (no directive): a HOLD is recorded, and arm BB is not run")
+    if (d.get("decision") or {}).get("mode") != "live":
+        raise PairRefused("the directive's decision block is not in mode live")
+    text = d.get("settings")
+    if not isinstance(text, str):
+        raise PairRefused("the directive carries no settings")
+    kv = dict(p.split("=", 1) for p in text.split(",") if "=" in p)
+    if kv.get("planned_freight_only") != "1":
+        raise PairRefused("the directive does not set planned_freight_only=1")
+    handed = [s for s in slots if kv.get(s, "-1") != "-1"]
+    open_ = [s for s in slots if s not in kv]
+    if len(handed) != 1 or open_:
+        raise PairRefused(f"the directive must hand exactly one line and clear every other slot; it sets {handed} "
+                          f"and leaves {len(open_)} slot(s) to the planner ({', '.join(open_[:4])}{', ...' if len(open_) > 4 else ''})")
+    return text
+
+
+def decided_line(answer):
+    """(producer, acceptor, cargo) of a live answer's selected line, or "HOLD"; None if refused."""
+    c = answer.get("comparison") or {}
+    if answer.get("ok") is False or not c:
+        return None
+    b = c.get("battlebrain")
+    return "HOLD" if b is None else (b.get("producer"), b.get("acceptor"), b.get("cargo_id"))
+
+
+def pair_check(a, b):
+    """Whether battlebrain decided the same on arm P's capture (`a`) and arm BB's (`b`): the pair is
+    valid only then (the held start is repeatable to a few ticks, not bit for bit)."""
+    la, lb = decided_line(a), decided_line(b)
+    if la is None or lb is None:
+        return {"valid": False, "why": "a decision was refused", "p": la, "bb": lb}
+    return {"valid": la == lb, "why": "same decision" if la == lb else "the two starts led to different decisions",
+            "p": la, "bb": lb}
+
+
+def pair_record(capture_dir, directive_file):
+    """What a duel record says about its place in a Battlebrain pair (None outside a pair)."""
+    if not capture_dir and not directive_file:
+        return None
+    rec = {"experiment": "research/battlebrain/experiment-freight-margin.md"}
+    if capture_dir:
+        p = Path(capture_dir) / "held-start.json"
+        rec["capture"] = {"dir": str(capture_dir), "held_start": json.loads(p.read_text()) if p.is_file() else None}
+    if directive_file:
+        ans = json.loads(Path(directive_file).read_text())
+        d = ans.get("directive") or {}
+        rec["directive"] = {"file": str(directive_file), "settings": d.get("settings"),
+                            "decision": (d.get("decision") or {}).get("decision"),
+                            "idempotency_key": (d.get("decision") or {}).get("idempotency_key")}
+    return rec
+
+
+def cli_directive_settings(root, path):
+    try:
+        slots = fr_slots((Path(root) / "tools/research/prismatic-ai/PrismaticAI/info.nut").read_text())
+        print(directive_settings(json.loads(Path(path).read_text()), slots))
+        return 0
+    except (PairRefused, OSError, ValueError) as e:
+        print(f"mcp-duel: --directive {path}: {e}", file=sys.stderr)
+        return 2
+
+
+def cli_capture_at_start(root, port, out_dir):
+    try:
+        held = capture_at_start(Panel(port), out_dir, Path(root) / "tools/research/mcp-rhai/target/release/mcp-plan")
+    except (PairRefused, OSError, subprocess.TimeoutExpired) as e:
+        print(f"mcp-duel: --capture-at-start: {e}", file=sys.stderr)
+        return 1
+    print(f"mcp-duel: held start captured: company {held['company']}, window {held['window']}")
+    return 0
+
+
+def cli_pair_check(root, a_path, b_path):
+    r = pair_check(json.loads(Path(a_path).read_text()), json.loads(Path(b_path).read_text()))
+    print(json.dumps(r))
+    return 0 if r["valid"] else 1
+
+
 def main(argv):
     port, months, seed, label, root, opponent, bot_settings = argv
     cfg = {"months": int(months), "seed": int(seed), "label": label, "root": Path(root), "opponent": opponent,
            "bot_settings": bot_settings, "start_paused": int(os.environ.get("PRISMATIC_START_PAUSED") or 0)}
     out = duel(Panel(port), cfg)
+    pair = pair_record(os.environ.get("DUEL_CAPTURE_DIR"), os.environ.get("DUEL_DIRECTIVE"))
+    if pair:
+        out["record"]["battlebrain_pair"] = pair
     rec, base = out["record"], cfg["root"] / "research" / "results" / out["name"]
     base.parent.mkdir(parents=True, exist_ok=True)
     with open(f"{base}.json", "w") as f:

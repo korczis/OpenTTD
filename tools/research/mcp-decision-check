@@ -105,7 +105,11 @@ missing="$(jq -c --argjson f "$fields" '[.[] | . as $c | $f[] | . as $k | select
   || fail "GET /api/bridge/companies: bot '$BOT', missing fields $missing: $(head -c 400 "$TMP/companies.json")"
 
 # One read-only statement on the panel's store: the answer of POST /api/db/query.
-db_query() { jq -n --arg sql "$1" '{sql: $sql}' | curl -s -m 20 -X POST -H 'Content-Type: application/json' -d @- "$URL/api/db/query"; }
+# One read-only statement on the panel's store; $2, a JSON object, binds its named parameters.
+db_query() {
+  jq -n --arg sql "$1" --argjson params "${2:-null}" '{sql: $sql} + (if $params == null then {} else {params: $params} end)' \
+    | curl -s -m 20 -X POST -H 'Content-Type: application/json' -d @- "$URL/api/db/query"
+}
 # The data of the newest plan.directive in the store (committed within a second), newer than seq $1.
 last_directive() {
   local after="$1" out
@@ -120,12 +124,14 @@ directive_seq() { db_query "SELECT coalesce(max(seq), 0) FROM events WHERE kind 
 
 # 1b. The history each company offers, and the bot's samples query answered by the store.
 bad_history="$(jq -c '[.[] | select((.history.schema != "prismatic-history/v1") or ((.history.bus.endpoint // "") | startswith("tcp://") | not)
-                                 or ((.history.samples_query // "") == "") or ((.history.query_url // "") | endswith("/api/db/query") | not)) | .id]' "$TMP/companies.json" 2>/dev/null || echo '"unreadable"')"
+                                 or ((.history.samples_query // "") == "") or ((.history.samples_params | type) != "object")
+                                 or ((.history.query_url // "") | endswith("/api/db/query") | not)) | .id]' "$TMP/companies.json" 2>/dev/null || echo '"unreadable"')"
 SQL="$(jq -r --argjson c "${BOT:-0}" '.[] | select(.id == $c) | .history.samples_query // empty' "$TMP/companies.json")"
+PARAMS="$(jq -c --argjson c "${BOT:-0}" '[.[] | select(.id == $c) | .history.samples_params][0] // {}' "$TMP/companies.json")"
 COLS="$(jq -c --argjson c "${BOT:-0}" '.[] | select(.id == $c) | .history.columns' "$TMP/companies.json")"
 ROWS=0
 for ((i = 0; i < 30; i++)); do
-  db_query "$SQL" > "$TMP/samples.json"
+  db_query "$SQL" "$PARAMS" > "$TMP/samples.json"
   ROWS="$(jq -r '.count // 0' "$TMP/samples.json" 2>/dev/null || echo 0)"
   [[ "$ROWS" -gt 0 ]] && break
   sleep 2
@@ -192,12 +198,12 @@ if [[ -n "${PRISMATIC_DECISION_URL:-}" ]]; then
 else
   SRC="$STAND"
   # What a fitting Prismatic answers: its working names the samples query it was fitted from.
-  jq -n --argjson c "$BOT" --arg s "aggressiveness=$WANT" --argjson w "$WANT" --arg q "$SQL" --argjson n "$ROWS" \
+  jq -n --argjson c "$BOT" --arg s "aggressiveness=$WANT" --argjson w "$WANT" --arg q "$SQL" --argjson p "$PARAMS" --argjson n "$ROWS" \
         --arg u "$URL/api/db/query" \
     '{ai: "PrismaticAI", company_id: $c, settings: $s, engine: "PrismaticMonteCarlo.simulate/3", chosen_aggressiveness: $w, candidates: [],
       fit: {schema: "prismatic-fit/v1", model: "growth_by_aggressiveness",
             parameters: {by_aggressiveness: [{aggressiveness: $w, mean_growth: 0.04, std_growth: 0.1, n: $n}]},
-            samples: {query: $q, query_url: $u, rows: $n, runs: 1}, quality: {rows_used: $n}}}' \
+            samples: {query: $q, params: $p, query_url: $u, rows: $n, runs: 1}, quality: {rows_used: $n}}}' \
     > "$TMP/directive.json"
 fi
 # 2c. A directive not bound to what Prismatic observed is refused before any step (research/agent-loop.md
@@ -225,10 +231,14 @@ if [[ -z "${PRISMATIC_DECISION_URL:-}" ]]; then
   echo observe > "$TMP/mode"
 fi
 SEQ0="$(directive_seq)"
-# The auto-approve switch needs this run's approver secret (ADR 0038), which the panel writes
-# for its port; the check is this stack's operator.
-APPROVER_SECRET="$(cat "${PRISMATIC_STATE_DIR:-$HOME/.local/state/prismatic-mcp}/approver-${URL##*:}.secret" 2>/dev/null)"
-curl -s -m 10 -X POST -H 'Content-Type: application/json' -H "X-Approver-Secret: $APPROVER_SECRET" -d '{"on": true}' "$URL/api/auto-approve" > /dev/null
+# Switching auto-approve on is the owner's: this check started the stack, so it holds the owner
+# secret the panel printed once into the launcher's log. Auto-approve never approves an owner-only
+# tool (openttd.ai.set_settings); this directive applies through openttd.ai.set_setting.
+OWNER="$(sed -n 's/^mcp-panel: owner secret \([0-9a-f]*\) .*/\1/p' "$TMP/e2e.log" | head -1)"
+[[ -n "$OWNER" ]] || fail "the panel printed no owner secret into $TMP/e2e.log"
+code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST -H 'Content-Type: application/json' -d '{"on": true}' "$URL/api/auto-approve")"
+[[ "$code" == 401 ]] && pass "auto-approve stays off without the owner secret (401)" || fail "auto-approve on without the owner secret answered $code"
+curl -s -m 10 -X POST -H 'Content-Type: application/json' -H "X-Panel-Owner: $OWNER" -d '{"on": true}' "$URL/api/auto-approve" > /dev/null
 curl -s -m 90 -X POST -H 'Content-Type: application/json' -d "{\"url\": \"$SRC\"}" "$URL/api/decision/pull" > "$TMP/pull.json"
 shape="$(jq -r '(has("called_url") and has("raw_response") and (.applied_rcon.lines | type == "array"))' "$TMP/pull.json" 2>/dev/null || echo false)"
 [[ "$shape" == true ]] \
