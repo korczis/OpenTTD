@@ -40,8 +40,12 @@ flowchart LR
   `~/.local/state/prismatic-mcp/store/`, committed in batches at least twice a second. Tables:
   `runs`, `events`, `samples`. It is the cargo feature `store` and links the system libduckdb; a
   panel without it reports `"store": "off"`.
-- **Analytic views.** Every time a store opens, it recreates the views of `VIEWS` in
-  `bus_sinks.rs`, so a changed definition reaches old files too. Each view carries its
+- **SQL in files.** Every statement the store runs on its own lives in
+  [`tools/research/mcp-rhai/sql/`](../../tools/research/mcp-rhai/sql/README.md), one file each:
+  `tables/<name>.sql`, `views/NN_<name>.sql` and `queries/<name>.sql`. `build.rs` embeds whatever
+  the directory holds, and no Rust or Rhai code builds SQL by joining strings.
+- **Analytic views.** Every time a store opens, it runs the table files and then every view file
+  (`CREATE OR REPLACE VIEW`), so a changed definition reaches old files too. Each view carries its
   `COMMENT ON VIEW`. `GET /api/db/tables` lists them under `views` with their comment and columns.
   They are generic over runs: every row carries `instance` and `run_ms` (the run's start), and the
   current run is the largest `run_ms`. Read them instead of repeating their SQL. A test fails when
@@ -59,12 +63,20 @@ flowchart LR
   | `kind_month` | how many events of each kind each game month raised |
   | `schema_doc` | the store describing itself: every table, view and column with its comment |
 
-- **The store documents itself.** Every base table and column carries a `COMMENT ON` from
-  `TABLE_DOCS` in `bus_sinks.rs`, written at every open, and every view carries its own. An agent
-  or a script learns the store with one query: `SELECT * FROM schema_doc` (also
-  `GET /api/db/query?sql=...`, Rhai `api_dbQuery(#{sql: "SELECT * FROM schema_doc"})`).
-  `GET /api/db/tables` carries the same comments. A test fails when a column of a table lacks its
-  documentation, or when `schema_doc` has a row without a comment.
+- **The store documents itself.** Every table file comments its table and each column next to
+  its definition, and every view file comments its view. These comments are written at every open.
+  An agent or a script learns the store with one query: `SELECT * FROM schema_doc` (also
+  `GET /api/db/query?sql=...`). `GET /api/db/tables` reads the same comments back from the store
+  (`queries/store_schema.sql`). A test fails when a file creates an object other than its name, a
+  table, view or column lacks its comment, or `schema_doc` has a row without one.
+- **Named queries.** A file in `sql/queries/` is one read-only statement with named parameters
+  (`$company`), and its leading `--` lines describe it. `GET /api/db/named` lists them with their
+  parameters, which come from DuckDB's prepared statement and are never declared twice.
+  `POST /api/db/named {name, params}` runs one with the values bound, never pasted into the text.
+  Rhai reaches both as `api_dbNamed()` and `api_dbNamedRun(#{name: "company_rank", params:
+  #{company: 0}})`. Today's queries: `company_rank`, `company_trend` (both read by `replan.rhai`),
+  `advice_recent`, `newest_events` (what `/api/db/query` answers without `?sql=`) and
+  `store_schema`.
 
 - **Read-only queries.** Only SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW, one statement; the
   connection also runs without external access. While the panel runs it holds the file's lock, so
@@ -91,7 +103,8 @@ the Majordomus blackboard"). The feature record is
 |---|---|
 | [`tools/research/mcp-rhai/src/panel_events.rs`](../../tools/research/mcp-rhai/src/panel_events.rs) | `KINDS`, the `plan` payload, the external-kind check |
 | [`tools/research/mcp-rhai/src/panel_store.rs`](../../tools/research/mcp-rhai/src/panel_store.rs) | the panel's tap and its read routes |
-| [`tools/research/mcp-rhai/src/bus_sinks.rs`](../../tools/research/mcp-rhai/src/bus_sinks.rs) | the ZeroMQ and DuckDB sinks, the read-only guard |
+| [`tools/research/mcp-rhai/src/bus_sinks.rs`](../../tools/research/mcp-rhai/src/bus_sinks.rs) | the ZeroMQ and DuckDB sinks, the read-only guard, named queries with bound parameters |
+| [`tools/research/mcp-rhai/sql/`](../../tools/research/mcp-rhai/sql/README.md) | the store's tables, views and named queries, one file each |
 | [`tools/research/mcp-rhai/src/bin/mcp-bus-tail.rs`](../../tools/research/mcp-rhai/src/bin/mcp-bus-tail.rs) | a SUB client that prints envelopes |
 | [`tools/research/mcp-rhai/src/bin/mcp-bus-blackboard.rs`](../../tools/research/mcp-rhai/src/bin/mcp-bus-blackboard.rs) | the digest to the Majordomus board |
 | [`tools/research/mcp-rhai/src/board.rs`](../../tools/research/mcp-rhai/src/board.rs) | the board client it shares with Rhai's `board_post` |
