@@ -1877,6 +1877,23 @@ mod tests {
         assert_eq!(graph_number(&json!(null)), None);
     }
 
+    /// I0227: the discovered catalogue carries AlgoGlyph's Rust kernels after the runner's, each
+    /// with engine native-rust (src/algoglyph_native.rs). Such an entry is a catalogue kernel like
+    /// any other, and without an adapter it is considered and never chosen.
+    #[test]
+    fn a_native_rust_entry_is_discovered_and_never_chosen_without_an_adapter() {
+        let native = json!({"id": "bubble-sort", "engine": "native-rust", "input": "{keys: integer[] (32-bit, at most 1048576), seed?: integer, max_steps?: integer}",
+                            "kind": "comparison", "stable": "stable", "in_place": true, "crate": "algoglyph-kernels 0.1.0", "source": "0123456789abcdef"});
+        let cat = synthetic(|l| l.push(native));
+        assert_eq!(cat.engine("bubble-sort"), Some("native-rust"));
+        assert_eq!(cat.kernel("bubble-sort").unwrap().input.as_deref(), Some("{keys: integer[] (32-bit, at most 1048576), seed?: integer, max_steps?: integer}"));
+        for c in CAPABILITIES {
+            let m = match_capability(c.id, &cat, ADAPTERS);
+            assert_ne!(m.chosen.as_deref(), Some("bubble-sort"), "{}", c.id);
+            assert!(m.decision["unadapted"].as_array().unwrap().contains(&json!("bubble-sort")), "{}", c.id);
+        }
+    }
+
     #[test]
     fn digests_ignore_key_order() {
         assert_eq!(digest(&json!({"b": 1, "a": [1, {"d": 2, "c": 3}]})), digest(&json!({"a": [1, {"c": 3, "d": 2}], "b": 1})));

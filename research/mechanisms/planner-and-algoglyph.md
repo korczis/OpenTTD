@@ -71,8 +71,21 @@ flowchart TB
 - **Sentences** (`intent.rs`). "find the most productive coal mine" or a Czech sentence becomes a
   query: nouns from the game's own language files, orderings nearest, most productive, most
   profitable; `POST /api/intent`, the console's `plan` verb.
-- **How AlgoGlyph is reached** (`hub_algoglyph.rs`). Through its flow CLI
-  (`npm run flow -- kernel <id> -`), found at `$MCP_ALGOGLYPH_DIR` or two default checkouts.
+- **How AlgoGlyph is reached** (`hub_algoglyph.rs`; I0227, ADR 0039). AlgoGlyph is the git
+  submodule [`tools/research/vendor/algoglyph`](../../tools/research/vendor/algoglyph), pinned at one
+  commit. Its record [`algoglyph.pin.json`](../../tools/research/vendor/algoglyph.pin.json) holds the
+  commit, the kernels the stack needs and the runner's catalogue there. The pin is the only
+  AlgoGlyph version the fork trusts, and
+  [`tools/research/algoglyph-pin`](../../tools/research/algoglyph-pin) installs it (`install`),
+  checks it (`check`) and moves it (`bump [REF]`, which stages the gitlink and the record). The
+  planner's kernels run through the flow CLI (`npm run flow -- kernel <id> -`). The checkout is
+  `$MCP_ALGOGLYPH_DIR` when it is set. Otherwise it is the first installed checkout cleanly at the
+  pin: the submodule, else `~/dev/algoglyph-wt/main` or `~/dev/algoglyph`. mcp-e2e takes the same
+  one (`algoglyph-pin runner`). The submodule's crate `algoglyph-kernels` is linked into mcp-rhai.
+  Every sorting kernel of its registry that the runner does not list is a catalogue entry with
+  engine `native-rust`, after the runner's entries (`algoglyph.kernels`, Rhai `kernels()`). It is
+  answered in-process, not through npm (`algoglyph_native.rs`). The planner's own kernels have no
+  Rust port, so they stay on the runner.
   `flow_serve.rs` keeps one long-lived `flow serve` per process when `MCP_ALGOGLYPH_SERVE` is on.
   `kernel_feed.rs` and `mcp-kernel-feed` complete a kernel's input from the store's trailing
   samples (only `action-plan` has a feed today).
