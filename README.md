@@ -400,7 +400,7 @@ xychart-beta
     title "Points/match by contestant (line: Avg rank)"
     x-axis ["AAAHogEx", "PrismaticAI GA g347.3", "PrismaticAI pre-g150", "PrismaticAI GA g347.brainSafe", "PrismaticAI", "PrismaticAI GA g347.brainExplore", "PrismaticAI GA g347.0", "AdmiralAI", "LuDiAI AfterFix", "CivilAI"]
     %% series: Points/match | Avg rank
-    y-axis "Points/match" 0 --> 5.368
+    y-axis "Points/match" 0 --> 5.37
     bar [4, 3, 3, 3, 2.857, 2.833, 2.833, 2.024, 0.927, 0.122]
     line [1, 2, 2, 2, 2.14, 2.17, 2.17, 2.98, 4.07, 4.88]
 ```
@@ -1220,6 +1220,7 @@ What the fork delivers, from its `.ai/` feature records:
 <!-- surfaces:begin ai-features as=pie -->
 ```mermaid
 pie showData title Features by status
+    %% links: README.md?col=Status&filter=stable#042-published-surfaces | README.md?col=Status&filter=draft#042-published-surfaces
     "stable" : 5
     "draft" : 5
 ```
@@ -1310,6 +1311,7 @@ those files:
 <!-- surfaces:begin ai-rules origin=project as=pie -->
 ```mermaid
 pie showData title Rules (project) by class
+    %% links: README.md?col=Class&filter=blocking#06-ground-rules-short-version | README.md?col=Class&filter=advisory#06-ground-rules-short-version
     "blocking" : 19
     "advisory" : 2
 ```
@@ -1334,6 +1336,7 @@ choices, with its status (generated from [`.ai/repo/adrs/`](./.ai/repo/adrs/READ
 <!-- surfaces:begin ai-adrs as=pie -->
 ```mermaid
 pie showData title Decisions by status
+    %% links: README.md?col=Status&filter=proposed#071-architecture-decisions | README.md?col=Status&filter=accepted#071-architecture-decisions | README.md?col=Status&filter=superseded#071-architecture-decisions
     "proposed" : 31
     "accepted" : 3
     "superseded" : 1

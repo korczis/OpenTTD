@@ -128,7 +128,12 @@ site's palette: a tooltip per value, zoom when there are many categories, a swit
 lines, the data as a table, an image export, and a card that maximizes to the viewport until
 Escape. Two Mermaid comments carry what Mermaid cannot say and GitHub ignores: `%% series: a | b`
 names the bar and line series, and `%% links: t1 | t2 ...` gives every bar or slice a link target,
-in order, so a click opens that mark's page (a milestone, a duel's write-up). The Mermaid source
+in order, so a click opens that mark's page (a milestone, a duel's write-up). A pie of the `.ai/`
+records links each slice to the table it summarises: the document that carries that table region
+(this one first), at the heading before it, as `?col=Status&filter=proposed#heading`. The site then
+shows only the rows whose cell in that column is the value, with a badge that names the filter
+and clears it; GitHub ignores the query and opens the document. `check` resolves every chart link
+like any other link and reports one that leads nowhere as a `chart` finding. The Mermaid source
 stays under the chart. `diagrams-check` fails when a page's chart has no ECharts canvas or its
 Mermaid source does not parse, as it fails on a Mermaid diagram that does not render.
 

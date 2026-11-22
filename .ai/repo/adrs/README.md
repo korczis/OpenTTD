@@ -25,6 +25,16 @@ durable enough to write down here.
 Generated from each decision's front matter by `tools/surfaces/surfaces sync`; the decisions
 themselves stay hand-written.
 
+<!-- surfaces:begin ai-adrs as=pie -->
+```mermaid
+pie showData title Decisions by status
+    %% links: README.md?col=Status&filter=proposed#index | README.md?col=Status&filter=accepted#index | README.md?col=Status&filter=superseded#index
+    "proposed" : 31
+    "accepted" : 3
+    "superseded" : 1
+```
+<!-- surfaces:end ai-adrs -->
+
 <!-- surfaces:begin ai-adrs -->
 | Decision | Status | Title |
 |---|---|---|
