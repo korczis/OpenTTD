@@ -529,7 +529,7 @@ history, the world with the map, the plan and transfer yards, every window of th
 the faceted MCP catalogue with a page per tool and resource, the duels with a page and a chart per
 run, the event store, the Rhai scripts, and the API under Swagger UI. Every button is a declared
 route of the OpenAPI document, and every page is driven end to end in a real browser by a
-Playwright check (rule [`project.web-ui-is-covered-end-to-end`](.ai/repo/rules/project/web-ui-is-covered-end-to-end.v1.md)).
+Playwright check (rule [`project.web-ui-is-covered-end-to-end`](.ai/repo/rules/project/web-ui-is-covered-end-to-end.v2.md)).
 
 The [hub](research/mcp-hub.md) (`mcp-hub`) puts every running instance behind one WebSocket
 JSON-RPC surface, derived from each panel's OpenAPI document and each MCP server's catalogue, and
@@ -612,19 +612,19 @@ from the code. The right-hand column says what was counted.
 | **22** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
 | **28** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **43** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **44** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **11** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **17** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
-| **35** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
+| **36** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **93** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **89** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
-| **863** | published documents on the site and the wiki | published documents under `/` |
+| **864** | published documents on the site and the wiki | published documents under `/` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 43
+    "research tools and checks (tools/research/, shell and Python)" : 44
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 11
     "Rhai scripts that drive a live game (director, narrator, steward, …)" : 17
 ```
@@ -1307,7 +1307,7 @@ those files:
 | [project.research-net-compat-is-local-and-non-spoofing](.ai/repo/rules/project/research-net-compat-is-local-and-non-spoofing.v1.md) | blocking | The research override of the network revision check may only make IsNetworkCompatibleVersion accept more peers; it must never alter GetNetworkRevisionString or the revision this build sends, must stay compile-gated and default-off, and must never be used to connect to a server the owner does not run. |
 | [project.savegame-fields-are-version-gated](.ai/repo/rules/project/savegame-fields-are-version-gated.v1.md) | blocking | Never remove, reorder or renumber an existing saved field or chunk; give an obsolete field a version-gated load-and-discard path and add a new field behind a SaveLoadVersion check. |
 | [project.tooling-language-preference](.ai/repo/rules/project/tooling-language-preference.v1.md) | advisory | Write new extension logic in Rhai, new hosts and tools in Rust, change OpenTTD itself in C++, and reach for C only where OpenTTD requires it; do not grow new capability in Python or shell. |
-| [project.web-ui-is-covered-end-to-end](.ai/repo/rules/project/web-ui-is-covered-end-to-end.v1.md) | blocking | Cover every web UI page with a Playwright end-to-end check that drives it in a real browser against a live game, declare it with an `e2e-covers:` line, and keep tools/research/e2e-coverage passing; a page, button or flow no such check drives is treated as not built. |
+| [project.web-ui-is-covered-end-to-end](.ai/repo/rules/project/web-ui-is-covered-end-to-end.v2.md) | blocking | Drive every page and every control of the web UI in a real browser against a live stack (the generic crawl plus the page checks), let no control be dead or fail silently, and give every page script the shell's one kit ($, esc, api, notify) instead of a copy; a page, control or flow no browser check drives is treated as not built. |
 <!-- surfaces:end ai-rules -->
 
 <!-- surfaces:begin ai-rules origin=project as=pie -->
@@ -1339,7 +1339,7 @@ choices, with its status (generated from [`.ai/repo/adrs/`](./.ai/repo/adrs/READ
 ```mermaid
 pie showData title Decisions by status
     %% links: README.md?col=Status&filter=accepted#071-architecture-decisions | README.md?col=Status&filter=superseded#071-architecture-decisions
-    "accepted" : 34
+    "accepted" : 35
     "superseded" : 1
 ```
 <!-- surfaces:end ai-adrs -->
@@ -1384,6 +1384,7 @@ pie showData title Decisions by status
 | [adr-0034](.ai/repo/adrs/0034-planning-decisions-read-recorded-history-and-emit-structured.md) | accepted | Planning decisions read recorded history from the store and publish each choice as a structured event |
 | [adr-0035](.ai/repo/adrs/0035-company-ais-are-ranked-in-headless-null-driver-matches-on-ever.md) | accepted | Company AIs are ranked in headless null-driver matches on every reachable LAN machine, and the ranking is a derived record |
 | [adr-0036](.ai/repo/adrs/0036-prismatic-ai-settings-are-tuned-by-a-deterministic-genetic-algorith.md) | accepted | PrismaticAI's settings are tuned by a deterministic genetic algorithm over the LAN battle, and a tuned setting reaches a default only through held-start duels |
+| [adr-0037](.ai/repo/adrs/0037-one-approval-core-plans-not-settings-every-channel-an-adapter.md) | accepted | One approval core on the game server: a plan is approved as a whole and executes on approval, and every channel (web, console, game command, chat) is an adapter to it |
 <!-- surfaces:end ai-adrs -->
 
 </details>

@@ -55,7 +55,94 @@
     return hit ? hit.key : '';
   }
 
+  /* ---- the one page kit: every page script takes these from here (PanelKit, components.js), never
+     a copy of its own (rule project.web-ui-is-covered-end-to-end, ADR 0037) ------------------------- */
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const $ = (id) => document.getElementById(id);
+  /** A Flowbite toast in the corner (#toasts, made on the first one): what a control did, or why it failed. Errors
+   *  stay until dismissed; the rest go after 6 s. The toast carries data-toast="<tone>", which the
+   *  generic browser crawl reads (tools/research/mcp-ui-crawl-check). */
+  function notify(text, tone = 'red') {
+    if (typeof document === 'undefined' || !document.body) return;
+    let box = document.getElementById('toasts');
+    if (!box) {
+      document.body.insertAdjacentHTML('beforeend', '<div id="toasts" aria-live="polite" class="fixed bottom-4 end-4 z-50 flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm"></div>');
+      box = document.getElementById('toasts');
+    }
+    const t = document.createElement('div');
+    t.setAttribute('role', tone === 'red' ? 'alert' : 'status');
+    t.dataset.toast = tone;
+    t.className = 'flex items-start w-full max-w-sm p-4 gap-3 text-gray-700 bg-white rounded-lg shadow-sm border border-gray-200 dark:text-gray-300 dark:bg-gray-800 dark:border-gray-700';
+    t.innerHTML = `<span class="${UI.badge} ${TONE[tone] || TONE.gray}">${tone === 'red' ? 'error' : 'ok'}</span><div class="text-sm min-w-0 break-words">${esc(text)}</div><button type="button" aria-label="Dismiss" class="ms-auto -mx-1.5 -my-1.5 p-1.5 rounded-lg text-gray-400 hover:text-gray-900 hover:bg-gray-100 dark:hover:text-white dark:hover:bg-gray-700">&times;</button>`;
+    t.querySelector('button').onclick = () => t.remove();
+    box.append(t);
+    if (tone !== 'red') setTimeout(() => t.remove(), 6000);
+  }
+  /** Where a failure is shown: a toast, or, for a page that writes the state into an element itself
+   *  (a poll, a card that says "no GUI client"), that element, marked data-failure="<METHOD> <path>:
+   *  <why>" so the crawl can check the failure really is on the page. Cleared on the next success. */
+  // One element may show several failures (the windows and the screenshot of one card): one line
+  // each, keyed by "<METHOD> <path>", replaced on the next failure and dropped on the next success.
+  const elementOf = (shownIn) => (typeof shownIn === 'string' ? (typeof document !== 'undefined' && document.getElementById(shownIn)) : shownIn);
+  const withoutKey = (marks, key) => (marks || '').split('\n').filter((m) => m && !m.startsWith(`${key}:`));
+  function failed(shownIn, what) {
+    const el = elementOf(shownIn);
+    if (!el) return notify(what);
+    el.dataset.failure = [...withoutKey(el.dataset.failure, what.split(':')[0]), what].join('\n');
+  }
+  function succeeded(shownIn, key) {
+    const el = elementOf(shownIn);
+    if (!el || !el.dataset || !el.dataset.failure) return;
+    const rest = withoutKey(el.dataset.failure, key);
+    if (rest.length) el.dataset.failure = rest.join('\n'); else delete el.dataset.failure;
+  }
+  /** The one API client: GET without a body, POST JSON with one. Answers the parsed body (or {status,
+   *  text} for a non-JSON one) with `ok`; a non-2xx answer or a network failure is shown to the person
+   *  (a toast, or the element named by `shownIn`, see failed()), so no control fails silently: a 403
+   *  only the console saw is how every button of a page opened as localhost went dead (2026-11-22). */
+  async function api(path, body, { shownIn } = {}) {
+    const opts = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    const where = `${opts.method || 'GET'} ${path.split('?')[0]}`;
+    let r;
+    try { r = await fetch(path, { credentials: 'same-origin', ...opts }); } catch (e) {
+      failed(shownIn, `${where}: ${e.message || 'the panel is unreachable'}`);
+      return { ok: false, status: 0, error: String(e.message || e) };
+    }
+    const text = await r.text();
+    let out;
+    try { out = JSON.parse(text); } catch { out = { status: r.status, text }; }
+    if (!r.ok) failed(shownIn, `${where}: ${r.status} ${(out && (out.error || out.text)) || r.statusText}`);
+    else succeeded(shownIn, where);
+    // `ok` and the HTTP `status` ride along unlisted (a body's own `status`, a debug session's, wins).
+    if (out && typeof out === 'object' && !Array.isArray(out)) {
+      if (!('ok' in out)) Object.defineProperty(out, 'ok', { value: r.ok, enumerable: false });
+      if (!('status' in out)) Object.defineProperty(out, 'status', { value: r.status, enumerable: false });
+    }
+    return out;
+  }
+  /** One image from the server (a screenshot): `done(image)` when it loaded, `done(null)` when not,
+   *  the failure shown as api() shows one (`shownIn`, else a toast). */
+  function image(src, shownIn, done = () => {}) {
+    const next = new Image();
+    next.onload = () => { succeeded(shownIn, `GET ${src.split('?')[0]}`); done(next); };
+    next.onerror = () => { failed(shownIn, `GET ${src.split('?')[0]}: did not load`); done(null); };
+    next.src = src;
+  }
+  /** The live view of the owner's game window: `img` follows the GUI client's screenshot every
+   *  `every` ms while the page is visible, `msg` says when it was updated or why it is not. */
+  function liveImage(img, msg, every = 1200) {
+    if (!img || !msg) return;
+    let busy = false;
+    setInterval(() => {
+      if (busy || document.hidden) return;
+      busy = true;
+      image(`/api/view/screenshot?t=${Date.now()}`, msg, (next) => {
+        busy = false;
+        if (next) { img.src = next.src; msg.textContent = `updated ${new Date().toLocaleTimeString()}`; } else msg.textContent = 'no GUI client attached yet';
+      });
+    }, every);
+  }
+  const KIT = Object.freeze({ esc, $, api, notify, image, liveImage });
   /** The frame every page's <main> gets: under the navbar, beside the sidebar, one gutter. It fills
    *  the width beside the sidebar at every size: a cap (max-w-screen-2xl) left a third of a 2560 px
    *  screen empty, and the cards and grids already wrap by their own breakpoints. */
@@ -241,6 +328,7 @@
     globalThis.PanelSidebar = { set: setSidebar, toggle: toggleSidebar };
     globalThis.PanelUI = UI;
     globalThis.PanelTONE = TONE;
+    globalThis.PanelKit = KIT;
     if (app.console) {
       const toConsole = () => { location.href = app.console; };
       document.getElementById('open-console').onclick = toConsole;
@@ -273,6 +361,6 @@
   }
 
   if (typeof module !== 'undefined') {
-    module.exports = { PAGES, APPS, FRAME, UI, TONE, SIDEBAR_KEY, SIDEBAR_STATES, sidebarState, pageOf, sidebarHtml, sectionsHtml, navbarHtml, asideHtml, crumbsHtml, headerHtml };
+    module.exports = { PAGES, APPS, FRAME, UI, TONE, KIT, SIDEBAR_KEY, SIDEBAR_STATES, sidebarState, pageOf, sidebarHtml, sectionsHtml, navbarHtml, asideHtml, crumbsHtml, headerHtml };
   }
 })();

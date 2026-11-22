@@ -28,10 +28,9 @@ export const CLS = {
 
 /* ---- the kit every page module shares (classic scripts cannot import it, see app.js) -------- */
 
-/** The element of an id. */
-export const $ = (id) => document.getElementById(id);
-/** HTML-escape a value for markup; null and undefined become ''. */
-export const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/** The shell's page kit (static/shell.js KIT, published as PanelKit): the element of an id, HTML
+ *  escaping, the one API client (a failed answer is shown, never swallowed) and its toasts. */
+export const { $, esc, api, notify, image, liveImage } = globalThis.PanelKit;
 /** Numbers as the panel writes them: 1,234,567 and 1.2M. */
 export const whole = new Intl.NumberFormat('en');
 export const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
