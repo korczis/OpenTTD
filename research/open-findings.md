@@ -192,10 +192,10 @@ pie showData title Open findings by kind
 | not-run | A remote human joining over the internet: NOT RUN: needs a second machine and a person | [research/real-game.md](real-game.md):105 | none — needs an issue | OBSERVED |
 | not-run | An invite-only game through the coordinator: NOT RUN | [research/real-game.md](real-game.md):106 | none — needs an issue | OBSERVED |
 | partial | without a base set: ctest 94/94 PASS with -E '^regression', regression reported NOT RUN with a pointer to research/baseset-prerequisite-macos.md, change: PARTIAL (exit 3), no 120 s timeouts; | [I0028](../.ai/repo/project/issues/I0028.yaml):35 | none — needs an issue | OBSERVED |
-| partial | Retrieve: PARTIAL | [research/agent-loop.md](agent-loop.md):50 | none — needs an issue | OBSERVED |
-| partial | Coordinate: PARTIAL | [research/agent-loop.md](agent-loop.md):51 | none — needs an issue | OBSERVED |
-| partial | Decide: PARTIAL | [research/agent-loop.md](agent-loop.md):53 | none — needs an issue | OBSERVED |
-| partial | Authorize: PARTIAL | [research/agent-loop.md](agent-loop.md):55 | none — needs an issue | OBSERVED |
+| partial | Retrieve: PARTIAL | [research/agent-loop.md](agent-loop.md):54 | none — needs an issue | OBSERVED |
+| partial | Coordinate: PARTIAL | [research/agent-loop.md](agent-loop.md):55 | none — needs an issue | OBSERVED |
+| partial | Decide: PARTIAL | [research/agent-loop.md](agent-loop.md):57 | none — needs an issue | OBSERVED |
+| partial | Authorize: PARTIAL | [research/agent-loop.md](agent-loop.md):59 | none — needs an issue | OBSERVED |
 | partial | Dedicated build, feature ON: PARTIAL | [research/prismatic-mcp/11-continuation-baseline.md](prismatic-mcp/11-continuation-baseline.md):21 | none — needs an issue | OBSERVED |
 | partial | Native status visible: PARTIAL | [research/prismatic-mcp/11-continuation-baseline.md](prismatic-mcp/11-continuation-baseline.md):26 | none — needs an issue | OBSERVED |
 | partial | Streamable HTTP: DELETE (session end): PARTIAL | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):14 | none — needs an issue | OBSERVED |
