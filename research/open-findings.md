@@ -38,7 +38,7 @@ pie showData title Open findings by kind
     %% links: open-findings.md?col=Kind&filter=blocked#findings | open-findings.md?col=Kind&filter=out-of-scope#findings | open-findings.md?col=Kind&filter=not-run#findings | open-findings.md?col=Kind&filter=partial#findings | open-findings.md?col=Kind&filter=unreviewed#findings | open-findings.md?col=Kind&filter=staged#findings | open-findings.md?col=Kind&filter=failed#findings | open-findings.md?col=Kind&filter=handoff#findings
     "blocked" : 71
     "out-of-scope" : 37
-    "not-run" : 14
+    "not-run" : 18
     "partial" : 9
     "unreviewed" : 9
     "staged" : 6
@@ -55,7 +55,7 @@ pie showData title Open findings by kind
 | blocked | 71 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
 | out-of-scope | 37 | A finished issue left this out (its non_scope) and no open issue names it |
 | failed | 1 | A run or check the records say failed |
-| not-run | 14 | A validation the records say did not run |
+| not-run | 18 | A validation the records say did not run |
 | partial | 9 | A capability or run the records say is only partly there |
 | staged | 6 | Designed and written down, not implemented |
 | handoff | 1 | A change asked of another repository; nothing in this one can close it |
@@ -172,7 +172,7 @@ pie showData title Open findings by kind
 | out-of-scope | Any change in prismatic-platform or algoglyph | [I0097](../.ai/repo/project/issues/I0097.yaml):18 | none — needs an issue | DERIVED |
 | out-of-scope | Any change in algoglyph or prismatic-platform (the AlgoGlyph-side gap is a written proposal only) | [I0098](../.ai/repo/project/issues/I0098.yaml):16 | none — needs an issue | DERIVED |
 | out-of-scope | Routing the planner's own kernel calls (cargo.rs, linecost.rs, mcp-plan.rs) through the matcher | [I0098](../.ai/repo/project/issues/I0098.yaml):17 | none — needs an issue | DERIVED |
-| failed | In that round track-planning found a route on the map for none of the 21 rail lines, so no line went to the bot unpriced and the round held. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):99 | none — needs an issue | OBSERVED |
+| failed | In that round track-planning found a route on the map for none of the 21 rail lines, so no line went to the bot unpriced and the round held. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):107 | none — needs an issue | OBSERVED |
 | not-run | without a base set: ctest 94/94 PASS with -E '^regression', regression reported NOT RUN with a pointer to research/baseset-prerequisite-macos.md, change: PARTIAL (exit 3), no 120 s timeouts; | [I0028](../.ai/repo/project/issues/I0028.yaml):35 | none — needs an issue | OBSERVED |
 | not-run | The economy loop (mcp-human game: reinforce, borrow) is implemented but NOT RUN yet. | [I0045](../.ai/repo/project/issues/I0045.yaml):48 | none — needs an issue | OBSERVED |
 | not-run | NOT RUN: the page in a browser (WebGL terrain, clicks, maximize) - the browser extension was disconnected. | [I0048](../.ai/repo/project/issues/I0048.yaml):34 | none — needs an issue | OBSERVED |
@@ -183,8 +183,12 @@ pie showData title Open findings by kind
 | not-run | NOT RUN: a live pull (needs the owner's approval and p1's go-ahead); | [I0097](../.ai/repo/project/issues/I0097.yaml):46 | none — needs an issue | OBSERVED |
 | not-run | NOT RUN: the OpenTTD build of tools/gate.sh change, because the Mac is under the 35 GiB disk floor (31 GiB free after freeing 8.6 GB of my merged build outputs); | [I0117](../.ai/repo/project/issues/I0117.yaml):43 | [I0117](../.ai/repo/project/issues/I0117.yaml) | OBSERVED |
 | not-run | NOT RUN: tools/research/mcp-panel-check (needs a live panel built from master; | [I0220](../.ai/repo/project/issues/I0220.yaml):41 | [I0220](../.ai/repo/project/issues/I0220.yaml) | OBSERVED |
+| not-run | C2 correctness, per pair (H1): NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):267 | none — needs an issue | OBSERVED |
+| not-run | C3 performance: NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):268 | none — needs an issue | OBSERVED |
+| not-run | C4 strategy (H2): NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):269 | none — needs an issue | OBSERVED |
+| not-run | C5 operator safety: NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):270 | none — needs an issue | OBSERVED |
 | not-run | A client restart after a crash (the supervisor fix): NOT RUN: no crash happened in this run | [research/coplay.md](coplay.md):59 | none — needs an issue | OBSERVED |
-| not-run | Mesh records: NOT RUN, because the panel had no $MAJORDOMUS_URL. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):100 | none — needs an issue | OBSERVED |
+| not-run | Mesh records: NOT RUN, because the panel had no $MAJORDOMUS_URL. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):108 | none — needs an issue | OBSERVED |
 | not-run | A remote human joining over the internet: NOT RUN: needs a second machine and a person | [research/real-game.md](real-game.md):105 | none — needs an issue | OBSERVED |
 | not-run | An invite-only game through the coordinator: NOT RUN | [research/real-game.md](real-game.md):106 | none — needs an issue | OBSERVED |
 | partial | without a base set: ctest 94/94 PASS with -E '^regression', regression reported NOT RUN with a pointer to research/baseset-prerequisite-macos.md, change: PARTIAL (exit 3), no 120 s timeouts; | [I0028](../.ai/repo/project/issues/I0028.yaml):35 | none — needs an issue | OBSERVED |
