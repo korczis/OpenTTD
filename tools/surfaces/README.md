@@ -64,6 +64,10 @@ directory the first time. Exit codes follow Majordomus: 0 ok, 2 usage, 10 findin
 To preview the site, serve `target/web/site` with any static server, for example
 `python3 -m http.server -d target/web/site`.
 
+The workflow uploads the site with `include-hidden-files: true`. Every page of the `.ai/` layer
+lives under a dot directory, and `actions/upload-pages-artifact` leaves those out by default, so
+without it the site would link pages that Pages answers with 404.
+
 ## Tool flags
 
 A document that shows `tool --flag` restates the tool's parser, so `check` treats it like a link:
