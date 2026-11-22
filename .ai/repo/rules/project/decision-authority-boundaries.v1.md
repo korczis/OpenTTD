@@ -32,7 +32,7 @@ binary it just built (B8).
 | B1 | Exactly one component writes an executable decision for a decision type: only `battlebrain` builds a `decision` record or a `battlebrain-decision/v1` block. | `battlebrain` (`tools/research/mcp-rhai/src/bin/battlebrain.rs`); the contract `tools/research/mcp-rhai/src/battlebrain_contract.rs` | `only_the_authority_writes_a_decision_and_never_a_snapshot_or_outcome` (the contract refuses any other writer with `writer_not_allowed`); `b1_only_battlebrain_builds_a_decision_record_or_block` (no other code line names `battlebrain-decision/`, `DECISION_SCHEMA`, `AUTHORITY` or `record("decision"`) |
 | B2 | A kernel output is never an executable command. Planner and AlgoGlyph outputs become candidate records; only battlebrain turns a candidate into a decision. | `battlebrain`; the executor `tools/research/mcp-rhai/src/panel_decision.rs` | `a_shadow_run_writes_valid_records_and_a_shadow_block_only` (the planner's output is a `candidate` by `mcp-plan`, the decision is battlebrain's); `a_shadow_or_broken_decision_block_never_passes_the_executor`; `b2_freight_slots_are_written_only_by_the_authority_and_the_named_legacy_paths` (who may name an `fr_*` slot) |
 | B3 | A blackboard write never changes the game. The mesh record client and the bus have no command path. | `tools/research/mcp-rhai/src/mesh_records.rs`, `tools/research/mcp-rhai/src/panel_mesh.rs`, `tools/research/mcp-rhai/src/board.rs`, `tools/research/mcp-rhai/src/bus_sinks.rs`, `tools/research/mcp-rhai/src/bin/mcp-bus-blackboard.rs`, `tools/research/mcp-rhai/src/bin/mcp-bus-tail.rs` | `b3_a_blackboard_write_has_no_command_path` (none of these files names a game tool, an acting panel route, `set_bot_setting`, `start_bot`, `.tool(` or rcon; every `tools/call` is a `majordomus_` tool) |
-| B4 | No hand-kept copy of the MCP or kernel catalogue. The only per-kernel code is the adapter registry of domain checks. | the registry: `domain_check` in `battlebrain_contract.rs`, owned by `battlebrain`; MCP surfaces: rule `project.mcp-surfaces-are-derived` | `b4_no_list_literal_copies_the_kernel_or_tool_catalogue`; `b4_the_adapter_registry_is_the_named_domain_checks`; `a_kernel_outside_the_discovered_catalogue_is_unknown` |
+| B4 | No hand-kept copy of the MCP or kernel catalogue. The only per-kernel code is the adapter registry of domain checks. | the registry: `domain_check` in `battlebrain_contract.rs`, owned by `battlebrain`; MCP surfaces: rule `project.mcp-surfaces-are-derived` | `b4_no_list_literal_copies_the_kernel_or_tool_catalogue`; `b4_the_adapter_registry_is_the_named_domain_checks`; `b4_the_planner_calls_kernels_by_capability_only`; `a_kernel_outside_the_discovered_catalogue_is_unknown` |
 | B5 | Every decision record carries provenance, policy identity and its snapshot. | the contract (`validate_record`) | `every_invalid_fixture_is_refused_with_its_code` (`decision-not-derived-from-its-snapshot.json`, `decision-by-the-planner.json`, ...); `b5_a_decision_without_provenance_policy_or_snapshot_is_refused` |
 | B6 | Stale dependencies are revalidated before execution. | the executor (`decision_gate`, `freshness` in `panel_decision.rs`); `battlebrain live` | `a_shadow_or_broken_decision_block_never_passes_the_executor` (`key_mismatch`, `stale_decision`); `a_directive_is_applied_only_against_a_current_observation`; `a_live_decision_passes_only_its_gates_and_carries_one_slot` (`stale_companies`, `incoherent_snapshot`); `b6_the_executor_checks_block_and_freshness_before_any_step` (the order in `pull_with`) |
 | B7 | A fallback solver is never labelled as the kernel. | `tools/research/mcp-rhai/src/cargo.rs` (`BUILTIN_SOLVER`) | `the_builtin_fallback_is_never_labelled_as_the_kernel` (`cargo test --bin mcp-plan`); `b7_the_fallback_label_and_battlebrains_fallback_metric_agree` |
@@ -57,9 +57,12 @@ binary it just built (B8).
     matrix in `research/battlebrain/README.md`) and `intent.rs` (the answer to a plain-language
     request names a slot; its settings reach the bot through the approval-gated
     `openttd.ai.set_setting` or a later `start_ai`).
-- **B4.** The adapter registry is `domain_check` for `knapsack-dp` and `track-planning`. The
-  runner's outputs carry no schema, so these adapters sit at a protocol boundary on purpose. A
-  kernel without one may not price or select (`no_domain_check`). One list is allowed: the
+- **B4.** The adapter registry is `domain_check` for `knapsack-dp`, `track-planning` and
+  `transport-investment` (I0221). The runner's outputs carry no schema, so these adapters sit at a
+  protocol boundary on purpose. A kernel without one may not price or select (`no_domain_check`).
+  The planner names capabilities only: `cargo.rs` `Kernels` chooses each kernel through the
+  matcher, and `b4_the_planner_calls_kernels_by_capability_only` refuses a planner code line that
+  names a kernel id. One list is allowed: the
   tools `mcp-human` needs, in `play.rs` `require_tools`, because it is checked against the
   client's live tools/list before the hand acts.
 
@@ -86,10 +89,9 @@ What is not machine-checked, and why:
 - **B4 for MCP read sets.** A function that names the resources it reads (for example
   `graph.rs` `derived_from`) is a dependency, not a catalogue copy, so URIs are not scanned.
   The MCP surfaces stay with `project.mcp-surfaces-are-derived` and its live checks.
-- **B7 at the kernel boundary.** `cargo.rs` adopts a `knapsack-dp` answer without
-  `domain_check`. `cargo.rs` is also compiled into `mcp-intent`, which does not link the
-  contract, so the call is not a one-line change. Battlebrain's own path does not trust the
-  label alone: it reports `fallback_solver` and `missing_kernel`.
+- **B7 at the kernel boundary.** Since I0221, the planner adopts a kernel answer only after its
+  adapter's domain check, and `mcp-intent` links the contract too. The label alone is still not
+  trusted on Battlebrain's own path: it reports `fallback_solver` and `missing_kernel`.
 
 # Verification
 

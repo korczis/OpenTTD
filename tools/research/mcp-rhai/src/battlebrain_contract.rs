@@ -502,6 +502,13 @@ impl Catalogue {
         }
         Ok(Catalogue { kernels, digest: digest(answer), commit: commit.to_ascii_lowercase() })
     }
+    /// A recorded catalogue: `{"kernels": [...], "commit": ...}` as
+    /// tools/research/schema/fixtures/battlebrain/catalogue.json keeps the runner's answer, or
+    /// the same under `value`.
+    pub fn from_value(v: &Value) -> Result<Catalogue, Refusal> {
+        let v = v.get("value").unwrap_or(v);
+        Catalogue::from_runner(&v["kernels"], v["commit"].as_str().unwrap_or_default())
+    }
     pub fn kernel(&self, id: &str) -> Option<&Kernel> {
         self.kernels.iter().find(|k| k.id == id)
     }
@@ -635,11 +642,28 @@ pub const CAPABILITIES: &[Capability] = &[
             field("to", "tile", None, "the second station site's end tile and entry {x, y, dir}"),
             field("map", "resource", None, "openttd://map data"),
             field("prices", "resource", None, "openttd://economy/prices data: only with it is the price in game money"),
+            field("blocked", "list", None, "optional: [x, y] tiles the route may not use (a transfer yard proven beside another line, yards.rs)"),
         ],
         outputs: &[
             field("status", "status", None, "found | unreachable | budget; only found prices a line"),
             field("price", "amount", Some("money"), "what the route costs to build, in game money"),
             field("pieces", "list", None, "the track pieces, bridges and tunnels to lay"),
+        ],
+    },
+    Capability {
+        id: "routes-by-return",
+        goal: "for each demand between two places, its routes of one or two legs over the modes on offer, ranked by return on investment",
+        used_by: "the planner's investment run (invest.rs decide, mcp-plan --invest); its routes enter the portfolio, Battlebrain reads none of them",
+        inputs: &[
+            field("places", "list", None, "every town and freight industry {id, x, y}; any of them may be a hub"),
+            field("demands", "list", None, "{id, from, to, cargo, volume, payment, td1, td2, two_way?}: one per town pair and freight pair"),
+            field("modes", "list", None, "{mode, build_per_tile, terminal, vehicles: {cargo: vehicle}, overhead_periods, min_leg?, max_leg?}"),
+            field("prebuilt", "list", None, "{from, to, mode}: links that exist already and cost nothing to build"),
+        ],
+        outputs: &[
+            field("routes", "list", None, "per demand, in the input's order, its routes with legs, fleet, investment, score and roi"),
+            field("chosen", "list", None, "{demand, option}: each demand's route the answer chose, at most once"),
+            field("why", "list", None, "{demand, mode, roi, runner_up?}: why each demand's first route ranked first"),
         ],
     },
 ];
@@ -700,13 +724,53 @@ pub const ADAPTERS: &[Adapter] = &[
             ("to", "to", "the station tile itself, entered against its exit"),
             ("map", "map", "as read; ways, terrain and bridges ride along (hub_algoglyph.rs track_input)"),
             ("prices", "prices", "as read; without it result.money is null and result.cost is in tile units"),
+            ("blocked", "blocked", "as is; left out when nothing is blocked"),
         ],
         outputs: &[("status", "result.status"), ("price", "result.money"), ("pieces", "result.pieces")],
         exact: true,
         exact_because: "A* with an admissible heuristic, tested against Dijkstra (algoglyph src/plates/track-planning/plan.ts): the least-cost route of its cost model",
         check: check_track,
     },
+    Adapter {
+        capability: "routes-by-return",
+        kernel: "transport-investment",
+        engine: "custom",
+        inputs: &[
+            ("places", "places", "as is (invest.rs input)"),
+            ("demands", "demands", "as is; volume a month, payment and td1/td2 from openttd://engines cargos"),
+            ("modes", "modes", "as is; vehicles keyed by cargo; params (payback, load factor, max_legs 2, k 8, one_per_source off) ride along"),
+            ("prebuilt", "prebuilt", "as is: road-connected town pairs for the bus"),
+        ],
+        outputs: &[("routes", "result.options"), ("chosen", "result.chosen"), ("why", "result.why")],
+        exact: false,
+        exact_because: "only the k fastest routes of each demand (Yen's k-shortest paths, params.k) are priced and ranked by ROI (algoglyph src/plates/transport-investment/invest.ts): the best of those, not of every route",
+        check: check_routes,
+    },
 ];
+
+#[allow(dead_code)] // the planner (cargo.rs `Kernels`) calls these; battlebrain and mcp-panel do not
+impl Adapter {
+    /// The kernel input key that requirement field `field` maps to.
+    pub fn input_key(&self, field: &str) -> Option<&'static str> {
+        self.inputs.iter().find(|m| m.0 == field).map(|m| m.1)
+    }
+    /// The kernel input for requirement fields given by name: each under the key the adapter maps
+    /// it to. A field the adapter does not map is refused, never passed under its own name.
+    pub fn input(&self, fields: &[(&str, Value)]) -> Result<Value, Refusal> {
+        let mut out = Map::new();
+        for (f, v) in fields {
+            let key = self.input_key(f).ok_or_else(|| Refusal::new("unmapped_field", &format!("inputs.{f}"), format!("the adapter of {} maps no input {f:?}", self.kernel)))?;
+            out.insert(key.to_string(), v.clone());
+        }
+        Ok(Value::Object(out))
+    }
+    /// The value of requirement output `field` in a kernel answer: the answer's path the adapter
+    /// maps it to (`result.items` is answer.result.items). None when it is not there.
+    pub fn output<'v>(&self, answer: &'v Value, field: &str) -> Option<&'v Value> {
+        let path = self.outputs.iter().find(|m| m.0 == field)?.1;
+        path.split('.').try_fold(answer, |v, k| v.get(k))
+    }
+}
 
 fn check_knapsack(input: &Value, output: &Value) -> Result<(), Refusal> {
     let res = output.get("result").unwrap_or(output);
@@ -752,6 +816,43 @@ fn check_track(input: &Value, output: &Value) -> Result<(), Refusal> {
     // (algoglyph src/plates/track-planning/data.ts moneyOf); it must then be there.
     if input.get("prices").is_some_and(Value::is_object) && !res.get("money").and_then(Value::as_f64).is_some_and(|m| m.is_finite() && m >= 0.0) {
         return Err(Refusal::new("invalid_output", "result.money", "priced input, but the plan has no finite non-negative money"));
+    }
+    Ok(())
+}
+
+fn check_routes(input: &Value, output: &Value) -> Result<(), Refusal> {
+    let res = output.get("result").unwrap_or(output);
+    let demands: Vec<&Value> = input.get("demands").and_then(Value::as_array)
+        .ok_or_else(|| Refusal::new("invalid_input", "demands", "the input has no demands"))?.iter().map(|d| &d["id"]).collect();
+    // The kernel answers one route list per demand, in the input's order (algoglyph
+    // src/plates/transport-investment/invest.ts, Plan.options).
+    let options = res.get("options").and_then(Value::as_array).ok_or_else(|| Refusal::new("invalid_output", "result.options", "the answer has no routes"))?;
+    if options.len() != demands.len() {
+        return Err(Refusal::new("invalid_output", "result.options", format!("{} route lists for {} demands", options.len(), demands.len())));
+    }
+    for (i, (routes, d)) in options.iter().zip(&demands).enumerate() {
+        let path = format!("result.options.{i}");
+        let routes = routes.as_array().ok_or_else(|| Refusal::new("invalid_output", &path, "a demand's routes are not a list"))?;
+        for r in routes {
+            if r.get("demand") != Some(*d) {
+                return Err(Refusal::new("invalid_output", &path, format!("a route of demand {d} names demand {}", r.get("demand").unwrap_or(&Value::Null))));
+            }
+            let money = |k: &str| r.get(k).and_then(Value::as_f64).filter(|v| v.is_finite());
+            if !money("investment").is_some_and(|v| v >= 0.0) || money("score").is_none() {
+                return Err(Refusal::new("invalid_output", &path, format!("a route of demand {d} has no finite non-negative investment and finite score")));
+            }
+        }
+    }
+    let chosen = res.get("chosen").and_then(Value::as_array).ok_or_else(|| Refusal::new("invalid_output", "result.chosen", "the answer chose nothing, not even an empty list"))?;
+    let mut seen = std::collections::BTreeSet::new();
+    for c in chosen {
+        let d = c.get("demand").unwrap_or(&Value::Null);
+        if !demands.contains(&d) || !seen.insert(d.to_string()) {
+            return Err(Refusal::new("invalid_output", "result.chosen", format!("demand {d} is not one of the input's, or is chosen twice")));
+        }
+        if c.pointer("/option/demand") != Some(d) {
+            return Err(Refusal::new("invalid_output", "result.chosen", format!("the route chosen for demand {d} is not one of its own")));
+        }
     }
     Ok(())
 }
@@ -1276,7 +1377,44 @@ mod tests {
         assert!(domain_check("knapsack-dp", &input, &json!({"result": {"best": 110.0, "items": [1, 2]}})).is_err(), "over capacity");
         assert!(domain_check("knapsack-dp", &input, &json!({"result": {"best": 60.0, "items": [0, 0]}})).is_err(), "repeated item");
         assert!(domain_check("knapsack-dp", &input, &json!({"result": {"best": 99.0, "items": [0, 2]}})).is_err(), "best != sum");
-        assert_eq!(domain_check("transport-investment", &input, &json!({})).unwrap_err().code, "no_domain_check");
+        assert_eq!(domain_check("bayes-update", &input, &json!({})).unwrap_err().code, "no_domain_check");
+    }
+
+    #[test]
+    fn routes_must_answer_each_demand_with_its_own_routes() {
+        let input = json!({"demands": [{"id": "a"}, {"id": "b"}]});
+        let route = |d: &str| json!({"demand": d, "investment": 1000.0, "score": -5.0});
+        let ok = json!({"result": {"options": [[route("a")], []], "chosen": [{"demand": "a", "option": route("a")}], "why": []}});
+        assert!(domain_check("transport-investment", &input, &ok).is_ok());
+        let path = |input: &Value, v: Value| domain_check("transport-investment", input, &v).unwrap_err().path;
+        assert_eq!(domain_check("transport-investment", &json!({}), &ok).unwrap_err().code, "invalid_input");
+        assert_eq!(path(&input, json!({"result": {}})), "result.options");
+        assert_eq!(path(&input, json!({"result": {"options": [[]]}})), "result.options", "one list for two demands");
+        assert_eq!(path(&input, json!({"result": {"options": [7, []]}})), "result.options.0");
+        assert_eq!(path(&input, json!({"result": {"options": [[route("b")], []]}})), "result.options.0", "another demand's route");
+        for bad in [json!({"demand": "a", "investment": -1.0, "score": 1.0}), json!({"demand": "a", "investment": 1.0})] {
+            assert_eq!(path(&input, json!({"result": {"options": [[bad], []]}})), "result.options.0");
+        }
+        let with = |chosen: Value| json!({"result": {"options": [[route("a")], []], "chosen": chosen}});
+        assert_eq!(path(&input, json!({"result": {"options": [[], []]}})), "result.chosen");
+        assert_eq!(path(&input, with(json!([{"demand": "c", "option": route("c")}]))), "result.chosen", "unknown demand");
+        assert_eq!(path(&input, with(json!([{"demand": "a", "option": route("a")}, {"demand": "a", "option": route("a")}]))), "result.chosen", "twice");
+        assert_eq!(path(&input, with(json!([{"demand": "b", "option": route("a")}]))), "result.chosen", "another demand's route");
+    }
+
+    #[test]
+    fn an_adapter_maps_requirement_fields_onto_its_kernel() {
+        let a = &ADAPTERS[0];
+        assert_eq!(a.input_key("budget"), Some("capacity"));
+        assert_eq!(a.input_key("weights"), None, "a kernel key is not a requirement field");
+        assert_eq!(a.input(&[("costs", json!([1])), ("budget", json!(3))]).unwrap(), json!({"weights": [1], "capacity": 3}));
+        let e = a.input(&[("capacity", json!(3))]).unwrap_err();
+        assert_eq!((e.code, e.path.as_str()), ("unmapped_field", "inputs.capacity"));
+        let answer = json!({"result": {"items": [0, 2], "best": 9.0}});
+        assert_eq!(a.output(&answer, "chosen"), Some(&json!([0, 2])));
+        assert_eq!(a.output(&answer, "total_value"), Some(&json!(9.0)));
+        assert_eq!(a.output(&json!({"result": {}}), "chosen"), None);
+        assert_eq!(a.output(&answer, "price"), None, "a field the adapter does not map");
     }
 
     #[test]
@@ -1336,7 +1474,8 @@ mod tests {
     fn on_the_real_catalogue_portfolio_is_knapsack_dp_and_rail_pricing_is_track_planning() {
         let cat = catalogue();
         assert_eq!(cat.kernels.len(), 53);
-        for (cap, kernel, shape) in [("portfolio-within-budget", "knapsack-dp", "opaque"), ("rail-line-price", "track-planning", "verified")] {
+        for (cap, kernel, shape) in [("portfolio-within-budget", "knapsack-dp", "opaque"), ("rail-line-price", "track-planning", "verified"),
+                                     ("routes-by-return", "transport-investment", "verified")] {
             let m = match_capability(cap, &cat, ADAPTERS);
             assert_eq!(m.chosen.as_deref(), Some(kernel), "{cap}: {:?}", m.refusal);
             let d = &m.decision;
