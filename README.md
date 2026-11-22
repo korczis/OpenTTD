@@ -614,7 +614,7 @@ from the code. The right-hand column says what was counted.
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
 | **43** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **11** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
-| **16** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
+| **17** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **35** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **93** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **89** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
@@ -626,7 +626,7 @@ from the code. The right-hand column says what was counted.
 pie showData title Counted from the sources: tooling
     "research tools and checks (tools/research/, shell and Python)" : 43
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 11
-    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 16
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 17
 ```
 <!-- surfaces:end facts -->
 
