@@ -551,6 +551,9 @@ cmd_change() {
   research_code_is_guarded
   echo "==> tools/knowledge/refs check"
   tools/knowledge/refs check
+  # The check surfaces.toml runs over research/capability-matrix.md rests on these (anchored lines).
+  echo "==> python3 -B -m unittest tools/knowledge/test_refs.py (refs: paths, symbols, anchored lines)"
+  python3 -B -m unittest tools/knowledge/test_refs.py
   echo "==> tools/research/e2e-coverage (rule project.web-ui-is-covered-end-to-end: every web UI page has a browser check)"
   tools/research/e2e-coverage
   echo "==> tools/knowledge/refs impact HEAD (records citing what this change touches: re-read them)"

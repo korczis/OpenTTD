@@ -56,20 +56,39 @@ function PrismaticAI::OverlapsOwnBusStation(tile) {
 /* Is there a road path from tile a to tile b? A bounded breadth-first walk over connected road
  * pieces (stations included), so buses are never bought for stops on two separate networks. */
 function PrismaticAI::RoadConnected(a, b, budget) {
+	return PrismaticAI.RoadReach(a, budget, b).rawin("found");
+}
+
+/* The road tiles reachable from `origin` within `budget` visited tiles: the bounded breadth-first
+ * walk RoadConnected always did, returned as a table of tile -> true. With `stop` not null the walk
+ * ends when it visits that tile and the table also holds the key "found" (RoadConnected's answer,
+ * the same API calls in the same order as before). One walk answers every "is this tile on the
+ * route's network?" question of a depot search (BuildDepotNear). */
+function PrismaticAI::RoadReach(origin, budget, stop) {
 	local w = AIMap.GetMapSizeX();
 	local seen = {};
-	seen[a] <- true;
-	local queue = [a];
+	seen[origin] <- true;
+	local queue = [origin];
 	local head = 0;
 	while (head < queue.len() && budget-- > 0) {
 		local t = queue[head++];
-		if (t == b) return true;
+		if (t == stop) { seen.found <- true; break; }
 		foreach (n in [t - 1, t + 1, t - w, t + w]) {
 			if (seen.rawin(n) || !AIMap.IsValidTile(n)) continue;
 			if (!AIRoad.AreRoadTilesConnected(t, n)) continue;
 			seen[n] <- true;
 			queue.push(n);
 		}
+	}
+	return seen;
+}
+
+/* Is a road depot (of any company) on one of the four tiles beside `t`? Two depots side by side are
+ * one depot too many: the second never serves a vehicle the first could not. */
+function PrismaticAI::DepotBeside(t) {
+	local w = AIMap.GetMapSizeX();
+	foreach (n in [t - 1, t + 1, t - w, t + w]) {
+		if (AIMap.IsValidTile(n) && AIRoad.IsRoadDepotTile(n)) return true;
 	}
 	return false;
 }
@@ -152,16 +171,23 @@ function PrismaticAI::BuildBusStopAway(origin, radius, label, avoid) {
 	return null;
 }
 
-/* Build a road depot near `origin` whose entrance is connected to the road. Returns its tile or
- * null. */
+/* Build a road depot near `origin` whose exit leads onto the road network `origin` is on, never
+ * beside another depot. Returns its tile or null.
+ *
+ * Seen in the owner's game of 2026-11-22: depots one could not drive out of (built facing a road
+ * piece that no road joined to the route) and two depots side by side (the first was not on the
+ * route's network, so it was not reused, and the second went next to it). So the road the new
+ * depot faces must be reachable from `origin` (one RoadReach walk answers that for every candidate
+ * and for reuse alike), and a tile beside an existing depot is never taken. */
 function PrismaticAI::BuildDepotNear(origin, radius) {
+	local reach = PrismaticAI.RoadReach(origin, 3000, null);
 	/* An own road depot within the radius and on the same road network is reused. */
 	local depots = AIDepotList(AITile.TRANSPORT_ROAD);
 	depots.Valuate(AIMap.DistanceManhattan, origin);
 	depots.KeepBelowValue(radius + 1);
 	depots.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
 	for (local d = depots.Begin(); !depots.IsEnd(); d = depots.Next()) {
-		if (PrismaticAI.RoadConnected(d, origin, 3000)) {
+		if (reach.rawin(d)) {
 			AILog.Info("PrismaticAI: reuse depot at tile " + d);
 			return d;
 		}
@@ -176,9 +202,12 @@ function PrismaticAI::BuildDepotNear(origin, radius) {
 				if (x < 2 || y < 2 || x >= w - 2 || y >= h - 2) continue;
 				local front = AIMap.GetTileIndex(x, y);
 				if (!AIRoad.IsRoadTile(front) || AIRoad.IsRoadStationTile(front) || AIRoad.IsRoadDepotTile(front)) continue;
+				/* The exit must lead onto the route's own network, not onto a road piece of another. */
+				if (!reach.rawin(front)) continue;
 				foreach (t in [front - 1, front + 1, front - w, front + w]) {
 					if (!AIMap.IsValidTile(t) || AIRoad.IsRoadTile(t) || !AITile.IsBuildable(t)) continue;
 					if (AITile.GetSlope(t) != AITile.SLOPE_FLAT) continue;
+					if (PrismaticAI.DepotBeside(t)) continue;
 					if (!AIRoad.BuildRoadDepot(t, front)) continue;
 					AIRoad.BuildRoad(front, t);
 					if (AIRoad.AreRoadTilesConnected(front, t)) {

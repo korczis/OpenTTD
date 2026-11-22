@@ -1,0 +1,54 @@
+id: I0221
+milestone: prismatic-steers-a-company-through-the-bridge
+title: "The planner picks every AlgoGlyph kernel it calls by capability from the discovered catalogue, refuses with the matcher's reason when none matches, keeps its declared fallback, and records which kernel of which catalogue it relied on"
+slug: planner-kernels-by-capability
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "The planner's own kernel calls go through the matcher of I0098 (match_capability over CAPABILITIES and ADAPTERS in battlebrain_contract.rs): the portfolio (cargo.rs, portfolio-within-budget), the rail line price and the transfer yards (linecost.rs and yards.rs, rail-line-price) and the investment run (invest.rs, a new routes-by-return capability with its adapter and domain check). The catalogue is the one the runner reports (flow -- kernels, with the checkout's commit) or a file (mcp-plan --catalogue). A call builds its input keys and reads its answer through the chosen kernel's adapter, so no planner code names a kernel. With no match the call is not made and the refusal is the matcher's own; the portfolio still falls back to its built-in DP, labelled as such with the refusal as its reason. mcp-plan writes the capability-match/v1 decision of every capability it resolved under kernels, and each answer that used a kernel names its capability and the catalogue's digest and commit."
+why: "I0098 left the planner's own calls outside the matcher (its non_scope): the planner still called knapsack-dp, track-planning and transport-investment by name, which is a second, hand-kept kernel list beside the adapter registry, and its records did not say which catalogue a kernel came from."
+scope:
+  - "tools/research/mcp-rhai/src/cargo.rs"
+  - "tools/research/mcp-rhai/src/linecost.rs"
+  - "tools/research/mcp-rhai/src/yards.rs"
+  - "tools/research/mcp-rhai/src/invest.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-plan.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-intent.rs"
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs"
+  - "tools/research/mcp-rhai/src/authority_boundaries.rs"
+  - "research/battlebrain/**"
+  - "research/mechanisms/planner-and-algoglyph.md"
+  - ".ai/repo/rules/project/decision-authority-boundaries.v1.md"
+non_scope:
+  - "Any change in algoglyph or prismatic-platform"
+  - "How the AlgoGlyph checkout is located, the flow serve and the catalogue discovery of the hub (feature/algoglyph-submodule)"
+  - "Kernel calls outside the planner: the hub's algoglyph.* methods, the Rhai rail steward, mcp-human, the action plan and the kernel feed"
+depends_on:
+  - I0098
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#a-decision-contract-is-defined"
+acceptance_criteria:
+  - "on the real catalogue fixture the planner resolves portfolio-within-budget to knapsack-dp, rail-line-price to track-planning and routes-by-return to transport-investment, and writes each capability-match/v1 decision under kernels (unit tests)"
+  - "with a catalogue in which a capability matches no kernel, the call is not made: the portfolio falls back to the built-in DP with the matcher's refusal as its fallback reason, a rail line is left unpriced with the refusal, and the investment run is refused with it (unit tests)"
+  - "the kernel input keys and the answer paths are read from the chosen kernel's adapter, and no planner file names a kernel id of the catalogue in code (unit tests)"
+  - "a kernel answer that fails its domain check is refused in each of the three calls (unit tests)"
+validation:
+  - "cargo test --release --offline --no-default-features --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan --bin mcp-intent --bin battlebrain"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+started_at: 2026-11-22T16:58:31Z
+started_event: sha256:87a2716404165d56b2dbe551dd94dd14299af92950e050a81f01e40210c492fd
+updated_at: 2026-11-22T17:38:30Z
+verified_at: 2026-11-22T17:37:42Z
+verified_event: sha256:40dff4feef88d6fcc21ffbc28ff503c5d77d6e33c73e93d09af972f2a884e31f
+completed_at: 2026-11-22T17:38:30Z
+completed_event: sha256:6e0fa5ef32a4de3cde1c5e60c494bbc82a314d2cc38d0b39aba8e5b72836f794
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "cargo test --release --offline --no-default-features --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan --bin mcp-intent --bin battlebrain"
+    result: "on lundra at 4cdc3195 (merged with master): mcp-plan 84 passed, mcp-intent 66 passed, battlebrain 63 passed, 0 failed; end to end with AlgoGlyph 1b8e009 on capture coplay-8800-1963-02-22 the plan equals master's"
+    commit: 4cdc3195f44af06e0ff99ef1c62fa67a9fa50848
+    recorded_at: 2026-11-22T17:38:18Z

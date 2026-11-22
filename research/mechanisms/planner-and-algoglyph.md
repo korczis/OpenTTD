@@ -39,19 +39,29 @@ flowchart TB
   `openttd://towns` and `openttd://world/graph`, priced with the cargo payment formula cited from
   `src/economy.cpp` and vehicle speeds from `openttd://engines`. Every number is a parameter with a
   default; `?params=JSON` overrides any of them and the answer echoes the effective set.
-- **Portfolio.** A 0/1 knapsack over the best option of every candidate. AlgoGlyph's `knapsack-dp`
-  solves it when its runner is available, otherwise the same dynamic programme built in; the
-  answer names the solver.
-- **Line cost on the map** (`linecost.rs`). For the best rail candidates, AlgoGlyph's
-  `track-planning` lays the route on the game's map, ways, terrain, prices and bridges. Its money
+- **Kernels by capability** (`cargo.rs` `Kernels`, I0221). The planner never calls a kernel by
+  name. It names a capability (`portfolio-within-budget`, `rail-line-price`, `routes-by-return`),
+  and Battlebrain's matcher picks the kernel from the catalogue the runner reports
+  (`flow -- kernels` at the checkout's commit, or `mcp-plan --catalogue <file>`). The input and
+  the answer go through that kernel's adapter, and the answer must pass the adapter's domain
+  check. Each answer names its kernel and catalogue, and the plan's `kernels` keeps every match
+  decision. With no match the call is not made, and the refusal is recorded. See
+  [Battlebrain](../battlebrain/README.md#capabilities-i0098).
+- **Portfolio.** A 0/1 knapsack over the best option of every candidate. The kernel that
+  satisfies `portfolio-within-budget` (today `knapsack-dp`) solves it when there is a match and
+  its answer passes its check. Otherwise the same dynamic programme built in decides. The answer
+  names the solver, and `fallback` says why the built-in decided.
+- **Line cost on the map** (`linecost.rs`). For the best rail candidates, the kernel that
+  satisfies `rail-line-price` (today `track-planning`) lays the route on the game's map, ways, terrain, prices and bridges. Its money
   replaces the straight-line estimate; a candidate with no route loses its rail option.
 - **Transfer yards** (`yards.rs`). Before any bot builds one, the yard is proven offline: the
   better line's tiles are blocked and the second line is laid from a platform beside it.
-- **Investment** (`invest.rs`). The same facts handed to `transport-investment`, which also
-  considers routes through a hub, ranked by return on investment. The kernel prices routes from
-  the payment formula alone, so the planner's `calibration` is applied to every route it returns:
-  monthly profit scaled by the mode's ratio, the lowest one for a route of several legs, then the
-  kernel's own score and ROI recomputed (`invest.rs calibrated`).
+- **Investment** (`invest.rs`). The same facts handed to the kernel that satisfies
+  `routes-by-return` (today `transport-investment`). It also considers routes through a hub,
+  ranked by return on investment. The kernel prices routes from the payment formula alone, so the
+  planner's `calibration` is applied to every route it returns: monthly profit scaled by the
+  mode's ratio, the lowest one for a route of several legs, then the kernel's own score and ROI
+  recomputed (`invest.rs calibrated`).
 - **Action plan.** `POST /api/actionplan` turns a set of actions with dependencies into a
   validated DAG and executable steps through `action-plan`, refused if it would overdraw.
 - **Calibration** (`calibrate.rs`). Running lines with a whole year of profit are matched to the
