@@ -378,7 +378,8 @@ libduckdb (Homebrew duckdb 1.5; `tools/research/mcp-rhai/build.rs` finds it, and
 reports `"store": "off"`, and its query routes answer 503.
 
 **Queries.** `GET /api/db/tables` returns the schema. `GET /api/db/query?sql=...` and
-`POST /api/db/query {sql}` run one read-only statement: SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW,
+`POST /api/db/query {sql, params?}` run one read-only statement (`params` binds its named
+parameters, `$company`, never pasted; a missing one is a 400): SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW,
 checked after leading whitespace and comments. Anything else, or a second statement after `;`, is
 a 400. The answer is `{columns, rows, count, capped}`, where each row is a list in column order,
 capped at 5000 rows. A GET without `sql` answers the newest 20 events. The store's connection runs without external access (no file reads, no
@@ -529,8 +530,8 @@ tools/research/mcp-duel ...`), a planned bot start derives both from the stored 
 (`tools/research/mcp-rhai/src/duel_outcomes.rs`). Off is the default, and stays the default until the
 derived rule wins held-start pairs on three seeds (rule `project.a-tuning-claim-needs-held-start-pairs`).
 
-- **History.** One statement (`duel_outcomes.rs:outcomes_sql`) on every store of the store directory
-  (`query_every_store`): each `plan.duel` verdict of at least 60 months, with the `plan.bot_settings`
+- **History.** One named query (`duel_outcomes.rs:outcomes_query`, `sql/queries/duel_outcomes.sql`) on
+  every store of the store directory (`every_store`): each `plan.duel` verdict of at least 60 months, with the `plan.bot_settings`
   events of the same instance. A verdict is joined with the settings its own run published before it:
   how many freight lines the plan handed over (`h`), `own_lines` and `rail_after`. Only held starts
   against the unplanned PrismaticAI count. Every duel runs on the map of the panel's generated config,
@@ -1080,10 +1081,11 @@ mode nobody measured. Without `default` an unmeasured mode kept factor 1 and won
 the :8800 map the calibrated portfolio swapped two freight lines for three air routes.
 
 The bot start reads the readings when `PRISMATIC_PLAN_CALIBRATION` asks for them: `all` (every
-reading) or `seed` (games of this seed and map size); unset or `off`, the model alone. The statement
-is `calibrate.rs:readings_sql`; `panel_store.rs:query_every_store` runs it on every store of the
-store directory: the panel's own through the code of `/api/db/query`, a stopped panel's file
-read-only, a running panel's through its `/api/db/query`. `plan.portfolio` and `plan.bot_settings`
+reading) or `seed` (games of this seed and map size); unset or `off`, the model alone. The query
+is `calibrate.rs:readings_query` (`sql/queries/calibration_readings.sql`, the seed and map bound,
+null for `all`); `panel_store.rs:every_store` runs it on every store of the store directory: the
+panel's own through the code of `/api/db/named`, a stopped panel's file read-only, a running
+panel's through its `/api/db/named`. `plan.portfolio` and `plan.bot_settings`
 name the query and its rows (`inputs.stored`) and the readings used (`inputs.live.calibration`);
 with calibration off, the store off, or no reading in scope they carry `{fallback: "uncalibrated:
 <why>"}` and the plan runs uncalibrated, and the plan's log says which (`planner: calibration from
@@ -1145,8 +1147,8 @@ looks for the AlgoGlyph runner in the newest stacked branch first (`feature/acti
 **The split (2026-11-18).** AlgoGlyph stays a generic kernel runner. Its `flow serve` takes one JSON
 request per stdin line and answers one line per request. It learns nothing of OpenTTD, ZeroMQ or
 DuckDB. OpenTTD knows the game, so the subscriber lives here. It reads the store through the
-panel's read-only `/api/db/query`, follows the panel's ZeroMQ bus, and builds each kernel's input
-(ADR 0034 point 4). A ZeroMQ input adapter inside AlgoGlyph was rejected for three reasons. It
+panel's read-only `/api/db/named` (the named query `kernel_window`), follows the panel's ZeroMQ bus,
+and builds each kernel's input (ADR 0034 point 4). A ZeroMQ input adapter inside AlgoGlyph was rejected for three reasons. It
 would need a game-specific mapping from envelopes to kernel inputs there. It would add a network
 dependency to a repository whose flow rule (`project.typed-flow`) keeps the flow free of network and
 storage. And it would give AlgoGlyph a second reader of the store besides the panel. No AlgoGlyph
@@ -1416,7 +1418,10 @@ game run by `mcp-e2e` takes Prismatic's decisions without the Python bridge
   `samples_query`, one read-only statement of the company's samples in every run of the store: the
   first sample of each game month, with the run's seed and start and the `aggressiveness` the
   latest applied (or pending) `plan.directive` of that run had set for the company by then, null
-  before any (`panel_decision.rs:samples_sql`).
+  before any (`panel_decision.rs:samples_query`, the file `sql/queries/company_samples.sql`). Its
+  company is a named parameter, and `samples_params` (`{company}`) holds its value: a client
+  POSTs `{sql: samples_query, params: samples_params}` to `query_url`, and the value is bound,
+  never pasted.
 - `POST /api/decision/pull {url?}` GETs a directive from `url`, else `PRISMATIC_DECISION_URL`,
   checks it against the contract and applies it, answering a `DecisionPullResult`. A directive
   the contract refuses is answered 422 with every reason, and nothing is applied; no URL is 501.
@@ -1430,8 +1435,8 @@ game run by `mcp-e2e` takes Prismatic's decisions without the Python bridge
   (its `additionalProperties` is true since 2026-11-17; it was false, and Prismatic's real answer
   broke it).
 - One field of the working is read since I0085: `fit` (`prismatic-fit/v1`, `fitRecord` of the
-  contract), what Prismatic fitted its decision from: `model`, `parameters`, `samples` (`query` on
-  `query_url`, or `bus` with `kinds`, and `rows`), `quality`, and `fallback` when it could not fit
+  contract), what Prismatic fitted its decision from: `model`, `parameters`, `samples` (`query`
+  with its `params` on `query_url`, or `bus` with `kinds`, and `rows`), `quality`, and `fallback` when it could not fit
   (required when `rows` is 0). `plan.directive`'s `inputs.stored` records it: the query (or bus)
   and rows with the fit, or `{fallback}` with why none was read: Prismatic sent no fit (today's
   `OpenttdController`, a snapshot and its hand model), Prismatic fell back (its fit stays

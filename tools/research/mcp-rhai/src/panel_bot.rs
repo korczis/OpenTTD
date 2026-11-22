@@ -15,6 +15,7 @@ use crate::panel::{py_int, py_json, py_str, run, Game};
 use crate::calibrate::{self, Scope};
 use crate::panel_events::{self, Stored};
 use crate::panel_store::Across;
+use crate::store_sql::Named;
 use crate::duel_outcomes;
 
 fn ai_dir() -> PathBuf {
@@ -677,10 +678,10 @@ pub struct Calibration {
 pub const CALIBRATION_OFF: &str = "calibration is off (PRISMATIC_PLAN_CALIBRATION unset or off, the default: the three-seed held-start A/B averaged about zero, knowledge the-planner-overpredicts-what-a-line-earns; ADR 0034 point 6)";
 
 /// The calibration of `scope` for a game (`calibrate::game_of`), read with `read` (every store,
-/// `panel_store::query_every_store`): the factors of every reading it returns, or the fallback
+/// `panel_store::every_store`): the factors of every reading it returns, or the fallback
 /// `uncalibrated` with its reason when calibration is off, the scope is not one, the store is off or
 /// it holds no reading. Never a silent default (ADR 0034 point 2).
-pub fn calibration(scope: &Scope, game: &Value, read: impl FnOnce(&str) -> Result<Across, String>) -> Calibration {
+pub fn calibration(scope: &Scope, game: &Value, read: impl FnOnce(&Named) -> Result<Across, String>) -> Calibration {
     let name = match scope {
         Scope::Off => "off".to_string(),
         Scope::All => "all".to_string(),
@@ -700,31 +701,37 @@ pub fn calibration(scope: &Scope, game: &Value, read: impl FnOnce(&str) -> Resul
         }
         _ => {}
     }
-    let sql = match calibrate::readings_sql(scope, game) {
+    let query = match calibrate::readings_query(scope, game) {
         Ok(q) => q,
         Err(why) => return fallback(why, json!({})),
     };
-    let across = match read(&sql) {
+    let across = match read(&query) {
         Ok(a) => a,
-        Err(why) => return fallback(why, json!({"query": sql})),
+        Err(why) => return fallback(why, query.record()),
     };
     let answer = json!({"columns": across.columns, "rows": across.rows});
     let readings = calibrate::readings_of(&answer);
     if readings.is_empty() {
+        let mut read = query.record();
+        read["rows"] = json!(across.rows.len());
+        read["stores"] = json!(across.stores);
         return fallback(format!("the store holds no calibration reading for this scope ({} row(s) from {} store(s))",
-                                across.rows.len(), across.stores.len()),
-                        json!({"query": sql, "rows": across.rows.len(), "stores": across.stores}));
+                                across.rows.len(), across.stores.len()), read);
     }
     let f = calibrate::factors(&readings);
     let used: Vec<Value> = readings.iter().map(|r| json!({"instance": r["instance"], "seq": r["seq"], "ts_ms": r["ts_ms"],
                                                           "seed": r["seed"], "map": r["map"], "lines": r["lines"].as_array().map_or(0, Vec::len)}))
         .collect();
+    let mut record = query.record();
+    if let (Some(r), Some(x)) = (record.as_object_mut(), json!({"scope": name, "used": true, "rows": across.rows.len(),
+            "stores": across.stores, "game": game, "readings": used, "lines": f["lines"], "modes": f["modes"],
+            "factors": f["params"]["calibration"], "rule": calibrate::RULE}).as_object()) {
+        r.extend(x.clone());
+    }
     Calibration {
         factors: Some(f["params"]["calibration"].clone()),
-        stored: Stored::Query { sql: sql.clone(), rows: across.rows.len() },
-        record: json!({"scope": name, "used": true, "query": sql, "rows": across.rows.len(), "stores": across.stores, "game": game,
-                       "readings": used, "lines": f["lines"], "modes": f["modes"], "factors": f["params"]["calibration"],
-                       "rule": calibrate::RULE}),
+        stored: Stored::Query { query, rows: across.rows.len() },
+        record,
         readings,
     }
 }
@@ -798,7 +805,7 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
     } else {
         json!({"seed": g.args.seed, "map": null})
     };
-    let cal = calibration(&scope, &game, crate::panel_store::query_every_store);
+    let cal = calibration(&scope, &game, crate::panel_store::every_store);
     if let Some(f) = &cal.factors {
         g.event("ai", &format!("planner: calibration from the store ({}, {} reading(s) in {} row(s)): {f}",
                                cal.record["scope"].as_str().unwrap_or(""), cal.record["readings"].as_array().map_or(0, Vec::len),
@@ -863,7 +870,7 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
     // otherwise, and when the stores give no pair, the constants above, with the reason in the event.
     let handed = p.bot_settings["freight"].as_array().map_or(0, Vec::len);
     let from_duels = duel_outcomes::from_duels(duel_outcomes::enabled(), handed, OWN_LINES as i64, p.bot_settings["rail_after"].as_i64(),
-                                               crate::panel_store::query_every_store);
+                                               crate::panel_store::every_store);
     if from_duels.record["used"] == true {
         apply_from_duels(&mut p, &from_duels, &mut |text| g.event("ai", &text));
     } else if duel_outcomes::enabled() {
@@ -1157,7 +1164,7 @@ mod tests {
         assert_eq!(refused["choice"]["settings"]["own_lines"], 8);
     }
 
-    /// An answer of every store to `readings_sql`, as `panel_store::query_every_store` gives it.
+    /// An answer of every store to `readings_query`, as `panel_store::every_store` gives it.
     fn across(rows: Vec<Value>) -> Across {
         Across { columns: json!(["instance", "seq", "ts_ms", "seed", "map", "lines"]), stores: vec![json!({"store": "panel-1.duckdb", "via": "this panel", "rows": rows.len()})],
                  rows }
@@ -1169,11 +1176,15 @@ mod tests {
         let rows = vec![json!(["panel-1", 9, 200, 3, "256x256", "[{\"mode\":\"bus\",\"ratio\":0.2},{\"mode\":\"rail\",\"ratio\":0.6}]"]),
                         json!(["calibration-import", 1, 100, null, null, "[{\"mode\":\"bus\",\"ratio\":0.4}]"]),
                         json!(["panel-1", 4, 50, 3, "256x256", "[{\"mode\":\"rail\",\"why\":\"far\"}]"])];
-        let mut asked = String::new();
-        let c = calibration(&Scope::All, &game, |sql| { asked = sql.to_string(); Ok(across(rows.clone())) });
-        assert_eq!(asked, calibrate::readings_sql(&Scope::All, &game).unwrap(), "the statement of src/calibrate.rs");
+        let mut asked = None;
+        let c = calibration(&Scope::All, &game, |q| { asked = Some(q.clone()); Ok(across(rows.clone())) });
+        let want = calibrate::readings_query(&Scope::All, &game).unwrap();
+        assert_eq!(asked.as_ref(), Some(&want), "the query of src/calibrate.rs");
         assert_eq!(c.factors, Some(json!({"bus": 0.3, "rail": 0.6, "default": 0.4})), "bus: median of 0.2 and 0.4");
-        assert_eq!(c.stored.to_json(), json!({"query": asked, "rows": 3}));
+        let mut stored = want.record();
+        stored["rows"] = json!(3);
+        assert_eq!(c.stored.to_json(), stored);
+        assert_eq!((c.record["query"].clone(), c.record["name"].clone()), (json!(want.sql()), json!("calibration_readings")));
         assert_eq!(c.record["used"], true);
         assert_eq!(c.record["readings"], json!([{"instance": "panel-1", "seq": 9, "ts_ms": 200, "seed": 3, "map": "256x256", "lines": 2},
                                                {"instance": "calibration-import", "seq": 1, "ts_ms": 100, "seed": null, "map": null, "lines": 1}]),
@@ -1185,11 +1196,12 @@ mod tests {
         assert_eq!(off.factors, None);
         assert_eq!(off.stored.to_json(), json!({"fallback": "uncalibrated: store off: built without the store feature"}));
         assert_eq!((off.record["fallback"].clone(), off.record["used"].clone()), (json!("uncalibrated"), json!(false)));
+        assert_eq!(off.record["name"], "calibration_readings", "the query it could not run");
         // Too little history: an empty store, or only readings that measured nothing.
         let empty = calibration(&Scope::All, &game, |_| Ok(across(vec![rows[2].clone()])));
         assert_eq!(empty.factors, None);
         assert!(empty.stored.to_json()["fallback"].as_str().unwrap().starts_with("uncalibrated: the store holds no calibration reading"));
-        assert_eq!(empty.record["rows"], 1);
+        assert_eq!((empty.record["rows"].clone(), empty.record["params"]["limit"].clone()), (json!(1), json!(calibrate::QUERY_READINGS)));
         // The seed scope without a map size never queries; a file name is refused, never read.
         let blind = calibration(&Scope::Seed, &json!({"seed": 3, "map": null}), |_| panic!("no query without a map"));
         assert!(blind.record["why"].as_str().unwrap().contains("map size"));
@@ -1210,7 +1222,9 @@ mod tests {
         let off = duel_outcomes::from_duels(false, 2, 8, Some(2), |_| unreachable!());
         let mut b = bot_settings_event(&mut p, "", Some(7), &off);
         with_calibration(&mut b, &used);
-        assert_eq!(b["inputs"]["stored"], json!({"query": calibrate::readings_sql(&Scope::All, &game).unwrap(), "rows": 1}));
+        let mut stored = calibrate::readings_query(&Scope::All, &game).unwrap().record();
+        stored["rows"] = json!(1);
+        assert_eq!(b["inputs"]["stored"], stored);
         assert_eq!(b["inputs"]["live"]["calibration"]["readings"][0]["seq"], 9);
         assert_eq!(b["inputs"]["live"]["portfolio_seq"], 7);
         let mut b = bot_settings_event(&mut p, "", Some(7), &off);
@@ -1219,7 +1233,7 @@ mod tests {
         assert_eq!(b["inputs"]["live"]["calibration"]["scope"], "off");
     }
 
-    /// A store's answer to `duel_outcomes::outcomes_sql`: one held-start ten-year pair handing over
+    /// A store's answer to `duel_outcomes::outcomes_query`: one held-start ten-year pair handing over
     /// two lines, own_lines 0 against 8, the 8 ahead by 50% against a 0.2% rival spread.
     fn outcome_rows() -> Across {
         let duel = |seq: i64, a: f64, b: f64| json!(["panel-9", seq, seq * 10, "plan.duel", json!({"version": {"params": {"opponent": "PrismaticAI"}},
@@ -1246,7 +1260,9 @@ mod tests {
         assert_eq!(said.len(), 1);
         assert!(said[0].starts_with("planner: own_lines 16 from stored duel outcomes (constant 8): "), "{}", said[0]);
         let b = bot_settings_event(&mut p, "", Some(3), &d);
-        assert_eq!(b["inputs"]["stored"], json!({"query": duel_outcomes::outcomes_sql(), "rows": 4}));
+        let mut stored = duel_outcomes::outcomes_query().record();
+        stored["rows"] = json!(4);
+        assert_eq!(b["inputs"]["stored"], stored);
         let live = &b["inputs"]["live"]["from_duels"];
         assert_eq!((live["used"].clone(), live["rule"].clone()), (json!(true), json!(duel_outcomes::RULE)));
         assert_eq!(live["outcomes"].as_array().unwrap().len(), 2);
