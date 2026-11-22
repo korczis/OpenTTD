@@ -100,6 +100,9 @@ id = "documents"
 group = "record"
 label = "published documents on the site and the wiki"
 docs = ""
+# Nearly every pull request adds a document, so this number in README.md made every two open pull
+# requests conflict on one line; it is shown on the site's overview, computed at build time.
+site_only = true
 
 # Tools that own derived text the regions do not: their own markers, or whole generated files.
 # `surfaces sync` runs every `sync` before it regenerates the regions, and `surfaces check` (the
@@ -119,6 +122,12 @@ id = "prismatic-mcp-docs"
 outputs = ["README.md", "research/prismatic-mcp/README.md"]
 sync = ["python3", "-B", "tools/research/generate_prismatic_docs.py"]
 check = ["tools/check-prismatic-docs.sh"]
+
+[[generators.items]]
+id = "ingame-menu"
+outputs = ["research/prismatic-mcp/README.md"]
+sync = ["python3", "-B", "tools/research/prismatic-mcp-menu"]
+check = ["python3", "-B", "tools/research/prismatic-mcp-menu", "--check"]
 
 [[generators.items]]
 id = "town-model"
@@ -149,3 +158,21 @@ id = "ab-charts"
 outputs = ["research/results"]
 sync = ["tools/research/mcp-ab", "--render"]
 check = ["tools/research/mcp-ab", "--render", "--check"]
+
+[[generators.items]]
+id = "atlas"
+outputs = ["README.md", "docs/atlas/hero-light.svg", "docs/atlas/hero-dark.svg"]
+sync = ["tools/research/atlas/atlas", "render"]
+check = ["tools/research/atlas/atlas", "render", "--check"]
+
+# Pages of the site beyond the documents, each drawn by its own script from a JSON data contract
+# that a declared command prints when the site is built (tools/surfaces/README.md, "Declared pages").
+# The cards the data carries are rendered as plain HTML; the script draws the interactive views; the
+# scenario under `e2e` is what tools/surfaces/pages-check drives in Chrome.
+[[pages.items]]
+id = "atlas"
+title = "Research Atlas"
+summary = "Every recorded duel, A/B and LAN battle record, and the README's own diagrams, as views you drive: filter, compare, follow a seed through the bot's revisions, walk the architecture. Each record is classed by what it can support, and every mark opens its evidence."
+data = ["tools/research/atlas/atlas", "data"]
+script = "tools/research/atlas/atlas.js"
+e2e = "tools/research/atlas/atlas.e2e.mjs"

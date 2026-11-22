@@ -190,8 +190,8 @@ decides only what acts on one company.
   - On a network client, the one chat path (`ClientNetworkGameSocketHandler::SendChat`) refuses
     an approval line, read as the server reads it.
   - Any armed process's console refuses `approve` and changes to approvers.
-  - The finer check (refuse only input injected by a script) follows once the control window's
-    injection scope (PR #66) is on master.
+  - Input a UI tool injects (`PrismaticMCP::UI::InjectingInput()`, the control window's injection
+    scope from PR #66) never approves either, armed or not.
 - Every decision records `approved_via`: the console, or the chat client and company, and
   whether a registered approver or the company's allow list allowed it.
 - A newer pending `ai.set_settings` for a company, or `ai.set_setting` of the same name,
@@ -209,7 +209,6 @@ cannot approve its own request through the panel.
 - a wall-clock expiry;
 - the per-plan unit itself (`openttd.plan.submit` with a label). Today a plan is one
   `ai.set_settings`, and supersede goes by a shared setting of the same company;
-- the injection check, once PR #66 lands;
 - refusing an armed client's own `CompanyAllowListControl` additions. A script driving it could
   otherwise widen a human company's derived approvers to a second client it controls.
 

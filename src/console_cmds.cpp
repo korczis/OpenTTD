@@ -2005,7 +2005,7 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 		} else {
 			/* A script can type into a client whose input is armed for MCP tools, so no approval
 			 * leaves it; a denial, which only withdraws, may. */
-			if (sub == "approve" && PrismaticMCP::UI::InputArmed()) {
+			if (sub == "approve" && (PrismaticMCP::UI::InputArmed() || PrismaticMCP::UI::InjectingInput())) {
 				IConsolePrint(CC_ERROR, "Refused: this client's input is armed for MCP tools (PRISMATIC_MCP_INPUT=1), so an approval cannot come from it. Approve in the panel, or from a client that is not armed.");
 				return true;
 			}
@@ -2035,8 +2035,8 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 	 * key by its client id (it need not be in any company's allow list), listed and removed by key. */
 	/* An armed process (PRISMATIC_MCP_INPUT=1) takes keystrokes from scripts: its console neither
 	 * approves nor changes who may (ADR 0038). A denial, which only withdraws, stays open. */
-	if (PrismaticMCP::UI::InputArmed() && (sub == "approve" || (sub == "approvers" && argv.size() >= 3))) {
-		IConsolePrint(CC_ERROR, "Refused: this process's input is armed for MCP tools (PRISMATIC_MCP_INPUT=1), so its console does not approve or change approvers. Use the panel or an unarmed console.");
+	if ((PrismaticMCP::UI::InputArmed() || PrismaticMCP::UI::InjectingInput()) && (sub == "approve" || (sub == "approvers" && argv.size() >= 3))) {
+		IConsolePrint(CC_ERROR, "Refused: this input may come from a script (the process is armed for MCP tools, PRISMATIC_MCP_INPUT=1, or a UI tool is injecting it), so the console does not approve or change approvers. Use the panel or an unarmed console.");
 		return true;
 	}
 	if (sub == "approvers" && (_network_server || !_networking)) {

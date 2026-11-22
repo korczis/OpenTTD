@@ -429,7 +429,7 @@ NetworkRecvStatus ClientNetworkGameSocketHandler::SendChat(NetworkAction action,
 	/* RESEARCH-ONLY (ADR 0038): a script can type into a client whose input is armed for MCP tools,
 	 * so no approval leaves it. This is the one path every chat of a client takes (the chat window,
 	 * 'say' and the console's forwarding), and the line is read exactly as the server reads it. */
-	if (PrismaticMCP::UI::InputArmed() && PrismaticMCP::detail::ParseChatApproval(msg).verb == PrismaticMCP::detail::ChatRequest::Verb::Approve) {
+	if ((PrismaticMCP::UI::InputArmed() || PrismaticMCP::UI::InjectingInput()) && PrismaticMCP::detail::ParseChatApproval(msg).verb == PrismaticMCP::detail::ChatRequest::Verb::Approve) {
 		IConsolePrint(CC_ERROR, "Refused: this client's input is armed for MCP tools (PRISMATIC_MCP_INPUT=1), so it sends no approval.");
 		return NetworkRecvStatus::Okay;
 	}
