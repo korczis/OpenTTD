@@ -57,7 +57,7 @@ The generator's full reference is [`tools/surfaces/README.md`](../../tools/surfa
 | [`tools/surfaces/surfaces`](../../tools/surfaces/surfaces) | entry point; creates the virtual environment and runs the generator |
 | [`tools/surfaces/surfaces.py`](../../tools/surfaces/surfaces.py) | discovery, rendering, regions, check |
 | [`tools/surfaces/assets/`](../../tools/surfaces/assets/) | the site's stylesheet source and client script |
-| [`surfaces.toml`](../../surfaces.toml) | the declared choices and the counted facts |
+| [`surfaces.toml`](../../surfaces.toml) | the declared choices, the counted facts and the generators `sync` and `check` run |
 | [`.github/workflows/surfaces.yml`](../../.github/workflows/surfaces.yml) | check, site and wiki on every push; deploy from the default branch |
 | [`.ai/repo/policy.yaml`](../../.ai/repo/policy.yaml) | `surfaces-on-commit` and `scoreboard-on-commit` in `enforcement` |
 | [`tools/check-prismatic-docs.sh`](../../tools/check-prismatic-docs.sh) | the contributor docs match their catalogue |
@@ -66,9 +66,13 @@ The generator's full reference is [`tools/surfaces/README.md`](../../tools/surfa
 
 - `tools/surfaces/surfaces check` runs in the pre-commit hook, in `tools/gate.sh change` and in
   `.github/workflows/surfaces.yml`. Exit codes: 0 ok, 2 usage, 10 findings, 11 drift.
-- `tools/surfaces/surfaces sync --check` writes nothing and exits 11 when a region would change.
-- There is no unit test suite for the generator in `tools/surfaces/`; it is checked by running it
-  over this repository.
+- `tools/surfaces/surfaces sync --check` writes nothing and exits 11 when a region would change
+  or a declared generator's check fails; `check` reports such a generator as a `generate` finding.
+- `tools/research/test_surfaces_diagrams.py` and `tools/research/test_surfaces_charts.py` test the
+  diagram and chart checks, the chart read-back and the table of contents; the rest of the
+  generator is checked by running it over this repository.
+- `tools/surfaces/diagrams-check` opens every built page in Chrome: each Mermaid diagram becomes
+  an SVG and each generated chart an ECharts canvas.
 
 ## Related
 

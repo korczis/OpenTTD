@@ -1176,10 +1176,16 @@ impl Game {
             self.event("server", &format!("refused to publish {kind}: not a plan.* kind of src/panel_events.rs KINDS"));
             return None;
         }
-        Some(self.bus.publish(kind, data))
+        let mirrored = data.clone();
+        let seq = self.bus.publish(kind, data);
+        // RESEARCH-ONLY, opt-in: the directive's decision and outcome as typed mesh records (src/panel_mesh.rs).
+        for line in crate::panel_mesh::take_lines() { self.event("mesh", &line); }
+        crate::panel_mesh::mirror(kind, seq, &mirrored, &format!("panel-{}", self.args.panel_port));
+        Some(seq)
     }
 
     pub fn events_json(&self) -> Vec<Value> {
+        for line in crate::panel_mesh::take_lines() { self.event("mesh", &line); }
         self.events.lock().unwrap().iter().cloned().collect()
     }
 
@@ -2379,8 +2385,8 @@ pub fn routes() -> Vec<Route> {
           None, h_graph),
         r("GET", "/api/instances", "instances", "Every OpenTTD MCP instance in the cluster (panels and GUI clients) from the shared registry, each checked with a live probe", true,
           None, h_instances),
-        r("GET", "/api/mesh", "mesh", "The Majordomus mesh this repository's server cooperates with (src/panel_mesh.rs, read-only): `mesh` (identity, trust policy, providers, tallies), `peers` (machines, runtimes, sessions, claims) and `nodes` (every discovered node with trust, presence and endpoints), read from $PRISMATIC_MAJORDOMUS_URL (default http://127.0.0.1:8741) /api/v1/mesh, /peers and /nodes unchanged; 200 also when Majordomus is down (`reachable` false, `errors` per part)", false,
-          None, crate::panel_mesh::h_mesh),
+        r("GET", "/api/mesh", "mesh", "The Majordomus mesh this repository's server cooperates with (src/panel_mesh_page.rs, read-only): `mesh` (identity, trust policy, providers, tallies), `peers` (machines, runtimes, sessions, claims) and `nodes` (every discovered node with trust, presence and endpoints), read from $PRISMATIC_MAJORDOMUS_URL (default http://127.0.0.1:8741) /api/v1/mesh, /peers and /nodes unchanged; 200 also when Majordomus is down (`reachable` false, `errors` per part)", false,
+          None, crate::panel_mesh_page::h_mesh),
         r("POST", "/api/instances/call", "instancesCall", "One MCP JSON-RPC call on a named instance of the cluster (a panel's server or a GUI client)", true,
           s(json!({"name": st(), "method": st(), "params": obj()}), &["name", "method"]), h_instances_call),
         r("GET", "/api/news", "news", "The news the owner's game window has shown, newest first (openttd.view.news.list on the GUI client); ?limit=N", true,

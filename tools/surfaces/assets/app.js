@@ -184,7 +184,50 @@
   const STATUS = { done: '#0E9F6E', active: '#1C64F2', open: '#9CA3AF' };
   const PRIMARY = '#1A56DB';
 
+  // Charts the documents carry as generated Mermaid (pie, xychart), drawn here from the same data
+  // with tooltip, zoom, a bar/line switch, a data view and image export. Palette: the site's.
+  const PALETTE = ['#d11f1a', '#8a8a8a', PRIMARY, STATUS.done, '#FDBA8C', STATUS.open];
+
   const builders = {
+    inline(_data, el) {
+      const s = JSON.parse(el.dataset.option);
+      const title = { text: s.title, left: 'center', top: 0, textStyle: { fontSize: 14 } };
+      const toolbox = { right: 36, feature: { dataView: { readOnly: true }, saveAsImage: {} } };
+      if (s.kind === 'pie') {
+        return {
+          color: PALETTE, title, toolbox,
+          tooltip: { trigger: 'item', formatter: (p) => escapeHtml(p.name) + ': ' + p.value + ' (' + p.percent + '%)' },
+          legend: { type: 'scroll', bottom: 0 },
+          series: [{
+            type: 'pie', radius: ['35%', '66%'], top: 24, bottom: 28,
+            itemStyle: { borderRadius: 4, borderColor: isDark() ? '#1F2937' : '#fff', borderWidth: 2 },
+            label: { formatter: '{b}: {c}' },
+            data: s.items.map(([name, value], i) => ({ name, value, href: (s.links || [])[i] })),
+          }],
+        };
+      }
+      const many = s.labels.length > 12;
+      const tilt = many || s.labels.some((l) => String(l).length > 12);
+      toolbox.feature.magicType = { type: ['bar', 'line'] };
+      return {
+        color: PALETTE, title, toolbox,
+        tooltip: { trigger: 'axis' },
+        legend: { top: 24 },
+        grid: { left: 8, right: 16, top: 56, bottom: many ? 48 : 16, containLabel: true },
+        xAxis: {
+          type: 'category', data: s.labels,
+          axisLabel: { interval: many ? 'auto' : 0, rotate: tilt ? 30 : 0, width: 140, overflow: 'truncate' },
+        },
+        yAxis: { type: 'value', name: s.y, nameTextStyle: { align: 'left' } },
+        dataZoom: many ? [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 4 }] : [],
+        series: s.series.map((x, i) => ({
+          type: x.type, data: x.data.map((value, k) => ({ value, href: (s.links || [])[k] })),
+          smooth: x.type === 'line', cursor: s.links ? 'pointer' : 'default',
+          name: x.name || (i === 0 ? (s.y || 'value') : x.type + ' ' + i),
+          itemStyle: x.type === 'bar' ? { borderRadius: [3, 3, 0, 0] } : undefined,
+        })),
+      };
+    },
     activity(data) {
       const weeks = Number(params.get('activity.weeks') || 52);
       const rows = weeks > 0 ? data.activity.slice(-weeks) : data.activity;
@@ -297,13 +340,14 @@
       if (!builders[id]) return;
       if (charts[el.id || id]) charts[el.id || id].dispose();
       const chart = window.echarts.init(el, isDark() ? 'dark' : null, { renderer: 'canvas' });
-      const option = builders[id](siteData);
+      const option = builders[id](siteData, el);
       option.backgroundColor = 'transparent';
       option.textStyle = { fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif' };
       chart.setOption(option);
       chart.on('click', (p) => {
-        const url = p.data && p.data.url;
-        if (url) location.href = root + url;
+        const d = p.data || {};
+        if (d.href) location.href = d.href;
+        else if (d.url) location.href = root + d.url;
       });
       charts[el.id || id] = chart;
     });

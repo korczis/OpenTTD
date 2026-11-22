@@ -54,7 +54,7 @@ Maps is excluded, because its terms forbid making terrain models from it.
 | [`tools/research/schema/real-world-scenario.v1.schema.json`](../../tools/research/schema/real-world-scenario.v1.schema.json) | the scenario contract every artifact is checked against |
 | [`tools/research/mcp-rhai/src/panel_realworld.rs`](../../tools/research/mcp-rhai/src/panel_realworld.rs) | the panel's routes (`GET /api/realworld`, `GET /api/realworld/scenario`, `POST /api/realworld/compile`), derived into OpenAPI, Swagger UI, the hub and Rhai |
 | [`tools/research/mcp-panel/static/realworld.html`](../../tools/research/mcp-panel/static/realworld.html), [`realworld.js`](../../tools/research/mcp-panel/static/realworld.js) | `/realworld`, and a page per place on one ECharts map by evidence class |
-| [`research/real-world-scenario.md`](../real-world-scenario.md) | the flow, the evidence rules, sources and terms, limits, the Brno slice |
+| [`research/real-world-scenario.md`](../real-world-scenario.md) | the flow, the evidence rules, sources and terms, limits, the Brno slice and Olomouc, a live second place run with no code changed |
 
 ## How it is tested
 

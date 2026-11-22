@@ -1,5 +1,5 @@
 'use strict';
-/* The Majordomus mesh inside the panel (src/panel_mesh.rs): the machines, runtimes and sessions this
+/* The Majordomus mesh inside the panel (src/panel_mesh_page.rs): the machines, runtimes and sessions this
    repository's Majordomus server cooperates with, and every node it has discovered. Everything comes
    from the panel's GET /api/mesh, which answers Majordomus's /api/v1/mesh, /peers and /nodes
    unchanged; providers, tallies, trust states and sessions are read from the answer, never typed
