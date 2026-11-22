@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0018
 kind: adr
 title: "Every savegame ever written stays loadable: saved fields are gated by SaveLoadVersion and old layouts are converted after load"
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -18,7 +18,7 @@ related:
   - file:src/saveload/afterload.cpp
   - file:docs/savegame_format.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/saveload/saveload.h
     - file:src/saveload/afterload.cpp
@@ -36,6 +36,8 @@ Players keep games for decades and scenarios are shared; a savegame is also the 
 a network game (ADR 0016). The format changes with almost every feature.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **One monotonic version.** `src/saveload/saveload.h:SaveLoadVersion` names every format
    revision; a new revision is appended, never inserted or renumbered.

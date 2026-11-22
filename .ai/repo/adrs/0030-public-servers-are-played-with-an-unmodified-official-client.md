@@ -3,13 +3,13 @@ schema: adr/v1
 id: adr-0030
 kind: adr
 title: Public servers are played with an unmodified official client; fork features run only on the owner's own servers, on a client built on the same release
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - network
   - security
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/network/core/network_game_info.cpp
     - file:cmake/scripts/FindVersion.cmake
@@ -42,6 +42,8 @@ Options: "Separate vanilla client (Recommended)", "Fork client on the release ta
 servers on the same version."
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Public servers: an unmodified official client.** Built from the upstream release tag (15.3, and
    16.0-beta5 for beta servers) in a detached worktree with no fork commit, so its revision is the

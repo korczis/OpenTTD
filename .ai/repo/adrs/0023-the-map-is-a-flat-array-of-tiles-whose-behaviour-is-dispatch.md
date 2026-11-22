@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0023
 kind: adr
 title: The map is a flat array of tiles whose behaviour is dispatched by tile type through a table of tile procedures
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -16,7 +16,7 @@ related:
   - file:src/tile_cmd.h
   - file:src/landscape.cpp
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/tile_cmd.h
     - file:src/landscape.cpp
@@ -35,6 +35,8 @@ industry, tunnel/bridge, object), and generic code — drawing, clearing, terraf
 entering, periodic tile loops — must act on any of them.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Flat storage.** The map is a fixed-size array of tiles with packed per-type bit fields,
    accessed through the `*_map.h` accessors.

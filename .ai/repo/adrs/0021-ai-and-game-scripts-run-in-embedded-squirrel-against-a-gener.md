@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0021
 kind: adr
 title: AI and Game Scripts run in embedded Squirrel against a generated API, and old API versions are kept through compatibility scripts
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -16,7 +16,7 @@ related:
   - file:bin/ai/compat_0.7.nut
   - file:cmake/scripts/SquirrelExport.cmake
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/ai/ai_info.cpp
     - file:bin/ai/compat_0.7.nut
@@ -35,6 +35,8 @@ Third parties write company AIs and Game Scripts that outlive many OpenTTD relea
 must not be able to break determinism or crash the game.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Embedded VM.** Scripts run in a vendored Squirrel VM (`src/3rdparty/squirrel/`, wrapped by
    `src/script/squirrel.cpp`), with an operation budget per tick and suspension when a command is

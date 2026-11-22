@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0013
 kind: adr
 title: Every OpenTTD process may run its own MCP server, and its view tools act on the local viewport only, with no command and no approval
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - mcp
@@ -14,7 +14,7 @@ related:
   - file:src/prismatic_mcp/prismatic_mcp_view.cpp
   - file:src/console_cmds.cpp
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:0cd5925bd2bc229e991f75c4cc876c250bdbc882
     - issue:I0038
@@ -31,6 +31,8 @@ to watch the bot build from a GUI client, whose console reaches no standard outp
 printed to the console was unreachable to a launcher.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Any process starts its own server.** `prismatic_mcp start [port] [token-file]` (console
    command, `src/console_cmds.cpp`) starts the server in a GUI client as in a dedicated server,
