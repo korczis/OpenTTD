@@ -26,12 +26,12 @@ master into the branch again, re-run the gate and push; auto-merge stays enabled
   merge commit is a plain merge, so every commit of the branch is kept.
 - The body says what changed and how it was validated, each check as PASS, FAIL or NOT RUN, and
   ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)` when an agent wrote it.
-- The upstream "Commit checker" (OpenTTD-git-hooks) is not a required check here and fails by
-  construction on any pull request that merges master: it holds every commit of the range to the
-  `<keyword>: [<component>] <Details>` form, and a merge commit (`Merge remote-tracking branch ...`,
-  GitHub's own `Merge pull request #N ...`) does not match. Pull requests #3 and #5 show it. "Every
-  check passes" therefore means every check but this one; the branch's own commits still follow the
-  form, which the pre-commit hook checks.
+- The "Commit checker" (OpenTTD-git-hooks) judges a pull request's own commits against the
+  `<keyword>( #<issue>)?: [<component>] <Details>` form and skips the merge commits that bring master
+  in (a4a295be0f), with the whole history fetched so every commit of the range is present
+  (eb8a984273). Before those two fixes it failed on every pull request that merged master (#3, #5)
+  and was treated as advisory; now it is one of the checks that must pass, and a failure names a
+  commit of the branch to fix (a new commit, never an amend of a pushed one).
 - A pull request is opened only against `korczis/OpenTTD`. Never against upstream OpenTTD: `gh`
   defaults to the parent repository of a fork, so `-R korczis/OpenTTD` is always given.
 - Direct pushes to `master` stay possible for a commit already green on Surfaces with master
