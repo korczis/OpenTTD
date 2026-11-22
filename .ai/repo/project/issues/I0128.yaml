@@ -1,0 +1,36 @@
+id: I0128
+milestone: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "A new PrismaticAI air route opens with as many planes as its towns' passengers and its airports support, not one"
+slug: prismatic-ai-air-route-opener
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Derive the opening plane count of an air route from the towns' passenger production, the plane's monthly capacity on that distance and AirportHasRoom, within air_planes as an upper bound, and test the derived opener against today's one plane on held-start pairs."
+why: "External review 2026-11-22 (digest C-27): AAAHogEx opens every route with two vehicles and had 4.1 planes at 1960-04 against PrismaticAI's 1.0. air_planes defaults to 1 at every difficulty (tools/research/prismatic-ai/PrismaticAI/info.nut:560-566) and both air builds pass it unchanged (autopilot.nut:122, main.nut:461). AirportHasRoom already exists (rich.nut:75) and is used only for growth."
+scope:
+  - "tools/research/prismatic-ai/PrismaticAI/air.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/autopilot.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/main.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/info.nut"
+  - "tools/research/prismatic-ai/README.md"
+  - "research/results/**"
+non_scope:
+  - "Planes added after the opening (fleet.nut, rich.nut)"
+  - "Airport type selection"
+depends_on:
+  - I0127
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#prismatic-ai-grows-and-recovers"
+acceptance_criteria:
+  - "BuildAirRoute is called with a derived count (at least 1, at most air_planes and what AirportHasRoom allows); the derivation is logged with its inputs"
+  - "A setting selects the derived opener; with it off the fitness seed reproduces the previous standings"
+  - "Held-start pairs on three seeds compare it with one plane; the default changes only beyond the opponent's spread"
+validation:
+  - "python3 -B tools/research/prismatic-ai/derive_docs.py --check"
+  - "python3 -m unittest tools/research/test_ai_battle.py tools/research/test_prismatic_ai_docs.py"
+  - "python3 tools/research/ai-battle/battle.py fitness"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

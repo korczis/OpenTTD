@@ -1,0 +1,35 @@
+id: I0133
+milestone: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "The shared-station train count (PR #7) and the rich-growth switches (PR #46) are measured on held-start pairs over three seeds, with an ablation arm that runs an earlier revision of the bot"
+slug: prismatic-ai-landed-fixes-measured
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Let `battle.py ablate` run a variant at a named git revision of PrismaticAI (exported with git archive, its revision in the record), then measure PR #7's fix against its parent and PR #46's rich_growth, compete, modernize and upgrade_track switches against their off arms, each on three held-start seeds, and record the verdicts."
+why: "External review 2026-11-22 (digests C-33, B-28). PR #7 (merged as b97d173856) stopped a rail line counting the trains of a line sharing its stations; its +7.2% geometric (5 of 8) was confounded by an inert script and marked indicative, and its gate run was skipped; the deterministic part is the churn drop (372/360 to 20/20). PR #46 (4c1dc9c355) reported its multi-seed ablation as inconclusive (within +-7% over 6 years). The fix in PR #7 has no switch, and `battle.py ablate` only varies settings of the working tree (tools/research/ai-battle/battle.py:2615-2620), so a before/after of an unswitched fix cannot be recorded today. The method is rule project.a-tuning-claim-needs-held-start-pairs."
+scope:
+  - "tools/research/ai-battle/battle.py"
+  - "tools/research/test_ai_battle.py"
+  - "tools/research/schema/**"
+  - "research/ai-battle/README.md"
+  - "research/results/**"
+non_scope:
+  - "Changing any bot default; a verdict that favours a change opens its own issue"
+  - "Starting matches while the owner's live game runs, or without the owner's go-ahead for that session (the tournament host is shared)"
+depends_on: []
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#prismatic-ai-grows-and-recovers"
+acceptance_criteria:
+  - "`battle.py ablate --variant name=@<rev>[:settings]` runs PrismaticAI exported at <rev>; the ablation record carries each variant's revision and tar checksum, and the schema and `battle.py check` accept it; a test covers the variant parser"
+  - "PR #7: its parent against b97d173856 on three held-start seeds, with the churn counts and final value per arm, recorded under research/results/"
+  - "PR #46: each switch off against on, on three held-start seeds, recorded under research/results/"
+  - "Each verdict is stated as favoured, not favoured or inconclusive against the opponent's spread, and linked from research/ai-battle/README.md"
+validation:
+  - "python3 -m unittest tools/research/test_ai_battle.py"
+  - "python3 tools/research/ai-battle/battle.py check"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

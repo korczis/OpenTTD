@@ -1,0 +1,29 @@
+id: I0167
+milestone: evaluations-are-fair-pre-registered-and-paired
+title: "The determinism A/B covers three seeds, a command stream from two running AIs, and a stressed arm with the panel polling and WebSocket load an open page makes, over a game year"
+slug: determinism-ab-extended
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Extend tools/research/determinism-ab: SEEDS takes a list fixed in the script's defaults (53744 and two more) before the first run; every arm starts the same two AI companies at the same tick, so the `cmd:` stream is non-empty and compared; the stressed arm adds the load a person's session puts on the server, the panel's page polls (/api/status, /api/bridge/companies, the store queries the pages make) and a client held on the panel's WebSocket feed as an open page is, beside the existing 14-resource MCP reads; DAYS defaults to 365. The control (idle against idle2, AIs included) must match or the harness aborts; the result compares sync and cmd lines per seed. research/prismatic-mcp/determinism-ab.md reports each seed and what the load was."
+why: "External review 2026-11-22 (digest A-05). research/prismatic-mcp/determinism-ab.md:3 'One map seed run three times'; :29-30 'cmd lines 0/0' in both comparisons, so no command was ever executed under load; tools/research/determinism-ab:44-45 defaults SEED to 53744 and DAYS to 16. The claim the intent criterion agent-reads-do-not-perturb-the-game makes is wider than one seed, 16 days and no commands."
+scope:
+  - "tools/research/determinism-ab"
+  - "research/prismatic-mcp/determinism-ab.md"
+non_scope:
+  - "Mutating MCP calls in the stressed arm; this A/B is about reads (mutations are commands and run in both arms identically or not at all)"
+  - "Fixing a nondeterminism it finds inside an AI; that is filed as its own issue with the desync log"
+depends_on: []
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#evaluations-are-pre-registered-and-paired"
+acceptance_criteria:
+  - "The run passes on three seeds over 365 game days with a non-zero, identical cmd stream in every arm, or the report names the first differing day and the line"
+  - "The stressed arm's request counts per endpoint are in the report"
+  - "research/prismatic-mcp/determinism-ab.md states the configuration, build and limits actually run"
+validation:
+  - "SEEDS='53744 4242 31337' DAYS=365 tools/research/determinism-ab"
+  - "tools/research/research report --experiment-id <determinism-ab-id>"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -1,0 +1,32 @@
+id: I0190
+milestone: every-changed-line-is-tested
+title: "The gated C++ research code (src/prismatic_mcp, research instrumentation) is built with coverage in a research profile, and its changed lines are judged by the gate"
+slug: cpp-research-coverage
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Add a coverage build profile for the research options (OPTION_RESEARCH_INSTRUMENTATION and OPTION_PRISMATIC_MCP_SERVER ON, clang -fprofile-instr-generate -fcoverage-mapping), run openttd_test '[prismatic_mcp]' and the research tests under it, export with llvm-cov, and let tools/coverage/changed-lines judge changed lines in src/prismatic_mcp/** and the other research-gated sources. Upstream OpenTTD code is out of scope: the gate judges only fork-owned, compile-gated research files, so a rebase onto upstream never trips it."
+why: "Owner order 2026-11-22 (every changed line tested, enforced). The MCP server and research instrumentation have Catch2 tests (build-mcp/openttd_test '[prismatic_mcp]'), but no line coverage is measured, so a changed C++ line can land untested."
+scope:
+  - "tools/coverage/**"
+  - "tools/research/research"
+  - "cmake/**"
+  - "src/tests/test_prismatic_mcp.cpp"
+non_scope:
+  - "Coverage of upstream OpenTTD sources"
+  - "Changing release or default builds; the coverage profile is research-only"
+depends_on:
+  - I0180
+serves:
+  - "openttd-validates-agent-driven-engineering#every-changed-line-is-tested"
+acceptance_criteria:
+  - "A research coverage profile builds and runs the prismatic_mcp tests, and llvm-cov exports line coverage for src/prismatic_mcp/**"
+  - "A fixture change in src/prismatic_mcp with no test fails the gate with file:line; adding the test makes it pass"
+  - "Default and release builds are unchanged (tools/gate.sh change still passes)"
+validation:
+  - "tools/coverage/changed-lines --base origin/master"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

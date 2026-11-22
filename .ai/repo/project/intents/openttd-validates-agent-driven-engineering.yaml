@@ -14,6 +14,9 @@ milestones:
 - the-fork-is-published-supervised-and-current
 - records-and-status-tell-the-truth
 - the-toolchain-carries-no-known-vulnerability
+- every-changed-line-is-tested
+- the-live-agent-workbench
+- the-panel-has-integrity
 satisfaction:
 - id: ground-rules-are-one-source
   criterion: "Every AGENTS.md ground rule maps to a project rule under .ai/repo/rules/project/, and every tracked provider file links AGENTS.md"
@@ -47,5 +50,17 @@ satisfaction:
   criterion: "The default branch has no open Dependabot alert: each is fixed by an upgrade or dismissed with a recorded reason the owner accepted"
   evidence: command
   ref: "test \"$(gh api 'repos/korczis/OpenTTD/dependabot/alerts?state=open' --jq length)\" -eq 0"
+- id: every-changed-line-is-tested
+  criterion: "Every change ships tests that run every line it adds or modifies (UI code through real Playwright browser tests), and a blocking rule plus a changed-line coverage gate in tools/gate.sh and on pull requests refuses any changed line no test ran, by file and line, with listed exemptions"
+  evidence: command
+  ref: "tools/coverage/changed-lines --base origin/master"
+- id: the-workbench-drives-the-game-end-to-end
+  criterion: "From the in-game console and the panel, an operator reaches any panel or hub operation through one bridge, swaps a Rhai service to a new revision and rolls it back while a run is in flight, edits and runs a pinned AlgoGlyph flow, and changes game state through an approval confirmed by an independent read from the game, each journey proven by a browser or console check that passes"
+  evidence: command
+  ref: "tools/research/mcp-journey-check <panel-url> && tools/research/mcp-scripts-check"
+- id: every-panel-control-works
+  criterion: "Every control and link of every panel and hub page does something visible or is disabled with a stated reason, every page survives Back/Forward and a deep-link reload, every view is derived from registries and probes, and the generic crawl reports 0 DEAD, SILENT, FAIL and UNREACHED against a disposable stack"
+  evidence: command
+  ref: "node --test tools/research/mcp-panel/test/*.test.mjs && tools/research/e2e-coverage --run --panel http://127.0.0.1:8841 --hub http://127.0.0.1:8842"
 created_at: 2026-11-15
 updated_at: '2026-11-22'

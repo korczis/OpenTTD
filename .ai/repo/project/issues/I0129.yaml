@@ -1,0 +1,34 @@
+id: I0129
+milestone: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "PrismaticAI scores a freight line on the engine it would buy and the rail type that engine runs best on, not on a fixed 3.7 tiles a day"
+slug: prismatic-ai-freight-score-by-engine
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Replace the constant transit speed in NextOwnFreightLine with the speed of the locomotive PickRailEngines would buy for that cargo on the rail type BestRailType picks, and let a new line use BestRailType whether or not the bank is rich."
+why: "External review 2026-11-22 (digest C-28): AAAHogEx estimates net income per engine and earns about twice per train (INFERRED cause). NextOwnFreightLine still assumes 3.7 tiles a day for every engine (tools/research/prismatic-ai/PrismaticAI/rail.nut:1220-1221,1242). PR #46 (4c1dc9c355) added BestRailType (infra.nut), but a new line uses it only while rich and upgrade_track=1; otherwise it takes the first type of AIRailTypeList (rail.nut:1128-1129)."
+scope:
+  - "tools/research/prismatic-ai/PrismaticAI/rail.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/infra.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/info.nut"
+  - "tools/research/prismatic-ai/README.md"
+  - "research/results/**"
+non_scope:
+  - "Converting existing track (UpgradeTrack)"
+  - "The planner's own line economics in tools/research/mcp-rhai"
+depends_on: []
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#prismatic-ai-grows-and-recovers"
+acceptance_criteria:
+  - "The line score's transit time uses the chosen engine's speed (capped by the rail type's limit); no literal speed is left in NextOwnFreightLine"
+  - "Each own-line plan logs the engine, rail type and speed it was scored on"
+  - "Behind a setting; with it off the fitness seed reproduces the previous standings; held-start pairs on three seeds decide the default"
+validation:
+  - "python3 -B tools/research/prismatic-ai/derive_docs.py --check"
+  - "python3 -m unittest tools/research/test_ai_battle.py tools/research/test_prismatic_ai_docs.py"
+  - "python3 tools/research/ai-battle/battle.py fitness"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

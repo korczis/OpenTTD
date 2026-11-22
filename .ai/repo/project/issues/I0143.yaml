@@ -1,0 +1,30 @@
+id: I0143
+milestone: the-planner-reads-one-coherent-priced-world
+title: "The investment model values a subsidy as a time-bounded candidate: its multiplier counts only while the line could still be built and delivering before the subsidy ends"
+slug: subsidy-valued-as-candidate
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "mcp-plan reads openttd://subsidies and adds each subsidy whose ends it can serve as a candidate (never an order), with eligibility, the time left after an estimated build time, and the multiplier applied only to the deliveries that fall inside that window. A planner without the resource says so in its answer and values no subsidy."
+why: "External review 2026-11-22 (digest B-04). No planner or bot reads subsidies today (`git grep -i subsid` in tools/research/mcp-rhai/src, tools/research/prismatic-ai and tools/research/mcp-human/src: only tools/research/mcp-rhai/src/panel.rs:1221, a comment). The candidate list is built in mcp-plan.rs from towns and the world graph only (tools/research/mcp-rhai/src/bin/mcp-plan.rs:400-417)."
+scope:
+  - "tools/research/mcp-rhai/src/bin/mcp-plan.rs"
+  - "tools/research/mcp-rhai/src/plan.rs"
+  - "tools/research/mcp-rhai/src/cargo.rs"
+  - "research/mechanisms/planner-and-algoglyph.md"
+non_scope:
+  - "Changing the bot to chase subsidies on its own"
+depends_on:
+  - I0142
+  - I0138
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "A fixture with a subsidy that ends before the line could deliver gives that candidate no bonus; one with time left gives a bonus only over the remaining months (unit tests)"
+  - "Each subsidised candidate names the subsidy id and the months it counted"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

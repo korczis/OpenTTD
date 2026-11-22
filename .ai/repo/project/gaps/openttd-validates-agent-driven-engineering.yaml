@@ -27,6 +27,15 @@ observations:
 - id: zip-advisories-open
   statement: "Added 2026-11-22: Dependabot, enabled that day, reports four open advisories on zip 6.0.0 in tools/research/mcp-rhai/Cargo.lock (1 critical, 2 high, 1 medium; fixed in >= 9.0.5), pulled in only as a build-dependency of libduckdb-sys (I0117)"
   source: file:tools/research/mcp-rhai/Cargo.lock
+- id: no-changed-line-gate
+  statement: "Added 2026-11-22 after the owner's order of that day (every changed line tested, enforced): the fork has no project.new-code-tested rule and no changed-line coverage gate; Python, JavaScript, Rust and C++ research code are tested only where tests were written (I0180, I0181, I0189, I0190)"
+  source: file:tools/gate.sh
+- id: workbench-not-joined
+  statement: "Added 2026-11-22 from an external review re-checked on master: the console reaches the agent only through the intent resolver (src/console_cmds.cpp:2158-2185), and a Rhai hot reload discards the previous good text, so there is no revision to pin or roll back to (tools/research/mcp-rhai/src/panel_scripts.rs:256-295) (I0192-I0201)"
+  source: file:src/console_cmds.cpp
+- id: crawl-not-recorded
+  statement: "Added 2026-11-22 from an external review re-checked on master: CI only checks that every page is declared and runs the node tests (.github/workflows/surfaces.yml:56, :65); the crawl's only result lives in the PR #47 description, and it fetches links without following them (tools/research/mcp-ui-crawl-check:15, :155-165) (I0203-I0211)"
+  source: file:tools/research/mcp-ui-crawl-check
 conditions:
 - criterion: ground-rules-are-one-source
   state: satisfied
@@ -68,6 +77,21 @@ conditions:
   because: "four zip advisories are open; milestone the-toolchain-carries-no-known-vulnerability owns the fix"
   observations:
   - zip-advisories-open
+- criterion: every-changed-line-is-tested
+  state: missing
+  because: "milestone every-changed-line-is-tested owns the fix; nothing in it has started"
+  observations:
+  - no-changed-line-gate
+- criterion: the-workbench-drives-the-game-end-to-end
+  state: missing
+  because: "milestone the-live-agent-workbench owns the fix; nothing in it has started"
+  observations:
+  - workbench-not-joined
+- criterion: every-panel-control-works
+  state: missing
+  because: "milestone the-panel-has-integrity owns the fix; nothing in it has started"
+  observations:
+  - crawl-not-recorded
 risks:
 - "The base-set prerequisite is outside the repository; a fresh machine reproduces the hang"
 - "Every rebase rewrites the published master and strands branches cut from the old base"
