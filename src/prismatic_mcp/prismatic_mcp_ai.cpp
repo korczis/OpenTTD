@@ -10,6 +10,7 @@
 #ifdef OTTD_PRISMATIC_MCP_SERVER
 
 #include "prismatic_mcp_ai.h"
+#include "prismatic_mcp_ai_control.h"
 #include "prismatic_mcp_commands.h"
 #include "prismatic_mcp_detail.h"
 
@@ -175,6 +176,7 @@ json Resource()
 				settings.push_back(DescribeSetting(item, config->GetSetting(item.name), running));
 			}
 		}
+		detail::AddAiSettingControls(settings);
 		companies.push_back({
 			{"company", c->index.base()}, {"running", running},
 			{"ai", config->HasScript() ? json(config->GetName()) : json(nullptr)},
@@ -347,7 +349,7 @@ json Tools()
 	json company = {{"type", "integer"}, {"minimum", 0}, {"maximum", MAX_COMPANIES - 1}};
 	json arr = json::array();
 	arr.push_back({{"name", "openttd.ai.list"},
-		{"description", "Every company's AI with its settings as its info.nut declares them (range, step, flags, labels) and the value the running script reads; plus the AIs that can be started"},
+		{"description", "Every company's AI with its settings as its info.nut declares them (range, step, flags, labels), the value the running script reads and the control a form edits each with (control: kind, options, picker, table or group); plus the AIs that can be started"},
 		{"inputSchema", {{"type", "object"}}}});
 	arr.push_back({{"name", "openttd.ai.set_setting"},
 		{"description", "Approval-gated: change one setting of a company's AI; while it runs only settings flagged in_game. The script reads it on its next GetSetting; the verdict reads it back"},

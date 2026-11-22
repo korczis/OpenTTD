@@ -1,39 +1,38 @@
 // Live arena (RESEARCH-ONLY): keeps a lineup of company AIs playing in the running game and
 // reports the standings in the game's chat and as a newspaper. It is the visible counterpart of
-// the headless LAN battle (research/ai-battle/README.md), and uses the same contestants.
+// the headless LAN battle (research/ai-battle/README.md), and plays the same contestants: read
+// from the battle's own configuration every round, never copied here.
 //
 //   Run it as a service on the panel's Scripts page (/scripts/arena), or once:
 //   tools/research/mcp-rhai/target/release/mcp-rhai tools/research/mcp-panel/rhai/arena.rhai
 //
-// The lineup below is the desired state. Every round the script compares it with the AI
-// companies running now (api_bots().running) and starts what is missing, one AI per round so
-// that each new company appears where the game puts it. As a service it restarts within a second
-// when this file is saved, so editing LINEUP changes the running game live: add an entry and
-// that AI joins. The script never stops or removes a company. Which AI owns a company comes from
-// the game itself (openttd.ai.list), not from start order.
+// The lineup is the desired state: the battle's contestants (tools/research/ai-battle/battle.json
+// `contestants`, which the panel serves as GET /api/battle/contestants, api_battleContestants()),
+// in the file's order, then LOCAL below, the arena's own entries the battle does not play. Every
+// round the script compares it with the AI companies running now (api_bots().running) and starts
+// what is missing, one AI per round so that each new company appears where the game puts it.
+// battle.json is read every round, so a contestant added there joins the next round; as a service
+// this script restarts within a second when this file is saved, so editing LOCAL changes the
+// running game live too. A panel that cannot serve the contestants (one built before the route,
+// a battle.json it cannot read) starts nothing that round and prints why. The script never stops
+// or removes a company. Which AI owns a company comes from the game itself (openttd.ai.list), not
+// from start order.
 //
 // Starting an AI goes through the server console (start_ai), as the operator would type it; it
 // changes who plays, not the game's rules. The chat line and the newspaper only display text.
 import "ttd" as ttd;
 
-// The desired lineup: an AI name as the game lists it, and the settings string start_ai hands
-// it ("" for the AI's defaults). Two entries with the same AI mean two companies of it.
-const LINEUP = [
-    #{ ai: "PrismaticAI",     settings: "" },
-    #{ ai: "AAAHogEx",        settings: "" },
-    #{ ai: "LuDiAI AfterFix", settings: "" },
-    #{ ai: "CivilAI",         settings: "" },
-    #{ ai: "AdmiralAI",       settings: "" },
-    // The battle's second PrismaticAI contestant, "PrismaticAI solo-max" (battle.json).
+// The arena's own entries, after the battle's contestants: an AI name as the game lists it, and
+// the settings string start_ai hands it ("" for the AI's defaults). Two entries with the same AI
+// mean two companies of it, so the battle's two PrismaticAI contestants and these two make four.
+const LOCAL = [
+    // "PrismaticAI solo-max", the battle's second PrismaticAI contestant before the GA's
+    // configuration took its place in battle.json.
     #{ ai: "PrismaticAI",
        settings: "aggressiveness=100,max_routes=30,intercity=1,own_lines=8,cash_reserve=5000" },
     // "PrismaticAI self-steward": solo-max with the in-bot steward on (ba51ba6022).
     #{ ai: "PrismaticAI",
        settings: "aggressiveness=100,max_routes=30,intercity=1,own_lines=8,cash_reserve=5000,self_steward=1" },
-    // The battle's current second PrismaticAI contestant (battle.json `contestants[1]`, the GA's
-    // configuration). The "solo-max" comment above names its predecessor.
-    #{ ai: "PrismaticAI",
-       settings: "aggressiveness=50,air_add_waiting=0,air_grow_money=0,air_level_max=35,air_level_step=0,air_max_tiles=480,air_routes_max=3,cash_reserve=0,catchment_stops=2,invest_ppv_div=5,invest_road_cap=14,line_budget=80000,max_routes=30,own_fail_pause=0,own_lines=0,rail_twin_max=2" },
 ];
 
 // Seconds between rounds, and rounds between two standings reports.
@@ -55,10 +54,19 @@ fn count_of(rows, ai) {
     n
 }
 
-// The first lineup entry that has fewer companies than it asks for, or ().
-fn missing(rows) {
+// The desired lineup: the battle's contestants as {ai, settings}, in battle.json's order, then
+// `local`. Throws when the panel cannot serve the contestants.
+fn lineup(local) {
+    let l = [];
+    for c in api_battleContestants().contestants { l.push(#{ ai: c.ai, settings: c.settings }); }
+    for e in local { l.push(e); }
+    l
+}
+
+// The first entry of `lineup` that has fewer companies than it asks for, or ().
+fn missing(rows, lineup) {
     let wanted = #{};
-    for e in global::LINEUP {
+    for e in lineup {
         let k = e.ai;
         wanted[k] = if k in wanted { wanted[k] + 1 } else { 1 };
         if count_of(rows, k) < wanted[k] { return e; }
@@ -134,12 +142,16 @@ fn report() {
 }
 
 ttd::wait_running(120);
-print(`arena: lineup of ${LINEUP.len()} AIs, a round every ${ROUND_S}s`);
+print(`arena: the battle's contestants (GET /api/battle/contestants) and ${LOCAL.len()} local entries, a round every ${ROUND_S}s`);
 let round = 0;
 let leader = "";
 loop {
-    let e = missing(running());
-    if e != () { start(e); }
+    let want = ();
+    try { want = lineup(LOCAL); } catch (err) { print(`lineup: ${err}; nothing starts this round`); }
+    if want != () {
+        let e = missing(running(), want);
+        if e != () { start(e); }
+    }
     if round % REPORT_EVERY == 0 {
         let now = report();
         if now != "" && now != leader {

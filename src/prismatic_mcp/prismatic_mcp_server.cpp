@@ -37,6 +37,7 @@
 #include "prismatic_mcp_world.h"
 #include "prismatic_mcp_commands.h"
 #include "prismatic_mcp_ai.h"
+#include "prismatic_mcp_ai_status.h"
 #include "prismatic_mcp_api.h"
 
 #include "../3rdparty/nlohmann/json.hpp"
@@ -309,6 +310,7 @@ json ResourceWays();  // road ways and rail tracks per tile (prismatic_mcp_graph
 json ResourceWorldGraph(); // the world as one typed graph (prismatic_mcp_graph.cpp)
 
 json ResourceAi() { json env = MakeEnvelope(); env["data"] = ai::Resource(); return env; }
+json ResourceAiStatus() { json env = MakeEnvelope(); env["data"] = ai_status::Resource(); return env; }
 
 /** Every typed action type this build can execute: the fixed table, then one "command.<Name>" per
  * game command the catalogue exposes. openttd.decision.list_action_types and the decision tools'
@@ -331,7 +333,8 @@ const auto RESOURCES = std::to_array<ResourceEntry>({
 	{"openttd://game/state", "Game state", "Mode, pause, map size and object counts", &ResourceGameState},
 	{"openttd://companies", "Companies", "All companies with basic finances (server-visible)", &ResourceCompanies},
 	{"openttd://commands", "Commands", "Every game command, derived from the command table: category, flags, parameter schemas", &ResourceCommands},
-	{"openttd://ai", "AIs", "Every company's AI with its settings as declared by its info.nut and their live values; the AIs that can be started", &ResourceAi},
+	{"openttd://ai", "AIs", "Every company's AI with its settings as declared by its info.nut, their live values and the control a form edits each with; the AIs that can be started", &ResourceAi},
+	{"openttd://ai/status", "AI status", "Every AI company's latest heartbeat line from its own script log (`<Name> heartbeat: key=value ...`), split into fields: an integer when the value is one, else its text; no field is named by the server; lines_since counts the lines logged after it", &ResourceAiStatus},
 	{"openttd://decisions", "Decisions", "Provenance trace: decision -> approval -> command -> observed verdict", &ResourceDecisions},
 	{"openttd://towns", "Towns", "Every town: id, name, tile, x/y, population, growth, exclusivity, noise, and per company its exact rating, statue, months unwanted and active/idle stations near the town (scroll_to a town by id; research/mechanisms/town-authority.md)", &ResourceTowns},
 	{"openttd://map", "Map", "The whole map: tile types, heights and owners, one string per row, encoding included", &ResourceMap},

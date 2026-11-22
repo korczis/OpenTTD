@@ -26,7 +26,7 @@ validation:
 evidence_required:
 - validation_run
 created_at: '2026-11-15'
-updated_at: 2026-11-16T19:55:57Z
+updated_at: 2026-11-22T16:30:12Z
 started_at: 2026-11-16T19:55:29Z
 started_event: sha256:0bbb3064eabc2d770672483c15ad9460abe926c503134fabefac3a5f9b3f44c6
 verified_at: 2026-11-16T19:55:46Z
@@ -40,3 +40,10 @@ evidence:
     result: "PASS, exit 0 (jsonschema 4.26.0 in a venv; system python3 has no jsonschema module). decision-contract.schema.json (draft 2020-12) defines request (decision directive {ai?,company_id?(0-14),settings?}, at least one of ai/company_id) and response (DecisionPullResult {called_url, raw_response=directive, applied_rcon {lines[]}|null}); decision-contract.example.json validates against it. Negative control: a directive with neither ai nor company_id fails (exit 1). Cross-checked with check-jsonschema ('ok -- validation done'). ARCHITECTURE.md §7 now points to both files. Matches the bridge's actual POST /decision/pull (bridge/main.py: GET PRISMATIC_DECISION_URL -> reload_ai/start_ai)."
     commit: 5900a9d314b730a22b1297e2a3bfd79f38406042
     recorded_at: 2026-11-16T19:55:48Z
+  - covers: "validation_run"
+    type: artifact
+    command: "git show -s 1bacb607ce"
+    result: "Commit correction, no new run: the work this issue's validation_run tested was delivered in 1bacb607ce (Add: Define the bridge's /decision/pull contract with a JSON Schema and example (I0011)). The earlier entry's commit 5900a9d314 is the HEAD of the shared checkout when it was recorded, an unrelated commit; that entry is kept as recorded."
+    artifact: "commit:1bacb607ceef89849cead198fe42d8d44d2a212c"
+    commit: ab4b31a0bcfc88e5ca4166befd7cd01259dd914b
+    recorded_at: 2026-11-22T16:30:12Z

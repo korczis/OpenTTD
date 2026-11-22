@@ -114,7 +114,7 @@ pub mod fr_author;
 /// freight-line slots (its planner key is unset, null or names it), else the refusal
 /// `{key, company, holder, writer, why}` read from the memory `s`.
 fn fr_refusal_in(s: &Shared, company: i64, writer: &str) -> Option<Value> {
-    fr_author::refusal(s.get(&fr_author::planner_key(company)).map(|e| e.value).as_ref(), company, writer)
+    fr_author::refusal(planner_in(s, company).as_ref(), company, writer)
 }
 
 /// Every company whose planner key names another writer than `writer`, as refusals in key order.
@@ -127,6 +127,16 @@ fn fr_refusals_in(s: &Shared, writer: &str) -> Vec<Value> {
     s.list(fr_author::PLANNER_KEY_PREFIX).iter()
         .filter_map(|(k, _)| fr_author::company_of_key(k))
         .filter_map(|c| fr_refusal_in(s, c, writer)).collect()
+}
+
+/// The value of `company`'s planner key in this panel's memory, None when it is unset: the
+/// `holder` fr_author::change_refusal checks a writer-named change against (src/panel_bot.rs).
+pub fn planner_of(company: i64) -> Option<Value> {
+    planner_in(shared(), company)
+}
+
+fn planner_in(s: &Shared, company: i64) -> Option<Value> {
+    s.get(&fr_author::planner_key(company)).map(|e| e.value)
 }
 
 pub fn entry_json(key: &str, e: &Entry) -> Value {
@@ -292,6 +302,15 @@ mod tests {
         assert_eq!(fr_refusals_in(&s, "replan").len(), 1);
         s.set("planner.0", Value::Null, "runbook", None).unwrap();
         assert!(fr_refusal_in(&s, 0, "replan").is_none(), "a null value hands the slots back");
+        assert_eq!((planner_in(&s, 0), planner_in(&s, 1), planner_in(&s, 2)), (Some(Value::Null), Some(json!("replan")), None));
+    }
+
+    /// planner_of reads this process's own memory, the one POST /api/rhai/shared writes. No test
+    /// writes a planner key there: the panel's tests share it, and planned() reads every such key.
+    #[test]
+    fn planner_of_reads_the_panels_own_memory() {
+        assert_eq!(planner_of(97), None);
+        assert!(shared().get(&fr_author::planner_key(97)).is_none(), "the same memory, the same key");
     }
 
     // ------------------------------------------------------------- the Rhai side of the same rule
@@ -302,7 +321,8 @@ mod tests {
     const RHAI_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai");
 
     /// An engine that resolves `import` from mcp-panel/rhai as the panel's does, with `shared_get`
-    /// over `store` and a running PrismaticAI company 0 whose `api_botSetting` calls are recorded.
+    /// over `store` and a running PrismaticAI company 0 whose `api_botSetting` calls are recorded
+    /// as `name@writer` (the writer the call names for the panel's planner-key check, or nothing).
     fn guard_engine(store: Rc<Shared>, sent: Rc<RefCell<Vec<String>>>) -> rhai::Engine {
         let mut e = rhai::Engine::new();
         e.set_module_resolver(rhai::module_resolvers::FileModuleResolver::new_with_path(RHAI_DIR));
@@ -316,7 +336,7 @@ mod tests {
                 "settings": names.iter().map(|n| json!({"name": n, "value": -1})).collect::<Vec<_>>()}]})).unwrap()
         });
         e.register_fn("api_botSetting", move |m: rhai::Map| -> rhai::Dynamic {
-            sent.borrow_mut().push(m["name"].to_string());
+            sent.borrow_mut().push(format!("{}@{}", m["name"], m.get("writer").map(|w| w.to_string()).unwrap_or_default()));
             let n = sent.borrow().len() as i64;
             rhai::serde::to_dynamic(json!({"status": "pending_approval", "approval_id": n})).unwrap()
         });
@@ -353,7 +373,9 @@ mod tests {
             let r = bp::apply_as(#{ build: #{ settings: #{ fr_from: 3, fr_to: 18, fr_cargo: 7, rail_a: 2 } } }, "ask_relay");
             #{ withheld: r.withheld, pending: r.pending.len(), held: r.held, first: r.lines[0] }"#;
         let (r, sent) = eval_with(&store, script);
-        assert_eq!(sent, ["fr_cargo", "fr_from", "fr_to", "rail_a"], "unset: as before");
+        // Each call names its writer, so the panel's own check of planner.0 (POST /api/bots/setting)
+        // lets the freight-line slots through.
+        assert_eq!(sent, ["fr_cargo@ask_relay", "fr_from@ask_relay", "fr_to@ask_relay", "rail_a@ask_relay"], "unset: as before");
         assert_eq!((r["withheld"].clone(), r["held"].clone()), (json!([]), Value::Null));
 
         store.set("planner.0", json!("battlebrain"), "runbook", Some(0)).unwrap();
@@ -392,6 +414,40 @@ mod tests {
         assert_eq!(r["names"], json!([]));
         assert_eq!(r["notes"].as_array().unwrap().len(), 2);
         assert!(r["notes"][0].as_str().unwrap().contains("fr_from -> 3 (ga): not asked, company 0's freight-line slots are planned by battlebrain"), "{}", r["notes"]);
+    }
+
+    /// A whole round of the live tuner over host reads stubbed here: the GA's best variant proposes
+    /// a freight-line slot and another setting, and each request names the tuner as its writer, so
+    /// the panel's planner-key check lets the slot through while the key is unset; held, nothing.
+    #[test]
+    fn a_tuner_round_names_its_writer_on_every_request() {
+        let round = |store: &Rc<Shared>| -> (Value, Vec<String>) {
+            let sent = Rc::new(RefCell::new(Vec::new()));
+            let mut e = guard_engine(store.clone(), sent.clone());
+            let dynamic = |v: Value| rhai::serde::to_dynamic(v).unwrap();
+            let setting = |name: &str| json!({"name": name, "value": 1, "min": 0, "max": 64, "step": 1, "ingame": true, "editable": true});
+            let bots = json!({"running": [{"id": 0, "name": "Prismatic", "ai": "PrismaticAI", "settings": [setting("fr_from"), setting("rail_a")]}]});
+            e.register_fn("api_bots", move || dynamic(bots.clone()));
+            e.register_fn("status", move || dynamic(json!({"ai": "PrismaticAI", "pending": []})));
+            e.register_fn("read", move |uri: &str| -> Result<rhai::Dynamic, Box<rhai::EvalAltResult>> {
+                if uri != "openttd://companies" { return Err(format!("{uri}: not stubbed").into()); }
+                Ok(dynamic(json!({"game_date": "1950-01-01", "data": {"companies": [
+                    {"id": 0, "name": "Prismatic", "company_value": 1000, "money": 5000, "fleet": {"total": 1}}]}})))
+            });
+            e.register_fn("loopback_get", move |_: &str| dynamic(json!({"variants": [
+                {"label": "v1", "settings": "fr_from=3,rail_a=2", "fitness": {"score": 1.0, "matches": 99}}]})));
+            e.register_fn("shared_entry", |_: &str| rhai::Dynamic::UNIT);
+            e.register_fn("con_say", |_: &str| rhai::Dynamic::UNIT);
+            let script = format!("{}\ntune_round()", head_of("prismatic_tune", "// ---- main"));
+            let out: rhai::Dynamic = e.eval(&script).unwrap_or_else(|err| panic!("{err}"));
+            (rhai::serde::from_dynamic(&out).unwrap(), sent.take())
+        };
+        let store = Rc::new(Shared::default());
+        let (every, sent) = round(&store);
+        assert_eq!(sent, ["fr_from@prismatic_tune", "rail_a@prismatic_tune"]);
+        assert_eq!(every, json!(600), "the round answers the seconds to the next one");
+        store.set("planner.0", json!("battlebrain"), "runbook", Some(0)).unwrap();
+        assert!(round(&store).1.is_empty(), "held by another planner: the tuner asks for nothing");
     }
 
     /// replan stands down on another writer's key and plans on its own name or an unset key.

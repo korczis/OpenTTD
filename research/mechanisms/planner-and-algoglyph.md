@@ -48,7 +48,10 @@ flowchart TB
 - **Transfer yards** (`yards.rs`). Before any bot builds one, the yard is proven offline: the
   better line's tiles are blocked and the second line is laid from a platform beside it.
 - **Investment** (`invest.rs`). The same facts handed to `transport-investment`, which also
-  considers routes through a hub, ranked by return on investment.
+  considers routes through a hub, ranked by return on investment. The kernel prices routes from
+  the payment formula alone, so the planner's `calibration` is applied to every route it returns:
+  monthly profit scaled by the mode's ratio, the lowest one for a route of several legs, then the
+  kernel's own score and ROI recomputed (`invest.rs calibrated`).
 - **Action plan.** `POST /api/actionplan` turns a set of actions with dependencies into a
   validated DAG and executable steps through `action-plan`, refused if it would overdraw.
 - **Calibration** (`calibrate.rs`). Running lines with a whole year of profit are matched to the
@@ -96,8 +99,8 @@ quarter before) and a rating of 360 (+107). Sindingbury Transport earned 71,323 
 company 1 earned 33,873; company 1 led for road vehicles and aircraft. Its record was 12 of 12
 lines earning, so a new line paid with at least 0.85 at the 90 % lower bound, and 18 settings were
 proposed, each waiting for approval. The round in January 1954 found the plan equal to the live
-settings. In that round track-planning found a route on the map for none of the 21 rail lines, so
-no line went to the bot unpriced and the round held. Mesh records: NOT RUN, because the panel had
+settings. <!-- open-finding kind=failed -->In that round track-planning found a route on the map for none of the 21 rail lines, so
+no line went to the bot unpriced and the round held.<!-- /open-finding --> <!-- open-finding kind=not-run -->Mesh records: NOT RUN, because the panel had
 no `$MAJORDOMUS_URL`.
 
 Why none of the 21 had a route. OBSERVED: the 30 rounds of that game in the :8800 store that
