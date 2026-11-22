@@ -65,6 +65,9 @@
 #include "industry.h"
 #include "network/network_gui.h"
 #include "network/network_survey.h"
+#ifdef OTTD_RESEARCH_INSTRUMENTATION
+#include "network/core/network_game_info.h" /* RESEARCH-ONLY: the company a client rejoins */
+#endif
 #include "misc_cmd.h"
 #include "timer/timer.h"
 #include "timer/timer_game_calendar.h"
@@ -1384,7 +1387,12 @@ void GameLoop()
 		if (_network_reconnect > 0 && --_network_reconnect == 0) {
 			/* This means that we want to reconnect to the last host
 			 * We do this here, because it means that the network is really closed */
+#ifdef OTTD_RESEARCH_INSTRUMENTATION
+			/* RESEARCH-ONLY: back into the company this client played (ResearchRejoinCompany). */
+			NetworkClientConnectGame(_settings_client.network.last_joined, _research_rejoin_company);
+#else
 			NetworkClientConnectGame(_settings_client.network.last_joined, COMPANY_SPECTATOR);
+#endif
 		}
 		/* Singleplayer */
 		StateGameLoop();
