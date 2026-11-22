@@ -1,0 +1,202 @@
+{
+ "case": "a capability match: rail-line-price resolves to track-planning in the real catalogue (algoglyph 1b8e009)",
+ "value": {
+  "at": {
+   "date": "1961-01-01",
+   "tick": 74000
+  },
+  "body": {
+   "claim": "track-planning satisfies rail-line-price in the AlgoGlyph catalogue sha256:97e08572418b44db62dd546959a396dceddb555aa5a49d12ad54a9bd7a455c8d at 1b8e009059c299b29d7a829d2d51d4e057304d4d",
+   "method": {
+    "id": "capability-match",
+    "version": "v1"
+   },
+   "params": {
+    "adapters": {
+     "owner": "battlebrain (tools/research/mcp-rhai/src/battlebrain_contract.rs, research/battlebrain/README.md)",
+     "retire_when": "when AlgoGlyph publishes, per kernel, a versioned input and output schema with units (research/battlebrain/algoglyph-contract-proposal.md): the matcher then reads the mapping from the catalogue, and an adapter shrinks to its domain check or goes"
+    },
+    "candidates": [
+     {
+      "compatible": true,
+      "engine": "custom",
+      "exact": true,
+      "exact_because": "A* with an admissible heuristic, tested against Dijkstra (algoglyph src/plates/track-planning/plan.ts): the least-cost route of its cost model",
+      "kernel": "track-planning",
+      "mapping": {
+       "inputs": [
+        {
+         "conversion": "the station tile itself, leaving by its exit (linecost.rs endpoints)",
+         "field": "from",
+         "kernel": "from"
+        },
+        {
+         "conversion": "the station tile itself, entered against its exit",
+         "field": "to",
+         "kernel": "to"
+        },
+        {
+         "conversion": "as read; ways, terrain and bridges ride along (hub_algoglyph.rs track_input)",
+         "field": "map",
+         "kernel": "map"
+        },
+        {
+         "conversion": "as read; without it result.money is null and result.cost is in tile units",
+         "field": "prices",
+         "kernel": "prices"
+        }
+       ],
+       "outputs": [
+        {
+         "field": "status",
+         "kernel": "result.status"
+        },
+        {
+         "field": "price",
+         "kernel": "result.money"
+        },
+        {
+         "field": "pieces",
+         "kernel": "result.pieces"
+        }
+       ]
+      },
+      "rejected": [],
+      "shape": "verified",
+      "units": "asserted by the adapter; the catalogue states none"
+     }
+    ],
+    "catalogue": {
+     "commit": "1b8e009059c299b29d7a829d2d51d4e057304d4d",
+     "digest": "sha256:97e08572418b44db62dd546959a396dceddb555aa5a49d12ad54a9bd7a455c8d",
+     "kernels": 53,
+     "source": "npm run --silent flow -- kernels"
+    },
+    "chosen": "track-planning",
+    "ranking": [
+     "exact: a kernel whose adapter states it returns an optimal answer ranks above a heuristic one",
+     "verified: a kernel whose catalogue input shape declares every key the adapter maps ranks above one whose shape is opaque",
+     "a tie after both rules is refused as ambiguous_capability; a kernel id never breaks a tie"
+    ],
+    "refusal": null,
+    "requirement": {
+     "goal": "what a rail line between two station tiles costs to build on this map, or that it has no route",
+     "id": "rail-line-price",
+     "inputs": [
+      {
+       "doc": "the first station site's end tile and exit {x, y, dir}",
+       "kind": "tile",
+       "name": "from"
+      },
+      {
+       "doc": "the second station site's end tile and entry {x, y, dir}",
+       "kind": "tile",
+       "name": "to"
+      },
+      {
+       "doc": "openttd://map data",
+       "kind": "resource",
+       "name": "map"
+      },
+      {
+       "doc": "openttd://economy/prices data: only with it is the price in game money",
+       "kind": "resource",
+       "name": "prices"
+      }
+     ],
+     "outputs": [
+      {
+       "doc": "found | unreachable | budget; only found prices a line",
+       "kind": "status",
+       "name": "status"
+      },
+      {
+       "doc": "what the route costs to build, in game money",
+       "kind": "amount",
+       "name": "price",
+       "unit": "money"
+      },
+      {
+       "doc": "the track pieces, bridges and tunnels to lay",
+       "kind": "list",
+       "name": "pieces"
+      }
+     ],
+     "used_by": "a freight-line candidate's track price (linecost.rs price; policy require_priced)"
+    },
+    "schema": "capability-match/v1",
+    "unadapted": [
+     "action-plan",
+     "bayes-update",
+     "human-pointing",
+     "knapsack-dp",
+     "pert-monte-carlo",
+     "simplex-method",
+     "transport-investment",
+     "articulation-points",
+     "bellman-ford",
+     "bipartite-matching",
+     "boruvka-mst",
+     "brandes-betweenness",
+     "breadth-first-search",
+     "bridges",
+     "centrality-comparison",
+     "connected-components",
+     "credible-path",
+     "critical-path",
+     "dag-shortest-paths",
+     "depth-first-search",
+     "dijkstra",
+     "edmonds-karp",
+     "effective-ownership",
+     "ego-network",
+     "euclidean-mst",
+     "euler-tour",
+     "fibonacci-sphere",
+     "floyd-warshall",
+     "force-atlas2",
+     "ford-fulkerson",
+     "geo-graph",
+     "hamilton-path",
+     "kahn-waves",
+     "kosaraju-scc",
+     "kruskal-mst",
+     "label-propagation",
+     "louvain-leiden",
+     "min-cost-flow",
+     "ownership-cycles",
+     "pagerank",
+     "personalised-pagerank",
+     "preflow-push",
+     "prim-mst",
+     "sir-cascade",
+     "spreading-activation",
+     "sugiyama-layout",
+     "tarjan-scc",
+     "topological-sort",
+     "transitive-closure",
+     "transitive-support",
+     "union-find-entity-merge",
+     "yen-k-shortest"
+    ],
+    "why": "the only compatible kernel"
+   },
+   "valid_until": "1961-02-01"
+  },
+  "derived_from": [
+   "bb:76337ad2a40c3a385fd670726b38b3e84db0389982678f2616ca1b4023c1f382"
+  ],
+  "id": "bb:92de00212e79a3dc7641a2ff559b49e6978411f0ba30332da1dcc997d625ac95",
+  "producer": {
+   "id": "battlebrain",
+   "version": "0.1.0"
+  },
+  "schema": "battlebrain-record/v1",
+  "scope": {
+   "company": 1,
+   "instance": "research-fixture"
+  },
+  "status": "valid",
+  "type": "inference"
+ }
+}
