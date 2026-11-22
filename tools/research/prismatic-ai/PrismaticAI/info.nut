@@ -601,6 +601,35 @@ class PrismaticAI extends AIInfo {
 			step_size = 1,
 			flags = CONFIG_INGAME,
 		});
+		/* Yield (fleet.nut RouteLoad, RoadPays; autopilot.nut AirRoutesPay): money goes where it earns. */
+		AddSetting({
+			name = "load_add_min",
+			description = "Yield: no vehicle is added to a road, air or water route (fleet growth, InvestSurplus) whose vehicles ran under this percent full over the last heartbeats, sampled while they run (fleet.nut RouteLoad; 0: off).",
+			min_value = 0, max_value = 100,
+			easy_value = 50, medium_value = 50, hard_value = 50, custom_value = 50, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "road_yield",
+			description = "Yield: a new bus route is built only while our road vehicles a year old earned, last year, at least this percent of their price between them; before any is a year old, only while fewer than road_probes road routes run (fleet.nut RoadPays; 0: off).",
+			min_value = 0, max_value = 200,
+			easy_value = 20, medium_value = 20, hard_value = 20, custom_value = 20, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "road_probes",
+			description = "Yield: how many bus routes run before any road vehicle is a year old and road_yield can judge them (fleet.nut RoadPays).",
+			min_value = 0, max_value = 30,
+			easy_value = 2, medium_value = 2, hard_value = 2, custom_value = 2, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "air_yield_routes",
+			description = "Yield: autopilot air routes beyond air_routes_max, one at a time, each once every air route we fly has planes a year old that earned last year at least their price / invest_ppv_div a plane (autopilot.nut AirRoutesPay; 0: off).",
+			min_value = 0, max_value = 30,
+			easy_value = 8, medium_value = 8, hard_value = 8, custom_value = 8, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
 	}
 }
 
