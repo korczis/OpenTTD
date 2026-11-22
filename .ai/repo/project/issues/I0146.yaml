@@ -1,0 +1,29 @@
+id: I0146
+milestone: the-planner-reads-one-coherent-priced-world
+title: "Calibration measures real against predicted profit per service and leg, so a multi-leg service, a shared cost and transfer waiting time are measured rather than dropped"
+slug: calibration-per-service
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "calibrate.rs groups running vehicles into transport-service/v1 services by their order chains (read from the order load/unload/transfer flags), attributes each leg's income including the feeder share, and reports real against predicted profit per service and per leg. A vehicle whose orders form no service is listed with the reason, as today."
+why: "External review 2026-11-22 (digest B-08). tools/research/mcp-rhai/src/calibrate.rs:5-6 matches 'vehicles with two station orders, grouped by the station pair', so any vehicle with a third stop or a transfer is not measured, and no service_id exists anywhere on origin/master."
+scope:
+  - "tools/research/mcp-rhai/src/calibrate.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-plan.rs"
+  - "research/mechanisms/planner-and-algoglyph.md"
+non_scope:
+  - "Changing how a calibration factor feeds back into the next plan"
+depends_on:
+  - I0140
+  - I0145
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "A fixture with a two-leg transfer service is calibrated per leg and per service; the feeder share is counted once (unit test)"
+  - "The existing two-stop fixtures give the same factors as before"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan --bin mcp-panel"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

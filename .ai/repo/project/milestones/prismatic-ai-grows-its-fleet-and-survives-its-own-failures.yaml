@@ -1,0 +1,21 @@
+id: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "PrismaticAI grows its fleet and survives its own failures"
+slug: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+order: 120
+priority: p1
+problem: "PrismaticAI lost every published battle match to AAAHogEx, and its fleet is the gap: 55 vehicles against 377 by 1980 at about the same profit per vehicle, with 160-480k idle in the bank in 1960-62 while AAAHogEx held 23-48k (External review 2026-11-22). PR #46 (4c1dc9c355) lifted the caps once the bank is rich, but below that every growth gate still holds: InvestSurplus buys nothing until 500k is usable at the defaults (tools/research/prismatic-ai/PrismaticAI/fleet.nut:60,71), demand-driven growth stops at a hard-coded 4 planes or 8 road vehicles per route (fleet.nut:165), a route build draws the full loan and keeps it (autopilot.nut:120-122, main.nut:459-462) while RepaySurplus keeps twice the reserve (main.nut:628), and a new air route opens with one plane (info.nut:560-566). Its failures cost it too: a rail line that fails after its track is laid returns with its stations and track standing (rail.nut:794-812, 933-993), a road pair whose stops are not joined or whose depot fails is not blacklisted (intercity.nut:143-152), the road search refuses every slope (intercity.nut:52), and the self-steward lineup hoards 485k to 1.1M because its builds fail, so it is exempt from the fitness hoard check (research/ai-battle/README.md:329-336, tools/research/ai-battle/battle.json:86-89). The town-authority model is not even loaded (main.nut:98-113 requires neither town.nut nor town_model.nut), the bot picks rail station sites itself instead of the planner's (rail.nut:378 against tools/research/mcp-rhai/src/sites.rs:1-3), PR #46's restart survival (restore.nut) is proven by one manual save/load run, and the shared-station fix of PR #7 (b97d173856) was measured as indicative only. Which gate binds the fleet is UNKNOWN."
+outcome: "The bot names the gate that stopped each purchase, the binding early gates are settings and are lifted only on held-start evidence, early money follows build needs instead of sitting in the bank, air routes open with the planes the demand and airports support, freight lines are scored on the engine actually bought, every failed build is cleaned up and never retried, the road search crosses slopes the game accepts, every fitness lineup (self-steward included) is held to spend, the town model informs at least one tested decision, a handed line is built at the planner's site, and a committed scenario proves that a save/load mid-run neither duplicates a line nor repeats a fleet move."
+acceptance_criteria:
+- "Every PrismaticAI fitness lineup, self-steward included, is listed in fitness.must_not_hoard and passes `battle.py fitness`"
+- "A level-3 decision log of a fitness match names, per heartbeat, the gate that stopped InvestSurplus and AdjustFleet from adding a vehicle"
+- "No fitness or ablation match ends with a bot station that a failed build left without track or vehicles, and no failed pair is tried twice"
+- "A committed recovery scenario (save and load mid-run, one forced build failure, one fleet move) passes and is part of the research unit tests or the fitness command"
+- "Every default changed in this milestone is backed by held-start pairs on three seeds recorded under research/results/, or reported as inconclusive (rule project.a-tuning-claim-needs-held-start-pairs)"
+validation:
+- "python3 -m unittest tools/research/test_ai_battle.py tools/research/test_prismatic_ai_docs.py"
+- "python3 -B tools/research/prismatic-ai/derive_docs.py --check"
+- "python3 tools/research/ai-battle/battle.py fitness"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

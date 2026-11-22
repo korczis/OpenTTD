@@ -1,0 +1,32 @@
+id: I0172
+milestone: prismatic-closes-one-real-loop
+title: "The mesh-record blackboard runs live against the installed Majordomus 1.2.0: Rhai and the panel write and read typed records, and the journal's refusals come from the real server"
+slug: mesh-records-live
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "tools/research/mesh-records-check uses this checkout's `majordomus serve ensure` server, opens a session with a claim, and drives the fork's clients live. A Rhai script writes an observation and a decision with mesh_record_write and reads them back with mesh_records. It revises a record at the revision it read, and is refused stale_revision at an older one. A second session is refused not_own and supersedes instead. A write outside the claim is refused out_of_scope. With $MAJORDOMUS_URL and $MAJORDOMUS_SESSION set, the panel mirrors one plan.directive and its outcome as a decision record and an outcome record that cite each other. The check says NOT RUN, with the reason, when majordomus is older than 1.2.0 or its mesh is off. research/agent-loop.md's Coordinate row cites the run."
+why: "External review 2026-11-22 (digest C-38, B-35). research/agent-loop.md:51 says the clients are 'contract-tested against a fixture', that 'the live check waits for an installed 1.2.0 majordomus (this machine has 1.0.2)', and that the panel's mirroring is 'contract-tested only'. tools/research/mcp-rhai/src/panel_mesh.rs:6-8 makes the mirroring opt-in. On 2026-11-22 `majordomus --version` on this Mac reports 1.2.0, so the precondition holds. The typed records themselves are DONE: prismatic-majordomus d02c59d447c outside this repository, and the fork's clients in f66a074d89 (mesh_records.rs) and 58f4951b2e (panel_mesh.rs)."
+scope:
+  - "tools/research/mesh-records-check"
+  - "tools/research/mcp-rhai/src/mesh_records.rs"
+  - "tools/research/mcp-rhai/src/panel_mesh.rs"
+  - "research/agent-loop.md"
+non_scope:
+  - "Editing prismatic-majordomus. A defect found there goes to that repository as an issue with the failing request"
+  - "A fork-local blackboard; the owner chose the mesh journal (research/agent-loop.md:128-135)"
+  - "Battlebrain's Director records (I0153)"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
+acceptance_criteria:
+  - "mesh-records-check passes live, and each refusal code it reports comes from the real server's answer"
+  - "One live directive's decision and outcome records are listed by `mesh.records` with evidence state 'evidenced'"
+  - "The check exits 3 NOT RUN on a fixture of an older majordomus"
+validation:
+  - "tools/research/mesh-records-check"
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-rhai --bin mcp-panel"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

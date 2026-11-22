@@ -1,0 +1,39 @@
+id: I0165
+milestone: evaluations-are-fair-pre-registered-and-paired
+title: "A minimal decisive PrismaticAI vs AAAHogEx experiment: same seeds, settings and length, each seed played in both start-slot orders, and the value ratio reported with an interval"
+slug: prismatic-vs-aaahogex-paired
+priority: p1
+profile: deep-work
+parallel_safe: false
+objective: "Add `battle.py paired --protocol <file>`. The protocol (I0161) names the lineup: PrismaticAI default against AAAHogEx alone, or the tournament's fixed field. It also names the seeds, chosen before the first run, the 20-year length and the tournament settings. Each seed is played twice with the two contestants' start slots swapped, on arenas running the same game build (I0121). The paired record gives, per seed and slot order, the PrismaticAI/AAAHogEx ratio of company value, of money minus loan and of vehicle count. It also gives each ratio's geometric mean with a bootstrap interval over seeds, and the slot-order effect. Each match links its decision logs (I0118), loans (I0119) and read-back settings (I0120)."
+why: "External review 2026-11-22 (digest C-31, B-42). research/ai-battle/README.md:56 shows AAAHogEx with 41 played and 41 won. :431-436: the start order rotates once per seed, and on one seed the same genes scored 11.8M from slot 0 and 2.9M from slot 2, so slot order alone can swamp a result. The paired intervals in the README (:384-391) compare PrismaticAI configurations with each other, never with AAAHogEx. The records hold no decision log and no loan (I0118, I0119)."
+scope:
+  - "tools/research/ai-battle/battle.py"
+  - "tools/research/test_ai_battle.py"
+  - "research/ai-battle/README.md"
+  - "research/results/**"
+  - "research/experiments/**"
+non_scope:
+  - "Changing either AI; a change to PrismaticAI is I0166"
+  - "Starting matches while the owner's live game runs, or without the owner's go-ahead for that session (the tournament host is shared, as in I0124)"
+depends_on:
+  - I0161
+  - I0118
+  - I0119
+  - I0120
+  - I0121
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#evaluations-are-pre-registered-and-paired"
+acceptance_criteria:
+  - "Tests cover the slot swap, the ratio and the bootstrap interval on fixture matches"
+  - "The protocol's commit precedes the first match, and every seed ran in both slot orders on one game build, or is listed as excluded with its reason"
+  - "The paired record and its page give each ratio's geometric mean with an interval and the slot-order effect, and the README cites them next to the leaderboard"
+validation:
+  - "python3 -m unittest tools/research/test_ai_battle.py"
+  - "tools/research/preregistration check research/experiments"
+  - "python3 tools/research/ai-battle/battle.py paired --protocol research/experiments/<id>.yaml"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -1,0 +1,32 @@
+id: I0203
+milestone: the-panel-has-integrity
+title: "A bot setting is badged live only when the running binary can change it, and a setting it cannot change says why"
+slug: bot-setting-live-badge-is-true
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Derive the bot-settings card's `live` badge from two facts at once: the AI declares the setting changeable while it runs (in_game) and the instance publishes openttd.ai.set_settings or openttd.ai.set_setting in its tools/list (panel_bot.rs reports both). A setting the binary cannot change shows a grey `start only` badge with the reason, and the card's message, badge and disabled state come from one derived value instead of three separate checks."
+why: "External review 2026-11-22 (digest A-46). tools/research/mcp-panel/static/bots.js:141 renders the green `live` badge from `st.ingame` alone, while the card's capability check sits apart at bots.js:196 (`canSet`, from panel_bot.rs:342, which reads only openttd.ai.set_setting from tools/list); a binary without the tool shows `live` on settings it cannot change. Master also publishes openttd.ai.set_settings (src/prismatic_mcp/prismatic_mcp_ai.cpp:356), which the capability check does not count."
+scope:
+  - "tools/research/mcp-panel/static/bots.js"
+  - "tools/research/mcp-rhai/src/panel_bot.rs"
+  - "tools/research/mcp-panel/test/bots.test.mjs"
+  - "tools/research/mcp-panel/test/bots-page.test.mjs"
+non_scope:
+  - "Switching Apply to one openttd.ai.set_settings plan (I0200)"
+  - "The shared form renderer (I0204)"
+depends_on:
+  - I0200
+serves:
+  - "openttd-validates-agent-driven-engineering#every-panel-control-works"
+acceptance_criteria:
+  - "With a fake instance publishing neither tool, no setting is badged live and each says why; with either tool, in_game settings are live; node tests cover the three cases"
+  - "panel_bot.rs reports set_settings beside set_setting in `live`, and a cargo test covers it"
+  - "The badge, the disabled state and the card's message read one derived value; a test fails if they disagree"
+validation:
+  - "node --test tools/research/mcp-panel/test/bots.test.mjs tools/research/mcp-panel/test/bots-page.test.mjs"
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml panel_bot"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
