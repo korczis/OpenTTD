@@ -51,6 +51,10 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 | master `5cc9cdbf8d` (#213 rail search fail-fast, #163 ships off, #217 depot guard) vs `c5bf32182a` | 24 | +11.8% | 19 |
 | #213 alone (`3e4ec154ff`) vs `c5bf32182a` | 24 | +14.4% | 17 |
 | #163 (off) and #217 depot guard (`5cc9cdbf8d`) vs `3e4ec154ff` | 24 | -2.3% | 14 |
+| greedier rail A* estimate `H_TILE=8` vs 7, on `5cc9cdbf8d` | 24 | +9.4% | 18 |
+| `H_TILE=9` / `H_TILE=11` vs 7, on `5cc9cdbf8d` | 24 / 12 | +8.8% / +8.7% | 15 / 4 |
+| master `6333347512` (#232 second track, sibling claims, air yield log) vs `5cc9cdbf8d` | 24 | -1.0% | 12 |
+| `H_TILE=8` vs 7, on `6333347512` | 24 | +0.9% | 12 |
 
 # How to apply it
 
@@ -68,5 +72,8 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
   sells the other's trains.
 - Keep every search bounded: a rail search that ran most of a game year before giving up cost 14.4%
   of value (#213). Time the bot spends searching is time its money sits idle.
+- A gain measured on one master does not carry to the next: `H_TILE=8` replayed at +9.4% over 24
+  matches on `5cc9cdbf8d` and at +0.9% on `6333347512`, three bot changes later. Re-measure on the
+  current master before opening a PR.
 - A single replay is chaotic: `07472abe/m-0006` moved by up to 15% with no behavioural change.
   Use 8 or more matches.

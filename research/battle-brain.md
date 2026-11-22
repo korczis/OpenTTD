@@ -209,6 +209,10 @@ that ran most of a game year left the bot's money and its other plans idle for t
 own when the arena resumes: rows played before `5cc9cdbf8d` by 1/1.118, on top of the 1/1.057 for rows
 before `fced659668`.
 
+Master `6333347512` (#232: a second track is no longer refused for a cost its search only estimated;
+two companies no longer build from the same producer; air income logged per aircraft) replays at
+-1.0% against `5cc9cdbf8d` (24 matches, 12 up), within noise: no rebase of its own.
+
 ### Why trust-region parents need four rows
 
 In edition `eb9cae38` the safe pick `g241.brainSafe` finished last on seed 199435860. The four other
