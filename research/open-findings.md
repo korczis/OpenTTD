@@ -64,7 +64,7 @@ pie showData title Open findings by kind
 
 | Kind | Finding | Evidence | Follow-up | Label |
 |---|---|---|---|---|
-| blocked | No tracked text claims a shipped MCP capability is absent or planned: the server header and research/mcp-control.md describe today's code — waits on I0110 (open) | [I0111](../.ai/repo/project/issues/I0111.yaml):17 | [I0110](../.ai/repo/project/issues/I0110.yaml) | DERIVED |
+| blocked | No tracked text claims a shipped MCP capability is absent or planned: the server header and research/mcp-control.md describe today's code — waits on I0110 (active) | [I0111](../.ai/repo/project/issues/I0111.yaml):17 | [I0110](../.ai/repo/project/issues/I0110.yaml) | DERIVED |
 | blocked | One capability matrix states, per capability, its owner, code path, live input, fallback, tests and end-to-end status, labelled OBSERVED/DERIVED/INFERRED, and a check keeps it honest — waits on I0111 (open) | [I0114](../.ai/repo/project/issues/I0114.yaml):20 | [I0111](../.ai/repo/project/issues/I0111.yaml) | DERIVED |
 | blocked | The research/prismatic-mcp contributor catalogue takes each document's title and kind from the document itself; nothing is written by hand — waits on I0111 (open) | [I0115](../.ai/repo/project/issues/I0115.yaml):18 | [I0111](../.ai/repo/project/issues/I0111.yaml) | DERIVED |
 | blocked | The battle referee's REF Q sample carries every company's loan and maximum loan, and the battle record and charts use them — waits on I0118 (open) | [I0119](../.ai/repo/project/issues/I0119.yaml):19 | [I0118](../.ai/repo/project/issues/I0118.yaml) | DERIVED |
