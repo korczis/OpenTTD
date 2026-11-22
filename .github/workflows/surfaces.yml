@@ -52,7 +52,7 @@ jobs:
       - name: Check the README scoreboard against research/results
         run: tools/research/readme-scoreboard --check
 
-      - name: Every web UI page has a browser check (rule project.web-ui-is-covered-end-to-end)
+      - name: Every web UI page and control has a browser check (rule project.web-ui-is-covered-end-to-end)
         run: tools/research/e2e-coverage
 
       - name: Build the site
@@ -60,6 +60,9 @@ jobs:
 
       - name: Install the browser driver (playwright-core, from the panel's lockfile)
         run: npm ci --no-audit --no-fund --prefix tools/research/mcp-panel
+
+      - name: The web UI's own tests, one kit and no fetch past it (rule project.web-ui-is-covered-end-to-end)
+        run: node --test tools/research/mcp-panel/test/*.test.mjs
 
       - name: Every Mermaid diagram renders in Chrome (rule project.docs-are-derived-and-current)
         env:

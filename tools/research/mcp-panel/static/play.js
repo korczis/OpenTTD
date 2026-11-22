@@ -32,14 +32,18 @@
   if (typeof module !== 'undefined') { module.exports = { bridgeUrl, playArgs, playConfig, statusText, PLAY_CFG }; }
   if (typeof document === 'undefined') return;
 
-  const $ = (id) => document.getElementById(id);
+  const { $, api } = globalThis.PanelKit ?? require('./shell.js').KIT;
   const DOT = { loading: 'bg-amber-400 animate-pulse', live: 'bg-green-500', lost: 'bg-red-500', idle: 'bg-gray-500' };
   const setState = (text, tone) => {
     $('play-state').textContent = text;
     $('play-dot').className = `inline-block w-2 h-2 rounded-full ${DOT[tone] || DOT.idle}`;
   };
+  // The game's own controls act on the game: while the overlay stands in for it, they are disabled
+  // (a button under an overlay can be seen and not pressed).
+  const gameControls = (on) => { for (const id of ['play-focus', 'play-fullscreen']) $(id).disabled = !on; };
   const overlay = ({ title, message, command, spinner = false, progress = null }) => {
     $('play-overlay').classList.remove('hidden');
+    gameControls(false);
     $('play-title').textContent = title;
     $('play-message').textContent = message || '';
     $('play-command').classList.toggle('hidden', !command);
@@ -48,7 +52,7 @@
     $('play-progress').classList.toggle('hidden', progress === null);
     if (progress !== null) $('play-progress').value = progress;
   };
-  const hideOverlay = () => $('play-overlay').classList.add('hidden');
+  const hideOverlay = () => { $('play-overlay').classList.add('hidden'); gameControls(true); };
 
   /* Fullscreen: the stage (canvas and HUD), so the game fills the screen; SDL follows the size. */
   const stage = $('stage');
@@ -81,10 +85,10 @@
 
   let started = false;
   async function start() {
-    let info;
-    try { info = await (await fetch('/api/play')).json(); } catch (e) {
+    const info = await api('/api/play');
+    if (!info.ok) {
       setState('panel unreachable', 'lost');
-      return overlay({ title: 'The panel does not answer', message: String(e) });
+      return overlay({ title: 'The panel does not answer', message: info.error || `HTTP ${info.status}` });
     }
     $('play-build').textContent = `client: ${info.dir} · game port ${info.game_port}`;
     if (!info.built) {

@@ -1,0 +1,250 @@
+#!/usr/bin/env node
+// RESEARCH-ONLY. The generic browser crawl of rule project.web-ui-is-covered-end-to-end: every
+// control of every page of the web UI, driven in a real Chrome against a running stack. Nothing is
+// listed here.
+//
+// - Pages come from the one shell (static/shell.js APPS, through e2e-coverage's shellPages).
+// - Controls come from the live DOM of each page: links, buttons, fields, selects, checkboxes,
+//   [role=button|tab|switch|menuitem], [onclick]. They are taken again after every action, so a
+//   control that only appears after another (a row, a dialog, a tab) is found and driven too.
+// - A control's identity is inferred from its markup: its id, else its data-* attribute names, else
+//   its label, plus its tag and its place in the page. Repeated rows (one per approval, one per
+//   company) share one pattern, and one representative is driven for the whole pattern.
+//
+// What each control must do:
+// - **A link** to this server answers below 400 (fetched, not followed).
+// - **A button, field, select or checkbox** must do something you can see: a request, a change
+//   in the page, a navigation, focus or ARIA state, or a toast. A control that does none of
+//   these is DEAD.
+// - **Errors.** A 4xx/5xx answer or a failed request (an action's, or a poll's in the background)
+//   must be shown to the person: a toast ([data-toast], static/shell.js notify), or a visible
+//   element with text that the kit marked data-failure="<METHOD> <path>: ..." (api()/image() with
+//   shownIn). Otherwise it is SILENT. A page error (an uncaught exception) always fails.
+//
+// Controls whose label says they end something (stop, quit, kill, delete, remove, reset, close)
+// run last on their page, so they cannot take the stack away from the other controls. A
+// navigation is followed by a return to the page.
+//
+// e2e-covers: *
+//
+// Usage: tools/research/mcp-ui-crawl-check <panel-url> [--hub <hub-url>] [--json FILE] [--max-actions N]
+//
+// The stack must be a disposable one, because the crawl presses everything:
+// - start it with tools/research/mcp-e2e, giving MCP_RHAI_PATH a scratch copy of
+//   tools/research/mcp-panel/rhai, so that the Scripts page's Save writes there and not into the
+//   repository;
+// - start the hub with an empty --registry and --panel <panel-url>. A hub that sees any other
+//   instance is refused, so a game someone is playing is never crawled.
+// Exit 0 when every control of every page passes, 1 otherwise, 2 on bad usage. Drives the installed
+// Chrome through playwright-core (npm ci in tools/research/mcp-panel); CHROME overrides its path.
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { shellPages } from './e2e-coverage';
+
+const here = path.dirname(new URL(import.meta.url).pathname);
+const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const ENDING = /\b(stop|quit|kill|delete|remove|reset|close|shut ?down|deny)\b/i;
+
+/** The controls of a page as the browser sees them: [{key, pattern, kind, label, href, ending}]. Run
+    in the page. A control is visible, enabled and not inert; its key is inferred from its markup. */
+export function inventory() {
+  const SEL = 'a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=tab], [role=switch], [role=menuitem], [onclick]';
+  const seen = new Set();
+  const out = [];
+  // A label's numbers change with the data ("16 unused lines"): the pattern keeps their place, not them.
+  const shape = (t) => t.replace(/\d+([.,]\d+)?/g, '#');
+  const label = (el) => (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || el.getAttribute('placeholder') || el.name || el.value || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const region = (el) => { const r = el.closest('[id]'); return r && r !== el ? `#${r.id}` : ''; };
+  for (const el of document.querySelectorAll(SEL)) {
+    if (el.readOnly) continue; // shown, not edited
+    if (el.closest('[data-vendor]')) continue; // a vendor widget's own controls (Swagger UI): its tests, not ours
+    const r = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    const toggle = el.type === 'checkbox' && el.closest('label');
+    if ((!r.width || !r.height) && !toggle || style.visibility === 'hidden' || style.display === 'none' || el.closest('[inert],[aria-hidden="true"]')) continue;
+    const tag = el.tagName.toLowerCase();
+    const type = tag === 'input' ? (el.type || 'text') : tag;
+    const kind = tag === 'a' ? 'link' : ['checkbox', 'radio'].includes(type) ? 'check' : tag === 'select' ? 'select'
+      : ['text', 'search', 'number', 'url', 'email', 'password', 'range', 'date', 'textarea', 'tel', 'color'].includes(type) ? 'field' : 'press';
+    const dataAttrs = [...el.attributes].filter((a) => a.name.startsWith('data-') && !/^data-(state|testid|crawl-key|dirty|failure)$/.test(a.name));
+    const data = dataAttrs.map((a) => a.name).sort().join(',');
+    // A generated row (one per setting, per approval) carries data-* attributes: its pattern is those
+    // names, whatever its id, so forty fields of one kind are one pattern. A control of its own is its id.
+    // A link is its target's shape: every /tool/<name> of a catalogue is one pattern (/tool/*).
+    const linkShape = tag === 'a' && el.origin === location.origin ? el.pathname.replace(/\/[^/]+$/, '/*') : '';
+    const pattern = linkShape ? `a${region(el).replace(/\/.*$/, '')}->${linkShape}`
+      : data ? `${type}[${data}]${region(el)}` : el.id ? `#${el.id}` : `${type}${region(el)}:${shape(label(el))}`;
+    const key = el.id ? `#${el.id}` : `${pattern}=${dataAttrs.map((a) => a.value).join('/')}`;
+    // A selector a redraw keeps: the id, else the tag and its data-* values (one approval's row).
+    const selector = el.id ? `#${CSS.escape(el.id)}`
+      : data ? `${tag}${dataAttrs.map((a) => `[${a.name}="${CSS.escape(a.value)}"]`).join('')}` : null;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    el.dataset.crawlKey = key;
+    out.push({ key, pattern, kind, selector, disabled: el.matches(':disabled') || !!el.closest('[aria-disabled="true"]'), // a disabled fieldset too, label: label(el), href: tag === 'a' ? el.href : '', external: tag === 'a' && el.origin !== location.origin });
+  }
+  return out;
+}
+
+/** The order controls run in: every control first, then those that end something. */
+export const order = (items, ending = ENDING) => [...items.filter((i) => !ending.test(i.label)), ...items.filter((i) => ending.test(i.label))];
+
+/** One verdict per pattern: the first control of a pattern stands for its siblings. */
+export function representatives(items) {
+  const by = new Map();
+  for (const i of items) { if (!by.has(i.pattern)) by.set(i.pattern, { ...i, siblings: 0 }); else by.get(i.pattern).siblings++; }
+  return [...by.values()];
+}
+
+/** A value a field accepts, inferred from its type and constraints (run in the page on the element). */
+export function sample(el) {
+  const t = el.type || el.tagName.toLowerCase();
+  if (t === 'number' || t === 'range') { const min = Number(el.min || 0), max = el.max === '' ? min + 10 : Number(el.max); return String(Math.min(max, min + (Number(el.step) || 1))); }
+  if (t === 'url') return 'https://example.org/';
+  if (t === 'email') return 'crawl@example.org';
+  if (t === 'date') return '1950-01-01';
+  if (t === 'color') return '#3987e5';
+  return el.maxLength > 0 && el.maxLength < 5 ? 'x' : 'crawl';
+}
+
+async function crawlPage(browser, base, p, opts) {
+  const url = base + p.href;
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const errors = [];
+  const failed = [];
+  let requests = 0;
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('dialog', (d) => d.dismiss().catch(() => {}));
+  page.on('request', () => { requests++; });
+  const where = (r) => `${r.method()} ${r.url().slice(base.length).split('?')[0]}`;
+  page.on('requestfailed', (r) => { if (r.url().startsWith(base) && !/ERR_ABORTED/.test(r.failure()?.errorText || '')) failed.push(`${where(r)}: ${r.failure()?.errorText}`); });
+  page.on('response', (r) => { if (r.url().startsWith(base) && r.status() >= 400) failed.push(`${where(r.request())}: ${r.status()}`); });
+  /** The failures the page does not show: no new toast and no visible, texted element marked for it. */
+  const unshown = async (list, toastsBefore) => (list.length ? page.evaluate(({ list, toastsBefore }) => {
+    if (document.querySelectorAll('[data-toast]').length > toastsBefore) return [];
+    const marked = [...document.querySelectorAll('[data-failure]')]
+      .filter((e) => e.getClientRects().length && (e.textContent.trim() || e.value || e.getAttribute('alt')))
+      .flatMap((e) => e.dataset.failure.split('\n'));
+    return list.filter((f) => !marked.some((m) => m.startsWith(f.split(': ')[0])));
+  }, { list, toastsBefore }) : []);
+  const results = [];
+  const record = (item, verdict, detail = '') => {
+    results.push({ page: `${p.app} ${p.href}`, key: item.key, pattern: item.pattern, label: item.label, kind: item.kind, siblings: item.siblings || 0, verdict, detail });
+    console.log(`${verdict.padEnd(6)} ${p.app} ${p.href}  ${item.pattern}${item.label ? ` "${item.label}"` : ''}${item.siblings ? ` (+${item.siblings} alike)` : ''}${detail ? `: ${detail}` : ''}`);
+  };
+  const open = async () => {
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForTimeout(opts.settle);
+  };
+  await open();
+  const loadSilent = [...new Set(await unshown(failed.splice(0), 0))];
+  record({ key: '(load)', pattern: '(load)', label: '', kind: 'page' }, errors.length ? 'FAIL' : loadSilent.length ? 'SILENT' : 'PASS',
+    [...errors, ...loadSilent].join('; '));
+  errors.length = 0;
+  // A control is driven once per pattern. One that is disabled, or gone, waits for a later round: an
+  // earlier action may enable it (Apply after a change). Seen and never driven is UNREACHED.
+  const done = new Set();
+  const seen = new Map();
+  let actions = 0;
+  for (let round = 0; round < 8 && actions < opts.maxActions; round++) {
+    const all = representatives(order(await page.evaluate(inventory)));
+    for (const i of all) if (!seen.has(i.pattern)) seen.set(i.pattern, i);
+    const fresh = all.filter((i) => !done.has(i.pattern) && !i.disabled);
+    if (!fresh.length) break;
+    for (const item of fresh) {
+      if (actions++ >= opts.maxActions) break;
+      if (item.kind === 'link') {
+        done.add(item.pattern);
+        if (item.external || !item.href || /^(javascript|mailto):/.test(item.href)) { record(item, 'SKIP', item.external ? 'another site' : 'not a page'); continue; }
+        const target = item.href.split('#')[0];
+        if (target === url || target === url + '/' || item.href.includes('#')) { record(item, 'PASS', 'in-page anchor'); continue; }
+        const r = await page.request.get(target).catch((e) => ({ status: () => `error ${e.message}` }));
+        record(item, typeof r.status() === 'number' && r.status() < 400 ? 'PASS' : 'FAIL', `GET ${target.slice(base.length)} ${r.status()}`);
+        continue;
+      }
+      // The page may have redrawn or been reopened since the inventory: stamp the keys again, and
+      // find the control by its pattern when its exact key (a row's values) changed meanwhile.
+      const now = await page.evaluate(inventory);
+      const hit = now.find((i) => i.key === item.key) || now.find((i) => i.pattern === item.pattern);
+      if (!hit || hit.disabled) continue; // gone or disabled for now: a later round may reach it
+      done.add(item.pattern);
+      // By id when it has one (a redraw keeps the id, not the stamp), else by the stamp just set.
+      const el = page.locator(hit.selector || `[data-crawl-key="${hit.key.replace(/"/g, '\\"')}"]`).first();
+      const before = await page.evaluate(() => ({ html: document.body.innerHTML.length + ':' + document.body.innerHTML.slice(-2000), toasts: document.querySelectorAll('[data-toast]').length, focus: document.activeElement?.outerHTML.slice(0, 200), url: location.href }));
+      const req0 = requests;
+      try {
+        if (item.kind === 'field') await el.fill(await el.evaluate(sample), { timeout: 3000 }).then(() => el.press('Enter').catch(() => {}));
+        else if (item.kind === 'select') {
+          const values = await el.evaluate((s) => [...s.options].filter((o) => !o.disabled).map((o) => o.value));
+          if (values.length < 2) { record(item, 'SKIP', 'one option: nothing to choose'); continue; }
+          await el.selectOption(values.find((v) => v !== (values[0] ?? '')) ?? values[0], { timeout: 3000 });
+        } else if (item.kind === 'check') {
+          // A Flowbite toggle hides its input (sr-only) under a label: press the label, as a person does.
+          const box = await el.boundingBox();
+          if (box && box.width <= 2) await page.locator(`label:has(${hit.selector || `[data-crawl-key="${hit.key}"]`})`).first().click({ timeout: 3000 });
+          else await el.click({ timeout: 3000 });
+        }
+        else await el.click({ timeout: 3000 });
+      } catch (e) { record(item, 'FAIL', `could not ${item.kind}: ${e.message.split('\n')[0]}`); continue; }
+      await page.waitForTimeout(opts.settle);
+      const after = await page.evaluate(() => ({ html: document.body.innerHTML.length + ':' + document.body.innerHTML.slice(-2000), toasts: document.querySelectorAll('[data-toast]').length, toastText: [...document.querySelectorAll('[data-toast="red"]')].map((t) => t.textContent).join(' | '), focus: document.activeElement?.outerHTML.slice(0, 200), url: location.href, text: document.body.innerText }));
+      const bad = [...new Set(failed.splice(0))];
+      const silent = [...new Set(await unshown(bad, before.toasts))];
+      const did = requests > req0 || after.html !== before.html || after.url !== before.url || after.focus !== before.focus || after.toasts !== before.toasts;
+      if (errors.length) record(item, 'FAIL', `page error: ${errors.splice(0).join('; ')}`);
+      else if (silent.length) record(item, 'SILENT', silent.join('; '));
+      else if (!did) record(item, 'DEAD', 'no request, no change, no navigation, no toast');
+      else record(item, 'PASS', bad.length ? `failure shown: ${after.toastText || bad.join('; ')}` : '');
+      // Back to the page if the control left it; dismiss toasts so the next control is judged alone.
+      if (after.url.split('#')[0] !== url.split('#')[0]) await open();
+      await page.evaluate(() => document.querySelectorAll('[data-toast]').forEach((t) => t.remove())).catch(() => {});
+      await page.keyboard.press('Escape').catch(() => {});
+    }
+  }
+  for (const [pattern, i] of seen) {
+    if (!done.has(pattern)) record(i, 'UNREACHED', i.disabled ? 'disabled, and no other control enabled it' : 'offered, then gone before it could be driven');
+  }
+  const vendor = await page.evaluate(() => [...document.querySelectorAll('[data-vendor]')].map((v) => v.dataset.vendor)).catch(() => []);
+  for (const v of new Set(vendor)) record({ key: `(vendor ${v})`, pattern: `(vendor ${v})`, label: '', kind: 'vendor' }, 'SKIP', `${v}'s own controls; the page itself is proven by its page check`);
+  await page.close();
+  return results;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+  const argv = process.argv.slice(2);
+  const opt = (n) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : '');
+  const valued = new Set([opt('--hub'), opt('--json'), opt('--max-actions'), opt('--settle')].filter(Boolean));
+  const panel = (argv.find((a) => !a.startsWith('--') && !valued.has(a)) || '').replace(/\/$/, '');
+  const hub = opt('--hub').replace(/\/$/, '');
+  if (!panel) { console.error('usage: mcp-ui-crawl-check <panel-url> [--hub <hub-url>] [--json FILE] [--max-actions N]'); process.exit(2); }
+  const opts = { maxActions: Number(opt('--max-actions')) || 300, settle: Number(opt('--settle')) || 600 };
+  // The crawl presses everything, and the hub's controls act on every instance it sees: refuse a hub
+  // that sees any instance but the given panel (a game someone is playing must never be crawled).
+  if (hub) {
+    const seen = await fetch(`${hub}/hub/rpc`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'hub.instances' }) }).then((r) => r.json()).catch((e) => ({ error: e.message }));
+    const others = (seen.result || []).map((i) => i.base).filter((b) => b && b.replace('localhost', '127.0.0.1') !== panel.replace('localhost', '127.0.0.1'));
+    if (!seen.result || others.length) {
+      console.error(`refused: the hub sees ${seen.result ? others.join(', ') : `nothing (${seen.error || 'no answer'})`} beside ${panel}; start it with an empty --registry and --panel ${panel}`);
+      process.exit(2);
+    }
+  }
+  const { chromium } = createRequire(path.join(here, 'mcp-panel', 'package.json'))('playwright-core');
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true });
+  const results = [];
+  try {
+    for (const p of shellPages()) {
+      const base = p.app === 'hub' ? hub : panel;
+      if (!base) { console.log(`NOTRUN ${p.app} ${p.href}: no --hub given`); results.push({ page: `${p.app} ${p.href}`, key: '(load)', verdict: 'NOTRUN' }); continue; }
+      results.push(...await crawlPage(browser, base, p, opts));
+    }
+  } finally { await browser.close(); }
+  const tally = results.reduce((t, r) => ({ ...t, [r.verdict]: (t[r.verdict] || 0) + 1 }), {});
+  const driven = results.filter((r) => r.verdict !== 'SKIP');
+  const pass = driven.filter((r) => r.verdict === 'PASS');
+  if (opt('--json')) fs.writeFileSync(opt('--json'), JSON.stringify({ at: new Date().toISOString(), panel, hub, tally, results }, null, 2));
+  const bad = driven.length - pass.length;
+  console.log(`${bad ? 'FAIL' : 'PASS'} mcp-ui-crawl-check: ${pass.length}/${driven.length} control patterns pass on ${new Set(results.map((r) => r.page)).size} pages (${Object.entries(tally).map(([k, v]) => `${v} ${k}`).join(', ')})`);
+  process.exit(bad ? 1 : 0);
+}

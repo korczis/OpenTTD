@@ -85,19 +85,22 @@ pub struct Args {
     pub ai: String,
     pub auto_approve: bool,
     pub plan_bot: bool,
+    /// Who may use the panel's web surface (src/web_access.rs).
+    pub web: crate::web_access::Policy,
     /// A savegame to start from instead of a new world (`-g FILE`); its AI companies come with it.
     pub load: Option<String>,
 }
 
 pub const USAGE: &str = "usage: mcp-panel --bin <openttd> [--panel-port 8800] [--mcp-port 8731] [--game-port 3979]\n\
                          \x20                [--seed 1] [--ai PrismaticAI] [--auto-approve] [--no-plan-bot] [--load FILE]\n\
+                         \x20                [--bind 127.0.0.1] [--allow-origin <origin> ...] [--token <t>]   (src/web_access.rs)\n\
                          \x20      mcp-panel --write-event-kinds   (the knowledge note's table of event kinds, from src/panel_events.rs)\n\
                          \x20      mcp-panel --import-calibration FILE [NAME]   (a retired calibration file's readings, once, into the store)";
 
 /// server.py's command line: `--name value` or `--name=value`.
 pub fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut a = Args { bin: String::new(), panel_port: 8800, mcp_port: 8731, game_port: 3979, seed: 1,
-                       ai: "PrismaticAI".into(), auto_approve: false, plan_bot: true, load: None };
+                       ai: "PrismaticAI".into(), auto_approve: false, plan_bot: true, load: None, web: Default::default() };
     let mut bin = None;
     let mut i = 0;
     while i < argv.len() {
@@ -125,6 +128,8 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--ai" => a.ai = value(&mut i)?,
             "--auto-approve" => a.auto_approve = true,
             "--no-plan-bot" => a.plan_bot = false,
+            // The one web access policy's own flags (src/web_access.rs).
+            web @ ("--bind" | "--allow-origin" | "--token") => { a.web.flag(web, &value(&mut i)?)?; }
             "--load" => a.load = Some(value(&mut i)?),
             other => return Err(format!("unrecognized arguments: {other}")),
         }
@@ -2179,7 +2184,19 @@ fn h_pause(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
 
 fn h_approve(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     let declared = i.body.get("by").and_then(Value::as_str).map(|b| b.chars().take(64).collect::<String>());
-    ok(g.approve(py_int(&i.body["id"])?, json!({"channel": "api", "declared": declared}))?)
+    let id = py_int(&i.body["id"])?;
+    let out = g.approve(id, json!({"channel": "api", "declared": declared}))?;
+    // An approval that did not take is an error the owner sees (the page's one API client shows a
+    // non-2xx answer), never a 200 with an error inside: unknown here, or forgotten by the game
+    // server so that the resubmission only asked again (ADR 0038 replaces resubmission altogether).
+    Ok(match out.get("status").and_then(Value::as_str) {
+        _ if out.get("error").is_some() && out.get("approval_id").is_none() => (404, out),
+        Some("pending_approval") => (409, json!({"error": format!(
+            "the game server no longer holds approval #{id} (it keeps only the newest); the same change waits again as #{}",
+            py_str(out.get("approval_id"))), "answer": out})),
+        Some("rejected") => (422, out),
+        _ => (200, out),
+    })
 }
 
 fn h_bots(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
@@ -2686,12 +2703,6 @@ pub struct Request {
     pub body: Vec<u8>,
 }
 
-impl Request {
-    pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
-    }
-}
-
 /// One HTTP/1.1 request from a socket: the request line, headers and a Content-Length body.
 pub fn read_request(stream: &mut TcpStream) -> Option<Request> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
@@ -2726,7 +2737,8 @@ fn send_json(stream: TcpStream, code: u16, v: &Value) {
 }
 
 fn sse_head(stream: &mut TcpStream) -> std::io::Result<()> {
-    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n")
+    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nCache-Control: no-store\r\n{}\r\n", crate::web_access::headers());
+    stream.write_all(head.as_bytes())
 }
 
 /// Server-sent events from the bus: every event after ?since= (default: from now on) that passes
@@ -2774,10 +2786,6 @@ fn stream_rhai(g: &Game, mut stream: TcpStream, body: &Value) {
     let _ = runner.join();
 }
 
-const SWAGGER_HTML: &str = r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>OpenTTD MCP API</title>
-<link rel="stylesheet" href="/vendor/swagger-ui/swagger-ui.css"></head><body>
-<div id="swagger"></div><script src="/vendor/swagger-ui/swagger-ui-bundle.js"></script>
-<script>SwaggerUIBundle({url: '/openapi.json', dom_id: '#swagger', deepLinking: true});</script></body></html>"#;
 
 /// The front-end packages the pages load, from the panel's npm ci (node_modules).
 fn vendor(path: &str) -> Option<(&'static str, &'static str)> {
@@ -2848,17 +2856,18 @@ fn page_meta(g: &Arc<Game>, path: &str) -> (String, String, bool) {
 }
 
 impl Panel {
-    fn origin_ok(&self, req: &Request) -> bool {
-        req.header("Origin").map_or(true, |o| o == self.game.panel_url())
-    }
-
     pub fn handle(&self, mut stream: TcpStream) {
         // The browser's OpenTTD (WASM) joins the game through this bridge (src/panel_play.rs). It is
         // told apart before the request is read, because the WebSocket handshake needs it unread.
         if crate::panel_play::is_game_upgrade(&stream) {
-            return crate::panel_play::bridge(stream, self.game.args.panel_port, self.game.args.game_port);
+            return crate::panel_play::bridge(stream, self.game.args.game_port);
         }
         let Some(req) = read_request(&mut stream) else { return };
+        // Who may ask, from where (src/web_access.rs, ADR 0038): a preflight or a refusal is answered here.
+        let peer = stream.peer_addr().ok().map(|a| a.ip());
+        if let Err((code, why)) = crate::web_access::gate(&req.method, &req.headers, peer, req.query.get("token")) {
+            return if code == 204 { hub::respond(stream, 204, "text/plain", b"") } else { send_json(stream, code, &json!({"error": why})) };
+        }
         let g = &self.game;
         let file = |stream: TcpStream, f: PathBuf, ctype: &str| match std::fs::read(&f) {
             Ok(b) => hub::respond(stream, 200, ctype, &b),
@@ -2867,9 +2876,6 @@ impl Panel {
         let body = match req.method.as_str() {
             "GET" => Value::Null,
             "POST" => {
-                if !self.origin_ok(&req) {
-                    return send_json(stream, 403, &json!({"error": "foreign origin"}));
-                }
                 let text = if req.body.is_empty() { &b"{}"[..] } else { &req.body[..] };
                 match serde_json::from_slice::<Value>(text) {
                     Ok(v) => v,
@@ -2894,7 +2900,7 @@ impl Panel {
                     return send_json(stream, 200, &json!({"built": crate::panel_play::play_built(&dir), "dir": dir.display().to_string(),
                         "game_port": g.args.game_port, "bridge": "/ws/game", "max_bridges": crate::panel_play::MAX_BRIDGES}));
                 }
-                "/docs" => return hub::respond(stream, 200, "text/html; charset=utf-8", SWAGGER_HTML.as_bytes()),
+                "/docs" => return hub::respond(stream, 200, "text/html; charset=utf-8", hub::swagger_page("OpenTTD MCP API").as_bytes()),
                 "/openapi.json" => return send_json(stream, 200, &openapi_doc(&self.routes, &live_derived(g), g.args.panel_port)),
                 "/api/view/screenshot" => return match screenshot(g) {
                     Ok(png) => hub::respond(stream, 200, "image/png", &png),
@@ -3688,7 +3694,7 @@ mod tests {
         let endpoint = format!("http://{}/mcp", l.local_addr().unwrap());
         thread::spawn(move || for mut c in l.incoming().flatten() {
             let Some(req) = read_request(&mut c) else { continue };
-            let auth = req.header("Authorization").unwrap_or("").to_string();
+            let auth = req.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("Authorization")).map_or(String::new(), |(_, v)| v.clone());
             let call: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
             let text = |v: Value| json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": v.to_string()}]}});
             let out = if auth != "Bearer t0k" {

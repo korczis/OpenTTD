@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "../3rdparty/nlohmann/json.hpp"
+#include "../core/format.hpp"
 
 /**
  * Pure helpers with no OpenTTD or game-state dependency, factored out of the
@@ -90,7 +91,7 @@ inline bool ClosedByReset(std::string_view verdict)
 /** The fixed typed action types this build can execute, the one place they are named; the game
  * commands add one "command.<Name>" type each, derived from the command table (prismatic_mcp_commands).
  * The validator, openttd.decision.list_action_types and the decision tools' input schemas read both. */
-inline constexpr std::array<std::string_view, 5> ACTION_TYPES = {"game.set_pause", "ai.set_setting", "ai.start", "ai.stop", "ai.reload"};
+inline constexpr std::array<std::string_view, 6> ACTION_TYPES = {"game.set_pause", "ai.set_setting", "ai.set_settings", "ai.start", "ai.stop", "ai.reload"};
 
 /** Whether this build can execute a typed action of this type. Anything else is rejected. */
 inline bool IsKnownActionType(std::string_view type)
@@ -200,6 +201,75 @@ inline SubmitDecision ClassifySubmit(const std::vector<ApprovalView> &approvals,
 		}
 	}
 	return SubmitDecision::CreatePending;
+}
+
+/** At most this many settings one openttd.ai.set_settings call changes: a bound on one approval. */
+inline constexpr size_t SET_SETTINGS_MAX = 32;
+
+/**
+ * What openttd.ai.set_settings `{company, settings: {name: int, ...}, expires_tick?}` asks, checked for
+ * shape before any AI is looked at. Every name and value is then checked against the company's AI
+ * (prismatic_mcp_ai.cpp); this is the part that needs no game.
+ */
+struct SetSettingsPlan {
+	std::vector<std::string> errors;                        ///< every reason the shape is wrong; empty: well formed
+	std::vector<std::pair<std::string, int64_t>> settings;  ///< the changes, in canonical (name) order
+	std::optional<uint64_t> expires_tick;                   ///< the last game tick the decision may run at
+};
+
+/**
+ * Check the shape of openttd.ai.set_settings arguments: `settings` an object of 1..SET_SETTINGS_MAX
+ * integer values, `expires_tick` (when given) a non-negative integer. Every wrong value is named.
+ * Pure: the company is the caller's to check.
+ */
+inline SetSettingsPlan PlanSetSettings(const nlohmann::json &args)
+{
+	SetSettingsPlan plan;
+	const nlohmann::json *settings = args.is_object() && args.contains("settings") ? &args["settings"] : nullptr;
+	if (settings == nullptr || !settings->is_object()) {
+		plan.errors.push_back("settings (an object {name: integer}) required");
+	} else if (settings->empty()) {
+		plan.errors.push_back("settings is empty: name at least one setting");
+	} else if (settings->size() > SET_SETTINGS_MAX) {
+		plan.errors.push_back(fmt::format("at most {} settings per call, got {}", SET_SETTINGS_MAX, settings->size()));
+	} else {
+		for (const auto &[name, value] : settings->items()) {
+			if (!value.is_number_integer()) {
+				plan.errors.push_back(fmt::format("{}: value must be an integer", name));
+				continue;
+			}
+			plan.settings.emplace_back(name, value.get<int64_t>());
+		}
+	}
+	if (args.is_object() && args.contains("expires_tick")) {
+		const nlohmann::json &e = args["expires_tick"];
+		if (!e.is_number_integer() || (!e.is_number_unsigned() && e.get<int64_t>() < 0)) {
+			plan.errors.push_back("expires_tick must be a non-negative integer (a game tick)");
+		} else {
+			plan.expires_tick = e.get<uint64_t>();
+		}
+	}
+	return plan;
+}
+
+/** The expiry tick an action binds through its arguments: only ai.set_settings has one (`expires_tick`). */
+inline std::optional<uint64_t> BoundExpiresTick(std::string_view type, const nlohmann::json &args)
+{
+	if (type != "ai.set_settings") return std::nullopt;
+	return PlanSetSettings(args).expires_tick;
+}
+
+/** When an approval created at `now` expires: after `ttl` ticks, or at the action's own expires_tick if that is sooner. */
+inline uint64_t ApprovalExpiry(uint64_t now, uint64_t ttl, std::optional<uint64_t> expires_tick)
+{
+	uint64_t by_ttl = now + ttl;
+	return expires_tick.has_value() ? std::min(by_ttl, *expires_tick) : by_ttl;
+}
+
+/** Whether an action bound to `expires_tick` may still run at tick `now` (the last tick it names included). */
+inline bool StillFresh(uint64_t now, std::optional<uint64_t> expires_tick)
+{
+	return !expires_tick.has_value() || now <= *expires_tick;
 }
 
 /** At most this many resources one openttd.resources.read_many call reads: a bound on one main-thread poll. */

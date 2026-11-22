@@ -19,7 +19,7 @@ is catalogued as designed-but-not-yet-adapted, not pretended-covered.
 | Admin password / client_secret_key / X25519 keys | `WITHHELD_SECRET` | never serialized. |
 | Bearer token | `WITHHELD_SECRET` | only via explicit `prismatic_mcp token`; never in cfg/logs/snapshots. |
 | Raw pointers / process memory / filesystem | `NOT_APPLICABLE` | never serialized by design (forbidden-shortcuts list). |
-| Game-state mutations (pause/AI/vehicle/commands) | `EXPOSED_APPROVAL_REQUIRED` | `openttd.game.set_pause`, `openttd.cmd.<Name>` (one per exposable game command), `openttd.ai.set_setting/start/stop/reload`, and `openttd.api.*` with `execute: true`; all through the approval gate (`16-decision-contract.md`). |
+| Game-state mutations (pause/AI/vehicle/commands) | `EXPOSED_APPROVAL_REQUIRED` | `openttd.game.set_pause`, `openttd.cmd.<Name>` (one per exposable game command), `openttd.ai.set_setting/set_settings/start/stop/reload`, and `openttd.api.*` with `execute: true`; all through the approval gate (`16-decision-contract.md`). |
 | Server-admin ops | `EXPOSED_SERVER_ONLY` (target) | staged; server-authority + audit required. |
 | Determinism-sensitive internals (RNG, tick order) | `WITHHELD_DETERMINISM` | never mutated by reads; token uses OS CSPRNG, not game RNG. |
 
