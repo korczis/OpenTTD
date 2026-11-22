@@ -72,13 +72,18 @@ fn start_ai(name, settings) {
     if settings == "" { con_start_ai(name) } else { con_start_ai(`${name} ${settings}`) }
 }
 
-/// Pause or resume through MCP: submit, wait for the operator's approval, resubmit, and check the
-/// effect. Returns the executed answer, or throws when no approval arrives within `seconds`.
+/// Pause or resume through MCP: submit once, wait for the operator's approval (the game server
+/// carries it out the moment it is given, ADR 0038; nothing resubmits), and check the effect.
+/// Returns the executed answer; throws when the request is refused (a full approval queue), or
+/// when no approval arrives within `seconds`.
 fn set_pause(on, seconds) {
     // Through the panel, so the request shows up under "Pending approvals" with an Approve
-    // button; the panel resubmits it once approved.
+    // button; approving it executes it on the game server.
     let first = pause(on);
     if first.status == "executed" { return first; }
+    if first.status != "pending_approval" || first.approval_id == () {
+        throw `set_pause(${on}) was not queued for approval: ${first.status ?? "no status"}${if first.error == () { "" } else { ` (${first.error})` }}`;
+    }
     let id = first.approval_id;
     print(`  waiting for the operator to approve #${id} (panel Approve, or auto-approve)`);
     for i in 0..seconds {
@@ -89,7 +94,7 @@ fn set_pause(on, seconds) {
                 if s.paused == on { return #{ status: "executed", approval_id: id, paused: s.paused }; }
                 sleep(500);
             }
-            throw `approval #${id} was consumed but the game is not ${if on { "paused" } else { "running" }}`;
+            throw `approval #${id} left the queue (approved, denied or expired) but the game is not ${if on { "paused" } else { "running" }}`;
         }
     }
     // Withdraw the request, so a late Approve cannot pause the game with nobody left to resume it.

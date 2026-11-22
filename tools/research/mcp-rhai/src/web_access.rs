@@ -58,9 +58,14 @@ impl Policy {
         self.cookie = format!("mcp_token_{port}");
         let mut note = None;
         if !self.bind.is_loopback() && self.token.is_none() {
-            let t = random_token();
-            note = Some(format!("listening on {} beyond loopback: open it once as http://<host>:{port}/?token={t}", self.bind));
-            self.token = Some(t);
+            note = Some(match random_hex(16) {
+                Some(t) => {
+                    let line = format!("listening on {} beyond loopback: open it once as http://<host>:{port}/?token={t}", self.bind);
+                    self.token = Some(t);
+                    line
+                }
+                None => format!("listening on {} beyond loopback, but /dev/urandom is unreadable: no token, so every request from beyond loopback is refused", self.bind),
+            });
         }
         (self, note)
     }
@@ -175,7 +180,8 @@ fn bearer(header: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     header("Authorization").and_then(|v| v.strip_prefix("Bearer ").map(|t| t.trim().to_string()))
 }
 
-fn cookie(header: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> {
+/// The value of cookie `name` in the request's `Cookie` header.
+pub fn cookie(header: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> {
     header("Cookie")?.split(';').find_map(|c| c.trim().strip_prefix(name)?.strip_prefix('=').map(str::to_string))
 }
 
@@ -184,12 +190,14 @@ pub fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn random_token() -> String {
-    let mut b = [0u8; 16];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = std::io::Read::read_exact(&mut f, &mut b);
-    }
-    b.iter().map(|x| format!("{x:02x}")).collect()
+/// `bytes` bytes of /dev/urandom as hex: the one source of every secret the panel and the hub
+/// make (the web token here, the panel's owner secret). None when /dev/urandom cannot be read, so
+/// a caller never mistakes zeros for a secret.
+pub fn random_hex(bytes: usize) -> Option<String> {
+    let mut b = vec![0u8; bytes];
+    let mut f = std::fs::File::open("/dev/urandom").ok()?;
+    std::io::Read::read_exact(&mut f, &mut b).ok()?;
+    Some(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
 thread_local! {

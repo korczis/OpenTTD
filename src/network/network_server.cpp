@@ -37,6 +37,9 @@
 #include <condition_variable>
 
 #include "table/strings.h"
+#ifdef OTTD_PRISMATIC_MCP_SERVER
+#include "../prismatic_mcp/prismatic_mcp.h" /* RESEARCH-ONLY: the approval channel from the game's chat */
+#endif
 
 #include "../safeguards.h"
 
@@ -1450,6 +1453,17 @@ NetworkRecvStatus ServerNetworkGameSocketHandler::ReceiveClientChat(Packet &p)
 	int64_t data = p.Recv_uint64();
 
 	NetworkClientInfo *ci = this->GetInfo();
+#ifdef OTTD_PRISMATIC_MCP_SERVER
+	/* RESEARCH-ONLY: '!approvals', '!approve <id>' and '!deny <id>' are the approval channel from
+	 * inside the game, the client console's 'prismatic_mcp approve' included (ADR 0038). The one
+	 * approval core decides; the answer goes to the asker alone and the line is never broadcast. */
+	if (std::vector<std::string> replies; PrismaticMCP::ChatApproval(to_underlying(this->client_id), ci->client_playas.base(), ci->public_key, false, msg, replies)) {
+		for (const auto &reply : replies) {
+			NetworkServerSendChat(NetworkAction::ChatClient, NetworkChatDestinationType::Client, to_underlying(this->client_id), reply, ClientID::Server);
+		}
+		return NetworkRecvStatus::Okay;
+	}
+#endif
 	switch (action) {
 		case NetworkAction::ChatBroadcast:
 		case NetworkAction::ChatClient:
