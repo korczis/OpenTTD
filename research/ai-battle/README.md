@@ -342,6 +342,8 @@ money doubled (1960-62), its fleet grew by half or more. The lineup is now in
 (test `test_the_merged_self_steward_bot_spends_on_the_fitness_seed`). On seed 31337 with the same
 field and years, neither self-steward (58 vehicles, 2.61M) nor the default (46 vehicles, 2.31M)
 has a `hoards` window.
+With the lost-vehicle checks merged (`9aaa7beed8`), self-steward's fitness value is 1,435,024
+with 42 vehicles, again with no `hoards` window.
 
 The money is still not fully at work: every lineup ends the six years with 0.88M to 2.27M in
 the bank. The cause is the heartbeat's rhythm. From 1963 on, a heartbeat lasts about a game year,
