@@ -392,6 +392,55 @@ TEST_CASE("The control window is a snapshot of what the console and the menu alr
 	CHECK(P::Tool()["annotations"]["readOnlyHint"] == true);
 }
 
+TEST_CASE("The control window lists every line from its snapshot alone", "[prismatic_mcp]")
+{
+	namespace P = PrismaticMCP::Panel;
+	using K = P::Row::Kind;
+	const json s = {
+		{"status", "listening on 127.0.0.1:9000"},
+		{"approvals", json::array({{{"id", 7}, {"tool", "openttd.game.set_pause"}, {"args", "{\"pause\":true}"}, {"expired", false}},
+			{{"id", 9}, {"tool", "openttd.ai.stop"}, {"args", "{}"}, {"expired", true}}})},
+		{"decisions", json::array({"decision #1 approval #3 pause result=succeeded verdict=VERIFIED_SUCCESS"})},
+		{"requests", json::array({{{"id", 2}, {"kind", "ask"}, {"text", "nearest forest"}, {"answered", true}, {"answer", "Forest at 12x40"}},
+			{{"id", 3}, {"kind", "watch"}, {"text", ""}, {"answered", false}, {"answer", nullptr}}})},
+		{"switches", json::array({{{"index", 6}, {"label", "Human player: paused"}, {"on", true}}})},
+	};
+	auto rows = P::Rows(s);
+	std::vector<K> kinds;
+	for (const auto &r : rows) kinds.push_back(r.kind);
+	CHECK(kinds == std::vector<K>{K::Heading, K::Text, K::Heading, K::Approval, K::Approval, K::Heading, K::Text,
+		K::Heading, K::Text, K::Text, K::Heading, K::Switch});
+	CHECK(rows[1].text == "listening on 127.0.0.1:9000");
+	CHECK(rows[2].text == "Waiting for your approval (2)");
+	/* An approval row carries its id for Approve and Deny, and whether it expired. */
+	CHECK((rows[3].id == 7 && !rows[3].flag && rows[3].text == "#7  openttd.game.set_pause  {\"pause\":true}"));
+	CHECK((rows[4].id == 9 && rows[4].flag));
+	CHECK(rows[6].text.find("VERIFIED_SUCCESS") != std::string::npos);
+	CHECK(rows[8].text == "#2 ask: nearest forest - Forest at 12x40");
+	CHECK(rows[9].text == "#3 watch - waiting for an answer"); // an unanswered request with a null answer
+	CHECK((rows[11].id == 6 && rows[11].flag && rows[11].text == "Human player: paused"));
+
+	/* Nothing waits, nothing ran, nothing asked, no switch: each section says so, no switch heading. */
+	auto quiet = P::Rows({{"status", "stopped"}, {"approvals", json::array()}, {"decisions", json::array()},
+		{"requests", json::array()}, {"switches", json::array()}});
+	REQUIRE(quiet.size() == 8);
+	CHECK(quiet[2].text == "Waiting for your approval (0)");
+	CHECK(quiet[3].kind == K::Text);
+	CHECK(quiet.back().kind == K::Text);
+
+	/* A partial or malformed snapshot (a client's cached copy of a server's queue) never throws. */
+	CHECK_NOTHROW(P::Rows(json::object()));
+	CHECK_NOTHROW(P::Rows(json(nullptr)));
+	CHECK_NOTHROW(P::Rows({{"approvals", "not a list"}, {"decisions", json::array({42})},
+		{"requests", json::array({{{"id", -1}, {"answered", true}, {"answer", nullptr}}})}}));
+	auto partial = P::Rows({{"approvals", json::array({{{"id", "x"}}})}, {"decisions", json::array({42})}});
+	CHECK(partial[1].text == "status unknown");
+	CHECK((partial[3].kind == K::Approval && partial[3].id == 0)); // an id that is not a number selects nothing real
+	CHECK(partial[5].text == "42");
+	/* The snapshot the server builds lists the same way. */
+	CHECK_FALSE(P::Rows(P::Snapshot()).empty());
+}
+
 TEST_CASE("Only the owner's own click consents in the control window", "[prismatic_mcp]")
 {
 	namespace P = PrismaticMCP::Panel;
