@@ -162,33 +162,37 @@ enum class SubmitDecision : uint8_t {
 	Execute,       ///< an approved, unexpired, unconsumed approval for these exact args: run once
 };
 
-/** One approval as the pure classifier sees it: its state, the canonical args it was granted for,
- * and when it expires. `state` mirrors ApprovalState (0 Pending, 1 Approved, 2 Denied, 3 Consumed). */
+/** One approval as the pure classifier sees it: its state, the action (tool) and the canonical args
+ * it was granted for, and when it expires. `state` mirrors ApprovalState (0 Pending, 1 Approved,
+ * 2 Denied, 3 Consumed). */
 struct ApprovalView {
 	uint8_t state = 0;
+	std::string tool;
 	std::string canonical_args;
 	uint64_t expiry_tick = 0;
 };
 
-/** Classify a submission whose canonical arguments are `canonical_args`, at tick `now`, against the
- * live `approvals` (scanned in order). Returns the decision; for ReusePending/Execute it sets
- * `matched_index` to the matched approval's index. Pure: no globals, no game state, no side effects
- * -- the caller consumes the approval and runs the command. */
-inline SubmitDecision ClassifySubmit(const std::vector<ApprovalView> &approvals,
+/** Classify a submission of action `tool` with canonical arguments `canonical_args`, at tick `now`,
+ * against the live `approvals` (scanned in order). An approval binds to the action AND its exact
+ * arguments: an approval granted for one tool is never spent by another tool with the same
+ * arguments (e.g. ai.reload {company:N} never runs ai.stop {company:N}). Returns the decision; for
+ * ReusePending/Execute it sets `matched_index` to the matched approval's index. Pure: no globals, no
+ * game state, no side effects -- the caller consumes the approval and runs the command. */
+inline SubmitDecision ClassifySubmit(const std::vector<ApprovalView> &approvals, std::string_view tool,
 	std::string_view canonical_args, uint64_t now, size_t &matched_index)
 {
-	/* An approved, unexpired, unconsumed approval bound to these exact args executes once. */
+	/* An approved, unexpired, unconsumed approval bound to this action and these exact args executes once. */
 	for (size_t i = 0; i < approvals.size(); i++) {
 		const ApprovalView &a = approvals[i];
-		if (a.state == 1 && a.canonical_args == canonical_args && now <= a.expiry_tick) {
+		if (a.state == 1 && a.tool == tool && a.canonical_args == canonical_args && now <= a.expiry_tick) {
 			matched_index = i;
 			return SubmitDecision::Execute;
 		}
 	}
-	/* Otherwise reuse a still-pending approval for these exact args. */
+	/* Otherwise reuse a still-pending approval for this action and these exact args. */
 	for (size_t i = 0; i < approvals.size(); i++) {
 		const ApprovalView &a = approvals[i];
-		if (a.state == 0 && a.canonical_args == canonical_args && now <= a.expiry_tick) {
+		if (a.state == 0 && a.tool == tool && a.canonical_args == canonical_args && now <= a.expiry_tick) {
 			matched_index = i;
 			return SubmitDecision::ReusePending;
 		}
