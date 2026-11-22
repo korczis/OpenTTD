@@ -656,7 +656,7 @@ from the code. The right-hand column says what was counted.
 | **37** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **105** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **98** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
-| **883** | published documents on the site and the wiki | published documents under `/` |
+| **885** | published documents on the site and the wiki | published documents under `/` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
@@ -1146,6 +1146,7 @@ the bridge: [a real place as the map](#a-real-place-as-the-map).
 | [`tools/research/vanilla-client`](./tools/research/vanilla-client), [`real-game-check`](./tools/research/real-game-check) | The unmodified release client for public servers ([`research/vanilla-client.md`](./research/vanilla-client.md)) and the readiness check for a hosted real game ([`research/real-game.md`](./research/real-game.md)). |
 | [`tools/research/e2e-coverage`](./tools/research/e2e-coverage) and the `tools/research/mcp-*-check` family | Every web page driven in a real browser, and one live check per surface of the panel, the hub and the game. |
 | [`tools/gate.sh`](./tools/gate.sh), [`tools/research/research`](./tools/research/research) | Layered local validation (0.5) and the research-mode CLI with its experiment manifest ([`research/tooling.md`](./research/tooling.md)). |
+| [`tools/coverage/`](./tools/coverage/README.md) | `changed-lines`: every changed Python line runs under a test, or the change gate and CI refuse it by file and line (rule [`project.new-code-tested`](.ai/repo/rules/project/new-code-tested.v1.md)); C++, Rust and JavaScript are named, not yet measured. |
 | [`tools/surfaces/`](./tools/surfaces/README.md), [`surfaces.toml`](./surfaces.toml), [`tools/knowledge/`](./tools/knowledge/README.md) | The published surfaces (0.4.2), and the checks that keep the `.ai/` records' citations true. |
 | [`tools/research/town-model/`](./tools/research/town-model/README.md) | The town-authority model derived from `src/`, and its outputs for the bot, Rhai, the panel and [its page](./research/mechanisms/town-authority.md). |
 | [`tools/research/real-world/`](./tools/research/real-world/) | `rw-scenario`: a real place compiled from open data into a heightmap and a GameScript ([`research/real-world-scenario.md`](./research/real-world-scenario.md)). |
@@ -1307,7 +1308,7 @@ tool, and this fork does not fake one. `tools/gate.sh --help` lists the exact co
 | Tier | Command | Cost | When to use it |
 |---|---|---|---|
 | Smoke | `tools/gate.sh smoke` | cheapest | fast feedback while iterating (incremental build, optional targeted tests) |
-| Change | `tools/gate.sh change` | standard | before calling a change done: docs, surfaces, scoreboard and knowledge checks, build, the full suite |
+| Change | `tools/gate.sh change` | standard | before calling a change done: docs, surfaces, scoreboard and knowledge checks, every Python test with changed-line coverage, build, the full suite |
 | Research | `tools/gate.sh research` | standard+ | code behind `OPTION_RESEARCH_INSTRUMENTATION` or the MCP server option, which the other tiers never compile |
 | Full | `tools/gate.sh full` | expensive | significant changes or a baseline: a clean-room build in `build-fullgate/` |
 | Evaluation | `tools/research/research validate --gate research` | n/a | checks a generated `manifest.json` for completeness and honesty |
@@ -1333,6 +1334,7 @@ those files:
 | [project.long-runs-are-owned-bounded-and-stoppable](.ai/repo/rules/project/long-runs-are-owned-bounded-and-stoppable.v1.md) | blocking | Before a job runs unattended or on another machine, make it write who owns it and how to stop it on every host, refuse new work over the host's load ceiling or under its 35 GiB disk floor, and honour a PAUSED file on the host and a STOP file beside it. |
 | [project.mcp-surfaces-are-derived](.ai/repo/rules/project/mcp-surfaces-are-derived.v1.md) | blocking | Derive every surface of the MCP integration from the live catalogue and the one route table; do not hand-list tools, routes, functions or settings in a second place. |
 | [project.never-report-unrun-validation-as-pass](.ai/repo/rules/project/never-report-unrun-validation-as-pass.v1.md) | blocking | Report every validation layer with the command that ran and its exit status, mark a layer that did not run as NOT RUN, and never round PARTIAL or ambiguous up to PASS. |
+| [project.new-code-tested](.ai/repo/rules/project/new-code-tested.v1.md) | blocking | Ship every change with tests that run every line it adds or modifies; keep tools/coverage/changed-lines passing, which refuses any changed Python line no test runs (file:line) and accepts an untestable one only through an exemption with a written reason that every run prints; until the other languages are measured, cover their changed lines with tests anyway and say in the report that no gate measured them. |
 | [project.no-commit-without-current-instruction](.ai/repo/rules/project/no-commit-without-current-instruction.v1.md) | blocking | Commit, push, rewrite history or force-push only on an explicit, current instruction from the owner that covers this change. |
 | [project.no-upstream-interaction](.ai/repo/rules/project/no-upstream-interaction.v1.md) | blocking | Never push to, open an issue against, or open a pull request against OpenTTD/OpenTTD; keep every commit, branch and experiment in korczis/OpenTTD, and keep the upstream remote fetch-only. |
 | [project.panel-charts-go-through-one-layer](.ai/repo/rules/project/panel-charts-go-through-one-layer.v1.md) | blocking | Create a panel chart only through components.js ecInit, register it with its parameters and drill target, keep its parameters in the address, make its card maximizable, and commit a static/app.css rebuilt from input.css and the current markup. |
@@ -1353,7 +1355,7 @@ those files:
 ```mermaid
 pie showData title Rules (project) by class
     %% links: README.md?col=Class&filter=blocking#06-ground-rules-short-version | README.md?col=Class&filter=advisory#06-ground-rules-short-version
-    "blocking" : 21
+    "blocking" : 22
     "advisory" : 2
 ```
 <!-- surfaces:end ai-rules -->

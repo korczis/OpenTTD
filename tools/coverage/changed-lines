@@ -1,0 +1,456 @@
+#!/usr/bin/env python3
+"""Every changed Python line runs under a test (rule project.new-code-tested).
+
+    tools/coverage/changed-lines [--base <ref>] [--repo <dir>] [--exemptions <file>]
+                                 [--data <dir>] [--no-run] [--list-tests]
+
+The change is the diff from a base to the working tree: --base, else COVERAGE_BASE, else the
+merge base of HEAD with the remote's default branch (origin/HEAD, else origin/master); where
+that is HEAD itself, HEAD when the working tree holds the change, else HEAD's first parent.
+Untracked files count whole. Its added or modified lines of Python files (*.py, or a file
+without an extension whose first line is a python shebang) are judged; the tests themselves
+(test_*.py) are not.
+
+Every tracked test_*.py of the repository is run, one `unittest discover` per directory that
+holds one, under line tracing that reaches every Python subprocess a test starts
+(tools/coverage/hook/). A failing suite fails the gate. A changed executable line that no test
+ran fails it too, listed as <file>:<line>, unless an entry of the exemptions file
+(tools/coverage/exemptions.toml) covers it; every entry carries a reason and is printed on
+every run, and an entry that matches nothing is refused.
+
+C++, Rust, JavaScript, Squirrel and shell files are not judged yet: the run names the changed
+ones and says so, and they never fail it.
+
+Exit status: 0 every changed Python line ran or is exempt, 1 a refusal (an unrun line, a
+failing suite, a bad exemption), 2 a usage error or no base to measure from.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import fnmatch
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import types
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+HOOK = HERE / "hook"
+EXEMPTIONS = "tools/coverage/exemptions.toml"
+TEST_FILE = re.compile(r"(^|/)test_[^/]*\.py$")
+PY_SHEBANG = re.compile(r"^#!.*\bpython[0-9.]*\b")
+SH_SHEBANG = re.compile(r"^#!.*\b(ba|z|da|k)?sh\b")
+# Code this gate cannot judge yet, by extension: named in every run, never refused.
+NOT_YET = {
+    ".c": "C++", ".cc": "C++", ".cpp": "C++", ".h": "C++", ".hpp": "C++", ".mm": "C++",
+    ".rs": "Rust",
+    ".js": "JavaScript", ".mjs": "JavaScript", ".cjs": "JavaScript", ".ts": "JavaScript",
+    ".nut": "Squirrel", ".rhai": "Rhai", ".sh": "shell",
+}
+# Never judged and never run as tests: vendored code.
+VENDORED = ("src/3rdparty/",)
+
+
+class Refusal(Exception):
+    """A usage error or a missing base (exit status 2)."""
+
+
+def git(root: Path, *args: str, check: bool = True) -> str | None:
+    """git's stdout, or None when it failed and check is False."""
+    proc = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True)
+    if proc.returncode != 0:
+        if check:
+            raise Refusal(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
+        return None
+    return proc.stdout
+
+
+def default_remote_branch(root: Path) -> str | None:
+    """origin/HEAD's target, else origin/master, else None."""
+    ref = git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD", check=False)
+    if ref and ref.strip():
+        return ref.strip().removeprefix("refs/remotes/")
+    if git(root, "rev-parse", "--verify", "--quiet", "origin/master", check=False) is not None:
+        return "origin/master"
+    return None
+
+
+def resolve_base(root: Path, base: str | None) -> str:
+    """The commit the change is measured from (see the module doc)."""
+    base = base or os.environ.get("COVERAGE_BASE") or None
+    if base:
+        sha = git(root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", check=False)
+        if not sha:
+            raise Refusal(f"base {base!r} is not a commit of this repository")
+        return sha.strip()
+    head = (git(root, "rev-parse", "HEAD", check=False) or "").strip()
+    if not head:
+        raise Refusal("no HEAD: nothing to measure a change from")
+    remote = default_remote_branch(root)
+    mb = (git(root, "merge-base", remote, "HEAD", check=False) or "").strip() if remote else ""
+    if mb and mb != head:
+        return mb
+    if git(root, "status", "--porcelain", "--untracked-files=normal").strip():
+        return head
+    parent = (git(root, "rev-parse", "--verify", "--quiet", "HEAD^1", check=False) or "").strip()
+    if not parent:
+        raise Refusal("no base: HEAD has no parent and no remote branch to diff against")
+    return parent
+
+
+def parse_diff(diff: str) -> dict[str, set[int]]:
+    """File -> the working-tree line numbers a `git diff -U0` adds or modifies."""
+    out: dict[str, set[int]] = {}
+    file = None
+    for line in diff.split("\n"):
+        if line.startswith("+++ "):
+            # git ends a name holding a space with a tab, so its end is unambiguous.
+            file = line[6:].removesuffix("\t") if line.startswith("+++ b/") else None
+            continue
+        hunk = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
+        if hunk and file:
+            start, count = int(hunk[1]), 1 if hunk[2] is None else int(hunk[2])
+            out.setdefault(file, set()).update(range(start, start + count))
+    return out
+
+
+def changed_lines(root: Path, base: str) -> tuple[dict[str, set[int]], list[str]]:
+    """The added/modified lines per file, and every changed file that still exists."""
+    lines = parse_diff(git(root, "-c", "core.quotePath=false", "diff", "-U0", "-M", "--no-color",
+                           "--no-ext-diff", base, "--"))
+    names = git(root, "-c", "core.quotePath=false", "diff", "--name-only", "-M", base,
+                "--").splitlines()
+    for f in git(root, "-c", "core.quotePath=false", "ls-files", "--others",
+                 "--exclude-standard").splitlines():
+        names.append(f)
+        try:
+            n = len((root / f).read_text(encoding="utf-8").split("\n"))
+        except (OSError, UnicodeDecodeError):
+            continue
+        lines[f] = set(range(1, n + 1))
+    files = sorted({f for f in names if (root / f).is_file()})
+    return lines, files
+
+
+def first_line(path: Path) -> str:
+    """The file's first line, or "" when it cannot be read as text."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.readline()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def language(root: Path, rel: str) -> str | None:
+    """'Python', a language not judged yet, or None for a file that is not code."""
+    if rel.startswith(VENDORED):
+        return None
+    suffix = Path(rel).suffix
+    if suffix == ".py":
+        return "Python"
+    if suffix in NOT_YET:
+        return NOT_YET[suffix]
+    if suffix == "":
+        head = first_line(root / rel)
+        if PY_SHEBANG.match(head):
+            return "Python"
+        if SH_SHEBANG.match(head):
+            return "shell"
+    return None
+
+
+def executable(source: str, name: str) -> set[int]:
+    """Every line a code object of the source maps an instruction to (line 0 is RESUME)."""
+    lines: set[int] = set()
+
+    def walk(code: types.CodeType) -> None:
+        for _, _, line in code.co_lines():
+            if line:
+                lines.add(line)
+        for const in code.co_consts:
+            if isinstance(const, types.CodeType):
+                walk(const)
+
+    walk(compile(source, name, "exec", dont_inherit=True))
+    return lines
+
+
+def test_dirs(root: Path) -> list[str]:
+    """Every directory holding a test_*.py, minus one an ancestor's discover already reaches."""
+    files = git(root, "ls-files", "--cached", "--others", "--exclude-standard").splitlines()
+    dirs = sorted({str(Path(f).parent) for f in files
+                   if TEST_FILE.search(f) and not f.startswith(VENDORED) and (root / f).is_file()})
+    keep = []
+    for d in dirs:
+        reached = False
+        p = Path(d)
+        # unittest discover descends only into packages: a chain of __init__.py up to an ancestor.
+        while (root / p / "__init__.py").is_file() and str(p.parent) != str(p):
+            p = p.parent
+            if str(p) in dirs:
+                reached = True
+                break
+        if not reached:
+            keep.append(d)
+    return keep
+
+
+def run_tests(root: Path, data: Path, dirs: list[str]) -> list[str]:
+    """Run each directory's suite under the tracer; the problems (a failing suite)."""
+    env = dict(os.environ)
+    env["CHANGED_LINES_DATA"] = str(data)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(HOOK), env.get("PYTHONPATH")) if p)
+    problems = []
+    for d in dirs:
+        began = time.monotonic()
+        proc = subprocess.run([sys.executable, "-B", "-m", "unittest", "discover", "-s", d,
+                               "-t", d, "-p", "test_*.py"], cwd=root, env=env,
+                              capture_output=True, text=True)
+        took = time.monotonic() - began
+        tail = proc.stderr.strip().splitlines()[-3:]
+        ran = next((t for t in tail if t.startswith("Ran ")), "Ran ? tests")
+        verdict = "OK" if proc.returncode == 0 else f"FAILED (exit {proc.returncode})"
+        print(f"tests   {d}: {verdict}, {ran.removeprefix('Ran ')}, {took:.0f}s", flush=True)
+        if proc.returncode != 0:
+            sys.stdout.write(proc.stdout)
+            sys.stdout.write(proc.stderr)
+            problems.append(f"{d}: the test suite failed (exit {proc.returncode})")
+    return problems
+
+
+def sha256(path: Path) -> str:
+    """The SHA-256 of a file's bytes."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_readings(root: Path, data: Path, judged: set[str]) -> dict[str, set[int]]:
+    """Repository file -> the lines any traced process ran in it.
+
+    A file inside the repository counts by its path. A file outside it (a test's scratch copy)
+    counts for the judged file whose path it ends with, when their bytes are identical."""
+    real_root = os.path.realpath(root) + os.sep
+    shas = {rel: sha256(root / rel) for rel in judged}
+    ran: dict[str, set[int]] = {}
+    for reading in sorted(data.glob("*.json")):
+        try:
+            files = json.loads(reading.read_text(encoding="utf-8"))["files"]
+        except (OSError, ValueError, KeyError):
+            continue  # a process killed while writing: its lines are simply not seen
+        for path, entry in files.items():
+            if path.startswith(real_root):
+                rel = path[len(real_root):]
+                ran.setdefault(rel, set()).update(entry["lines"])
+                continue
+            for rel, sha in shas.items():
+                if path.endswith("/" + rel) and entry.get("sha256") == sha:
+                    ran.setdefault(rel, set()).update(entry["lines"])
+    return ran
+
+
+class Exemption:
+    """One [[exempt]] entry: a path glob, a reason, and optionally a function or a match."""
+
+    KEYS = {"path", "reason", "function", "match"}
+
+    def __init__(self, raw: dict, index: int) -> None:
+        self.raw = raw
+        self.index = index
+        self.path = raw.get("path")
+        self.reason = (raw.get("reason") or "").strip() if isinstance(raw.get("reason"), str) else ""
+        self.function = raw.get("function")
+        self.match = raw.get("match")
+        self.hits = 0  # changed lines this entry exempted in this run
+
+    def label(self) -> str:
+        what = f" function {self.function}" if self.function else ""
+        what += f" match {self.match!r}" if self.match else ""
+        return f"{self.path}{what}"
+
+    def problems(self) -> list[str]:
+        out = []
+        unknown = sorted(set(self.raw) - self.KEYS)
+        if unknown:
+            out.append(f"unknown key(s) {', '.join(unknown)}")
+        if not isinstance(self.path, str) or not self.path:
+            out.append("no path")
+        if not self.reason:
+            out.append("no reason: every exemption says why its lines cannot run under a test")
+        if self.function and self.match:
+            out.append("both function and match: name one")
+        return out
+
+    def lines(self, rel: str, source: str) -> set[int]:
+        """The lines of the file this entry exempts (all of them for a path-only entry)."""
+        if not fnmatch.fnmatchcase(rel, self.path):
+            return set()
+        if self.match:
+            return {i for i, t in enumerate(source.split("\n"), 1) if self.match in t}
+        if self.function:
+            return function_lines(source, self.function)
+        return set(range(1, len(source.split("\n")) + 1))
+
+
+def function_lines(source: str, qualname: str) -> set[int]:
+    """The lines (decorators included) of the function or class named by a dotted qualname."""
+    want = qualname.split(".")
+    found: set[int] = set()
+
+    def visit(nodes, prefix):
+        for node in nodes:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                name = prefix + [node.name]
+                if name == want:
+                    first = min([node.lineno] + [d.lineno for d in node.decorator_list])
+                    found.update(range(first, node.end_lineno + 1))
+                visit(node.body, name)
+
+    visit(ast.parse(source).body, [])
+    return found
+
+
+def load_exemptions(path: Path) -> tuple[list[Exemption], list[str]]:
+    """The entries of the exemptions file and the problems with it."""
+    if not path.is_file():
+        return [], []
+    try:
+        import tomllib
+    except ImportError:  # Python < 3.11
+        return [], [f"{path.name}: reading it needs Python 3.11+ (tomllib)"]
+    try:
+        doc = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as e:
+        return [], [f"{path.name}: {e}"]
+    entries = [Exemption(raw, i) for i, raw in enumerate(doc.get("exempt", []), 1)]
+    problems = [f"{path.name} entry {e.index} ({e.label()}): {p}" for e in entries for p in e.problems()]
+    return entries, problems
+
+
+def stale_exemptions(root: Path, entries: list[Exemption]) -> list[str]:
+    """An entry that matches no file, function or line of the repository is refused."""
+    files = git(root, "ls-files", "--cached", "--others", "--exclude-standard").splitlines()
+    out = []
+    for e in entries:
+        if e.problems():
+            continue
+        hit = False
+        for rel in (f for f in files if fnmatch.fnmatchcase(f, e.path) and (root / f).is_file()):
+            try:
+                if e.lines(rel, (root / rel).read_text(encoding="utf-8")):
+                    hit = True
+                    break
+            except (UnicodeDecodeError, SyntaxError):
+                continue
+        if not hit:
+            out.append(f"exemption {e.index} ({e.label()}) matches nothing in the repository: remove it")
+    return out
+
+
+def judge(root: Path, base: str, data: Path, run: bool, exemptions_file: Path) -> int:
+    lines, files = changed_lines(root, base)
+    by_lang: dict[str, list[str]] = {}
+    for f in files:
+        lang = language(root, f)
+        if lang:
+            by_lang.setdefault(lang, []).append(f)
+    python = by_lang.pop("Python", [])
+    tests = [f for f in python if TEST_FILE.search(f)]
+    judged = sorted(set(python) - set(tests))
+
+    problems: list[str] = []
+    entries, bad = load_exemptions(exemptions_file)
+    problems += bad + stale_exemptions(root, entries)
+
+    if run:
+        dirs = test_dirs(root)
+        print(f"changed-lines: running {len(dirs)} test suite(s) under line tracing "
+              f"(every directory holding a test_*.py)", flush=True)
+        problems += run_tests(root, data, dirs)
+    ran = load_readings(root, data, set(judged))
+
+    unrun: list[str] = []
+    counted = 0
+    for rel in judged:
+        source = (root / rel).read_text(encoding="utf-8")
+        try:
+            exe = executable(source, rel)
+        except SyntaxError as e:
+            problems.append(f"{rel}:{e.lineno}: does not compile: {e.msg}")
+            continue
+        text = source.split("\n")
+        exempt: dict[int, Exemption] = {}
+        for e in entries:
+            if not e.problems():
+                for n in e.lines(rel, source):
+                    exempt.setdefault(n, e)
+        for n in sorted(lines.get(rel, set()) & exe):
+            counted += 1
+            if n in ran.get(rel, set()):
+                continue
+            if n in exempt:
+                exempt[n].hits += 1
+                continue
+            unrun.append(f"{rel}:{n}: no test runs this line: {text[n - 1].strip()[:90]}")
+
+    for e in entries:
+        if not e.problems():
+            print(f"exempt  {e.label()}: {e.reason} ({e.hits} changed unrun line(s) here)")
+    for lang, names in sorted(by_lang.items()):
+        print(f"not judged ({lang}: no changed-line coverage for it yet, never refused): "
+              f"{len(names)} file(s): {', '.join(names[:8])}{' ...' if len(names) > 8 else ''}")
+    if tests:
+        print(f"tests changed (the tests themselves are not judged): {', '.join(tests)}")
+    for u in unrun:
+        print(f"missing {u}")
+    for p in problems:
+        print(f"problem {p}")
+    exempted = sum(e.hits for e in entries)
+    print(f"changed-lines: {len(judged)} Python file(s), {counted} changed executable line(s) "
+          f"since {base[:12]}: {len(unrun)} not run by any test, {exempted} exempt with a reason, "
+          f"{len(problems)} other problem(s)")
+    if unrun or problems:
+        print("changed-lines: FAIL (rule project.new-code-tested: write the test that runs each "
+              "line, or an exemption with its reason in " + EXEMPTIONS + ")")
+        return 1
+    print("changed-lines: PASS")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="changed-lines", description=__doc__.split("\n\n")[0])
+    ap.add_argument("--base", help="the commit to measure the change from (default: see above)")
+    ap.add_argument("--repo", default=".", help="the repository to judge (default: the cwd's)")
+    ap.add_argument("--exemptions", help=f"the exemptions file (default: <repo>/{EXEMPTIONS})")
+    ap.add_argument("--data", help="the tracer's readings directory (default: a temporary one)")
+    ap.add_argument("--no-run", action="store_true",
+                    help="judge the readings already in --data instead of running the tests")
+    ap.add_argument("--list-tests", action="store_true",
+                    help="print the test directories the run would discover, then exit")
+    args = ap.parse_args(argv)
+    try:
+        top = git(Path(args.repo), "rev-parse", "--show-toplevel")
+        root = Path(top.strip())
+        if args.list_tests:
+            print("\n".join(test_dirs(root)))
+            return 0
+        if args.no_run and not args.data:
+            raise Refusal("--no-run judges existing readings: name them with --data")
+        base = resolve_base(root, args.base)
+        exemptions = Path(args.exemptions) if args.exemptions else root / EXEMPTIONS
+        if args.data:
+            return judge(root, base, Path(args.data), not args.no_run, exemptions)
+        with tempfile.TemporaryDirectory(prefix="changed-lines-") as tmp:
+            return judge(root, base, Path(tmp), True, exemptions)
+    except Refusal as e:
+        print(f"changed-lines: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
