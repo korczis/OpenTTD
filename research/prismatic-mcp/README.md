@@ -37,10 +37,11 @@ Homebrew LLVM (`CC`/`CXX`), see ADR 0006 and [`../tooling.md`](../tooling.md) "T
 Start OpenTTD (GUI or dedicated), then in the in-game console (backtick `` ` ``):
 
 ```
-prismatic_mcp start          # binds 127.0.0.1:8731, prints the bearer token
+prismatic_mcp start          # binds 127.0.0.1:8731, writes the token to a 0600 file, prints its path
+prismatic_mcp start <port> <file>  # the same on <port>, the token in <file> (what launchers use)
 prismatic_mcp status         # running/endpoint/counters (never prints the token)
-prismatic_mcp token          # prints the bearer token (local operator only)
-prismatic_mcp rotate         # new token, invalidates the old one
+prismatic_mcp token          # prints the token file's path and the token's fingerprint
+prismatic_mcp rotate         # new token, invalidates the old one, rewrites the token file
 prismatic_mcp approvals      # pending approvals; then approve <id> or deny <id>
 prismatic_mcp decisions      # the provenance trace (decisions [n])
 prismatic_mcp stop
@@ -49,7 +50,9 @@ prismatic_mcp stop
 ## Connect (any MCP client, or curl)
 
 ```bash
-TOKEN=<token from 'prismatic_mcp token'>
+# the file 'prismatic_mcp start' named: "Token written to <file> (mode 0600)"
+TOKEN=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["agent_token"])' \
+  ~/Documents/OpenTTD/prismatic_mcp_token_8731.json)
 curl -s http://127.0.0.1:8731/mcp \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
@@ -57,6 +60,13 @@ curl -s http://127.0.0.1:8731/mcp \
 curl -s http://127.0.0.1:8731/mcp -H "Authorization: Bearer $TOKEN" \
   -d '{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"openttd://game/state"}}'
 ```
+
+The token is never printed, to the local console or a remote one, and never written to
+`openttd.cfg` or a log: only to the 0600 token file `{"agent_token","endpoint"}` — the one
+`start` is given, else `prismatic_mcp_token_<port>.json` in the personal directory, where
+`openttd.cfg` and `secrets.cfg` live (the directory of `-c <cfg>` when one is given; by default
+`~/Documents/OpenTTD/` on macOS, `~/.local/share/openttd/` on Linux). `prismatic_mcp token` prints that path and a `blake2b:` fingerprint, so
+the operator can tell which token a file holds without seeing it.
 
 Bearer token via a header only — never in the URL. The endpoint refuses any request carrying an
 `Origin` header (anti-DNS-rebinding) and any non-loopback connection.
@@ -80,7 +90,7 @@ Bearer token via a header only — never in the URL. The endpoint refuses any re
    ```bash
    cmake --build build-mcp --target openttd_test -j$(sysctl -n hw.ncpu) && ctest --test-dir build-mcp -R prismatic --output-on-failure
    ```
-6. **Start the server and connect** — In the in-game console: prismatic_mcp start, then prismatic_mcp token to get the bearer token, and prismatic_mcp approve <id> or deny <id> for a pending mutation. Never share the token; it is never logged.
+6. **Start the server and connect** — In the in-game console: prismatic_mcp start writes the bearer token to a 0600 file and prints only its path (prismatic_mcp token prints the path and a fingerprint), then prismatic_mcp approve <id> or deny <id> for a pending mutation. Never share the token; it is never printed or logged.
 7. **Run the local validation gate before proposing a change**
    ```bash
    tools/gate.sh change
@@ -90,6 +100,28 @@ See [`../../README.md`](../../README.md#041-getting-started--prismatic-mcp-for-c
 the same content cross-linked from the top-level README, and `AGENTS.md` / `CLAUDE.md` for the
 ground rules that apply before any of this.
 <!-- END GENERATED: prismatic-mcp-readme-cta -->
+
+## AI settings and the control that edits each
+
+`openttd://ai` (and `openttd.ai.list`) describes every setting of every company's AI as its
+`info.nut` declares it (`name`, `description`, `min`, `max`, `step`, `default`, `flags`, `labels`,
+`value`, `editable`) and adds a derived `control`, so every form draws a setting the same way: the
+web panel's My bot card (`tools/research/mcp-panel/static/bots.js`) and the game's own settings
+window. The rules live once, in `src/prismatic_mcp/prismatic_mcp_ai_control.h`:
+
+- `kind`: `toggle` for the `boolean` flag; `select` when labels name integer values, with
+  `options` `[{value, label}]` in ascending order; `range` for more than one value in at most 2000
+  steps (a step of 0 counts as 1); `number` otherwise.
+- `picker`: on a `range` or `number` whose description names a world list (`(town id`,
+  `(industry id`, `(cargo id`); a client that has that list offers its entries.
+- The place: `table {base, line, field}` for names `<base><N>_<field>` when the base has at least
+  two lines (the bare `<base>_<field>` is line 1), else `group`, the first word when another
+  setting shares it, else `general`. A name declared twice is placed by its first declaration.
+
+The panel derives the same itself only for an AI read from its `info.nut`, with no game to ask.
+`src/tests/prismatic_mcp_ai_controls.json` pins both derivations, given these settings, these
+controls: the Catch2 test `src/tests/test_prismatic_mcp_ai_control.cpp`, the panel's
+`test/bots.test.mjs` and, in a browser, `tools/research/mcp-overview-check` all read it.
 
 ## The toolbar menu (in the game)
 

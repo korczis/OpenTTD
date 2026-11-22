@@ -21,6 +21,7 @@ catalogue cannot carry that match on its own:
   A caller learns `result.items`, `result.best`, `result.money` or `result.status` only by reading
   the source.
 
+<!-- open-finding kind=handoff -->
 So Battlebrain keeps an **adapter registry** (`ADAPTERS` in
 `tools/research/mcp-rhai/src/battlebrain_contract.rs`). For one kernel id, an adapter states the
 capability it satisfies, how each requirement field maps to the kernel's input and output, with
