@@ -306,4 +306,35 @@ mod tests {
         let (class, _) = divergence(None, None, 0, &P);
         assert_eq!(class, "same");
     }
+
+    fn line(cargo: i64, inv: f64, profit: f64) -> Line {
+        Line { cargo_id: cargo, producer: 10, acceptor: 20, mode: "freight_rail".into(), investment: inv, monthly_profit: profit,
+               planner_score: 1.0, track: Some("found".into()) }
+    }
+
+    #[test]
+    fn every_divergence_class_names_its_reason() {
+        let (good, other, tie) = (line(1, 50_000.0, 5_000.0), line(2, 50_000.0, 2_500.0), line(3, 100_000.0, 10_000.0));
+        let class = |b: Option<&Line>, o: Option<&Line>| divergence(b, o, 500_000, &P);
+        assert_eq!(class(Some(&good), None).0, "intended_policy_difference", "battlebrain holds on a line the planner may take");
+        assert!(class(Some(&good), None).1.contains("battlebrain holds"));
+        assert!(class(None, Some(&good)).1.contains("holds no freight rail line"));
+        assert_eq!(class(Some(&good), Some(&tie)).0, "tie_order", "1.2 a year each, two lines");
+        let (c, why) = class(Some(&other), Some(&good));
+        assert_eq!(c, "intended_policy_difference");
+        assert!(why.contains("payback score within a knapsack"), "{why}");
+    }
+
+    #[test]
+    fn a_candidate_without_a_rail_option_or_a_profit_is_not_a_line() {
+        let truck_only = json!([{"cargo_id": 1, "producer": {"id": 10}, "acceptor": {"id": 20}, "options": [{"mode": "truck"}]}]);
+        assert!(lines(&truck_only).is_empty());
+        assert!(lines(&json!([{"producer": {"id": 10}, "acceptor": {"id": 20}, "options": [{"mode": "freight_rail"}]}])).is_empty(), "no cargo");
+        let losing = json!([cand(1, 10, 20, 50_000.0, -10.0, 5.0, Some("found"))]);
+        let c = decide(&losing, &company(500_000, 0, 0), &P).unwrap();
+        assert!(c.selected.is_none());
+        assert!(c.rejected[0].1.starts_with("not profitable"), "{}", c.rejected[0].1);
+        assert_eq!(line(1, 0.0, 1.0).annual_return(), f64::NEG_INFINITY);
+        assert_eq!(line(1, 1.0, 0.0).payback_months(), None);
+    }
 }
