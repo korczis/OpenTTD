@@ -475,6 +475,85 @@ class Health(unittest.TestCase):
         m["status"] = "incomplete"
         self.assertTrue(battle.fitness_verdict(m, fit)[0].startswith("match incomplete"))
 
+    @staticmethod
+    def books(vehicles, money):
+        """Quarterly samples with a fleet and a bank balance, as the referee's REF Q lines carry."""
+        return [{"t": f"{1955 + i // 4}-{1 + 3 * (i % 4):02d}", "value": 1, "vehicles": v, "money": m}
+                for i, (v, m) in enumerate(zip(vehicles, money))]
+
+    INCIDENT_MONEY = [600_000 + i * 160_000 for i in range(20)]   # 0.6M -> 3.64M over 20 quarters
+
+    def test_a_flat_fleet_on_a_growing_bank_balance_hoards(self):
+        # The incident (owner's live co-play game 2026-11-22, company 0): 35-37 vehicles from 1955
+        # to 1960 while the bank balance climbed from 0.6M to 3.77M.
+        money = self.INCIDENT_MONEY
+        flat = self.books([37] * 20, money)
+        self.assertEqual(battle.anomalies(flat, 0, self.RULES),
+                         ["hoards:1955-01..1956-10:600000->1720000@37v"])
+        wobbly = self.books([35, 36, 37, 36] * 5, money)                # the incident's 35-37
+        self.assertEqual([a.split(":")[0] for a in battle.anomalies(wobbly, 0, self.RULES)], ["hoards"])
+        # A fleet that grows with its money spends it.
+        growing = self.books([10 + 3 * i for i in range(20)], money)
+        self.assertEqual(battle.anomalies(growing, 0, self.RULES), [])
+        # A poor company with a flat fleet has nothing to spend: below the floor.
+        poor = self.books([12] * 20, [50_000 + i * 20_000 for i in range(20)])
+        self.assertEqual(battle.anomalies(poor, 0, self.RULES), [])
+        # Fewer samples than the window (default 8 quarters): too early to judge.
+        self.assertEqual(battle.anomalies(self.books([37] * 7, money[:7]), 0, self.RULES), [])
+        # The window and thresholds come from the rules.
+        rules = dict(self.RULES, hoard_window=4, hoard_factor=1.1, hoard_floor=100_000)
+        self.assertEqual(battle.anomalies(poor[:6], 0, rules),
+                         ["hoards:1955-01..1955-10:50000->110000@12v"])
+
+    def test_a_company_that_builds_stations_is_not_hoarding(self):
+        # The planned fitness contestant (seed 930967890, 2026-11-22) kept 9 vehicles while its
+        # money rose 283k -> 697k: it was laying one rail line per heartbeat, months each, so its
+        # stations grew while its fleet waited. The incident's company built nothing at all.
+        money = self.INCIDENT_MONEY
+        building = [dict(s, stations=10 + 2 * i) for i, s in enumerate(self.books([37] * 20, money))]
+        self.assertEqual(battle.anomalies(building, 0, self.RULES), [])
+        idle = [dict(s, stations=40) for s in self.books([37] * 20, money)]
+        self.assertEqual([a.split(":")[0] for a in battle.anomalies(idle, 0, self.RULES)], ["hoards"])
+
+    def test_fitness_fails_on_hoarding_of_a_healthy_bot_only(self):
+        fit = {"rules": self.RULES, "must_be_healthy": ["P planned"]}
+        lineup = [{"ai": "PrismaticAI", "key": "P planned"}, {"ai": "PrismaticAI", "key": "P max"}]
+        money = self.INCIDENT_MONEY
+        m = {"status": "done", "lineup": lineup, "errors": {},
+             "series": {"P planned": self.books([10 + 3 * i for i in range(20)], money),
+                        "P max": self.books([37] * 20, money)}}
+        self.assertEqual(battle.fitness_verdict(m, fit), [])          # only the healthy bot is judged
+        m["series"]["P planned"] = self.books([37] * 20, money)
+        self.assertEqual(battle.fitness_verdict(m, fit),
+                         ["P planned: hoards:1955-01..1956-10:600000->1720000@37v"])
+
+    def test_hoarding_fails_only_the_contestants_held_to_spend(self):
+        # must_not_hoard narrows the hoards check within must_be_healthy (the self-steward lineup
+        # hoarded on the fitness seed before this check existed: a recorded finding, not a pass).
+        fit = {"rules": self.RULES, "must_be_healthy": ["P a", "P b"], "must_not_hoard": ["P a"]}
+        lineup = [{"ai": "PrismaticAI", "key": "P a"}, {"ai": "PrismaticAI", "key": "P b"}]
+        flat = self.books([37] * 20, self.INCIDENT_MONEY)
+        m = {"status": "done", "lineup": lineup, "errors": {}, "series": {"P a": flat, "P b": flat}}
+        self.assertEqual(battle.fitness_verdict(m, fit), ["P a: hoards:1955-01..1956-10:600000->1720000@37v"])
+        cfg = json.loads(battle.DEFAULT_CONFIG.read_text())["fitness"]
+        self.assertIn("PrismaticAI planned", cfg["must_not_hoard"])
+        self.assertTrue(set(cfg["must_not_hoard"]) <= set(cfg["must_be_healthy"]))
+
+    def test_fitness_holds_a_planned_prismatic_ai_healthy(self):
+        # The default, self-steward and solo-max lineups are all unplanned; the live game's bot was
+        # planned (b.planned in main.nut: rail_a/rail_b set) and hoarded unseen.
+        fit = json.loads(battle.DEFAULT_CONFIG.read_text())["fitness"]
+        keys = {battle.contestant_key(c) for lu in fit["lineups"] for c in lu}
+        self.assertTrue({"PrismaticAI", "PrismaticAI self-steward", "PrismaticAI solo-max",
+                         "PrismaticAI planned"} <= keys)
+        planned = next(c for lu in fit["lineups"] for c in lu if c.get("label") == "PrismaticAI planned")
+        self.assertEqual(planned["settings"], "rail_a=0,rail_b=1")
+        self.assertTrue({"PrismaticAI", "PrismaticAI self-steward", "PrismaticAI planned"}
+                        <= set(fit["must_be_healthy"]))
+        self.assertTrue({"PrismaticAI", "PrismaticAI self-steward"} <= set(fit["never_last"]))
+        for key in ("hoard_window", "hoard_factor", "hoard_floor"):
+            self.assertIn(key, fit["rules"])
+
 
 class Telemetry(unittest.TestCase):
     def test_v3_fields_parse_and_v2_lines_still_do(self):
@@ -577,6 +656,114 @@ class Tuning(unittest.TestCase):
         f = battle.fitness_of("X", ms)
         self.assertEqual((f["matches"], f["points"], f["log_gap"], f["last_share"]), (2, 0.5, -0.5, 0.5))
         self.assertEqual(battle.fitness_of("X", ms, 0.5)["score"], round(0.5 - 0.05 - 0.25, 4))
+
+
+INFO_FIXTURE = r'''
+class X extends AIInfo {
+	function GetSettings() {
+		AddSetting({ name = "one", description = "a, b = c", min_value = 0, max_value = 100,
+			easy_value = 30, custom_value = 30, flags = CONFIG_INGAME, });
+		AddSetting({
+			name = "two",
+			description = "Quoted \"<name> (AI)\" // not a comment",
+			min_value = -1,
+			max_value = 50000,
+			custom_value = 25000,
+			step_size = 5000,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
+		/* AddSetting({ name = "commented", min_value = 0, max_value = 1 }); */
+		// AddSetting({ name = "line_commented", min_value = 0, max_value = 1 });
+		for (local i = 2; i <= 3; i++) {
+			AddSetting({
+				name = "fr" + i + "_from",
+				min_value = -1, max_value = 65535,
+				easy_value = -1, custom_value = -1,
+				flags = 0,
+			});
+		}
+	}
+}
+'''
+INFO_NUT = HERE / "prismatic-ai" / "PrismaticAI" / "info.nut"
+BATTLE_JSON = HERE / "ai-battle" / "battle.json"
+SETTINGS = {"a": {"min": 0, "max": 100, "step": 1, "default": 50, "boolean": False, "ingame": True},
+            "b": {"min": 0, "max": 20, "step": 2, "default": 4, "boolean": False, "ingame": True},
+            "s": {"min": 0, "max": 1, "step": 1, "default": 1, "boolean": True, "ingame": True}}
+
+
+class GeneSpace(unittest.TestCase):
+    def test_info_settings_parses_one_line_multi_line_and_loop_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "info.nut"
+            f.write_text(INFO_FIXTURE)
+            s = battle.info_settings(f)
+        self.assertEqual(sorted(s), ["fr2_from", "fr3_from", "one", "two"])
+        self.assertEqual(s["one"], {"min": 0, "max": 100, "step": 1, "default": 30,
+                                    "boolean": False, "ingame": True})
+        self.assertEqual(s["two"], {"min": -1, "max": 50000, "step": 5000, "default": 25000,
+                                    "boolean": True, "ingame": True})
+        self.assertEqual(s["fr3_from"]["ingame"], False)
+
+    def test_info_settings_reads_the_real_bot(self):
+        s = battle.info_settings(INFO_NUT)
+        self.assertEqual(s["cash_reserve"]["step"], 5000)
+        self.assertTrue(s["intercity"]["boolean"])
+        self.assertIn("fr16_cargo", s)
+        self.assertIn("line24_wagons", s)
+
+    def test_effective_space_is_info_bounds_overridden_by_narrow(self):
+        t = {"genes": ["a", "b"], "narrow": {"a": [20, 80, 10]}}
+        self.assertEqual(battle.gene_space(t, SETTINGS), {"a": [20, 80, 10], "b": [0, 20, 2]})
+        self.assertEqual(list(battle.gene_space({"genes": ["b", "a"]}, SETTINGS)), ["b", "a"])
+        legacy = {"space": {"a": [0, 10, 5]}}                      # an older configuration's form
+        self.assertEqual(battle.gene_space(legacy, SETTINGS), {"a": [0, 10, 5]})
+
+    def test_errors_name_an_unknown_gene_a_wide_narrow_and_a_pinned_gene(self):
+        self.assertEqual(battle.gene_space_errors({"genes": ["a", "b"], "fixed": {"s": 1}}, SETTINGS), [])
+        errs = battle.gene_space_errors({"genes": ["a", "zz", "s"], "fixed": {"s": 1, "yy": 1},
+                                         "narrow": {"a": [-5, 80, 10], "b": [0, 20, 2]}}, SETTINGS)
+        self.assertEqual(len(errs), 5, errs)
+        joined = "\n".join(errs)
+        for needle in ("zz", "yy", "a: narrow [-5, 80, 10]", "b: narrow", "s: pinned"):
+            self.assertIn(needle, joined)
+        self.assertTrue(battle.gene_space_errors({"genes": ["a"], "narrow": {"a": [0, 200, 1]}}, SETTINGS))
+        self.assertTrue(battle.gene_space_errors({"genes": ["a"], "narrow": {"a": [50, 10, 1]}}, SETTINGS))
+        self.assertTrue(battle.gene_space_errors({"space": {"q": [0, 1, 1]}}, SETTINGS))
+
+    def test_the_real_configuration_names_only_settings_of_the_bot(self):
+        t = json.loads(BATTLE_JSON.read_text())["tuning"]
+        s = battle.info_settings(INFO_NUT)
+        self.assertNotIn("space", t)                               # derived, not hand-listed
+        self.assertEqual(battle.gene_space_errors(t, s), [])
+        for k, b in t.get("narrow", {}).items():                   # a narrow differs, or it is noise
+            self.assertNotEqual(b, [s[k]["min"], s[k]["max"], s[k]["step"]], k)
+        for k in ("rich_growth", "modernize", "compete", "upgrade_track", "air_keep_last"):
+            self.assertNotIn(k, t["genes"])                        # a bug fix is not a gene
+            if k in s:
+                self.assertEqual(t["fixed"].get(k), 1, k)
+
+    def test_check_refuses_a_gene_the_bot_does_not_declare(self):
+        cfg = json.loads(BATTLE_JSON.read_text())
+        self.assertEqual(battle.config_errors(cfg), [])
+        cfg["tuning"]["genes"] = cfg["tuning"]["genes"] + ["no_such_setting"]
+        self.assertTrue(any("no_such_setting" in e for e in battle.config_errors(cfg)))
+        cfg["tuning"]["genes"].pop()
+        cfg["tuning"]["narrow"]["aggressiveness"] = [0, 1000, 10]  # wider than info.nut allows
+        self.assertTrue(any("aggressiveness" in e for e in battle.config_errors(cfg)))
+
+    def test_resolving_sets_the_space_and_starts_a_new_gene_at_the_bots_default(self):
+        cfg = json.loads(BATTLE_JSON.read_text())
+        t = cfg["tuning"]
+        t["start"].pop("aggressiveness")
+        battle.resolve_genes(cfg)
+        s = battle.info_settings(INFO_NUT)
+        self.assertEqual(list(t["space"]), t["genes"])
+        self.assertEqual(t["start"]["aggressiveness"], s["aggressiveness"]["default"])
+        self.assertEqual(t["space"]["aggressiveness"], t["narrow"]["aggressiveness"])
+        cfg["tuning"]["genes"] = ["no_such_setting"]
+        with self.assertRaises(SystemExit):
+            battle.resolve_genes(cfg)
 
 
 class Promotion(unittest.TestCase):

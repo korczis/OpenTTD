@@ -67,6 +67,8 @@ class PrismaticAI extends AIController {
 	full_load = 1; /* this heartbeat's air_full_load, for air routes built from here on */
 	air_towns = null; /* town id -> true where an autopilot airport stands */
 	air_tried = null; /* "a-b" town pairs the autopilot tried for air */
+	loaded = null; /* {version, data} handed to Load(), read by Restore() (restore.nut) */
+	rich = false; /* this heartbeat's Behaviour().rich (growth.nut) */
 
 	constructor() {
 		this.name = AICompany.GetName(AICompany.COMPANY_SELF);
@@ -103,6 +105,11 @@ require("steward.nut");
 require("autopilot.nut");
 require("catchment.nut");
 require("statues.nut");
+require("growth.nut");
+require("pressure.nut");
+require("infra.nut");
+require("modernize.nut");
+require("restore.nut");
 
 /* Cheapest buildable road engine that carries a passenger-class cargo. */
 function PrismaticAI::PickPassengerEngine() {
@@ -328,6 +335,22 @@ function PrismaticAI::Behaviour() {
 		air_add_waiting = AIController.GetSetting("air_add_waiting"),
 		rail_twin_max = AIController.GetSetting("rail_twin_max"),
 		rail_double = AIController.GetSetting("rail_double"),
+		rich_growth = AIController.GetSetting("rich_growth"),
+		modernize = AIController.GetSetting("modernize"),
+		compete = AIController.GetSetting("compete"),
+		upgrade_track = AIController.GetSetting("upgrade_track"),
+		rich_budgets = AIController.GetSetting("rich_budgets"),
+		rich_air_money = AIController.GetSetting("rich_air_money") * 1000,
+		rich_air_cap_max = AIController.GetSetting("rich_air_cap_max"),
+		rich_invest_rounds = AIController.GetSetting("rich_invest_rounds"),
+		rich_served_below = AIController.GetSetting("rich_served_below"),
+		rich_min_tiles = AIController.GetSetting("rich_min_tiles"),
+		rich_max_tiles = AIController.GetSetting("rich_max_tiles"),
+		airport_fill = AIController.GetSetting("airport_fill"),
+		pressure_low = AIController.GetSetting("pressure_low"),
+		pressure_mid = AIController.GetSetting("pressure_mid"),
+		pressure_high = AIController.GetSetting("pressure_high"),
+		track_keep_budgets = AIController.GetSetting("track_keep_budgets"),
 	};
 	/* Autopilot (default on): a bot nobody gave a plan (no planner line, air or rail pair) grows on
 	 * its own instead of stopping at a few buses. In the LAN AI battle the unplanned default ended
@@ -351,6 +374,11 @@ function PrismaticAI::Behaviour() {
 		b.intercity = 1;
 		b.cash_reserve = min(b.cash_reserve, AUTOPILOT_CASH_RESERVE);
 	}
+	/* Money the caps leave idle lifts them, planned or not (growth.nut). */
+	PrismaticAI.ApplyRich(b, AICompany.GetBankBalance(AICompany.COMPANY_SELF));
+	/* Behind the strongest company with money idle: the fleet limits loosen with the gap (pressure.nut). */
+	if (b.rich) PrismaticAI.ApplyPressure(b, AICompany.GetBankBalance(AICompany.COMPANY_SELF));
+	else b.pressure <- 0;
 	return b;
 }
 
@@ -380,6 +408,10 @@ function PrismaticAI::Start() {
 	AICompany.SetAutoRenewStatus(true);
 	AICompany.SetAutoRenewMonths(-6);
 	AICompany.SetAutoRenewMoney(30000);
+	/* A restarted bot (a server save and load, or a new script deployed into a running game) takes
+	 * its lines, routes and tried plans from its save, or else from the map (restore.nut): without
+	 * this it would build the planner's lines a second time next to the ones it runs. */
+	this.Restore(PrismaticAI.Behaviour());
 
 	local last = "";
 	local disclosed = false;
@@ -404,7 +436,8 @@ function PrismaticAI::Start() {
 		AIR_LEVEL_STEP = b.air_level_step;
 		local knobs = "aggressiveness=" + b.aggressiveness + " max_routes=" + b.max_routes + " cash_reserve=" + b.cash_reserve +
 			" intercity=" + b.intercity + " self_steward=" + b.self_steward + " own_lines=" + b.own_lines +
-			(b.autopiloted ? " autopilot=engaged" : (b.grows ? " autopilot=growth-on-plan" : ""));
+			(b.autopiloted ? " autopilot=engaged" : (b.grows ? " autopilot=growth-on-plan" : "")) +
+			(b.rich ? " rich=1" : "");
 		if (knobs != last) {
 			AILog.Info("PrismaticAI behaviour: " + knobs);
 			last = knobs;
@@ -493,7 +526,7 @@ function PrismaticAI::Start() {
 		if (year_now != this.own_failed_year) { this.own_failed_year = year_now; this.own_failed = 0; }
 		if (!frozen && handed_done && !pair_open && this.own_built < own_cap && (b.own_fail_pause == 0 || this.own_failed < b.own_fail_pause) &&
 				money + headroom_own >= b.line_budget) {
-			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried);
+			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried, b.rich);
 			if (own != null) {
 				this.freight_tried[own.from + "-" + own.to + "-" + own.cargo] <- true;
 				this.own_built++;
@@ -548,7 +581,12 @@ function PrismaticAI::Start() {
 		this.air_add_waiting = b.air_add_waiting;
 		this.ManageFleet(b.cash_reserve);
 		/* With the steward on, idle money buys vehicles where vehicles earn most (fleet.nut). */
-		if (b.self_steward == 1) this.InvestSurplus(b);
+		/* Rich: several vehicles a heartbeat, because a heartbeat whose route builds fail can take
+		 * months; the self-steward fitness bot bought one vehicle per heartbeat and its money rose
+		 * from 485k to 1.1M on 27 vehicles in 1963-65 (growth.nut, setting rich_invest_rounds). */
+		if (b.self_steward == 1) {
+			for (local i = 0; i < (b.rich ? b.rich_invest_rounds : 1); i++) this.InvestSurplus(b);
+		}
 		/* Mechanisms learned from AAAHogEx, each behind its own setting (catchment.nut, statues.nut). */
 		if (!frozen) {
 			this.GrowCatchment(b);
@@ -564,6 +602,16 @@ function PrismaticAI::Start() {
 			if (!frozen) this.TwinLines(b);
 		}
 		this.ReconcileLines(b.cash_reserve);
+		/* Better engines than the ones it runs replace them at their next depot visit (modernize.nut). */
+		/* Only with money idle (b.rich): a replacement costs a new vehicle's price (modernize.nut). */
+		if (b.modernize == 1 && PrismaticAI.MonthKey() != this.month) {
+			if (b.rich) this.Modernize(b);
+			else PrismaticAI.ModernizeHold();
+		}
+		/* Track follows engines: one network a month moves to a better rail type it can afford (infra.nut). */
+		if (!frozen && b.rich && b.upgrade_track == 1 && PrismaticAI.MonthKey() != this.month) this.UpgradeTrack(b);
+		/* New models offered to us first: taken, like AAAHogEx does (modernize.nut). */
+		if (b.modernize == 1 && b.rich) PrismaticAI.AcceptPreviews();
 		if (PrismaticAI.MonthKey() != this.month) { this.month = PrismaticAI.MonthKey(); PrismaticAI.LogLines(); }
 		/* Borrowed money that sits idle only costs interest: repay what is above twice the reserve. */
 		PrismaticAI.RepaySurplus(max(2 * b.cash_reserve, afloat));
@@ -572,7 +620,9 @@ function PrismaticAI::Start() {
 		AILog.Info("PrismaticAI heartbeat: date=" + AIDate.GetCurrentDate() +
 			" money=" + AICompany.GetBankBalance(AICompany.COMPANY_SELF) +
 			" vehicles=" + AIVehicleList().Count() + " routes=" + this.routes + "/" + b.max_routes +
-			" " + knobs);
+			/* The caps in force, not the raw settings: own_lines=8 read as the cap while the real one
+			 * was 32, and hid where growth stopped (growth.nut). */
+			" own_cap=" + own_cap + " air_cap=" + b.invest_air_cap + " " + knobs);
 
 		local ticks = b.heartbeat * 74 / 30; // ~heartbeat_seconds of ticks (74 ticks/sec baseline)
 		this.Sleep(ticks > 0 ? ticks : 1);

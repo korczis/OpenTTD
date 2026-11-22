@@ -1110,7 +1110,7 @@ function PrismaticAI::KeepLinesServed(reserve) {
 		/* Its own trains only (lines.nut TrainsOf): a line sharing both stations with another is not
 		 * served by the other's trains. */
 		local served = PrismaticAI.TrainsOf(line).len() > 0;
-		if (served) continue;
+		if (served || line.depot == -1) continue; /* -1: a line rebuilt from the map with no depot near it */
 		if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) < reserve) return;
 		local train = PrismaticAI.BuildTrain(line);
 		if (train == -1) continue;
@@ -1120,10 +1120,13 @@ function PrismaticAI::KeepLinesServed(reserve) {
 	}
 }
 
-function PrismaticAI::UseFirstRailType() {
+/* The rail type a new line is built in: with upgrade_track, the one whose best locomotive for
+ * `cargo` is best (infra.nut BestRailType); else, or when none is found, the first available. */
+function PrismaticAI::UseFirstRailType(cargo = -1) {
 	local types = AIRailTypeList();
 	if (types.IsEmpty()) { AILog.Warning("PrismaticAI: no rail type available"); return false; }
-	AIRail.SetCurrentRailType(types.Begin());
+	local rt = (RICH_NOW && AIController.GetSetting("upgrade_track") == 1) ? PrismaticAI.BestRailType(cargo) : AIRail.RAILTYPE_INVALID;
+	AIRail.SetCurrentRailType(rt != AIRail.RAILTYPE_INVALID ? rt : types.Begin());
 	return true;
 }
 
@@ -1166,7 +1169,7 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
 		AILog.Warning("PrismaticAI: freight route needs two industries and a cargo (fr_from=" + p + ", fr_to=" + q + ", fr_cargo=" + cargo + ")");
 		return 0;
 	}
-	if (!PrismaticAI.UseFirstRailType()) return 0;
+	if (!PrismaticAI.UseFirstRailType(cargo)) return 0;
 	local pl = AIIndustry.GetLocation(p), ql = AIIndustry.GetLocation(q);
 	local label = AICargo.GetCargoLabel(cargo) + " " + AIIndustry.GetName(p) + " - " + AIIndustry.GetName(q);
 	local dist = AIMap.DistanceManhattan(pl, ql);
@@ -1207,21 +1210,33 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
  * {from, to, cargo, distance, production, score} or null.
  * An industry built on water (an oil rig) has no land for a rail station. Its large output put it
  * first, and every attempt ended at "no rail station site", yet still counted against own_lines and
- * own_fail_pause: on OpenTTD seed 930967890 its own plans 9 to 12 of 32 were all oil rigs. */
-function PrismaticAI::NextOwnFreightLine(tried) {
+ * own_fail_pause: on OpenTTD seed 930967890 its own plans 9 to 12 of 32 were all oil rigs.
+ * With `rich` (growth.nut), a producer others serve is a candidate while under RICH_SERVED_BELOW
+ * percent of its output was transported, scored on the part left, and acceptors may be
+ * RICH_MIN_TILES to RICH_MAX_TILES away: with eight companies on the owner's map no unserved
+ * producer was left after 1958, and the bot held 3.7M for years. */
+function PrismaticAI::NextOwnFreightLine(tried, rich = false) {
 	local best = null, best_score = 0;
 	/* Transit time at the speed of a typical early steam engine: about 100 km/h, some 3.7 tiles a day. */
 	local tiles_a_day = 3.7;
+	local near = rich ? RICH_MIN_TILES : 100, far = rich ? RICH_MAX_TILES : 260;
 	foreach (p, _ in AIIndustryList()) {
 		if (AIIndustry.IsBuiltOnWater(p)) continue;
 		if (PrismaticAI.OwnRailStationNear(AIIndustry.GetLocation(p), 8) != null) continue;
 		foreach (c, _ in AICargoList_IndustryProducing(p)) {
 			if (!AICargo.IsFreight(c)) continue;
 			local prod = AIIndustry.GetLastMonthProduction(p, c);
-			if (prod < 40 || AIIndustry.GetLastMonthTransported(p, c) > 0) continue;
+			if (prod < 40) continue;
+			if (AIIndustry.GetLastMonthTransported(p, c) > 0) {
+				if (!rich) continue;
+				local served = AIIndustry.GetLastMonthTransportedPercentage(p, c);
+				if (served >= RICH_SERVED_BELOW) continue;
+				prod = prod * (100 - served) / 100;
+				if (prod < 40) continue;
+			}
 			local accs = AIIndustryList_CargoAccepting(c);
 			accs.Valuate(AIIndustry.GetDistanceManhattanToTile, AIIndustry.GetLocation(p));
-			accs.KeepBetweenValue(99, 261);
+			accs.KeepBetweenValue(near - 1, far + 1);
 			foreach (q, dist in accs) {
 				if (tried.rawin(p + "-" + q + "-" + c)) continue;
 				local days = (dist / tiles_a_day).tointeger() + 1;

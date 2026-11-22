@@ -127,6 +127,12 @@ sync = ["python3", "-B", "tools/research/town-model/derive.py"]
 check = ["python3", "-B", "tools/research/town-model/derive.py", "--check"]
 
 [[generators.items]]
+id = "prismatic-ai-docs"
+outputs = ["tools/research/prismatic-ai/README.md"]
+sync = ["python3", "-B", "tools/research/prismatic-ai/derive_docs.py"]
+check = ["python3", "-B", "tools/research/prismatic-ai/derive_docs.py", "--check"]
+
+[[generators.items]]
 id = "ai-battle"
 outputs = ["research/ai-battle/README.md", "research/results"]
 sync = ["python3", "-B", "tools/research/ai-battle/battle.py", "render"]
