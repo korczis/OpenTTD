@@ -27,6 +27,9 @@ tools/research/mcp-rhai/target/release/mcp-hub --panel http://127.0.0.1:8800   #
 tools/research/mcp-rhai/target/release/mcp-hub --bus-port 8791 --no-store       # a fixed bus port, no store
 ```
 
+Beyond loopback the hub takes the panel's access flags and policy (`--bind`, `--allow-origin`,
+`--token`; [mcp-control.md](mcp-control.md#who-may-use-it-locally-on-the-lan-on-the-web-adr-0038)).
+
 ## The surface
 
 `ws://127.0.0.1:<port>/ws` speaks JSON-RPC 2.0; `POST /hub/rpc` takes the same requests one at a time

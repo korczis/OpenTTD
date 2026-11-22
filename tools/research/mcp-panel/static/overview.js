@@ -5,7 +5,7 @@
    maximized (Escape restores). A mark leads somewhere: a company focuses it in every chart, the
    fleet leads to the vehicles resource page. */
 
-import { ecInit, maximizable, PALETTE, $, whole, compact, INK, AXIS as axis, patchAddress } from './components.js';
+import { ecInit, maximizable, PALETTE, $, api, whole, compact, INK, AXIS as axis, patchAddress } from './components.js';
 
 const echarts = globalThis.echarts;
 const DAY = 86400000;
@@ -276,8 +276,8 @@ function mount() {
 
   const pull = async () => {
     try {
-      const r = await fetch(`/api/overview/history?since=${last}`);
-      const d = await r.json();
+      const d = await api(`/api/overview/history?since=${last}`, undefined, { shownIn: 'ov-samples' });
+      if (!d.ok) { if (!samples.length) $('ov-samples').textContent = `no history yet: ${d.error || `HTTP ${d.status}`}`; return; }
       if (typeof d.last === 'number' && d.last < last) { samples = []; last = -1; return pull(); }
       if (d.samples.length) {
         samples = samples.concat(d.samples).filter((s, i, all) => i === all.length - 1 || all[i + 1].date !== s.date);

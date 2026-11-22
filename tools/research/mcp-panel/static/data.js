@@ -5,7 +5,7 @@
    (components.js ecInit). The bus card shows the ZeroMQ endpoint (GET /api/bus) and how to subscribe
    from Rust, Python, Node and Elixir. The pure parts are exported for node --test (test/data.test.mjs). */
 
-import { ecInit, maximizable, PALETTE, UI, $, esc, whole, compact, INK, AXIS as axis, patchAddress, TONE } from './components.js';
+import { ecInit, maximizable, PALETTE, UI, $, esc, api, whole, compact, INK, AXIS as axis, patchAddress, TONE } from './components.js';
 
 /** The registry: every chart of /data, the address keys it reads and where a click goes. */
 export const CHARTS = [
@@ -370,14 +370,10 @@ export function page() {
     $('run-msg').textContent = 'running…';
     $('query-error').classList.add('hidden');
     const t0 = performance.now();
-    let r, d;
-    try {
-      r = await fetch('/api/db/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
-      d = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
-    } catch (e) { r = { ok: false, status: 0 }; d = { error: String(e) }; }
-    if (!r.ok || d.error) {
-      const missing = r.status === 404 ? 'This panel does not serve the event store yet (no /api/db/query; ADR 0033). ' : '';
-      $('query-error').textContent = missing + (d.error || `HTTP ${r.status}`);
+    const d = await api('/api/db/query', { sql });
+    if (!d.ok || d.error) {
+      const missing = d.status === 404 ? 'This panel does not serve the event store yet (no /api/db/query; ADR 0033). ' : '';
+      $('query-error').textContent = missing + (d.error || `HTTP ${d.status}`);
       $('query-error').classList.remove('hidden');
       $('run-msg').textContent = '';
       answer = null;
@@ -409,15 +405,15 @@ export function page() {
 
   const schema = async () => {
     try {
-      const r = await fetch('/api/db/tables');
-      if (r.ok) { const t = normalizeSchema(await r.json()); if (t.length) tables = t; }
+      const r = await api('/api/db/tables', undefined, { shownIn: 'table-list' });
+      if (r.ok) { const t = normalizeSchema(r); if (t.length) tables = t; }
     } catch { /* the ADR's schema stands in */ }
     renderExamples();
   };
 
   const bus = async () => {
     let b = null;
-    try { const r = await fetch('/api/bus'); if (r.ok) b = await r.json(); } catch { /* not served */ }
+    const r = await api('/api/bus', undefined, { shownIn: 'bus-endpoint' }); if (r.ok) b = r; // not served: the cards say so
     $('bus-endpoint').textContent = b?.endpoint || 'not served by this panel yet';
     $('bus-schema').textContent = b?.schema || '-';
     $('bus-published').textContent = b?.published == null ? '-' : whole.format(b.published);

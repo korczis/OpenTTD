@@ -5,22 +5,13 @@
    PanelUI before this runs). The markup builders are pure and exported for node --test
    (test/app.test.mjs); everything below them wires them to the page. */
 
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/** The shell's page kit (static/shell.js KIT): $, esc, the one API client, its toasts. */
+const { $, esc, api, notify, liveImage } = globalThis.PanelKit ?? require('./shell.js').KIT;
 /** The shell's Pro class sets, one per role (static/shell.js UI). */
 const UI = globalThis.PanelUI;
 /** The shell's badge tones (static/shell.js TONE). */
 const TONE = globalThis.PanelTONE;
 const tag = (text, tone) => `<span class="${UI.badge} ${TONE[tone]}">${esc(text)}</span>`;
-
-async function api(path, body) {
-  const opts = body === undefined ? {} : {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  };
-  const r = await fetch(path, opts);
-  const text = await r.text();
-  try { return JSON.parse(text); } catch { return { status: r.status, text }; }
-}
 
 const money = (v) => (typeof v === 'number' ? v.toLocaleString('en') : v ?? '-');
 
@@ -118,7 +109,7 @@ async function refreshOverview() {
 
 async function loadCatalogue() {
   // The same component as /tools (catalogue.js), compact, its filters kept in the address as c_*.
-  const [m, doc] = await Promise.all([import('/static/catalogue.js'), fetch('/openapi.json').then((r) => r.json())]);
+  const [m, doc] = await Promise.all([import('/static/catalogue.js'), api('/openapi.json')]);
   m.mountCatalogue($('catalogue-mount'), m.catalogueItems(doc), { compact: true, prefix: 'c_' });
 }
 
@@ -133,7 +124,14 @@ document.addEventListener('click', async (ev) => {
   const t = ev.target.closest('[data-approve],[data-read]');
   if (!t) return;
   ev.preventDefault();
-  if (t.dataset.approve) { await api('/api/approve', { id: Number(t.dataset.approve) }); tick(); }
+  if (t.dataset.approve) {
+    // A failure is shown by the one API client; a success says what the game did with it.
+    t.disabled = true;
+    const r = await api('/api/approve', { id: Number(t.dataset.approve) });
+    if (r.ok) notify(`#${t.dataset.approve} approved: ${r.status} ${r.command_result ?? ''}`.trim(), 'green');
+    t.disabled = false;
+    tick();
+  }
   if (t.dataset.read) location.href = '/resource/' + t.dataset.read.replace(/^openttd:\/\//, '');
 });
 $('btn-pause').onclick = async () => { await api('/api/pause', { pause: true }); tick(); };
@@ -217,6 +215,7 @@ const HELP = `OpenTTD console commands go straight to the server console (e.g. c
 
 /* /rhai: every line the script prints, as it prints it. */
 async function rhaiStream(script) {
+  // raw fetch: the answer is a stream read line by line (r.body), which api() would buffer whole.
   const r = await fetch('/api/rhai/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script }) });
   const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
   for (;;) {
@@ -328,24 +327,15 @@ if (window.EventSource) {
 }
 
 /* ---- live view of the owner's game window --------------------------------------------------- */
-(function liveView() {
-  const img = document.getElementById('live-img'); if (!img) return;
-  let busy = false;
-  setInterval(() => {
-    if (busy || document.hidden) return; busy = true;
-    const next = new Image();
-    next.onload = () => { img.src = next.src; busy = false; document.getElementById('live-msg').textContent = 'updated ' + new Date().toLocaleTimeString(); };
-    next.onerror = () => { busy = false; document.getElementById('live-msg').textContent = 'no GUI client attached yet'; };
-    next.src = '/api/view/screenshot?t=' + Date.now();
-  }, 1200);
-})();
+globalThis.document && liveImage($('live-img'), $('live-msg'));
 
 /* ---- cluster: every registered instance, probed live ------------------------------------------ */
 (function cluster() {
   const body = document.getElementById('cluster-body'); if (!body) return;
   async function load() {
     try {
-      const d = await (await fetch('/api/instances')).json();
+      const d = await api('/api/instances', undefined, { shownIn: body });
+      if (!d.ok) throw new Error(d.error || `HTTP ${d.status}`);
       document.getElementById('cluster-reg').textContent = `registry ${d.registry} · ${d.instances.length} instance(s)`;
       body.innerHTML = clusterHtml(d.instances);
     } catch (e) { body.innerHTML = `<tr><td class="px-4 py-2" colspan="5">${esc(e.message)}</td></tr>`; }
@@ -357,19 +347,20 @@ if (window.EventSource) {
 (function news() {
   const list = document.getElementById('news-list'); if (!list) return;
   const msg = (t) => { document.getElementById('news-msg').textContent = t; };
-  const post = async (path, body) => (await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })).json();
+  const post = (path, body) => api(path, body || {});
   async function load() {
     try {
-      const d = await (await fetch('/api/news?limit=15')).json();
+      const d = await api('/api/news?limit=15', undefined, { shownIn: 'news-msg' });
+      if (!d.ok) throw new Error(d.error || `HTTP ${d.status}`);
       list.innerHTML = newsHtml(d.news || []);
     } catch (e) { msg('no GUI client attached yet'); }
   }
   async function towns() {
     try {
-      const d = await (await fetch('/api/resources/towns')).json();
       const sel = document.getElementById('news-town');
-      sel.innerHTML = townOptions(d.data.towns);
-    } catch (e) { /* the game is still starting */ }
+      const d = await api('/api/resources/towns', undefined, { shownIn: sel });
+      sel.innerHTML = d.ok ? townOptions(d.data.towns) : '<option value="">No towns yet: the game is still starting</option>';
+    } catch (e) { /* an answer without towns: the options stay */ }
   }
   document.getElementById('news-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -384,9 +375,10 @@ if (window.EventSource) {
   document.getElementById('news-close').addEventListener('click', async () => { await post('/api/news/close'); msg('news window closed'); });
   async function asks() {
     try {
-      const d = await (await fetch('/api/ask')).json();
-      document.getElementById('ask-list').innerHTML = asksHtml(d.asks || []);
-    } catch (e) { /* no GUI client yet */ }
+      const list = document.getElementById('ask-list');
+      const d = await api('/api/ask', undefined, { shownIn: list });
+      list.innerHTML = d.ok ? asksHtml(d.asks || []) : `<li class="text-gray-500 dark:text-gray-400">${esc(d.error || 'no GUI client attached yet')}</li>`;
+    } catch (e) { /* an answer without asks: the list stays */ }
   }
   load(); towns(); asks(); setInterval(load, 4000); setInterval(asks, 3000); setInterval(towns, 60000);
 })();
@@ -400,8 +392,7 @@ if (window.EventSource) {
   document.getElementById('plan-run').onclick = async () => {
     let actions;
     try { actions = JSON.parse(document.getElementById('plan-actions').value); } catch (e) { document.getElementById('plan-msg').textContent = 'actions are not JSON: ' + e.message; return; }
-    const r = await fetch('/api/actionplan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actions }) });
-    const d = await r.json();
+    const d = await api('/api/actionplan', { actions });
     if (!d.ok) { document.getElementById('plan-msg').textContent = 'refused: ' + JSON.stringify(d.errors || d.error); document.getElementById('plan-steps').innerHTML = ''; return; }
     const res = d.result;
     document.getElementById('plan-msg').textContent = planSummary(res);
