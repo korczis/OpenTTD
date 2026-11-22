@@ -972,6 +972,10 @@ class Regions:
                 a = parse_args(m["args"])
                 if region == "ai-rules":
                     a.setdefault("origin", "project")
+                if region == "docs-index":  # the table must show the column the chart counts
+                    a.setdefault("dir", "")
+                    if column.lower() not in a.get("fields", "").lower().split(","):
+                        continue
                 if m["name"] == region and "as" not in a and all(a.get(k) == v for k, v in match.items()):
                     return m
             return None
@@ -1089,15 +1093,29 @@ class Regions:
         raise ValueError(f"table-chart: no table in {src} with columns {', '.join(w for w in want if w)}")
 
     def gen_docs_index(self, args: dict, doc: Doc) -> str:
+        """Every published document under `dir` (to `depth`), with its summary; `fields=a,b` adds a
+        column per front-matter field, and `as=pie by=<field>` draws the same documents as a pie
+        of that field, each slice linked to the table filtered to its value."""
         prefix = args.get("dir", "").strip("/")
-        rows = []
+        picked = []
         for d in self.docs.values():
             if d.path == doc.path or (prefix and not d.path.startswith(prefix + "/")):
                 continue
             if args.get("depth") and d.path.count("/") - prefix.count("/") - (1 if prefix else 0) >= int(args["depth"]):
                 continue
-            rows.append([f"[{d.title}]({rel_md(doc, d.path)})", d.summary])
-        return table(["Document", "What it is"], rows)
+            picked.append(d)
+        value = lambda d, f: "" if (d.fm or {}).get(f) is None else str((d.fm or {})[f])  # noqa: E731
+        if args.get("as") == "pie":
+            field = args.get("by")
+            if not field:
+                raise ValueError("docs-index as=pie needs by=<front-matter field>")
+            where = f" under {prefix}/" if prefix else ""
+            return self.pie_by(doc, f"Documents{where} by {field}", "docs-index", {"dir": args.get("dir", "")},
+                               field.capitalize(), (value(d, field) for d in picked))
+        fields = [f for f in args.get("fields", "").split(",") if f]
+        rows = [[f"[{d.title}]({rel_md(doc, d.path)})"] + [value(d, f) for f in fields] + [d.summary]
+                for d in picked]
+        return table(["Document"] + [f.capitalize() for f in fields] + ["What it is"], rows)
 
     def gen_ai_features(self, args: dict, doc: Doc) -> str:
         if args.get("as") == "pie":

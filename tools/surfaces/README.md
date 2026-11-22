@@ -99,7 +99,7 @@ A region is a pair of HTML comments whose contents the generator owns:
 
 | Generator | Arguments | Table |
 |---|---|---|
-| `docs-index` | `dir=<path>` (default: all), `depth=<n>` | Every published document under the path, with its derived summary |
+| `docs-index` | `dir=<path>` (default: all), `depth=<n>`, `fields=<a,b>`, `as=pie by=<field>` | Every published document under the path, with its derived summary and a column per front-matter field in `fields`; or a pie of the documents by one front-matter field, each slice opening that table filtered to its value |
 | `ai-features` | `as=pie` | `.ai/` features: name, status, headline; or a pie by status |
 | `ai-adrs` | `as=pie` | Architecture decisions: id, status, title; or a pie by status |
 | `ai-rules` | `origin=project\|vendored\|all`, `as=pie` | Rules: id, class, statement; or a pie by class |
