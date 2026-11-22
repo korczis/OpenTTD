@@ -968,7 +968,7 @@ pub fn handle(state: &Shared, req: &Value, subscriber: Option<u64>) -> Option<Va
         }
         "hub.db_query" => {
             let sinks = state.lock().unwrap().sinks.clone();
-            let sql = p.get("sql").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).unwrap_or(bus_sinks::DEFAULT_QUERY);
+            let sql = p.get("sql").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).unwrap_or(bus_sinks::default_query());
             store_reply(&id, bus_sinks::query(sinks.as_deref(), sql))
         }
         "hub.instances" => ok(&id, state.lock().unwrap().instances_json()),
