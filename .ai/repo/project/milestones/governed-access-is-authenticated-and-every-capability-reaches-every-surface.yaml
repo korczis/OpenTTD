@@ -1,0 +1,24 @@
+id: governed-access-is-authenticated-and-every-capability-reaches-every-surface
+title: "Governed access is authenticated, and every capability is derived onto every surface and exercised live"
+slug: governed-access-is-authenticated-and-every-capability-reaches-every-surface
+order: 170
+priority: p1
+problem: "The panel and the hub now share one web access policy and need a token beyond loopback (tools/research/mcp-rhai/src/web_access.rs, ADR 0038, PR #47), but on loopback the approver is still a name the caller declares: POST /api/approve records `by` unchecked (tools/research/mcp-rhai/src/panel.rs:2382) and research/agent-loop.md:55 says the loopback API checks no identity, while research/mcp-hub.md:221 still tells the reader the hub has no authentication at all. Every MCP tool is exposed, but live scenarios call about 2% of them and a call counts before its arguments are checked (README.md:291, src/prismatic_mcp/prismatic_mcp_coverage.cpp:34). Each surface is derived on its own (OpenAPI test panel.rs:3382, Rhai catalogue, hub GraphQL, console), but no single artifact shows a capability's state on every surface, and no test proves that a new registration reaches all of them. The panel and hub offer no MCP endpoint of their own (panel.rs:2336 routes() is REST only), there is no declared transport-operations catalogue, no request id that follows one request across surfaces, and no reasoner adapter that can say it is unavailable."
+outcome: "Every approval names a principal the panel or hub authenticated, never a declared name. Live probes exercise the MCP catalogue counted by validated outcome, and a gate tier holds the floor. A parity matrix generated from the live registries shows every capability on every surface (console, panel, REST/Swagger, MCP, hub WebSocket, GraphQL, Rhai), and a fixture registration proves the derivation while a removed projection fails it. The panel and hub answer a standards MCP client with tools derived from their route and method tables. A versioned transport.* catalogue is declared once and projected from there. One request id runs from intent to verified outcome on every surface. A provider-neutral reasoner adapter proposes against real schemas and reports reasoner_unavailable without breaking any deterministic capability."
+acceptance_criteria:
+- "An approval through the panel, the hub or the in-game console records an authenticated principal derived from the credential that carried it; an unauthenticated approval is refused, and research/mcp-hub.md and research/agent-loop.md state the policy as it is on master"
+- "mcp-coverage-check counts a call only when its arguments passed validation; a disposable e2e stack runs the probe, and a gate tier fails below the declared floor"
+- "A generated parity matrix lists every capability against every surface with a machine-tested state; a fixture capability appears on every applicable surface with no hand edit, and removing one projection fails the check"
+- "An MCP client initializes against the panel and the hub and lists tools derived from routes() and the hub method table; mutating ones stay behind the approval flow"
+- "A transport.* catalogue (snapshot, plan, evaluate, apply, status, explain) is declared once with schemas and permissions and reaches every surface through the existing derivation"
+- "One request id follows a request from console, panel, Swagger, MCP and Rhai through plan, approval and verified outcome, and every event of it carries that id"
+- "A reasoner adapter answers propose_intent, propose_plan, explain and request_clarification against the live schemas, or reasoner_unavailable, and the parity matrix stays green with no reasoner present"
+validation:
+- "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+- "node --test tools/research/mcp-panel/test/"
+- "python3 -m unittest tools/research/test_mcp_coverage_check.py"
+- "tools/gate.sh research"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -1,0 +1,29 @@
+id: I0159
+milestone: battlebrain-decides-live-with-rollback
+title: "Every kernel output the planner or Battlebrain consumes passes a domain check: transport-investment gains one, and a kernel without one is refused on every path, not only in Battlebrain"
+slug: every-consumed-kernel-domain-checked
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Add a domain check for transport-investment (chosen items within budget, totals consistent with the input) to battlebrain_contract.rs, run it in invest.rs before an investment answer is used, and make mcp-plan refuse (no_domain_check) any kernel output it would use to price or select whose kernel has no check. Each invocation on these paths is an algoglyph-invocation/v1 envelope pinned to the discovered catalogue."
+why: "External review 2026-11-22 (digest C-43). Discovery and the fail-closed envelope exist (tools/research/schema/algoglyph-invocation.v1.schema.json; refusal codes in research/battlebrain/README.md:72-87), but tools/research/mcp-rhai/src/battlebrain_contract.rs:487-529 checks only knapsack-dp and track-planning, and :807 asserts transport-investment is no_domain_check, while mcp-plan --invest uses it (invest.rs). AlgoGlyph exposes no kernel version, output schema or units (README:191-192); that part is cross-repo and out of scope."
+scope:
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/mcp-rhai/src/invest.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-plan.rs"
+  - "research/battlebrain/README.md"
+non_scope:
+  - "Adding versions or output schemas to AlgoGlyph (used from outside, never edited)"
+depends_on:
+  - I0158
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "transport-investment answers over budget or with inconsistent totals are refused (tests); the :807 assertion is replaced"
+  - "mcp-plan --invest records an invocation envelope per call and refuses an unchecked kernel (test)"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan --bin battlebrain"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

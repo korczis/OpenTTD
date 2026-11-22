@@ -1,0 +1,31 @@
+id: I0124
+milestone: every-battle-match-explains-itself
+title: "The post-mortem of edition a80cc94a and battle-brain pick one proposal, which is tested on held-start pairs over three seeds against a named opponent before any default changes"
+slug: postmortem-a80cc94a-paired-test
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Run battle-postmortem on edition a80cc94a275dbec1 and battle-brain over its result, commit both outputs, choose one proposal with the reason, and test it paired: the same held start, three seeds, one named opponent (AAAHogEx or the strongest available), proposal versus current default. Change the default only if the effect exceeds the opponent's own spread across the seeds; otherwise record the null result."
+why: "External review 2026-11-22 (digest C-34). The tools exist (tools/research/mcp-rhai/src/bin/battle-postmortem.rs, tools/research/battle-brain/brain, research/battle-brain.md), but the only committed post-mortem is for edition 155d18ea50071e72 (research/results/postmortem-155d18ea50071e72.*); none exists for the latest edition a80cc94a, and no proposal has been paired-tested. The owner declined running it ad hoc on 2026-11-22; this issue makes it planned work with the instrumentation of I0118-I0120 in place."
+scope:
+  - "research/results/**"
+  - "research/battle-brain.md"
+  - "tools/research/battle-brain/**"
+non_scope:
+  - "Starting matches while the owner's live game runs, or without the owner's go-ahead for that session (the tournament host is shared)"
+depends_on:
+  - I0118
+  - I0119
+  - I0120
+serves:
+  - "internal-state-is-observable-reproducibly#a-battle-explains-itself"
+acceptance_criteria:
+  - "research/results/postmortem-a80cc94a275dbec1.{json,md} and the battle-brain output are committed"
+  - "The chosen proposal, the seeds, the opponent and the held start are declared in a committed pre-registration before the matches run"
+  - "The paired results are committed with per-seed deltas and the opponent's spread; the default changes only if the rule is met"
+validation:
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

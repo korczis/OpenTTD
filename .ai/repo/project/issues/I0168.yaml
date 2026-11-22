@@ -1,0 +1,34 @@
+id: I0168
+milestone: prismatic-closes-one-real-loop
+title: "Prismatic's own decision runs live: the panel pulls a directive from a running prismatic_api, an operator approves it, the game executes it, and its effect is read back a game month later"
+slug: prismatic-decides-live
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Run tools/research/mcp-decision-check and tools/research/prismatic-rhai-check against the real prismatic_api on loopback, not the stand-in of research/agent-loop.md step 1, on a research build with a planned PrismaticAI company. Both checks must record, in the store and in plan.directive_outcome: the panel's observation, Prismatic's directive, the freshness check, one approval given by an operator (never by the requester), the Command::Post, the verdict, and a re-read at least one game month later of the AI setting and of the game quantity it governs. The record names the Prismatic revision that answered, or 'unknown' if Prismatic offers none. When prismatic_api is down, both checks say NOT RUN with the reason, and nothing is reported as PASS. The run record goes under research/results/, and research/agent-loop.md's Decide row cites it."
+why: "External review 2026-11-22 (digest B-29, A-59). research/agent-loop.md:78-84: the live proof of the decision path used 'a stand-in that behaves as mcp-decision-check's does'. .ai/repo/project/issues/I0092.yaml evidence: 'prismatic-rhai-check NOT RUN live (nothing on 4004, exit 3), 6/6 against a fixture'. research/agent-loop.md:53 marks Decide PARTIAL, while every stage after it is IMPLEMENTED (:54-58), so the missing piece of a closed loop is Prismatic itself deciding live. Prismatic decides aggressiveness (tools/research/mcp-rhai/src/panel_decision.rs, commit 54460f40fc)."
+scope:
+  - "tools/research/mcp-decision-check"
+  - "tools/research/prismatic-rhai-check"
+  - "research/agent-loop.md"
+  - "research/results/**"
+non_scope:
+  - "Editing prismatic-platform. The fork uses it from outside. If /api/openttd/decision does not run, or answers outside research/prismatic-bridge/decision-contract.schema.json, the issue records what that repository must provide and stops"
+  - "The freight-line decision; ADR 0037 gives it to Battlebrain (I0152 runs that live)"
+  - "Starting a game stack while the owner's live game needs the machine, or without the owner's go-ahead for the approval step"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
+acceptance_criteria:
+  - "One live run in which both checks exit 0 against prismatic_api on loopback, with the record committed under research/results/"
+  - "approved_by on every applied step names an operator channel, never auto-approve or the requester"
+  - "A read-back at least one game month after execution shows the setting still applied and names the game quantity it governs"
+  - "With prismatic_api stopped, both checks exit 3 NOT RUN"
+validation:
+  - "tools/research/mcp-decision-check"
+  - "tools/research/prismatic-rhai-check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

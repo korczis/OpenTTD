@@ -1,0 +1,35 @@
+id: I0180
+milestone: every-changed-line-is-tested
+title: "A blocking rule project.new-code-tested and one changed-line coverage gate exist, start with Python (sys.monitoring) and are proven against a change they must refuse"
+slug: new-code-tested-rule-and-gate
+priority: p0
+profile: deep-work
+parallel_safe: false
+objective: "Write the rule .ai/repo/rules/project/new-code-tested.v1.md (blocking, owner order 2026-11-22) and the gate tools/coverage/changed-lines: given a diff base (merge-base with origin/master) it collects the changed lines per file, reads coverage reports in a common format, and fails listing file:line for every changed executable line no test ran. Wire Python first: run the fork's Python tests (tools/research/test_*.py, tools/plan-github/test_*.py, tools/knowledge, tools/surfaces tests) under a sys.monitoring line collector, then hook the gate into tools/gate.sh change and the PR workflow. Add the exemption file with a reason per entry, printed on every run, and a fixture proving the gate fails on an untested line and passes once a test covers it."
+why: "Owner order 2026-11-22 in the global instructions: every change ships tests that run every line it adds or modifies, enforced as a blocking project rule plus a coverage gate refusing any changed line no test ran, by file and line (template: sonic-playground project.new-code-tested, scripts/coverage.mjs, sys.monitoring for Python). Today the fork has neither the rule nor a changed-line gate; for example tools/plan-github/plan_github.py landed with tests for its pure functions only."
+scope:
+  - ".ai/repo/rules/project/new-code-tested.v1.md"
+  - ".ai/repo/rules/README.md"
+  - "tools/coverage/**"
+  - "tools/gate.sh"
+  - ".github/workflows/surfaces.yml"
+  - "tools/plan-github/**"
+non_scope:
+  - "JavaScript, Rust and C++ coverage (I0181, I0189, I0190)"
+  - "Raising coverage of untouched legacy lines; the gate judges changed lines only"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#every-changed-line-is-tested"
+acceptance_criteria:
+  - "The rule exists, is blocking and names its validator; `majordomus rules` lists it"
+  - "tools/coverage/changed-lines fails with file:line on the committed fixture's untested line and passes with its test"
+  - "Python coverage is collected with sys.monitoring for every Python test suite the gate runs"
+  - "tools/gate.sh change and the PR workflow run the gate; the exemption list is printed on every run"
+  - "tools/plan-github/plan_github.py reaches full changed-line coverage under the gate (its sync paths tested against a fake gh and majordomus)"
+validation:
+  - "tools/coverage/changed-lines --base origin/master"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

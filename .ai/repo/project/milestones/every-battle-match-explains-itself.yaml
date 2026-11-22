@@ -1,0 +1,20 @@
+id: every-battle-match-explains-itself
+title: "Every AI battle match records why each company won or lost, with the settings it actually ran under, and replays identically on another arena"
+slug: every-battle-match-explains-itself
+order: 110
+priority: p1
+problem: "The AI battle is the fork's hardest benchmark (AAAHogEx won every published match against PrismaticAI), but its records cannot explain a result. Matches run with `-d script=1` (tools/research/ai-battle/battle.py:1182 and :2590), so no AI decision log exists; the referee's REF Q line (referee/BattleReferee/main.nut:44) has value, money, income, performance and vehicle counts but no loan; the match record keeps years, start year, landscape, map size and breakdowns but not max_loan (hard-coded in the generated config at battle.py:1094) or the vehicle-slot limits, and a loaded game can take missing settings from the loader's own config; replays reproduced 0 of 4 originals on another arena, with the replay hosts on different game builds; tools/research/mcp-ab attributes observations to the first company in the dump (rows[0]); and the forensic source audit of AAAHogEx produced in the external review exists only outside the repository. Which cap stops PrismaticAI's fleet, and whether the benchmark is reproducible at all, stays UNKNOWN."
+outcome: "A battle record answers 'why': it carries each AI's decision log at script level 3, the loan of every company on every REF Q sample, and the game settings the match really loaded (max_loan, vehicle limits, difficulty), read back from the game. A replay runs on the same game build as its original, or is recorded as confounded, and identical replays are the norm with every divergence explained by a desync log. mcp-ab binds observations to the tested company. The AAAHogEx gap report, its source audit and its figures are committed and re-derived from the tournament database by a committed query, and one post-mortem proposal is tested on held-start pairs."
+acceptance_criteria:
+- "A new battle record holds, per AI company, a script-level-3 decision log (stored compressed, size-bounded) and REF Q samples with loan="
+- "The record's match settings are read back from the running game, not copied from the generated config, and include max_loan and the vehicle-slot limits"
+- "A replay on a second arena with the same build reproduces its original, or the record says why not (desync log, build mismatch)"
+- "tools/research/mcp-ab passes a test with an extra company in the game"
+- "research/analysis/aaahogex-performance-gap-2026-11-22.md is committed with path:line citations into AAAHogEx's source and figures re-derived by a committed SQL query"
+- "One battle-brain proposal is tested on held starts over three seeds against a named opponent, and a default changes only beyond the opponent's spread"
+validation:
+- "python3 -m unittest tools/research/test_ai_battle.py tools/research/test_mcp_ab.py"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

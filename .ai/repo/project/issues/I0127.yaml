@@ -1,0 +1,37 @@
+id: I0127
+milestone: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "PrismaticAI borrows for a build when it pays and repays what it did not spend, so its early bank balance stays near its reserve"
+slug: prismatic-ai-just-in-time-loan
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Replace the full-loan-per-build pattern with borrowing the build's priced cost plus the reserve, and repay the unspent part at once, so early money is either working or not borrowed; measure the bank balance over 1960-62 from REF Q loan samples and decide any default on held-start pairs."
+why: "External review 2026-11-22 (digest C-26): in 1960-62 PrismaticAI held 160-480k (more than its company value in 1961) against AAAHogEx's 23-48k. The autopilot and the planner's air route draw the whole loan before a build and keep it when the build succeeds (tools/research/prismatic-ai/PrismaticAI/autopilot.nut:120-122,129; main.nut:459-462), RepaySurplus then keeps max(2 x cash_reserve, a quarter's running cost) (main.nut:628), and the fitness hoard check starts at 500k (tools/research/ai-battle/battle.json:78), so early idle capital fails nothing. PR #46 and commit 52f631b115 address rich money and survival borrowing, not this. Measuring it needs the loan on REF Q (I0119)."
+scope:
+  - "tools/research/prismatic-ai/PrismaticAI/autopilot.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/main.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/air.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/info.nut"
+  - "tools/research/prismatic-ai/README.md"
+  - "research/results/**"
+non_scope:
+  - "StayAfloat and BuildFrozen (survival borrowing), which stay as they are"
+  - "InvestSurplus's borrowing (invest_borrow), handled with the gates of I0126"
+depends_on:
+  - I0119
+  - I0126
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#prismatic-ai-grows-and-recovers"
+acceptance_criteria:
+  - "A build borrows its tested cost (AITestMode + AIAccounting) plus cash_reserve, not the maximum loan, and gives back the unspent part right after the build, success or failure"
+  - "The behaviour sits behind an AI setting; with it off the fitness seed reproduces the previous standings"
+  - "Held-start pairs on three seeds report the mean bank balance and loan over 1960-62 for both arms from REF Q samples, and a default changes only beyond the opponent's spread"
+validation:
+  - "python3 -B tools/research/prismatic-ai/derive_docs.py --check"
+  - "python3 -m unittest tools/research/test_ai_battle.py tools/research/test_prismatic_ai_docs.py"
+  - "python3 tools/research/ai-battle/battle.py fitness"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
