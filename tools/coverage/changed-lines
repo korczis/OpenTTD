@@ -206,6 +206,8 @@ def run_tests(root: Path, data: Path, dirs: list[str]) -> list[str]:
     """Run each directory's suite under the tracer; the problems (a failing suite)."""
     env = dict(os.environ)
     env["CHANGED_LINES_DATA"] = str(data)
+    # As -B for every child: no __pycache__/ in the tree, the hook's sitecustomize.pyc included.
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONPATH"] = os.pathsep.join(p for p in (str(HOOK), env.get("PYTHONPATH")) if p)
     problems = []
     for d in dirs:

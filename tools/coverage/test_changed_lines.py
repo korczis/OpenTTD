@@ -123,6 +123,9 @@ class RefusesAndAccepts(Scratch):
                 out = subprocess.run([sys.executable, str(Path(__file__).parent / "foo.py")],
                                      capture_output=True, text=True, check=True)
                 self.assertEqual(out.stdout, "2\\n")
+                # No run leaves __pycache__/ behind, the hook's own sitecustomize.pyc included.
+                import os
+                self.assertEqual(os.environ.get("PYTHONDONTWRITEBYTECODE"), "1")
             '''), "    "))
         out = self.gate()
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
