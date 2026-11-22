@@ -466,7 +466,7 @@ decides when a measurement may change a default.
 | [Income per delivery is distance times a time factor; ground vehicles cover about 0.036 tiles a day per km/h](.ai/repo/knowledge/curated/cargo-payment-and-vehicle-speed.md) | When a planner, bot or script estimates what a route earns, how long cargo is in transit, or which mode of transport pays. |
 | [Classic cheats leave no gamelog entry; a savegame records them only as been_used flags in the CHTS chunk](.ai/repo/knowledge/curated/cheats-are-not-recorded-in-the-gamelog.md) | When reconstructing a savegame's history for research provenance, or adding a cheat. |
 | [A check run against :8800 can test an old panel: mcp-e2e moves a new stack to a free port when 8800 is held](.ai/repo/knowledge/curated/checks-can-test-an-old-panel-when-a-stack-moves-port.md) | When restarting the main stack and then running mcp-panel-check, mcp-route-check or mcp-view-check against the default address. |
-| [The panel parses console output, so a reworded console line in src/ can stop every stack; run mcp-e2e after changing one](.ai/repo/knowledge/curated/console-lines-the-panel-parses-are-an-interface.md) | Before changing the text of a console line that tools/research parses (the bearer token line, the MCP endpoint, approvals). |
+| [The panel parses console output, so a reworded console line in src/ can stop every stack; run mcp-e2e after changing one](.ai/repo/knowledge/curated/console-lines-the-panel-parses-are-an-interface.md) | Before changing the text of a console line that tools/research parses (the token-file line, the MCP endpoint, approvals). |
 | [src/core string files, utf8 and getoptdata also compile into the host tools strgen and settingsgen, where game headers are not available](.ai/repo/knowledge/curated/core-string-files-also-build-into-strgen-and-settingsgen.md) | When adding an include, a Debug() call or a game dependency to src/core/string.cpp, src/core/utf8.cpp or src/misc/getoptdata.cpp. |
 | [A dedicated server's console runs one line per select(): lines written together wait in the stream buffer](.ai/repo/knowledge/curated/dedicated-console-reads-one-buffered-line-per-select.md) | When a tool writes several console commands to a dedicated server's stdin in quick succession (the panel, a script, a ~ plan answer). |
 | [The headless research run feeds console commands on stdin after a fixed delay, and a loaded machine can lose them](.ai/repo/knowledge/curated/dedicated-server-stdin-startup-race.md) | When a research run passes but its research_status line is missing, or when scheduling a run next to a heavy build. |
@@ -786,7 +786,7 @@ from the code. The right-hand column says what was counted.
 |---|---|---|
 | **146** | [game commands, each an MCP tool an agent can call (`openttd.cmd.*`)](research/mcp-api.md) | `DEF_CMD_TRAIT\(Commands::` in `src/*_cmd.h` |
 | **23** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
-| **34** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
+| **36** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
 | **49** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **12** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
@@ -1255,7 +1255,7 @@ A real, compiling, connectable read-only vertical, plus approval-gated mutations
    ```bash
    cmake --build build-mcp --target openttd_test -j$(sysctl -n hw.ncpu) && ctest --test-dir build-mcp -R prismatic --output-on-failure
    ```
-6. **Start the server and connect** — In the in-game console: prismatic_mcp start, then prismatic_mcp token to get the bearer token, and prismatic_mcp approve <id> or deny <id> for a pending mutation. Never share the token; it is never logged.
+6. **Start the server and connect** — In the in-game console: prismatic_mcp start writes the bearer token to a 0600 file and prints only its path (prismatic_mcp token prints the path and a fingerprint), then prismatic_mcp approve <id> or deny <id> for a pending mutation. Never share the token; it is never printed or logged.
 7. **Run the local validation gate before proposing a change**
    ```bash
    tools/gate.sh change
