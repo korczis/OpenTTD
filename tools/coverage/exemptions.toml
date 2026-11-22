@@ -1,0 +1,11 @@
+# Changed Python lines that cannot run under a test (rule project.new-code-tested).
+#
+# Every entry is printed with its reason on every run of tools/coverage/changed-lines, and an
+# entry without a reason, with an unknown key, or that matches nothing in the repository fails
+# the gate. A line that merely has no test yet is not exempt: write the test.
+#
+#   [[exempt]]
+#   path = "tools/x/tool.py"            # a glob over repository paths (required)
+#   function = "Class.method"           # optional: that function's lines, decorators included
+#   match = "except ImportError"        # optional, instead of function: lines containing it
+#   reason = "why no test can run it"   # required, non-empty

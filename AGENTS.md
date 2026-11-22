@@ -38,7 +38,7 @@ One entry point, four build/test tiers of increasing cost, plus a reporting laye
 | Tier | Entry point | Cost | Purpose |
 |---|---|---|---|
 | Smoke | `tools/gate.sh smoke` | cheapest | fast feedback while actively iterating |
-| Change | `tools/gate.sh change` | standard | before calling a task done |
+| Change | `tools/gate.sh change` | standard | before calling a task done; refuses a changed Python line no test runs (`tools/coverage/changed-lines`, rule `project.new-code-tested`) |
 | Research | `tools/gate.sh research` | standard+ | a change to code behind `OPTION_RESEARCH_INSTRUMENTATION` (or the MCP server option), which the other tiers never compile |
 | Full | `tools/gate.sh full` | expensive | significant changes, or an experimental baseline |
 | Research/evaluation | `research/experiment-template.md` | n/a | records what was actually done and validated for an experiment |

@@ -21,7 +21,9 @@ pub const RECORD_SCHEMA: &str = "battlebrain-record/v1";
 /// The version of one AlgoGlyph kernel call's envelope.
 pub const INVOCATION_SCHEMA: &str = "algoglyph-invocation/v1";
 /// The version of the decision block a directive may carry.
-/// v2 (I0117): the block names the digest of the exact settings it authorises (`settings_digest`).
+/// v2 (I0117): the block names the digest of the exact settings it authorises (`settings_digest`)
+/// and the game tick of the snapshot it was decided on (`snapshot_tick`): an executor refuses it in
+/// a game whose clock is behind that tick (a reloaded earlier save or another world).
 pub const DECISION_SCHEMA: &str = "battlebrain-decision/v2";
 /// PrismaticAI's freight-line slots (info.nut declares fr_* then fr2_* to fr16_*; a test reads it).
 pub const FREIGHT_SLOTS: usize = 16;
@@ -31,9 +33,86 @@ pub fn freight_slot_prefix(i: usize) -> String {
     if i <= 1 { "fr_".to_string() } else { format!("fr{i}_") }
 }
 
+/// The companies in an openttd://companies answer, whatever its shape: the game's envelope
+/// (`{data: {companies: [...]}}`, prismatic_mcp_server.cpp), a `companies` or `data` array, or a
+/// bare array. The one reader of that shape for the panel's executor and for battlebrain.
+pub fn company_list(v: &Value) -> Vec<Value> {
+    [v.pointer("/data/companies"), v.get("companies"), v.get("data"), Some(v)].into_iter().flatten()
+        .find_map(|x| x.as_array().cloned()).unwrap_or_default()
+}
+
 /// The digest a decision block names for the settings string it authorises.
 pub fn settings_digest(settings: &str) -> String {
     digest(&Value::String(settings.to_string()))
+}
+
+/// The settings that clear every freight-line slot after `first` (fr<i>_from=-1): a decision owns
+/// all slots, so whatever it does not set it clears.
+pub fn cleared_slots(first: usize) -> String {
+    (first..=FREIGHT_SLOTS).map(|i| format!("{}from=-1", freight_slot_prefix(i))).collect::<Vec<_>>().join(",")
+}
+
+/// The policy id of a rollback decision.
+pub const ROLLBACK_POLICY: (&str, &str) = ("rollback", "1");
+
+/// The rollback of a live decision, as a live decision of its own (I0117 round 2): the bot plans
+/// its own freight lines again (planned_freight_only=0) and every slot is cleared. It is decided on
+/// `snapshot` (a snapshot record of the company's game), keyed `<prior key>:rollback` when the
+/// rolled-back block is given (else `<instance>:<company>:<date>:rollback`), stale with the
+/// snapshot, and applied through the executor's live path like any decision: one keyed pull, one
+/// approval, the world checked first. Returns the directive and the records it rests on.
+pub fn rollback_directive(snapshot: &Value, company: i64, prior: Option<&Value>, version: &str) -> Result<Value, Vec<Refusal>> {
+    let refuse = |code: &'static str, path: &str, msg: String| vec![Refusal::new(code, path, msg)];
+    match validate_record(snapshot) {
+        Ok("snapshot") => {}
+        Ok(other) => return Err(refuse("not_a_snapshot", "type", format!("--snapshot is a {other} record"))),
+        Err(e) => return Err(e),
+    }
+    if snapshot["scope"]["company"].as_i64() != Some(company) {
+        return Err(refuse("scope_mismatch", "scope.company", format!("the snapshot is scoped to company {}, not {company}", snapshot["scope"]["company"])));
+    }
+    if let Some(p) = prior {
+        validate_decision_block(p)?;
+        if p["mode"] != "live" {
+            return Err(refuse("not_live", "mode", "only a live decision is rolled back; a shadow one never reached the game".into()));
+        }
+    }
+    let (scope, at) = (snapshot["scope"].clone(), snapshot["at"].clone());
+    let snap_id = snapshot["id"].as_str().map(str::to_string).unwrap_or_else(|| record_id(snapshot));
+    let date = at["date"].as_str().unwrap_or_default();
+    let max_age = snapshot.pointer("/body/max_age_days").and_then(Value::as_i64).unwrap_or(1);
+    let valid_until = add_days(date, max_age).ok_or_else(|| refuse("invalid_input", "at.date", format!("the snapshot date {date:?} is not a date")))?;
+    let key = match prior {
+        Some(p) => format!("{}:rollback", p["idempotency_key"].as_str().unwrap_or_default()),
+        None => format!("{}:{company}:{date}:rollback", scope["instance"].as_str().unwrap_or_default()),
+    };
+    let hold = record("candidate", "proposed", &scope, &at, (AUTHORITY, version), &[json!(snap_id)],
+        json!({"action": {"kind": "hold"}, "assumptions": ["the bot plans its own freight lines again; no slot is handed to it"]}));
+    let mut derived = vec![json!(snap_id), hold["id"].clone()];
+    if let Some(p) = prior {
+        derived.push(p["decision"].clone());
+    }
+    let decision = record("decision", "decided", &scope, &at, (AUTHORITY, version), &derived, json!({
+        "policy": {"id": ROLLBACK_POLICY.0, "version": ROLLBACK_POLICY.1, "params": {"rolls_back": prior.map(|p| p["decision"].clone())}},
+        "goal": "back to the verified baseline: planned_freight_only=0 and every freight-line slot cleared", "snapshot": snap_id,
+        "selected": hold["id"], "rejected": [], "idempotency_key": key, "approval": "operator", "valid_until": valid_until}));
+    let settings = format!("planned_freight_only=0,{}", cleared_slots(1));
+    let block = json!({"schema": DECISION_SCHEMA, "decision": decision["id"], "snapshot_digest": snapshot["body"]["digest"],
+        "snapshot_tick": at["tick"], "idempotency_key": key, "policy": format!("{}@{}", ROLLBACK_POLICY.0, ROLLBACK_POLICY.1),
+        "valid_until": valid_until, "settings_digest": settings_digest(&settings), "mode": "live"});
+    let mut errs = Vec::new();
+    for r in [&hold, &decision] {
+        if let Err(e) = validate_record(r) {
+            errs.extend(e);
+        }
+    }
+    if let Err(e) = validate_decision_block(&block) {
+        errs.extend(e);
+    }
+    if !errs.is_empty() {
+        return Err(errs);
+    }
+    Ok(json!({"mode": "live", "directive": {"company_id": company, "settings": settings, "decision": block}, "records": [hold, decision]}))
 }
 /// The modes a decision block declares. An executor applies only `live`; `shadow` is refused
 /// before any step (I0096), so a shadow decision cannot reach a game even if it is submitted.
@@ -1082,6 +1161,7 @@ pub fn validate_decision_block(d: &Value) -> Result<(), Vec<Refusal>> {
     c.need("policy", nonempty_str, "policy id@version");
     c.need("valid_until", is_game_date, "the game date after which the directive is stale");
     c.need("settings_digest", is_digest, "sha256:<hex> of the exact settings string the decision authorises");
+    c.need("snapshot_tick", |v| v.as_u64().is_some(), "the game tick of the snapshot decided on (>= 0)");
     c.one_of("mode", DECISION_MODES);
     if c.errs.is_empty() {
         Ok(())
@@ -1181,13 +1261,14 @@ pub fn schema(name: &str) -> Option<Value> {
         })),
         "decision" => Some(json!({
             "type": "object",
-            "description": format!("GENERATED by `battlebrain schema decision` (I0095); do not edit by hand, regenerate. The Battlebrain decision a directive rests on: its blackboard record, the snapshot digest, the idempotency key, the policy, the game date after which the directive is stale, and its mode (an executor applies only live). Version-gated: a reader reads only a 'schema' it knows and refuses the directive for any other."),
-            "required": ["schema", "decision", "snapshot_digest", "idempotency_key", "policy", "valid_until", "settings_digest", "mode"],
+            "description": format!("GENERATED by `battlebrain schema decision` (I0095); do not edit by hand, regenerate. The Battlebrain decision a directive rests on: its blackboard record, the snapshot digest and game tick, the idempotency key, the policy, the game date after which the directive is stale, the digest of the settings it authorises, and its mode (an executor applies only live). Version-gated: a reader reads only a 'schema' it knows and refuses the directive for any other."),
+            "required": ["schema", "decision", "snapshot_digest", "snapshot_tick", "idempotency_key", "policy", "valid_until", "settings_digest", "mode"],
             "additionalProperties": false,
             "properties": {
                 "schema": {"const": DECISION_SCHEMA},
                 "decision": rref,
                 "snapshot_digest": dig,
+                "snapshot_tick": {"type": "integer", "minimum": 0, "description": "the game tick of the snapshot decided on; an executor refuses the block in a game whose tick is behind it (another world, or an earlier save reloaded)"},
                 "idempotency_key": nonempty,
                 "policy": {"type": "string", "minLength": 1, "description": "policy id@version"},
                 "valid_until": date,
@@ -1614,6 +1695,17 @@ mod tests {
         assert_eq!(days_between("1963-03-24", "1963-02-22"), Some(-30));
         assert_eq!(days_between("x", "1963-02-22"), None);
         assert_eq!(add_days("1963-02-22", 30).as_deref(), Some("1963-03-24"));
+    }
+
+    #[test]
+    fn the_company_list_is_read_from_every_shape_the_game_and_its_records_use() {
+        let a = json!([{"id": 1, "is_ai": true}]);
+        assert_eq!(company_list(&json!({"game_tick": 5, "data": {"companies": a}})), a.as_array().unwrap().clone(), "the game's envelope");
+        assert_eq!(company_list(&json!({"companies": a})), a.as_array().unwrap().clone());
+        assert_eq!(company_list(&json!({"data": a})), a.as_array().unwrap().clone());
+        assert_eq!(company_list(&a), a.as_array().unwrap().clone());
+        assert!(company_list(&json!({"data": {"other": 1}})).is_empty());
+        assert!(company_list(&json!(null)).is_empty());
     }
 
     #[test]
