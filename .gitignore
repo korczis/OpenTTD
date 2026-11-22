@@ -22,7 +22,8 @@ docs/source/*
 # tools/research/atlas: its cargo target
 /tools/research/atlas/target/
 /tools/research/real-world/.cache/
-/tools/research/mcp-panel/__pycache__/
+# Python bytecode caches, wherever a tool or its tests ran
+__pycache__/
 
 # Published surfaces (tools/surfaces): generated output, the Python environment, the asset tree
 /target/
