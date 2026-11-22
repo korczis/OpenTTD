@@ -20,6 +20,13 @@ fn note_in(reads: &mut Vec<(String, bool)>, name: &str, ok: bool) {
     }
 }
 
+/// Forget every read so far: a planner that runs its plan more than once (mcp-plan's coherent
+/// --capture) reports only the run it keeps.
+#[allow(dead_code)]
+pub fn clear() {
+    READS.lock().unwrap().clear();
+}
+
 /// Every read so far as `[{uri, ok}]`.
 pub fn json() -> serde_json::Value {
     to_json(&READS.lock().unwrap())

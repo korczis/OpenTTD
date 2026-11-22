@@ -1,0 +1,30 @@
+id: I0116
+milestone: records-and-status-tell-the-truth
+title: "An ADR decides whether tools/gate.sh change runs on pull requests, and the workflows and branch protection match the decision"
+slug: gate-tier-in-ci-decided
+priority: p2
+profile: implementation
+parallel_safe: true
+objective: "Decide, in an ADR the owner accepts, whether the change tier of tools/gate.sh (configure, build, ctest, and the research-options build for gated code) runs as a required check on pull requests to master, or stays local by design. Then make .github/workflows and the branch protection's required checks match the decision exactly, so 'validated' means the same thing locally and on GitHub."
+why: "External review 2026-11-22 (digest A-11). Branch protection now requires 'Check and build' with enforce_admins, and surfaces.yml runs surfaces check, readme-scoreboard, e2e coverage and diagram checks; but no workflow runs tools/gate.sh, and ADR 0015 (the fork does not run upstream's CI workflows) predates the PR-based delivery the owner now requires. Whether code changes are built and tested before merge depends on each worker remembering to run the gate."
+scope:
+  - ".ai/repo/adrs/**"
+  - ".github/workflows/**"
+  - "tools/gate.sh"
+non_scope:
+  - "Re-enabling upstream's own CI workflows (ADR 0015 stands unless the new ADR supersedes it explicitly)"
+  - "Accepting the ADR: that is the owner's act; the issue proposes it"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#status-surfaces-match-the-code"
+acceptance_criteria:
+  - "A proposed ADR states the options (gate change tier as a required PR check; a cheaper smoke tier in CI with the change tier local; status quo), the cost of each in CI minutes and the owner's choice"
+  - "After acceptance, the workflows run exactly the chosen tier and `gh api repos/korczis/OpenTTD/branches/master/protection` lists it as required"
+  - "AGENTS.md and research/README.md describe where each tier runs"
+validation:
+  - "majordomus adr check"
+  - "gh api repos/korczis/OpenTTD/branches/master/protection --jq .required_status_checks"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
