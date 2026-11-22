@@ -71,6 +71,10 @@ class PrismaticAI extends AIController {
 	air_tried = null; /* "a-b" town pairs the autopilot tried for air */
 	loaded = null; /* {version, data} handed to Load(), read by Restore() (restore.nut) */
 	rich = false; /* this heartbeat's Behaviour().rich (rich.nut) */
+	ship_routes = -1; /* ship routes running (ships.nut; -1: not counted from the map yet) */
+	ship_tried = null; /* ship route candidates already checked or built, a table (ships.nut) */
+	ship_idle_year = -1; /* the game year no ship route was left to try in (ships.nut) */
+	ship_cap = 6; /* this heartbeat's ships_cap: most ships per route (fleet.nut) */
 
 	constructor() {
 		this.name = AICompany.GetName(AICompany.COMPANY_SELF);
@@ -85,6 +89,7 @@ class PrismaticAI extends AIController {
 		this.air_towns = {};
 		this.air_tried = {};
 		this.ringed = {};
+		this.ship_tried = {};
 	}
 }
 
@@ -116,6 +121,7 @@ require("infra.nut");
 require("modernize.nut");
 require("restore.nut");
 require("events.nut");
+require("ships.nut");
 
 /* Cheapest buildable road engine that carries a passenger-class cargo. */
 function PrismaticAI::PickPassengerEngine() {
@@ -363,6 +369,9 @@ function PrismaticAI::Behaviour() {
 		pressure_mid = AIController.GetSetting("pressure_mid"),
 		pressure_high = AIController.GetSetting("pressure_high"),
 		track_keep_budgets = AIController.GetSetting("track_keep_budgets"),
+		ships_max = AIController.GetSetting("ships_max"),
+		ships_cap = AIController.GetSetting("ships_cap"),
+		ships_max_tiles = AIController.GetSetting("ships_max_tiles"),
 	};
 	/* Autopilot (default on): a bot nobody gave a plan (no planner line, air or rail pair) grows on
 	 * its own instead of stopping at a few buses. In the LAN AI battle the unplanned default ended
@@ -450,7 +459,8 @@ function PrismaticAI::Start() {
 			" intercity=" + b.intercity + " self_steward=" + b.self_steward + " own_lines=" + b.own_lines +
 			(b.autopiloted ? " autopilot=engaged" : (b.grows ? " autopilot=growth-on-plan" : "")) +
 			(b.planned_freight_only == 1 ? " planned_freight_only=1" : "") +
-			(b.rich ? " rich=1" : "");
+			(b.rich ? " rich=1" : "") +
+			(b.ships_max > 0 ? " ships_max=" + b.ships_max : "");
 		if (knobs != last) {
 			AILog.Info("PrismaticAI behaviour: " + knobs);
 			last = knobs;
@@ -522,6 +532,11 @@ function PrismaticAI::Start() {
 			}
 			money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 		}
+		/* Ships (ships.nut; ships_max, default 0: none): one water route a heartbeat, from an oil rig
+		 * or a coastal producer to an acceptor by the sea, or between two coastal towns, before the
+		 * bot's own rail lines take the money. */
+		this.ship_cap = b.ships_cap;
+		if (!frozen && this.ShipRoutes(b)) money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 		/* The bot's own plan: once every freight line the planner handed over was tried and its
 		 * passenger pair is done, money no longer waits for a new plan from outside. With the script
 		 * budget it was meant to have, the bot built all fourteen planned lines by month 24 on OpenTTD

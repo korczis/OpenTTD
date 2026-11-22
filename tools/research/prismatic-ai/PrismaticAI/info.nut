@@ -556,6 +556,28 @@ class PrismaticAI extends AIInfo {
 			easy_value = 2, medium_value = 2, hard_value = 2, custom_value = 2, step_size = 1,
 			flags = CONFIG_INGAME,
 		});
+		/* RESEARCH-ONLY: ships (ships.nut). Off by default: new behaviour is measured before it is on. */
+		AddSetting({
+			name = "ships_max",
+			description = "Ships (ships.nut): most water routes the bot plans itself, from an oil rig or a coastal producer to an acceptor by the sea, or between two coastal towns, one a heartbeat when money plus loan headroom reach line_budget; the fleet grows them like road and air routes (0, the default: no ships).",
+			min_value = 0, max_value = 30,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "ships_cap",
+			description = "Ships: most ships per water route, for the fleet's additions where cargo waits and InvestSurplus (fleet.nut), and for how many a new route is planned with (ships.nut).",
+			min_value = 1, max_value = 20,
+			easy_value = 6, medium_value = 6, hard_value = 6, custom_value = 6, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "ships_max_tiles",
+			description = "Ships: the longest water route, in tiles between its two ends (the shortest is 20; ships.nut).",
+			min_value = 40, max_value = 500,
+			easy_value = 150, medium_value = 150, hard_value = 150, custom_value = 150, step_size = 10,
+			flags = CONFIG_INGAME,
+		});
 		AddSetting({
 			name = "air_planes",
 			description = "Aircraft on the planner's air route.",
