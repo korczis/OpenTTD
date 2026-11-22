@@ -102,6 +102,17 @@ the news-refs branch. All 8 companies came back with their names, money and loan
 and AdmiralAI. No new bot was started. The client half (`--coplay` after `--load`): NOT RUN on
 that check.
 
+### After a load
+
+A `load` on the server restarts its game, and every client reconnects in the same process. Upstream
+it rejoins as a spectator (`NetworkClientConnectGame(last_joined, COMPANY_SPECTATOR)` in
+`src/openttd.cpp`). In the game of 2026-11-22 the owner therefore landed among the spectators after
+each deploy and had to be moved back by hand (`move 3 1`). In a research build a client that played
+a company now asks for that company again (`ResearchRejoinCompany`,
+`src/network/core/network_game_info.cpp`). The co-play opening is server state that a load does not
+clear, so the server admits the owner into the co-play company as it did on the first join. A client
+that was a spectator rejoins as one.
+
 ## Limits
 
 - Loopback R&D games that the owner runs only. It changes nothing about stock servers, and a

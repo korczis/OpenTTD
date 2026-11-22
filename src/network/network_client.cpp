@@ -1145,6 +1145,10 @@ NetworkRecvStatus ClientNetworkGameSocketHandler::ReceiveServerNewGame(Packet &)
 		 * Client ID modulo 16 + 1 (value 0 means no reconnect).
 		 * This way reconnects should be spread out a bit. */
 		_network_reconnect = to_underlying(_network_own_client_id) % 16 + 1;
+#ifdef OTTD_RESEARCH_INSTRUMENTATION
+		/* RESEARCH-ONLY: rejoin the company this client played, not as a spectator (research/coplay.md). */
+		_research_rejoin_company = ResearchRejoinCompany(_local_company);
+#endif
 		ShowErrorMessage(GetEncodedString(STR_NETWORK_MESSAGE_SERVER_REBOOT), {}, WarningLevel::Critical);
 	}
 
