@@ -695,10 +695,19 @@ reads the new value back, and then offers an undo, which is the reverse change a
 route), `max_routes` (towns served) and `cash_reserve` (money kept) again at every heartbeat. Its
 log lines reach the event feed as `ai.log`, because the panel runs the server with `-d script=4`.
 
-Planned, not yet in the game (C++ side, branch `research/mcp-full-auto`): `openttd.ai.*` tools,
-client mode (a network client's MCP server posts commands as that client's company, for network
-games), and operator-token approval over MCP. A policy that approves on its own is auto-approve,
-and that is the owner's call (knowledge `auto-approve-is-the-owners-switch`).
+In the game on master (C++ side, `src/prismatic_mcp/`): the `openttd.ai.*` tools
+(`prismatic_mcp_ai.cpp`; `openttd.ai.list` reads, the others are approval-gated, see
+[`prismatic-mcp/08-tool-catalog.md`](prismatic-mcp/08-tool-catalog.md)) and client mode (a network
+client's MCP server posts commands only as that client's company and refuses a server-only command
+before sending it: `ClientMayPost` in `prismatic_mcp_server.cpp`). `openttd://mcp/status` says which
+of them a running build has (`capabilities`,
+[`prismatic-mcp/07-resource-catalog.md`](prismatic-mcp/07-resource-catalog.md)). No MCP method
+approves: the operator approves in the console or the panel. Approving from every channel through
+one core on the game server is
+[ADR 0038](../.ai/repo/adrs/0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md), its
+slices landing through their own PRs (slice 2 on branch `fix/approval-core`). A policy that approves
+on its own is auto-approve, and that is the owner's call (knowledge
+`auto-approve-is-the-owners-switch`).
 
 ## Rhai (`tools/research/mcp-rhai`)
 

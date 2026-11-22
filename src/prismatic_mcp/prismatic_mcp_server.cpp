@@ -12,13 +12,23 @@
  *    admin network. No worker thread ever dereferences game state.
  *  - Auth is a 256-bit random bearer token generated at Start(), compared in
  *    constant time. The token is never logged and never written to openttd.cfg.
- *  - This first vertical implements: initialize, notifications/initialized, ping,
- *    resources/list, resources/read (read-only, live game state). Tools, the
- *    approval workflow and mutations are staged behind this transport; see the
- *    implementation plan. It deliberately does NOT expose any mutation yet.
+ *  - It implements initialize, notifications/initialized, ping, prompts/list,
+ *    resources/list and resources/read (live game state, read-only), and
+ *    tools/list and tools/call. Reading tools change nothing; every tool that
+ *    changes the game (openttd.cmd.<Name>, openttd.game.set_pause, the openttd.ai.*
+ *    actions, openttd.api.* with execute, openttd.decision.submit) is approval-gated: an
+ *    operator approves the exact arguments in the console, and the command is
+ *    posted through the normal, network-safe command path. In client mode (this
+ *    process is a network client) it acts only as its own company and refuses a
+ *    server-only command. Interface input (openttd.input.* and the acting
+ *    openttd.ui.* tools) runs only in a process armed with PRISMATIC_MCP_INPUT=1.
+ *    openttd://mcp/status reports what this build and process can do, derived
+ *    from the registry (ServerCapabilities()).
+ *  - The tool catalogue is research/prismatic-mcp/08-tool-catalog.md; the
+ *    resources are 07-resource-catalog.md.
  */
 
-/** @file prismatic_mcp_server.cpp Loopback MCP transport + read-only resources (research-only). */
+/** @file prismatic_mcp_server.cpp Loopback MCP transport, resources, approval-gated tools (research-only). */
 
 #include "../stdafx.h"
 
