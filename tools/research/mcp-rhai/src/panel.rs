@@ -1304,6 +1304,32 @@ impl Game {
         Ok(json!({"error": format!("approved #{id} in the console, but the game server recorded no decision for it within 3 s"), "approval_id": id, "pending_decision": true}))
     }
 
+    /// Deny `id` through the game's console, as the owner would type it: the game server's one
+    /// approval core withdraws it (ADR 0038) and enacts nothing, so no owner secret is needed. The
+    /// panel reads the server's queue back for the approval's new state; it keeps no state of its
+    /// own. 404 when the server holds no such approval, 409 when it is not pending, 504 when the
+    /// server did not mark it denied within 3 s.
+    pub fn deny(&self, id: i64) -> Result<Value, String> {
+        let Some(a) = self.approvals().into_iter().find(|a| a["id"] == json!(id)) else {
+            return Ok(json!({"error": format!("the game server holds no approval #{id}")}));
+        };
+        if a["state"] != json!("pending") || a["expired"] == json!(true) {
+            let st = if a["expired"] == json!(true) { "expired".to_string() } else { py_str(a.get("state")) };
+            return Ok(json!({"error": format!("approval #{id} is {st}, not pending"), "approval": a}));
+        }
+        self.console(&format!("prismatic_mcp deny {id}"))?;
+        self.event("operator", &format!("denied #{id} in the OpenTTD console"));
+        for _ in 0..20 {
+            thread::sleep(Duration::from_millis(150));
+            if let Some(now) = self.approvals().into_iter().find(|a| a["id"] == json!(id)) {
+                if now["state"] == json!("denied") {
+                    return Ok(json!({"status": "denied", "approval_id": id, "approval": now}));
+                }
+            }
+        }
+        Ok(json!({"error": format!("denied #{id} in the console, but the game server did not mark it denied within 3 s"), "approval_id": id, "pending_decision": true}))
+    }
+
     /// The approvals that wait for the operator, as /api/status and the scripts read them
     /// (`status().pending`): {id, tool, args, created_tick, expires_tick}, from the server's queue.
     pub fn pending_json(&self) -> Vec<Value> {
@@ -2365,7 +2391,7 @@ pub fn approve_status(out: &Value) -> u16 {
     let nonempty_error = out.get("error").is_some_and(|e| !e.as_str().is_some_and(str::is_empty));
     match out.get("status").and_then(Value::as_str) {
         _ if out.get("refused").is_some() => 403,
-        Some("executed") => 200,
+        Some("executed") | Some("denied") => 200,
         Some("rejected") => 422,
         _ if out.get("pending_decision").is_some() => 504,
         _ if out.get("approval").is_some() => 409,
@@ -2379,6 +2405,11 @@ fn h_approve(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     let id = py_int(&i.body["id"])?;
     // The owner secret was checked (owner_gate); the name in `by` is declared, not checked.
     let out = g.approve(id, json!({"channel": "api", "declared": declared, "owner_secret": true}))?;
+    Ok((approve_status(&out), out))
+}
+
+fn h_deny(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
+    let out = g.deny(py_int(&i.body["id"])?)?;
     Ok((approve_status(&out), out))
 }
 
@@ -2567,6 +2598,8 @@ pub fn routes() -> Vec<Route> {
           s(json!({"pause": {"type": "boolean"}}), &["pause"]), h_pause),
         r("POST", "/api/approve", "approve", "The owner's approval of a pending decision, which the game server carries out at once (ADR 0038): the decision it recorded (200), 422 when the game rejected it, 409 for an approval not pending, 404 for one it does not hold, 504 when no decision came. Needs the owner secret mcp-panel printed at start (the cookie ?owner=<secret> sets, or the X-Panel-Owner header), else 401; an owner-only tool (openttd.ai.set_settings, a Battlebrain live decision) is refused with 403 and the console command to type, whoever asks; `by` names the approver it declares (recorded in plan.directive_outcome, not checked)", true,
           s(json!({"id": {"type": "integer"}, "by": st()}), &["id"]), h_approve),
+        r("POST", "/api/deny", "deny", "Deny a pending decision: the game server withdraws it and enacts nothing (ADR 0038), so no owner secret is needed. 200 with the approval now denied, 409 for an approval not pending, 404 for one the server does not hold, 504 when the server did not mark it denied", true,
+          s(json!({"id": {"type": "integer"}}), &["id"]), h_deny),
         r("POST", "/api/auto-approve", "autoApprove", "The owner's full-auto switch: on needs the owner secret (as /api/approve), off is open to anyone; it never approves an owner-only tool", false,
           s(json!({"on": {"type": "boolean"}}), &["on"]), h_auto),
         r("POST", "/api/start-ai", "startAi", "Start a company AI with an optional settings string", false,
@@ -3428,7 +3461,8 @@ mod tests {
         // And evidence retrieval (GET /api/evidence; research/agent-loop.md, Retrieve).
         // And the store's named queries (GET and POST /api/db/named; sql/queries).
         // And the LAN battle's contestants the live arena plays (GET /api/battle/contestants; panel_battle.rs).
-        assert_eq!(rs.len(), 77);
+        // And Deny beside Approve (POST /api/deny; ADR 0038).
+        assert_eq!(rs.len(), 78);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -4079,6 +4113,26 @@ mod tests {
         pend(43, "openttd.game.set_pause");
         let (code, out) = post_as(&p, "/api/approve", json!({"id": 43}), &owner);
         assert!(code == 502 && py_str(out.get("error")).contains("console is closed"), "{code} {out}");
+    }
+
+    /// POST /api/deny goes through the server's one core like Approve, needs no owner secret, and
+    /// answers 404 for an approval the server does not hold and 409 for one not pending; a pending
+    /// one reaches the console (closed here, so 502). A denial reads back as 200.
+    #[test]
+    fn denying_needs_no_secret_and_answers_what_the_server_holds() {
+        let (g, p) = bare_panel("7");
+        let row = |id: i64, state: &str, expired: bool| json!({"id": id, "tool": "openttd.game.set_pause", "args": {}, "state": state, "expired": expired});
+        g.test_approvals.lock().unwrap().extend([row(51, "pending", false), row(52, "consumed", false), row(53, "pending", true)]);
+        let (code, out) = post_to(&p, "/api/deny", json!({"id": 99}));
+        assert_eq!((code, out["error"].clone()), (404, json!("the game server holds no approval #99")), "no secret asked: {out}");
+        let (code, out) = post_to(&p, "/api/deny", json!({"id": 52}));
+        assert_eq!((code, out["error"].clone()), (409, json!("approval #52 is consumed, not pending")));
+        let (code, out) = post_to(&p, "/api/deny", json!({"id": 53}));
+        assert_eq!((code, out["error"].clone()), (409, json!("approval #53 is expired, not pending")));
+        let (code, out) = post_to(&p, "/api/deny", json!({"id": 51}));
+        assert!(code == 502 && py_str(out.get("error")).contains("console is closed"), "{code} {out}");
+        assert_eq!(approve_status(&json!({"status": "denied", "approval_id": 51})), 200);
+        assert_eq!(approve_status(&json!({"error": "denied #51 ...", "pending_decision": true})), 504);
     }
 
     #[test]

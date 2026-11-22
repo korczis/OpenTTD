@@ -72,6 +72,7 @@ jobs:
           pattern='^(tools/research/(mcp-rhai|schema|prismatic-ai|real-world|mcp-panel|town-model)/'
           pattern+='|research/(results|battlebrain|prismatic-bridge|mechanisms)/'
           pattern+='|\.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds\.md$'
+          pattern+='|tools/research/mcp-(fake-game|approval-ui-check)$'
           pattern+='|src/window_type\.h$|\.github/workflows/research-rust\.yml$'
           pattern+='|\.gitmodules$|tools/research/vendor/|tools/research/(test_)?algoglyph[-_]pin(\.py)?$)'
           matched=$(git diff --name-only "$base" HEAD | grep -E "$pattern" || true)
@@ -145,3 +146,21 @@ jobs:
         run: |
           cargo test --release --locked --offline --manifest-path "$MANIFEST" \
             --bin battlebrain --bin mcp-plan --bin mcp-intent --bin mcp-panel
+
+      - uses: actions/setup-node@v7
+        if: steps.changes.outputs.run == 'true'
+        with:
+          node-version: "22"
+
+      # The web panel's Approve and Deny in Chrome: the real mcp-panel against a stand-in game
+      # (tools/research/mcp-fake-game), every answer (200/404/409/422/504) shown on the page, and
+      # every line the change adds to static/app.js run there (rule project.web-ui-is-covered-end-to-end).
+      - name: The panel's Approve and Deny, end to end in Chrome (tools/research/mcp-approval-ui-check)
+        if: steps.changes.outputs.run == 'true'
+        env:
+          CHROME: /usr/bin/google-chrome
+          COVERAGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          cargo build --release --locked --offline --manifest-path "$MANIFEST" --bin mcp-panel
+          npm ci --no-audit --no-fund --prefix tools/research/mcp-panel
+          tools/research/mcp-approval-ui-check

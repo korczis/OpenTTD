@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+// RESEARCH-ONLY. A stand-in for the dedicated OpenTTD server that mcp-panel starts (--bin), for a
+// browser check of the panel that needs no game build: it reads the console on stdin as the
+// dedicated server does, starts an MCP endpoint on `prismatic_mcp start <port>` (a token file,
+// "Token written to <path> (mode 0600)"), and holds one approval queue (openttd://approvals) that
+// `prismatic_mcp approve|deny <id>` decides, recording decisions in openttd://decisions. It
+// implements only what the panel's approval path reads; any other resource is unknown (-32602).
+//
+// The queue is seeded so that every answer of POST /api/approve and /api/deny can be reached:
+//   #1 openttd.game.set_pause   approve -> executed (a decision, command_result succeeded)
+//   #2 openttd.cmd.BuildRoad    approve -> rejected (a decision, command_result rejected)
+//   #3 openttd.ai.set_setting   approve -> consumed, but no decision is ever recorded
+//   #4 openttd.game.set_pause   consumed by `fake consume 4` (another channel got there first)
+//   #5 openttd.game.set_pause   forgotten by `fake drop 5` (the server no longer holds it)
+//   #6 openttd.cmd.CreateGoal   deny -> denied
+//   #7 openttd.cmd.CreateGoal   deny ignored after `fake ignore 7` (never marked denied)
+// `fake ...` lines are this stand-in's own; the real game has no such command.
+//
+// Usage (as mcp-panel calls it): mcp-fake-game -D <host:port> -x -g ... -c <cfg> -d ...
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import readline from 'node:readline';
+
+const say = (line) => process.stdout.write(`${line}\n`);
+const approval = (id, tool, args) => ({ id, tool, args, state: 'pending', expired: false, created_tick: 10 * id, expires_tick: 10 * id + 7400 });
+export const queue = [
+  approval(1, 'openttd.game.set_pause', { pause: true }),
+  approval(2, 'openttd.cmd.BuildRoad', { company: 0, tile: 4242 }),
+  approval(3, 'openttd.ai.set_setting', { company: 1, name: 'aggressiveness', value: 75 }),
+  approval(4, 'openttd.game.set_pause', { pause: false }),
+  approval(5, 'openttd.game.set_pause', { pause: true }),
+  approval(6, 'openttd.cmd.CreateGoal', { company: 'deity', params: [255, 0, 0, 'deny me'] }),
+  approval(7, 'openttd.cmd.CreateGoal', { company: 'deity', params: [255, 0, 0, 'ignore me'] }),
+];
+export const decisions = [];
+const ignored = new Set();
+const OUTCOME = { 1: { command_result: 'succeeded', verdict: 'VERIFIED_SUCCESS' },
+  2: { command_result: 'rejected', verdict: 'VERIFIED_FAILURE', error: 'not enough cash' } };
+
+/** One console line, as the game's console answers it. */
+export function consoleLine(line) {
+  const w = line.trim().split(/\s+/);
+  const find = (id) => queue.find((a) => a.id === Number(id));
+  if (w[0] === 'prismatic_mcp' && w[1] === 'start') return start(Number(w[2]));
+  if (w[0] === 'prismatic_mcp' && (w[1] === 'approve' || w[1] === 'deny')) {
+    const a = find(w[2]);
+    if (!a || a.state !== 'pending') return say(`Approval #${w[2]} is not pending.`);
+    if (w[1] === 'deny') {
+      if (ignored.has(a.id)) return say(`(fake) deny #${a.id} ignored`);
+      a.state = 'denied';
+      return say(`Denied approval #${a.id}.`);
+    }
+    a.state = 'consumed';
+    if (OUTCOME[a.id]) decisions.push({ decision_id: 100 + a.id, approval_id: a.id, action: a.tool, approved_via: 'console', error: '', ...OUTCOME[a.id] });
+    return say(`Approved #${a.id}: carried out.`);
+  }
+  if (w[0] === 'fake' && w[1] === 'consume') { const a = find(w[2]); if (a) a.state = 'consumed'; return say(`(fake) #${w[2]} consumed`); }
+  if (w[0] === 'fake' && w[1] === 'drop') { const i = queue.findIndex((a) => a.id === Number(w[2])); if (i >= 0) queue.splice(i, 1); return say(`(fake) #${w[2]} dropped`); }
+  if (w[0] === 'fake' && w[1] === 'ignore') { ignored.add(Number(w[2])); return say(`(fake) deny #${w[2]} will be ignored`); }
+  if (w[0] === 'setting') return say(`Current value for '${w[1]}' is '10000' (min: 1, max: 4000000000)`);
+  if (w[0] === 'quit' || w[0] === 'exit') process.exit(0);
+  return say(`ERROR: command '${w[0]}' not found`);
+}
+
+let server = null;
+/** `prismatic_mcp start <port>`: the MCP endpoint and its token file, said as the game says it. */
+function start(port) {
+  if (server) return say('MCP server already running');
+  const token = crypto.randomBytes(16).toString('hex');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-fake-game-'));
+  process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'token.json');
+  const endpoint = `http://127.0.0.1:${port}/mcp`;
+  fs.writeFileSync(file, JSON.stringify({ endpoint, agent_token: token }), { mode: 0o600 });
+  server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      if (req.headers.authorization !== `Bearer ${token}`) { res.writeHead(401); return res.end(); }
+      let call;
+      try { call = JSON.parse(body); } catch { res.writeHead(400); return res.end(); }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, ...answer(call.method, call.params || {}) }));
+    });
+  });
+  server.listen(port, '127.0.0.1', () => say(`MCP server started on ${endpoint}. Token written to ${file} (mode 0600)`));
+}
+
+/** The JSON-RPC result (or error) of one MCP call. */
+export function answer(method, params) {
+  const text = (data) => ({ result: { contents: [{ uri: params.uri, mimeType: 'application/json', text: JSON.stringify({ uri: params.uri, game_tick: 1000, data }) }] } });
+  if (method === 'initialize') return { result: { protocolVersion: '2025-11-25', serverInfo: { name: 'mcp-fake-game', version: '1' }, capabilities: { tools: {}, resources: {} } } };
+  if (method === 'tools/list') return { result: { tools: [] } };
+  if (method === 'resources/list') return { result: { resources: ['openttd://approvals', 'openttd://decisions'].map((uri) => ({ uri, name: uri })) } };
+  if (method === 'resources/read' && params.uri === 'openttd://approvals') return text({ approvals: queue, capacity: 64 });
+  if (method === 'resources/read' && params.uri === 'openttd://decisions') return text({ decisions });
+  return { error: { code: -32602, message: `mcp-fake-game: no ${method} ${params.uri || params.name || ''}`.trim() } };
+}
+
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('mcp-fake-game')) {
+  say('mcp-fake-game: a stand-in dedicated server (RESEARCH-ONLY); the console reads stdin');
+  readline.createInterface({ input: process.stdin }).on('line', consoleLine).on('close', () => process.exit(0));
+  // Never outlive the panel that started it: an orphan (reparented to init) exits, whatever stdin does.
+  const parent = process.ppid;
+  setInterval(() => { if (process.ppid !== parent) process.exit(0); }, 500).unref();
+  process.stdin.on('end', () => process.exit(0));
+}
