@@ -1,0 +1,31 @@
+id: I0150
+milestone: battlebrain-decides-live-with-rollback
+title: "Three coherent captures, each read at one game tick through read_many, have every shadow divergence classified, and none is a defect: the Phase 04 capture gate passes"
+slug: battlebrain-three-coherent-captures
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Take three captures with `mcp-plan --capture` on games whose server offers openttd.resources.read_many (different seeds, maps or companies, each with the consent of that game's owner session), check that each capture's window is one tick and its `coherence` names read_many, run `battlebrain snapshot` and `battlebrain shadow` with freight-margin@2 on each twice, and record the classified divergences. Replace the stale 'Not yet done' lines of research/battlebrain/README.md with what the records show."
+why: "External review 2026-11-22 (digest C-45). The three captures I0097 recorded (research/results/battlebrain-shadow-20261122T084607Z-, -104111Z-, -105052Z-coplay-8800-freight-margin-2) span 28 to 43 ticks and none is coherent (research/battlebrain/README.md:152-154); the cutover gate requires a coherent snapshot and three classified captures (README:169-182). PR #44 made a one-tick capture possible but it 'has not been taken on a live game yet' (README:187-188). README:186-187 still says 'no rollback switch' and 'Only one real capture exists', both outdated by I0097."
+scope:
+  - "research/results/**"
+  - "research/battlebrain/README.md"
+  - "tools/research/schema/fixtures/battlebrain/captures/**"
+non_scope:
+  - "Any live decision (I0152)"
+  - "Reading a game without its owner session's consent"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "Three capture.json files with window.coherent true and coherence starting 'read_many:' are committed as fixtures"
+  - "Each shadow run is byte-identical twice, and its divergence class is one of same, intended_policy_difference, input_model_discrepancy or tie_order"
+  - "research/battlebrain/README.md's status lines are derived from these records (battlebrain report)"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-plan"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

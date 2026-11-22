@@ -1,0 +1,30 @@
+id: I0189
+milestone: every-changed-line-is-tested
+title: "The fork's Rust crates report line coverage with cargo llvm-cov, and the changed-line gate refuses an uncovered new Rust line"
+slug: rust-llvm-cov-changed-lines
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Collect line coverage for every Rust crate under tools/research (mcp-rhai with its binaries, mcp-human, atlas and the others) with cargo llvm-cov in an lcov or JSON export, feed it to tools/coverage/changed-lines, and respect the machine's build-slot discipline (one CARGO_TARGET_DIR per worktree, at most two heavy builds via ~/dev/.build-slot-N)."
+why: "Owner order 2026-11-22 (every changed line tested, enforced). M9 measured cargo llvm-cov on mcp-rhai once (intent criterion rhai-is-a-live-ide cites it), but no gate refuses an uncovered new Rust line, and the other crates are not measured at all."
+scope:
+  - "tools/coverage/**"
+  - "tools/research/mcp-rhai/Cargo.toml"
+  - "tools/gate.sh"
+non_scope:
+  - "Raising coverage of untouched Rust code"
+depends_on:
+  - I0180
+  - I0220
+serves:
+  - "openttd-validates-agent-driven-engineering#every-changed-line-is-tested"
+acceptance_criteria:
+  - "cargo llvm-cov runs for every Rust crate under tools/research and its export is read by the gate"
+  - "A fixture Rust change without a test fails the gate with file:line; adding the test makes it pass"
+  - "The gate's Rust step honours one CARGO_TARGET_DIR per worktree and the build-slot locks"
+validation:
+  - "tools/coverage/changed-lines --base origin/master"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

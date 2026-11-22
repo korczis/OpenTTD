@@ -1,0 +1,36 @@
+id: I0182
+milestone: governed-access-is-authenticated-and-every-capability-reaches-every-surface
+title: "An approval names a principal the panel or hub authenticated, never a declared name, and the hub's documented limits match the access policy on master"
+slug: authenticated-approver
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Bind every approval to a principal derived from the credential that carried the request: the web access token or a per-operator credential on the panel and hub (loopback included when the policy asks for it), the owner's client on the in-game console. Record that principal as approved_by instead of the declared `by`, refuse an approval that carries none, and keep the agent's MCP token unable to approve. Correct research/mcp-hub.md's Limits, which still describe a hub with no authentication."
+why: "External review 2026-11-22 (digest C-37, A-08). The token outside loopback landed with PR #47 (239a5c5d00: tools/research/mcp-rhai/src/web_access.rs:213 gate, research/mcp-control.md:74-90), so the A-08 part about exposing the hub is done. What remains: POST /api/approve records `by` as declared and unchecked (tools/research/mcp-rhai/src/panel.rs:2382, panel_decision.rs:530-552); research/agent-loop.md:55 says 'the approver is declared, not authenticated: the loopback API checks no identity'; any local process that reaches the hub reaches every instance's MCP token; research/mcp-hub.md:221 says 'no authentication of its own ... Keep it on 127.0.0.1' while research/mcp-hub.md:30-31 documents --bind/--token."
+scope:
+  - "tools/research/mcp-rhai/src/web_access.rs"
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "tools/research/mcp-rhai/src/panel_decision.rs"
+  - "tools/research/mcp-rhai/src/hub.rs"
+  - "research/mcp-hub.md"
+  - "research/mcp-control.md"
+  - "research/agent-loop.md"
+non_scope:
+  - "The approval core and its channel adapters (ADR 0038 slice 2, peer worktree fix/approval-core, no PR yet); this issue lands on top of it and does not re-implement the queue"
+  - "Widening the embedded MCP server of the game beyond loopback"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#governed-access-is-authenticated-and-exercised"
+acceptance_criteria:
+  - "plan.directive_outcome's approved_by carries {channel, principal} where principal comes from the authenticated credential; a declared name is at most a label beside it"
+  - "An approval without an authenticated principal is refused with 401/403 and a reason; the agent token of the game's MCP server cannot approve its own request (unit-tested)"
+  - "The hub forwards an operation that mutates only for an authenticated principal and records it in its audit event"
+  - "research/mcp-hub.md Limits and research/agent-loop.md's Authorize row state the policy as it is on master; tools/knowledge/refs check passes"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-decision-check"
+  - "tools/knowledge/refs check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -1,0 +1,44 @@
+id: I0220
+milestone: the-toolchain-carries-no-known-vulnerability
+title: "The four Dependabot advisories on zip 6.0.0 in tools/research/mcp-rhai are closed: duckdb upgraded to a release whose build uses zip >= 9.0.5, or each alert dismissed with its evidence"
+slug: mcp-rhai-zip-advisories
+priority: p0
+profile: implementation
+parallel_safe: true
+objective: "Close Dependabot alerts 1-4 on tools/research/mcp-rhai/Cargo.lock. First try the fix: find the earliest duckdb / libduckdb-sys release whose build-dependency on zip resolves to >= 9.0.5, upgrade, rebuild and run the mcp-rhai suites (the store and every binary that links duckdb). If no such release exists yet, or the upgrade breaks the store, dismiss each alert through the API with reason tolerable_risk or vulnerable_code_not_used and a comment stating the evidence (zip runs only in libduckdb-sys's build script on an archive shipped inside the crate), record that as a decision the owner accepts, and leave a tracked note naming the upstream release to watch."
+why: "Dependabot, enabled 2026-11-22, reports zip 6.0.0 with a critical advisory (alert 1, fixed in 9.0.5) and three others fixed in 9.0.0. `cargo tree -i zip` shows the only path: zip <- libduckdb-sys v1.10505.0 [build-dependencies] <- duckdb v1.10505.0 <- mcp-rhai. A critical alert left open teaches everyone to ignore the alert list."
+scope:
+  - "tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-rhai/Cargo.lock"
+  - "tools/research/mcp-rhai/src/**"
+  - "research/mcp-control.md"
+non_scope:
+  - "Upgrading unrelated crates beyond what the duckdb upgrade pulls in"
+  - "Changing the store schema or its SQL files"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#no-open-dependency-alert"
+acceptance_criteria:
+  - "cargo tree --offline -i zip in tools/research/mcp-rhai shows zip >= 9.0.5, or every alert 1-4 is dismissed with a reason and an evidence comment"
+  - "cargo test --release --offline for every mcp-rhai binary that links duckdb passes after the change; the store's tests and mcp-panel-check still pass"
+  - "If dismissed: a majordomus decision records the owner's acceptance and the upstream release to watch"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-panel-check"
+  - "gh api 'repos/korczis/OpenTTD/dependabot/alerts?state=open' --jq length"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: 2026-11-22T15:07:24Z
+started_at: 2026-11-22T15:07:01Z
+started_event: sha256:e347be810ad14b641d6ec933621753865a0f0ec5d7ce810e385dd5ee3de80d2d
+verified_at: 2026-11-22T15:07:24Z
+verified_event: sha256:88704da2839bc7b73e4323049dbee0cc0b3711972daf4f3ca811986a2189bab6
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml; cargo tree --offline -i zip; gh api 'repos/korczis/OpenTTD/dependabot/alerts?state=open' --jq length"
+    result: "PR #63 (3dbdba818d): duckdb/libduckdb-sys 1.10505.0 -> 1.10506.1, zip 6.0.0 -> 9.8.1 (build-dependency only). Tests on lundra (Linux, libduckdb 1.5.5): 13 suites, 489 passed, 0 failed; on the Mac via majordomus finish: exit 0. Dependabot alerts 1-4 fixed at 2026-11-22T13:30:15Z, open alerts 0. NOT RUN: tools/research/mcp-panel-check (needs a live panel built from master; owner order to stop OpenTTD instances). Renumbered from I0117, which a parallel branch took on master."
+    artifact: "https://github.com/korczis/OpenTTD/pull/63"
+    commit: 0147722ea720d4d685b26a2e9736721d968018a2
+    recorded_at: 2026-11-22T15:07:17Z

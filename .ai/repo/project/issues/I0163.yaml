@@ -1,0 +1,36 @@
+id: I0163
+milestone: evaluations-are-fair-pre-registered-and-paired
+title: "AlgoGlyph's contribution is isolated: the same candidates planned with AlgoGlyph on and off, paired on held starts, and a run that fell back never counts as AlgoGlyph"
+slug: algoglyph-ablation
+priority: p1
+profile: deep-work
+parallel_safe: false
+objective: "Add `mcp-duel --algoglyph on|off` for company A. Off runs the panel with MCP_ALGOGLYPH_DIR unset, so the planner uses the builtin knapsack and no kernel. On runs it with the checkout the protocol names. Each record states what was requested and what ran for every planning step that may call a kernel: the portfolio solver, line costs and yards. It also records the digest of the candidate set the planner produced. paired-report excludes and lists an 'on' run in which any step fell back, and a pair whose two candidate digests differ. Run a protocol (I0161) on 4242, 31337, 20208 with repeats, against the same rival, and record whether AlgoGlyph changed the portfolio and the result."
+why: "External review 2026-11-22 (digest B-25). The planned bot beats the unplanned one, but no record separates the planner's candidates from AlgoGlyph's work on them. The research/results/ablation-* records are PrismaticAI feature ablations against AAAHogEx and AdmiralAI, not solver ablations. tools/research/mcp-rhai/src/cargo.rs:208 falls back to 'builtin knapsack (MCP_ALGOGLYPH_DIR not set or the runner refused)', and research/results/duel-20261118T095556-seed31337.md:29 is a duel planned that way. tools/research/mcp-duel's usage line takes only --months, --seed, --label, --opponent and --bot-settings. I0158 proves the named builtin knapsack equal to knapsack-dp on a corpus, so any difference this ablation finds must come from the other kernels."
+scope:
+  - "tools/research/mcp-duel"
+  - "tools/research/test_mcp_duel.py"
+  - "research/results/**"
+  - "research/experiments/**"
+  - "research/mechanisms/planner-and-algoglyph.md"
+non_scope:
+  - "Editing algoglyph; it is used from outside, and the fork only decides whether to call it"
+  - "cargo.rs and the builtin solver's name (I0158; PR #55 boundary B7)"
+depends_on:
+  - I0161
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#evaluations-are-pre-registered-and-paired"
+acceptance_criteria:
+  - "A test excludes a fixture 'on' record in which a step ran builtin, and a pair whose candidate digests differ, and the report lists both"
+  - "Every record names the requested and the actual solver of each planning step and the candidate-set digest"
+  - "The protocol, its records and its paired report are committed; the verdict follows the held-start rule"
+  - "research/mechanisms/planner-and-algoglyph.md states the measured contribution, or 'inconclusive' with the interval"
+validation:
+  - "python3 -m unittest tools/research/test_mcp_duel.py"
+  - "tools/research/preregistration check research/experiments"
+  - "PRISMATIC_START_PAUSED=2 tools/research/mcp-duel --protocol research/experiments/<id>.yaml --algoglyph off --months 36 --seed 31337"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
