@@ -323,6 +323,11 @@ condition, not output equality:
 - every divergence across at least three captures (seeds, maps or companies) is classified, and
   none is `defect`.
 
+The runbook that takes one decision live, and back, is one script with a subcommand per phase,
+[`tools/research/battlebrain-cutover`](../../tools/research/battlebrain-cutover). It stops at
+the owner's approval and never approves. It is rehearsed offline against the stand-in game of
+the live path; see [cutover.md](cutover.md), which also names an open blocker of the live path.
+
 ## Architecture boundaries (Phase 07)
 
 The rule [`project.decision-authority-boundaries`](../../.ai/repo/rules/project/decision-authority-boundaries.v1.md)
