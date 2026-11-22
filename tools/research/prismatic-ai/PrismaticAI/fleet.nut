@@ -142,11 +142,9 @@ function PrismaticAI::ManageFleet(reserve) {
 		if (AIVehicle.GetAge(v) > 730 && AIVehicle.GetProfitLastYear(v) < 0 && AIVehicle.GetProfitThisYear(v) < 0) {
 			local air = AIVehicle.GetVehicleType(v) == AIVehicle.VT_AIR;
 			if (air && AIR_KEEP_LAST == 1 && flying[PrismaticAI.RouteKey(v)] <= 1) continue; /* the route's last plane */
-			if (AIVehicle.SendVehicleToDepot(v)) {
+			/* The fleet's one selling path (events.nut SendToSell). */
+			if (this.SendToSell(v, "PrismaticAI: fleet: vehicle " + v + " lost money two years running; sending it to be sold")) {
 				if (air) flying[PrismaticAI.RouteKey(v)]--;
-				this.selling[v] <- true;
-				PrismaticAI.ProtectFromReplace(v); /* autoreplace would give it a new id there (modernize.nut) */
-				AILog.Info("PrismaticAI: fleet: vehicle " + v + " lost money two years running; sending it to be sold");
 			}
 			continue;
 		}
@@ -201,12 +199,8 @@ function PrismaticAI::ManageFleet(reserve) {
 			local monthly = max(1, cap * 30 / max(1, round_days));
 			local needed = max(1, (flow + monthly - 1) / monthly);
 			if (flow > 0 && r.count > needed) {
-				if (AIVehicle.SendVehicleToDepot(r.newest)) {
-					this.selling[r.newest] <- true;
-					PrismaticAI.ProtectFromReplace(r.newest); /* autoreplace would give it a new id there (modernize.nut) */
-					AILog.Info("PrismaticAI: fleet: link flow " + flow + "/month needs " + needed + " vehicle(s) of " + monthly +
-						"/month, route has " + r.count + "; selling vehicle " + r.newest);
-				}
+				this.SendToSell(r.newest, "PrismaticAI: fleet: link flow " + flow + "/month needs " + needed + " vehicle(s) of " + monthly +
+					"/month, route has " + r.count + "; selling vehicle " + r.newest);
 				continue;
 			}
 		}
@@ -222,11 +216,8 @@ function PrismaticAI::ManageFleet(reserve) {
 				for (local u = all.Begin(); !all.IsEnd(); u = all.Next()) {
 					if (PrismaticAI.RouteKey(u) == k && AIVehicle.GetAge(u) < newest_age && !this.selling.rawin(u)) { newest = u; newest_age = AIVehicle.GetAge(u); }
 				}
-				if (newest != -1 && AIVehicle.SendVehicleToDepot(newest)) {
-					this.selling[newest] <- true;
-					PrismaticAI.ProtectFromReplace(newest); /* autoreplace would give it a new id there (modernize.nut) */
-					AILog.Info("PrismaticAI: fleet: " + r.count + " vehicles on a route where " + waiting + " wait (capacity " + cap + "); selling vehicle " + newest);
-				}
+				if (newest != -1) this.SendToSell(newest, "PrismaticAI: fleet: " + r.count + " vehicles on a route where " + waiting +
+					" wait (capacity " + cap + "); selling vehicle " + newest);
 			}
 			continue;
 		}
