@@ -32,6 +32,13 @@ curl -s -X POST 127.0.0.1:8800/api/services/start -H 'content-type: application/
   -d '{"name":"arena"}'                    # or Start on http://127.0.0.1:8800/scripts/arena
 ```
 
+To play in the arena yourself, together with PrismaticAI in its own company, add `--arm-input --coplay` to
+`mcp-e2e` ([coplay.md](coplay.md)). The lineup then fills eight companies, and you are in the first one.
+Without the battle's `fetch` cache, the panel's `POST /api/content/download {ids}` fetches the four
+BaNaNaS AIs and their libraries (ids from `GET /api/content?q=<name>`). The console's `rescan_ai` makes
+the running server list them. The files land in the panel's temporary personal directory
+(`content_download/ai/`), so copy them to `~/Documents/OpenTTD/ai/` for the next start.
+
 `mcp-e2e` builds the panel with cargo. If your `~/.cargo/config.toml` sets `-C lto` in a target's
 `rustflags`, cargo's build scripts fail with "options `-C embed-bitcode=no` and `-C lto` are
 incompatible". Running with `RUSTFLAGS="-C target-cpu=native"` replaces the config's flags for that

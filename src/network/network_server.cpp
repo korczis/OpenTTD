@@ -941,6 +941,10 @@ NetworkRecvStatus ServerNetworkGameSocketHandler::ReceiveClientIdentify(Packet &
 		case COMPANY_SPECTATOR.base(): // Spectator
 			break;
 		default: // Join another company (companies 1..MAX_COMPANIES (index 0..(MAX_COMPANIES-1)))
+#ifdef OTTD_RESEARCH_INSTRUMENTATION
+			/* RESEARCH-ONLY: an AI company the operator opened for co-play (research/coplay.md). */
+			if (ResearchCoplayAllows(playas)) break;
+#endif
 			if (!Company::IsValidHumanID(playas)) {
 				return this->SendError(NetworkErrorCode::CompanyMismatch);
 			}
@@ -1529,7 +1533,12 @@ NetworkRecvStatus ServerNetworkGameSocketHandler::ReceiveClientMove(Packet &p)
 	Debug(Facility::Net, Severity::Trace3, "client[{}] ReceiveClientMove(): company_id={}", this->client_id, company_id);
 
 	/* Check if the company is valid, we don't allow moving to AI companies */
-	if (company_id != COMPANY_SPECTATOR) {
+	if (company_id != COMPANY_SPECTATOR
+#ifdef OTTD_RESEARCH_INSTRUMENTATION
+			/* RESEARCH-ONLY: an AI company the operator opened for co-play (research/coplay.md). */
+			&& !ResearchCoplayAllows(company_id)
+#endif
+			) {
 		if (!Company::IsValidHumanID(company_id)) return NetworkRecvStatus::Okay;
 
 		const Company *c = Company::Get(company_id);
