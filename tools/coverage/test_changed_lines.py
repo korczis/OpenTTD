@@ -36,6 +36,10 @@ if str(HOOK) not in sys.path:
     sys.path.insert(0, str(HOOK))
 import _changed_lines_trace as trace  # noqa: E402
 
+# The gate's own run in CI sets COVERAGE_BASE to the pull request's base, a commit no scratch
+# repository here holds: every test chooses its base itself.
+os.environ.pop("COVERAGE_BASE", None)
+
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
            "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 
