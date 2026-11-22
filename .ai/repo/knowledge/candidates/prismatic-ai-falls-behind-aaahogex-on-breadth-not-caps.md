@@ -43,12 +43,17 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 | planner scores source clusters and joins them at once (`rail_feed`, after 8b8e121e8a) | 8 | -8.8% | 3 joins in 8 games; 0.47 to 1.50 |
 | `invest_road_cap=20, max_routes=30` | 4 | -0.7% | - |
 | `air_routes_max=20, invest_air_cap=12, air_planes=3` | 4 | -12.0% | - |
+| rich growth with its air lifts (#46, `rich_growth=1`, as merged) vs `fced659668` | 8 | -29.2% | 1 |
+| `rich_air=0`: rich growth and pressure leave the air caps alone, vs `rich_air=1` | 6 | +35.5% | 6 |
+| `rich_growth=0` (hoards; fails `fitness.must_not_hoard`) vs `rich_air=0` | 6 | +6.6% | 4 |
 
 # How to apply it
 
 - Do not expect caps (own lines, road or air fleet) to close the gap: none of them binds, because the
   bot runs out of profitable things to build first. The lever is breadth: more candidate lines
   (the planner) and sources chosen as clusters.
+- Do not spend idle money on aircraft: more planes and air routes lowered company value in every
+  replay. Rich growth keeps its rail, road and own-line lifts (`rich_air=0`).
 - Size platforms at 4 tiles when a line is built. Growing them later gave the gain back.
 - Post-hoc feeding rarely fires, because a second unserved producer within station spread is rare.
   Scoring clusters in the planner did not help either (-8.8%, 3 joins in 8 games): on these 256x256
