@@ -1,0 +1,31 @@
+id: I0153
+milestone: battlebrain-decides-live-with-rollback
+title: "Battlebrain runs continuously as a read-only Director: every decision period it captures at one tick, records one shadow decision per idempotency key superseding the stale one, and the panel shows the latest"
+slug: battlebrain-read-only-director
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "A panel service (or a battlebrain subcommand the panel starts) runs capture, snapshot and shadow every decision period (~90 game days by default, a parameter), writes the records once per idempotency key, marks the earlier decision superseded, publishes each as a plan.* event and mesh record, and shows the latest decision, its divergence and its gates on a panel page through static/shell.js. It never submits a directive."
+why: "External review 2026-11-22 (digest B-24). I0096 built shadow on one capture invoked by hand (research/battlebrain/README.md:94-121), and the panel has no Battlebrain view: `git grep -i battlebrain tools/research/mcp-panel` on origin/master finds only a comment in replan.rhai:306. ADR 0037's decision cadence is 'every ~90 game days' (README:11-12)."
+scope:
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs"
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "tools/research/mcp-panel/static/**"
+  - "research/battlebrain/README.md"
+non_scope:
+  - "Any live directive (I0152)"
+depends_on:
+  - I0150
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "Two periods on a fake clock give two decisions, the first superseded; a repeated period writes nothing new (tests)"
+  - "The panel page renders the latest decision and is covered by mcp-pages-check"
+  - "The service holds no write path to the game (authority_boundaries test)"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-panel"
+  - "tools/research/mcp-pages-check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

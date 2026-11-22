@@ -1,0 +1,31 @@
+id: I0141
+milestone: the-planner-reads-one-coherent-priced-world
+title: "openttd://stations carries a per-platform model: each rail platform's tiles, axis, length and occupancy, and which platforms belong to one station"
+slug: station-platform-model
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Extend openttd://stations with, per rail station, its platforms (tiles, axis, length, rail type, whether a train stands in it now) and per road stop and dock its bays, read-only, so a multi-platform hub and a transfer yard can be checked from the resource rather than inferred from the map."
+why: "External review 2026-11-22 (digest B-03). src/prismatic_mcp/prismatic_mcp_world.cpp:319-343 gives id, name, tile, owner, facilities, town and catchment, nothing per platform. The transfer yard of research/mcp-human.md:239 was checked as 'both platforms in one station' by the player's own geometry, not by any resource."
+scope:
+  - "src/prismatic_mcp/prismatic_mcp_world.cpp"
+  - "src/prismatic_mcp/prismatic_mcp_server.cpp"
+  - "src/tests/test_prismatic_mcp.cpp"
+  - "research/prismatic-mcp/07-resource-catalog.md"
+non_scope:
+  - "Building or extending a station"
+depends_on:
+  - I0140
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#the-planner-reads-one-coherent-priced-world"
+acceptance_criteria:
+  - "A station with two platforms lists both with their tiles, axis and length (unit test)"
+  - "Occupancy is read from the vehicles on the tiles at the read's tick"
+  - "The resource stays within the read_many per-call bound on a 512x512 map (measured, written in the catalogue)"
+validation:
+  - "build-mcp/openttd_test '[prismatic_mcp]'"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

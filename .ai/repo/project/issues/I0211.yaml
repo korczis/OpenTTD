@@ -1,0 +1,39 @@
+id: I0211
+milestone: the-panel-has-integrity
+title: "One tested operator path: a check runs the contributor walkthrough from a research build through the panel, an approval and an observed change to a run record, and a second walkthrough adds a capability once and sees it on every surface"
+slug: tested-operator-path
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Extend the contributor walkthrough (research/prismatic-mcp/contributor-catalog.json, generated into README.md 0.4.1) past `prismatic_mcp start` to the companion UI: start a disposable stack with tools/research/mcp-e2e, open the panel, request the approval-gated pause, see it pending on the panel and in the game console, read the state back after the decision and write a run record with tools/research/research. Add tools/research/operator-path-check, which executes the walkthrough's commands as the catalogue declares them (not a second list) and fails on the first step that does not do what the text says. The check never approves its own request: unattended it withdraws the request with deny and proves the game state is unchanged and the denial recorded; with `--attended` it waits for a person to approve and then proves the pause took effect, reading it back through I0199's journey (mcp-journey-check) rather than a second implementation. A second walkthrough documents adding one research-only capability and runs I0184's fixture registration to show it on every surface."
+why: "External review 2026-11-22 (digest A-58). README.md:1161 '0.4.1) Getting started' ends at `prismatic_mcp start`, the token and `tools/gate.sh change` (README.md:1167-1184); it never reaches the panel, an approval or a run record, and no check executes it. The text is generated from research/prismatic-mcp/contributor-catalog.json by tools/research/generate_prismatic_docs.py (surfaces.toml:118-121), so the steps already exist as data a check can run. tools/research/mcp-e2e:1-15 starts the full stack the walkthrough would need."
+scope:
+  - "research/prismatic-mcp/contributor-catalog.json"
+  - "tools/research/generate_prismatic_docs.py"
+  - "tools/research/operator-path-check"
+  - "research/prismatic-mcp/README.md"
+  - "README.md"
+  - "research/results/**"
+non_scope:
+  - "The parity matrix and fixture registration themselves (I0184) and the pause journey (I0199)"
+  - "Approving any request from the check or an agent: the approval stays a person's (knowledge auto-approve-is-the-owners-switch); the check uses only a disposable stack it started"
+depends_on:
+  - I0115
+  - I0184
+  - I0199
+serves:
+  - "openttd-validates-agent-driven-engineering#every-panel-control-works"
+acceptance_criteria:
+  - "The walkthrough's steps are data in contributor-catalog.json and README.md 0.4.1 is regenerated from it, now ending at a decided, read-back request and a run record"
+  - "tools/research/operator-path-check runs every step from the catalogue against a fresh build directory and a disposable stack, exits 0, and prints the build and runtime configuration it used"
+  - "Unattended, the request reaches pending approval on the panel and in the console, is denied, and the read-back shows the game unpaused and the denial recorded; attended, the approved pause is read back; a step whose effect does not appear fails with the step named"
+  - "The second walkthrough's fixture capability appears on every surface the parity matrix lists, by I0184's check"
+validation:
+  - "python3 -B tools/research/generate_prismatic_docs.py && tools/check-prismatic-docs.sh"
+  - "tools/research/operator-path-check --build build-mcp"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
