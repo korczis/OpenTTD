@@ -26,7 +26,8 @@ nlohmann::json Tools();
 
 /**
  * Whether this process is armed for interface input: started with PRISMATIC_MCP_INPUT=1, the
- * owner's switch. Read once; openttd://mcp/status reports it.
+ * owner's switch. Read once; openttd://mcp/status reports it. Armed, a script can type into this
+ * process's chat and console, so an approval may not leave it that way (ADR 0038).
  * @return True when the openttd.input.* and acting openttd.ui.* tools may run.
  */
 bool InputArmed();
@@ -51,10 +52,6 @@ bool InputArmed();
  * @return The tool's JSON answer, or std::nullopt when \a name is not a UI tool.
  */
 std::optional<nlohmann::json> Call(const std::string &name, const nlohmann::json &args);
-
-/** Whether this process's input is armed for MCP tools (PRISMATIC_MCP_INPUT=1): then a script can
- * type into its chat and console, so an approval may not leave it that way (ADR 0038). */
-bool InputArmed();
 
 /**
  * Whether the input being handled right now was injected by a UI tool (openttd.input.*, and the
