@@ -1,0 +1,28 @@
+id: I0112
+milestone: records-and-status-tell-the-truth
+title: "Feature records carry a defined maturity: draft, active and the rest are defined with a promotion criterion, and every record is re-graded against it"
+slug: feature-maturity-defined
+priority: p2
+profile: implementation
+parallel_safe: true
+objective: "Define, once, what each status value of a feature record under .ai/repo/features/ means and what evidence promotes a feature from one value to the next; then re-grade every feature record against that definition, citing the evidence that justifies its value."
+why: "External review 2026-11-22 (digest A-12, C-20). Five feature records (embedded-mcp-server, prismatic-bridge, event-bus-and-store, lan-ai-battle, battle-postmortem) say `status: draft` while describing behaviour that ships on master and is covered by tests; a search of .ai/repo/features/README.md, .ai/repo/rules and .ai/repo/workflows finds no definition of draft. A reader cannot tell whether draft means unimplemented, unaccepted or simply stale."
+scope:
+  - ".ai/repo/features/**"
+non_scope:
+  - "Changing what any feature does"
+  - "Generated regions between majordomus:begin/end markers (edit the policy or templates instead)"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#status-surfaces-match-the-code"
+acceptance_criteria:
+  - ".ai/repo/features/README.md defines every status value used by feature records, with the evidence required to enter each (for example: active = shipped on master, covered by a validation command that runs, documented)"
+  - "Every feature record's status satisfies the definition, and a feature promoted or kept at draft says why in one line with a path or command"
+  - "If majordomus offers a schema or validator for feature status, the definition is expressed there so `majordomus doctor` enforces it; otherwise the README says so"
+validation:
+  - "majordomus doctor"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

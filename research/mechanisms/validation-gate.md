@@ -42,7 +42,7 @@ flowchart LR
 ### Every web page, end to end
 
 Rule
-[`project.web-ui-is-covered-end-to-end`](../../.ai/repo/rules/project/web-ui-is-covered-end-to-end.v1.md):
+[`project.web-ui-is-covered-end-to-end`](../../.ai/repo/rules/project/web-ui-is-covered-end-to-end.v2.md):
 every page of the panel and the hub has a Playwright check that opens it in Chrome against a live
 game and proves its content, its shell, no page error and no sideways scroll at 390 px.
 `tools/research/e2e-coverage` reads the pages from `static/shell.js` `APPS` and each check's

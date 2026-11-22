@@ -1038,7 +1038,9 @@ fn register(state: &Shared) -> (u64, mpsc::Receiver<Value>) {
 }
 
 fn serve_ws(state: Shared, stream: TcpStream) {
-    let Ok(mut ws) = tungstenite::accept(stream) else { return };
+    let peer = stream.peer_addr().ok().map(|a| a.ip());
+    let check = |req: &tungstenite::handshake::server::Request, resp| crate::web_access::ws_gate(req, peer).map(|()| resp);
+    let Ok(mut ws) = tungstenite::accept_hdr(stream, check) else { return };
     let _ = ws.get_mut().set_read_timeout(Some(Duration::from_millis(50)));
     let (sid, rx) = register(&state);
     loop {
@@ -1066,15 +1068,24 @@ fn serve_ws(state: Shared, stream: TcpStream) {
     state.lock().unwrap().subscribers.retain(|s| s.id != sid);
 }
 
-/// Swagger UI over the hub's own OpenAPI document, the same page the panels serve at /docs.
-const SWAGGER_PAGE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>MCP hub API</title>
+/// Swagger UI over a server's own `/openapi.json`, titled: the one page the panel and the hub serve
+/// at /docs. Its controls are the vendor's (swagger-ui-dist), marked data-vendor so the generic
+/// browser crawl leaves them to their own tests and proves the page through mcp-pages-check.
+pub fn swagger_page(title: &str) -> String {
+    format!(r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{title}</title>
 <link rel="stylesheet" href="/vendor/swagger-ui/swagger-ui.css"></head><body>
-<div id="swagger"></div><script src="/vendor/swagger-ui/swagger-ui-bundle.js"></script>
-<script>SwaggerUIBundle({url: '/openapi.json', dom_id: '#swagger', deepLinking: true});</script></body></html>"#;
+<div id="swagger" data-vendor="swagger-ui"></div><script src="/vendor/swagger-ui/swagger-ui-bundle.js"></script>
+<script>SwaggerUIBundle({{url: '/openapi.json', dom_id: '#swagger', deepLinking: true}});</script></body></html>"#)
+}
 
 pub fn respond(mut stream: TcpStream, code: u16, ctype: &str, body: &[u8]) {
-    let reason = match code { 200 => "OK", 400 => "Bad Request", 404 => "Not Found", 503 => "Service Unavailable", _ => "Error" };
-    let head = format!("HTTP/1.1 {code} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", body.len());
+    let reason = match code {
+        200 => "OK", 204 => "No Content", 400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden",
+        404 => "Not Found", 501 => "Not Implemented", 503 => "Service Unavailable", _ => "Error",
+    };
+    // The headers the web access policy asked for on this connection (CORS, the token cookie).
+    let head = format!("HTTP/1.1 {code} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n{}\r\n",
+                       body.len(), crate::web_access::headers());
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(body);
 }
@@ -1104,6 +1115,13 @@ fn serve_http(state: Shared, mut stream: TcpStream, statics: &Path) {
     }
     let body = &buf[header_end..buf.len().min(header_end + length)];
     let json_ct = "application/json";
+    // Who may ask, from where (src/web_access.rs, ADR 0038), before anything is served.
+    let headers: Vec<(String, String)> = head.lines().skip(1)
+        .filter_map(|l| l.split_once(':').map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))).collect();
+    let token = target.split_once('?').and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("token=")));
+    if let Err((code, why)) = crate::web_access::gate(method, &headers, stream.peer_addr().ok().map(|a| a.ip()), token) {
+        return respond(stream, code, json_ct, if code == 204 { Vec::new() } else { json!({"error": why}).to_string().into_bytes() }.as_slice());
+    }
     // A method row with a `get` path answers there (the read-only methods, the bus and the store).
     if method == "GET" {
         if let Some(m) = get_method(path) {
@@ -1120,7 +1138,7 @@ fn serve_http(state: Shared, mut stream: TcpStream, statics: &Path) {
             Ok(b) => respond(stream, 200, "text/html; charset=utf-8", &b),
             Err(_) => respond(stream, 404, json_ct, br#"{"error":"hub.html not found"}"#),
         },
-        ("GET", "/docs") => respond(stream, 200, "text/html; charset=utf-8", SWAGGER_PAGE.as_bytes()),
+        ("GET", "/docs") => respond(stream, 200, "text/html; charset=utf-8", swagger_page("MCP hub API").as_bytes()),
         ("GET", p) if p.starts_with("/vendor/swagger-ui/") => {
             // The panel's own copy (npm ci in tools/research/mcp-panel), so the hub ships no asset.
             let (rel, ctype) = match &p["/vendor/swagger-ui/".len()..] {

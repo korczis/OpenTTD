@@ -5,7 +5,7 @@
    path:line; and, when a game is connected, every live town with one company's rating, band and the
    advice of town_lib.rhai (GET /api/town/live?company=N). The company lives in the address. */
 
-import { UI, CLS, $, esc, whole, badge, patchAddress } from './components.js';
+import { UI, CLS, $, esc, api, whole, badge, patchAddress } from './components.js';
 
 /* ---- address state ------------------------------------------------------------------------- */
 export function getState(href = globalThis.location?.href) {
@@ -70,7 +70,7 @@ export function companyChoices(live) {
 /* ---- renderers: data in, HTML out ----------------------------------------------------------- */
 
 const head = (title, sub, actions = '') => `<div class="${UI.cardHead} mb-4"><div class="${UI.cardHeadTitle}"><h2 class="${UI.cardTitle}">${esc(title)}</h2>${sub ? `<p class="mt-2 ${UI.cardSub}">${sub}</p>` : ''}</div>${actions ? `<div class="flex flex-wrap items-center gap-2">${actions}</div>` : ''}</div>`;
-const api = (op) => `<a href="/docs#/default/${op}" class="text-sm text-primary-600 hover:underline dark:text-primary-500">API</a>`;
+const apiLink = (op) => `<a href="/docs#/default/${op}" class="text-sm text-primary-600 hover:underline dark:text-primary-500">API</a>`;
 const table = (cols, rows, empty = 'nothing') => `<div class="${UI.tableWrap}"><table class="${UI.table}"><thead class="${UI.thead}"><tr>${cols.map((c) => `<th class="${CLS.cell}">${esc(c)}</th>`).join('')}</tr></thead>
   <tbody>${rows.length ? rows.join('') : `<tr><td class="${CLS.cell}" colspan="${cols.length}">${esc(empty)}</td></tr>`}</tbody></table></div>`;
 const tr = (cells) => `<tr class="border-b dark:border-gray-700">${cells.map((c) => `<td class="${CLS.cell} align-top">${c}</td>`).join('')}</tr>`;
@@ -91,7 +91,7 @@ export function likesHtml(model) {
     `${esc(e.kind)} ${e.to != null ? `to ${esc(e.to)}` : esc(e.delta_expr)}${e.candidates.length ? `<div class="${CLS.muted}">${e.candidates.map((c) => `${esc(c.expr)}${c.value != null ? ' = ' + esc(c.value) : ''}${c.note ? ' (' + esc(c.note) + ')' : ''}`).join('; ')}</div>` : ''}`,
     e.limit == null ? '' : `${esc(e.limit)} <span class="${CLS.muted}">${esc(e.limit_expr || '')}</span>`,
     src(e.source)]));
-  return card(`${head('What the town likes and dislikes', `Every change of a company's rating in a town, ${esc(MODEL)}. A change stops at its limit and never crosses it.`, api('townModel'))}
+  return card(`${head('What the town likes and dislikes', `Every change of a company's rating in a town, ${esc(MODEL)}. A change stops at its limit and never crosses it.`, apiLink('townModel'))}
     <h3 class="${CLS.label}">Likes (${likes.length})</h3>${table(cols, rows(likes, 'green'))}
     <h3 class="mt-4 ${CLS.label}">Dislikes (${dislikes.length})</h3>${table(cols, rows(dislikes, 'red'))}
     <h3 class="mt-4 ${CLS.label}">Set, reset or per house (${other.length})</h3>${table(['Trigger', 'Change', 'Stops at', 'Source'], others)}`);
@@ -106,7 +106,7 @@ export function gatesHtml(model) {
   const m = removalMatrix(model);
   const mrows = m.checks.map((c) => tr([`<span class="text-gray-900 dark:text-white">${esc(c)}</span>`,
     ...m.tolerances.map((t) => { const g = m.cell(c, t); return g ? `<span title="${esc(g.threshold_expr)} · ${esc(g.source)}">${esc(g.op)} ${esc(g.threshold)}</span><div>${src(g.source)}</div>` : ''; })]));
-  return card(`${head('Gates: what the authority refuses', `Each comparison of a company's rating with a threshold: below it, the action is refused. ${esc(MODEL)}.`, api('townModel'))}
+  return card(`${head('Gates: what the authority refuses', `Each comparison of a company's rating with a threshold: below it, the action is refused. ${esc(MODEL)}.`, apiLink('townModel'))}
     ${table(['Where', 'Allowed when', 'Source'], rows)}
     <h3 class="mt-4 ${CLS.label}">Removing town roads, tunnels and bridges, by difficulty.town_council_tolerance</h3>
     ${table(['Check', ...m.tolerances], mrows)}`);
@@ -119,7 +119,7 @@ export function actionsHtml(model) {
     `${esc(a.cost_factor)}<div class="${CLS.muted}">${esc(a.cost)}</div>`,
     `<ul class="space-y-1">${(a.effects || []).map((e) => `<li><code>${esc(e.field)}</code> ${esc(e.value)}${e.radius != null ? ` within ${esc(e.radius)} tiles` : ''}${e.note ? ` <span class="${CLS.muted}">${esc(e.note)}</span>` : ''} ${src(e.source)}</li>`).join('')}</ul>`,
     `${src(a.source)}<div>${src(a.proc_source)}</div>`]));
-  return card(`${head('Town actions', `What a company can buy from the local authority: the cost is the base town-action price times the factor, shifted right by 8. ${esc(MODEL)}.`, api('townModel'))}
+  return card(`${head('Town actions', `What a company can buy from the local authority: the cost is the base town-action price times the factor, shifted right by 8. ${esc(MODEL)}.`, apiLink('townModel'))}
     ${table(['Action', 'Cost factor', 'Effects', 'Source'], rows)}`);
 }
 
@@ -137,7 +137,7 @@ export function linksHtml(model) {
     <p class="mt-1 ${CLS.muted}">Fewer ticks is faster growth. ${src(growth.source)}</p>` : '';
   const settings = Object.entries(model.settings || {}).map(([k, s]) => tr([`<code>${esc(k)}</code>`, esc(s.default),
     esc(s.min != null ? `${s.min}..${s.max}` : ''), src(s.source)]));
-  return card(`${head('Links between towns and stations', `Rules that tie a town to a company's stations. ${esc(MODEL)}.`, api('townModel'))}
+  return card(`${head('Links between towns and stations', `Rules that tie a town to a company's stations. ${esc(MODEL)}.`, apiLink('townModel'))}
     ${table(['Rule', 'Effect', 'Values', 'Source'], rows)}${gt}
     <h3 class="mt-4 ${CLS.label}">Settings these rules read</h3>${table(['Setting', 'Default', 'Range', 'Source'], settings)}`);
 }
@@ -149,7 +149,7 @@ export function relationsHtml(model) {
     i === 0 ? `<code class="text-gray-900 dark:text-white">${esc(g.node)}</code>` : '',
     badge(r.kind, { raises: 'green', lowers: 'red', allows: 'blue', enables: 'blue', sets: 'yellow' }[r.kind] || 'gray'),
     `<code>${esc(r.to)}</code>`, esc(r.label || ''), src(r.source)])));
-  return card(`${head('Relations', `The graph the model implies: trigger → rating → gate, action → effect (${groups.length} nodes, ${(model.relations || []).length} edges).`, api('townModel'))}
+  return card(`${head('Relations', `The graph the model implies: trigger → rating → gate, action → effect (${groups.length} nodes, ${(model.relations || []).length} edges).`, apiLink('townModel'))}
     ${table(['From', 'Kind', 'To', 'Label', 'Source'], rows)}`);
 }
 
@@ -175,14 +175,14 @@ export function liveHtml(live, company) {
   const sub = live.reason
     ? `No live towns: ${esc(live.reason)}.`
     : `${esc(live.count)} towns from openttd://towns; advice from town_lib.rhai advice(town, tolerance), run in the panel. Tolerance ${badge(live.tolerance || 'lenient', 'blue')} (${esc(live.tolerance_source || '')}). Fields the game publishes: ${esc((live.fields || []).join(', ') || 'none beyond id, name, tile and population')}.${live.advice_error ? ' Advice failed: ' + esc(live.advice_error) : ''}`;
-  return card(`${head('Live towns', sub, `${sel}${api('townLive')}`)}
+  return card(`${head('Live towns', sub, `${sel}${apiLink('townLive')}`)}
     ${table(['Town', 'Rating', 'Band', 'Advice (hover for why and rule)'], liveRows(live), live.reason ? 'no game connected' : 'no towns')}`);
 }
 
 /* ---- the page ------------------------------------------------------------------------------- */
 async function loadLive(company) {
   const q = company == null ? '' : `?company=${company}`;
-  const live = await (await fetch('/api/town/live' + q)).json();
+  const live = await api('/api/town/live' + q);
   $('live').innerHTML = liveHtml(live, company ?? live.company);
   $('t-company').onchange = (ev) => {
     const v = ev.target.value === '' ? undefined : Number(ev.target.value);
@@ -195,9 +195,8 @@ async function loadLive(company) {
 /** The whole page; exported so a test mounts it in the fake browser (test/towns.test.mjs). */
 export async function mount() {
   const state = getState();
-  const r = await fetch('/api/town/model');
-  if (r.ok) {
-    const model = await r.json();
+  const model = await api('/api/town/model');
+  if (model.ok) {
     $('likes').innerHTML = likesHtml(model);
     $('gates').innerHTML = gatesHtml(model);
     $('actions').innerHTML = actionsHtml(model);
@@ -205,7 +204,7 @@ export async function mount() {
     $('relations').innerHTML = relationsHtml(model);
     $('t-msg').textContent = `Model ${model.schema} from source revision ${model.source_rev}, generated by ${model.generated_by}.`;
   } else {
-    $('t-msg').textContent = `The town model is missing (${(await r.json()).error || r.status}).`;
+    $('t-msg').textContent = `The town model is missing (${model.error || model.status}).`;
   }
   await loadLive(state.company);
 }

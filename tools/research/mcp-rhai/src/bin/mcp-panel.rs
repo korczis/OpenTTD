@@ -37,6 +37,8 @@ mod panel;
 mod panel_bot;
 #[path = "../panel_play.rs"]
 mod panel_play;
+#[path = "../web_access.rs"]
+mod web_access;
 #[allow(dead_code)]
 #[path = "../battlebrain_contract.rs"]
 mod battlebrain_contract;
@@ -160,10 +162,11 @@ fn main() {
             println!("mcp-panel: port {old} is in use; --{name} {} instead", *port);
         }
     }
-    let listener = match TcpListener::bind(("127.0.0.1", args.panel_port)) {
+    let (web, note) = args.web.clone().finish(args.panel_port);
+    let listener = match TcpListener::bind((web.bind, args.panel_port)) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("mcp-panel: cannot listen on 127.0.0.1:{}: {e}", args.panel_port);
+            eprintln!("mcp-panel: cannot listen on {}:{}: {e}", web.bind, args.panel_port);
             std::process::exit(1);
         }
     };
@@ -174,6 +177,8 @@ fn main() {
         libc::signal(libc::SIGINT, on_signal as libc::sighandler_t);
         libc::signal(libc::SIGTERM, on_signal as libc::sighandler_t);
     }
+    if let Some(n) = note { println!("mcp-panel: {n}"); }
+    web_access::install(web);
     let game = panel::Game::new(args.clone());
     let me = format!("panel-{}", args.panel_port);
     // The bus tap follows the bus from its first event, so it starts before the game does (ADR 0033).

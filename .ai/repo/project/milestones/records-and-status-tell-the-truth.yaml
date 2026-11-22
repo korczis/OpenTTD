@@ -1,0 +1,23 @@
+id: records-and-status-tell-the-truth
+title: "Every status surface and record says what the code does today, and a capability matrix proves it"
+slug: records-and-status-tell-the-truth
+order: 100
+priority: p1
+problem: "An external review of the fork (2026-11-22, 17 conversations checked against origin/master) found that the fork's own surfaces contradict its code. openttd://mcp/status and the console status line report read_only=true on a server that executes approval-gated commands; the server's file header says it exposes no mutation; research/mcp-control.md lists openttd.ai.* tools and client mode as planned although both ship; five feature records are draft with no definition of draft; the gap record for the agent-channels intent still describes the 2026-11-15 state (MCP only on a branch, A/B not run); and there is no single matrix that states, per capability, what is implemented, where, and with which evidence. An agent or reader who trusts these surfaces reaches wrong conclusions, which is exactly what the review itself did in several places."
+outcome: "The MCP server reports its real mutation capability per build, no tracked text claims a shipped capability is planned or absent, feature records carry a defined maturity with a promotion criterion, the gap record is re-observed against current master, one capability matrix states owner, code path, tests and evidence for every capability (OBSERVED/DERIVED/INFERRED), the docs catalogue no longer needs hand-written entries, and whether the gate's change tier runs in CI is decided in an ADR."
+acceptance_criteria:
+- "openttd://mcp/status and `prismatic_mcp status` derive their mutation fields from what the server registers; tests cover a server build with commands, a GUI build and an OPTION_PRISMATIC_MCP_SERVER=OFF build"
+- "git grep on master finds no sentence stating that the MCP server exposes no mutation, or that openttd.ai.* or client mode are planned"
+- "The feature-record maturity values are defined in .ai/repo/features/README.md with a promotion criterion, and every feature record satisfies the definition of the value it carries"
+- "The gap record of an-agent-plays-the-game-through-governed-channels is re-observed at a current master commit, with every resolved observation removed or marked resolved by its evidence"
+- "research/capability-matrix.md (or its generated equivalent) lists every capability with owner, code path, live input, fallback, tests, end-to-end status and an OBSERVED/DERIVED/INFERRED label, and a check fails when a listed path no longer exists"
+- "The research/prismatic-mcp contributor catalogue takes title and kind from the documents themselves; tools/check-prismatic-docs.sh fails on drift"
+- "An ADR records whether tools/gate.sh change runs on pull requests, and the workflows match it"
+validation:
+- "majordomus plan validate"
+- "majordomus intent validate"
+- "tools/surfaces/surfaces check"
+- "tools/gate.sh change"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
