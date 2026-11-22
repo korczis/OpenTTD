@@ -9,6 +9,27 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Second doctrine check (I0111): no tracked text may claim that a shipped MCP capability is
+# absent or planned. These are the false phrases an external review found (2026-11-22); each is
+# refused wherever it reappears. Plan records under .ai/repo/project/ quote them as the history of
+# the fix, and this check and its test name them, so those are the only places they may stand.
+STALE_PHRASES=(
+  'does NOT expose any mutation'
+  'planned[^.]*openttd\.ai\.\*'
+)
+stale=0
+for phrase in "${STALE_PHRASES[@]}"; do
+  if git grep -n -I -i -E -e "$phrase" -- . ':!.ai/repo/project/' ':!tools/check-prismatic-docs.sh' \
+      ':!tools/research/test_check_prismatic_docs.py'; then
+    echo "STALE CLAIM: the tracked text above matches '$phrase', which the shipped server contradicts" >&2
+    stale=1
+  fi
+done
+if [[ "$stale" -ne 0 ]]; then
+  echo "FAIL: describe what master implements (research/prismatic-mcp/08-tool-catalog.md), not what it once lacked." >&2
+  exit 1
+fi
+
 GENERATED_PATHS=(
   README.md
   research/prismatic-mcp/README.md
