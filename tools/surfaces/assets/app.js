@@ -235,14 +235,17 @@
       const title = { text: s.title, left: 'center', top: 0, textStyle: { fontSize: 14 } };
       const toolbox = { right: 36, feature: { dataView: { readOnly: true }, saveAsImage: {} } };
       if (s.kind === 'pie') {
+        const narrow = el.clientWidth < 560;
         return {
           color: PALETTE, title, toolbox,
           tooltip: { trigger: 'item', formatter: (p) => escapeHtml(p.name) + ': ' + p.value + ' (' + p.percent + '%)' },
           legend: { type: 'scroll', bottom: 0 },
           series: [{
-            type: 'pie', radius: ['35%', '66%'], top: 24, bottom: 28,
+            // A narrow card (a grid cell, a phone) leaves the slice labels room beside the ring.
+            type: 'pie', radius: narrow ? ['24%', '46%'] : ['35%', '66%'], top: 24, bottom: 28,
             itemStyle: { borderRadius: 4, borderColor: isDark() ? '#1F2937' : '#fff', borderWidth: 2 },
             label: { formatter: '{b}: {c}' },
+            labelLine: narrow ? { length: 6, length2: 6 } : undefined,
             data: s.items.map(([name, value], i) => ({ name, value, href: (s.links || [])[i] })),
           }],
         };
