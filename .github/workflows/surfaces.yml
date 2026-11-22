@@ -6,8 +6,8 @@ name: Surfaces
 # documents to the wiki. Nothing it publishes is hand-written: tools/surfaces/README.md.
 
 on:
-  # A pull request's branch is checked by its `pull_request` run (and by the run the refresh job
-  # dispatches after it pushes); a second `push` run on the same commit only doubled the queue.
+  # A pull request's branch is checked by its `pull_request` run; a second `push` run on the same
+  # commit only doubled the queue.
   push:
     branches: [master]
   pull_request:
@@ -16,9 +16,9 @@ on:
 permissions:
   contents: read
 
-# A newer run on the same branch supersedes an older one, dispatched runs included, so a run on a
+# A newer run on the same ref supersedes an older one, dispatched runs included, so a run on a
 # pull request's superseded head does not hold a runner. The default branch never cancels: each
-# of its runs publishes the site and refreshes the next pull request.
+# of its runs publishes the site.
 concurrency:
   group: surfaces-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
@@ -63,7 +63,7 @@ jobs:
       - name: Check regions, links and anchors
         run: tools/surfaces/surfaces check
 
-      - name: The generator's own tests (refresh-branch, refresh-next, site-only facts; scratch repositories)
+      - name: The generator's own tests (refresh-branch, site-only facts; scratch repositories)
         run: python3 -B -m unittest discover -s tools/surfaces -p 'test_*.py'
 
       - name: Check the README scoreboard against research/results
@@ -111,65 +111,15 @@ jobs:
           path: target/web/wiki
           retention-days: 1
 
-  # Keeps same-repository pull requests current with master: merges master into a branch,
-  # regenerates the derived regions, pushes the result as a fast-forward (never a force), and
-  # dispatches this workflow on the branch, because a push made with GITHUB_TOKEN starts no
-  # workflow; the dispatched run reports "Check and build" on the new head. On a pull request it
-  # refreshes that branch; on a push to the default branch, only the next pull request in line
-  # (tools/surfaces/refresh-next): refreshing every auto-merge branch at once sent each back to
-  # blocked, and the next merge reset them all again.
-  refresh:
-    name: Refresh branches against master
-    if: >-
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
-      || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: write
-      pull-requests: read
-    concurrency:
-      group: refresh-${{ github.head_ref || github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          filter: blob:none
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Merge master into the branch and regenerate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_REF: ${{ github.head_ref }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -n "$HEAD_REF" ]; then
-            b="$HEAD_REF"
-            set +e
-            tools/surfaces/refresh-branch --push "$b"
-            rc=$?
-            set -e
-          else
-            prs=$(gh pr list -R "$GITHUB_REPOSITORY" --state open --limit 100 \
-              --json number,headRefName,isCrossRepository,autoMergeRequest)
-            set +e
-            b=$(printf '%s' "$prs" | tools/surfaces/refresh-next --push)
-            rc=$?
-            set -e
-          fi
-          if [ $rc -eq 3 ]; then
-            gh workflow run surfaces.yml -R "$GITHUB_REPOSITORY" --ref "$b"
-            # Research Rust is not a required check, so a refresh no longer dispatches it: each
-            # dispatch held a runner for a check nothing waits on. Restore this line when it
-            # becomes required (.ai/repo/workflows/delivery.md, "Research Rust tests"):
-            # gh workflow run research-rust.yml -R "$GITHUB_REPOSITORY" --ref "$b"
-          fi
-
+  # No job pushes to a pull request's branch. A `refresh` job used to merge master into every
+  # open auto-merge branch on each push to master, as github-actions[bot] with GITHUB_TOKEN, and
+  # dispatch Surfaces (later Research Rust too) on it. A bot-pushed head never merged: its
+  # pull_request workflows end `action_required` with no jobs, and although the dispatched run
+  # passed "Check and build" on that head, the pull request stayed BLOCKED until a human pushed.
+  # With `strict: false` a branch behind master merges anyway, so the job only stranded pull
+  # requests and filled the runner queue. Refreshing from CI again needs a push that starts
+  # pull_request workflows (an App or PAT token), which is the owner's call; until then the
+  # branch's owner runs tools/surfaces/refresh-branch (tools/surfaces/README.md, "Parallel merges").
   pages:
     name: Publish the site
     needs: check
