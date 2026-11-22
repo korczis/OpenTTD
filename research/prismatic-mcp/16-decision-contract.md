@@ -49,14 +49,27 @@ tools"). Snapshot-staleness checks are staged.
   approval is never pushed out.
 - **One-time**: on execute the approval is `Consumed`; a replay of the same approved call returns a new
   `pending_approval` — verified live. Defends replay.
-- **TTL**: approvals expire (`APPROVAL_TTL_TICKS`), bounded store (`MAX_APPROVALS`).
+- **TTL**: approvals expire (`APPROVAL_TTL_TICKS`), bounded store (`MAX_APPROVALS`). An action that
+  names its own stale date expires sooner: `ai.set_settings` takes an optional `expires_tick`, bound
+  with the other arguments, and its approval expires at `min(now + APPROVAL_TTL_TICKS, expires_tick)`
+  (`detail::ApprovalExpiry`); its validation, run again at execution, refuses it after that tick even
+  when it was approved (`detail::StillFresh`).
+- **One decision, one approval**: `ai.set_settings {company, settings: {name: int, ...}, expires_tick?}`
+  is several AI settings under ONE approval (at most `detail::SET_SETTINGS_MAX`, 32; an empty map is
+  refused). Every name and value is checked against the company's running AI through the same check
+  as `ai.set_setting`; if any is unknown, out of range or fixed while the AI runs, none is applied
+  and the error names each. Otherwise all are applied in the same main-thread call, so neither the
+  operator (approving some and not others) nor the script (reading between two changes) can leave
+  the AI on a mix nobody chose.
 
 ## Execution & honest verdict
 
 Execution goes through the normal deterministic command path (`Command<...>::Post`), on the main
 thread (handlers run inside `Poll()`), never a raw pool write (`ExecuteAction()` in
 `prismatic_mcp_server.cpp`). `game.set_pause` posts `Commands::Pause`; `command.<Name>` posts that
-command as the given actor; the `ai.*` actions post `Commands::CompanyControl`; an `api.*` action
+command as the given actor; `ai.start`, `ai.stop` and `ai.reload` post `Commands::CompanyControl`, while `ai.set_setting` and
+`ai.set_settings` write the AI's configuration (`AIConfig::SetSetting`), the one its script reads on
+its next `GetSetting`; an `api.*` action
 runs the Script API function in `GSAsyncMode`.
 
 The submit answer carries `verdict: PENDING_OBSERVATION` while the command is queued. The verdict is
@@ -81,7 +94,7 @@ observed outcome per the mission's provenance requirement.
 ## Action catalogue (this build)
 
 The fixed types are named once, in `detail::ACTION_TYPES` (`src/prismatic_mcp/prismatic_mcp_detail.h`):
-`game.set_pause` (SERVER_ADMIN), `ai.set_setting`, `ai.start`, `ai.stop`, `ai.reload` (AI_CONTROL).
+`game.set_pause` (SERVER_ADMIN), `ai.set_setting`, `ai.set_settings`, `ai.start`, `ai.stop`, `ai.reload` (AI_CONTROL).
 `ActionTypes()` adds one `command.<Name>` (GAME_MUTATION) per game command whose parameters convert
 from JSON, derived from the command table, and `openttd.decision.list_action_types` lists all of
 them. `api.Script<Class>.<Function>` (SCRIPT_API) is the action of an `openttd.api.*` call with

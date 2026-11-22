@@ -621,7 +621,14 @@ absent.
 - `rhai/narrator.rhai` follows the event feed and reports in the running game, as chat from the
   server (`owner-bot`): every route the bot opens or fails to open, its knobs, companies founded or
   renamed, every MCP decision, pause and resume, and a summary at every new month with each
-  company's trains, road vehicles, aircraft and ships, value and money. Run it beside the
+  company's trains, road vehicles, aircraft and ships, value and money. Only the owner's company
+  is the owner's bot: `ai.log` lines (and their newspapers) of other companies, other PrismaticAI
+  instances in an arena included, are not relayed. The company is `$NARRATOR_COMPANY` when set,
+  else the first running company of the panel's AI (`/api/status` `ai`, `/api/bots` `running`),
+  the one `mcp-e2e --coplay` joins. When it starts and at every game quarter it also says how many
+  of the bot's requests wait for an Approve in the panel (`/api/status` `pending` for that
+  company) and when the oldest was made: an approval-gated plan (for example `replan.rhai`'s
+  settings) otherwise waits unseen while auto-approve is off. Run it beside the
   game: `mcp-rhai tools/research/mcp-panel/rhai/narrator.rhai`.
 - The panel window shows the same events as toasts, live from `/api/events/stream`, and an
   approval that waits for you stays on screen.
