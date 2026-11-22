@@ -78,7 +78,7 @@ its own:
 | Step | Source |
 |---|---|
 | The company's last four quarters: income, expenses, value, performance rating, cargo delivered, and the trend between the last two | `ScriptCompany.GetQuarterly*` through MCP |
-| Its rank by value | the panel's DuckDB store, this run's latest `samples` |
+| Its rank by value and its value change over the last six months | the store's views `company_latest` and `company_month` |
 | The competition: each company's last quarter, and per transport type the profit per vehicle a year old, with the leader and this company's gap to it | the same calls, `openttd://vehicles` |
 | A fresh portfolio on today's map and money | `POST /api/bots/planned` (mcp-plan, AlgoGlyph track-planning and knapsack-dp), published as `plan.portfolio` and `plan.bot_settings` |
 | The chance that a new line pays | AlgoGlyph `bayes-update` on this company's own lines a year old: earned or lost |
