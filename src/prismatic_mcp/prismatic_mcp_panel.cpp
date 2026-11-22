@@ -90,7 +90,7 @@ json Snapshot()
 
 std::optional<std::string> ConsentRefusal(bool approve)
 {
-	if (approve && UI::InjectingInput()) return "an approval needs the owner's own click; input injected through openttd.input.* never consents";
+	if (approve && UI::InjectingInput()) return "an approval needs the owner's own click; input injected through a UI tool (openttd.input.*, openttd.ui.press, ...) never consents";
 	return std::nullopt;
 }
 
