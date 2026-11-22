@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0014
 kind: adr
 title: Interface input from an agent is armed per process by the owner and yields to the owner's mouse, and every action it causes is an ordinary client command
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - mcp
@@ -15,7 +15,7 @@ related:
   - file:src/prismatic_mcp/prismatic_mcp_ui.cpp
   - file:research/mcp-human.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:f308b13c03b1778b7d4cf4a31f83749ffe35e024
     - issue:I0044
@@ -32,6 +32,8 @@ read-only resources and the single approval-gated tool of ADR 0008: every button
 becomes reachable, and the actions it triggers are whatever the interface does.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Input is fed where a video driver feeds it.** `openttd.input.pointer`, `button`, `wheel`
    and `key` (`src/prismatic_mcp/prismatic_mcp_ui.cpp`) call `HandleMouseEvents()` and

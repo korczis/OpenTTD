@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0025
 kind: adr
 title: Game time runs on separate tick, calendar, economy and real-time timers, and periodic work subscribes to the one that matches its meaning
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -16,7 +16,7 @@ related:
   - file:src/timer/timer_game_economy.h
   - file:src/timer/timer_game_calendar.h
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/timer/timer_game_economy.h
     - file:src/timer/timer_game_calendar.h
@@ -36,6 +36,8 @@ payments, ratings, ageing) used to share one clock; a wallclock timekeeping mode
 economy run in fixed-length "minutes" while the calendar runs slower or is frozen.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Four clocks.** `src/timer/timer_game_tick.h:TimerGameTick` counts ticks;
    `src/timer/timer_game_calendar.h:TimerGameCalendar` the displayed date;

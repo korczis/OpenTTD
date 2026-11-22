@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0007
 kind: adr
 title: Prismatic steers a company through a standalone bridge that drives a Company AI over rcon, not through a Game Script relay
-status: proposed
+status: accepted
 date: 2026-07-24
 tags:
   - bridge
@@ -14,7 +14,7 @@ related:
   - file:docs/admin_network.md
   - file:.ai/repo/adrs/0008-an-agent-reaches-the-game-through-an-embedded-loopback-mcp-s.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:505fb87d7a441500b785e3b8a84f88b1152928df
     - commit:1e5ad23af931f4e5934e78eceb08f45d3c943e71
@@ -34,6 +34,8 @@ turned out that `~/dev/openttd-prismatic-bridge` already existed: a working, tes
 Python/FastAPI service.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 The bridge is three independent pieces: OpenTTD, the standalone bridge service, and
 `prismatic-platform`. Control is coarse-grained: the bridge uses the admin network's rcon to

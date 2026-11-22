@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0008
 kind: adr
 title: An agent reaches the game through an embedded loopback MCP server whose mutations pass a digest-bound human approval and the command system
-status: proposed
+status: accepted
 date: 2026-07-24
 tags:
   - mcp
@@ -17,7 +17,7 @@ related:
   - file:src/network/core/address.cpp
   - file:.ai/repo/adrs/0004-research-access-to-internals-is-permitted-and-research-code-.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:0a49a3dbb85e7b87daf4cd16097040e433de623a
     - commit:3bfd9a096ca7a8638b6cddc70909f8c3bef69f76
@@ -37,6 +37,8 @@ vendored JSON library and a CSPRNG. All mutation must pass `Command<>::Post`; po
 unsynchronised main-thread state.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 Embed a Model Context Protocol server (stable spec 2025-11-25) in the research fork, on the
 branch `research/prismatic-mcp-server`:

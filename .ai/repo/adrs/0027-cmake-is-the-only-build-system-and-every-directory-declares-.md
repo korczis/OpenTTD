@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0027
 kind: adr
 title: CMake is the only build system, and every directory declares its sources with add_files under explicit conditions
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -14,7 +14,7 @@ related:
   - file:CMakeLists.txt
   - file:cmake/Options.cmake
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:cmake/SourceList.cmake
     - file:CMakeLists.txt
@@ -33,6 +33,8 @@ variants (client, dedicated server, tools only), and generates code at build tim
 settings, script bindings).
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **CMake only** (3.16 or newer; `COMPILING.md`).
 2. **Per-directory source lists.** Each `CMakeLists.txt` lists its files with

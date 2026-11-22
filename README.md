@@ -614,11 +614,11 @@ from the code. The right-hand column says what was counted.
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
 | **43** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **11** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
-| **16** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
+| **17** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **35** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **93** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **89** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
-| **862** | published documents on the site and the wiki | published documents under `/` |
+| **863** | published documents on the site and the wiki | published documents under `/` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
@@ -626,7 +626,7 @@ from the code. The right-hand column says what was counted.
 pie showData title Counted from the sources: tooling
     "research tools and checks (tools/research/, shell and Python)" : 43
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 11
-    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 16
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 17
 ```
 <!-- surfaces:end facts -->
 
@@ -1289,6 +1289,7 @@ those files:
 | [project.a-tuning-claim-needs-held-start-pairs](.ai/repo/rules/project/a-tuning-claim-needs-held-start-pairs.v1.md) | advisory | Change a default of the bot or the planner on the strength of a measurement only when held-start duel pairs on three seeds favour it beyond the rival's spread, and record the pairs; report anything less as inconclusive. |
 | [project.battle-records-are-reproducible](.ai/repo/rules/project/battle-records-are-reproducible.v1.md) | blocking | Publish AI-battle results only as records written by battle.py report from a committed edition, never edit a record or its derived Markdown by hand, and keep battle.py check passing. |
 | [project.docs-are-derived-and-current](.ai/repo/rules/project/docs-are-derived-and-current.v1.md) | blocking | Derive every number, table, list and chart from the sources; infer what can be inferred instead of declaring it; keep code generic (no instance named where data can give it); draw every Markdown diagram in Mermaid; and keep the gates that prove this, surfaces check, e2e-coverage, readme-scoreboard and diagrams-check, passing on every change. |
+| [project.extend-and-integrate-before-adding](.ai/repo/rules/project/extend-and-integrate-before-adding.v1.md) | blocking | Extend the existing piece before writing a parallel one, integrate with what exists (the store and its views, the Rhai library, AlgoGlyph through the hub, the MCP catalogue, the blackboard and the mesh), and leave no second implementation behind. |
 | [project.game-state-mutates-only-through-commands](.ai/repo/rules/project/game-state-mutates-only-through-commands.v1.md) | blocking | Change vehicles, companies, map tiles or any other persistent game state only through a registered command issued with Command<>::Post, never by writing a pool from a research hook, the MCP server or any other side channel. |
 | [project.long-runs-are-owned-bounded-and-stoppable](.ai/repo/rules/project/long-runs-are-owned-bounded-and-stoppable.v1.md) | blocking | Before a job runs unattended or on another machine, make it write who owns it and how to stop it on every host, refuse new work over the host's load ceiling or under its 35 GiB disk floor, and honour a PAUSED file on the host and a STOP file beside it. |
 | [project.mcp-surfaces-are-derived](.ai/repo/rules/project/mcp-surfaces-are-derived.v1.md) | blocking | Derive every surface of the MCP integration from the live catalogue and the one route table; do not hand-list tools, routes, functions or settings in a second place. |
@@ -1313,7 +1314,7 @@ those files:
 ```mermaid
 pie showData title Rules (project) by class
     %% links: README.md?col=Class&filter=blocking#06-ground-rules-short-version | README.md?col=Class&filter=advisory#06-ground-rules-short-version
-    "blocking" : 19
+    "blocking" : 20
     "advisory" : 2
 ```
 <!-- surfaces:end ai-rules -->
@@ -1337,9 +1338,8 @@ choices, with its status (generated from [`.ai/repo/adrs/`](./.ai/repo/adrs/READ
 <!-- surfaces:begin ai-adrs as=pie -->
 ```mermaid
 pie showData title Decisions by status
-    %% links: README.md?col=Status&filter=proposed#071-architecture-decisions | README.md?col=Status&filter=accepted#071-architecture-decisions | README.md?col=Status&filter=superseded#071-architecture-decisions
-    "proposed" : 31
-    "accepted" : 3
+    %% links: README.md?col=Status&filter=accepted#071-architecture-decisions | README.md?col=Status&filter=superseded#071-architecture-decisions
+    "accepted" : 34
     "superseded" : 1
 ```
 <!-- surfaces:end ai-adrs -->
@@ -1349,39 +1349,39 @@ pie showData title Decisions by status
 <!-- surfaces:begin ai-adrs -->
 | Decision | Status | Title |
 |---|---|---|
-| [adr-0001](.ai/repo/adrs/0001-this-fork-is-a-private-research-target-and-never-interacts-w.md) | proposed | This fork is a private research target and never interacts with upstream |
-| [adr-0002](.ai/repo/adrs/0002-validation-runs-in-three-cost-tiers-behind-one-gate-script-a.md) | proposed | Validation runs in three cost tiers behind one gate script, and a report never claims a step that did not run |
-| [adr-0003](.ai/repo/adrs/0003-principles-are-adapted-from-prismatic-into-this-fork-one-way.md) | proposed | Principles are adapted from Prismatic into this fork one way, and nothing flows back automatically |
-| [adr-0004](.ai/repo/adrs/0004-research-access-to-internals-is-permitted-and-research-code-.md) | proposed | Research access to internals is permitted, and research code is compile-gated, labelled and removable |
-| [adr-0005](.ai/repo/adrs/0005-an-experiment-is-driven-by-the-research-cli-and-its-build-pr.md) | proposed | An experiment is driven by the research CLI and its build profile, runtime flags and evidence are recorded in a versioned manifest |
-| [adr-0006](.ai/repo/adrs/0006-the-research-cli-keeps-the-system-compiler-when-it-supports-.md) | proposed | The research CLI keeps the system compiler when it supports source_location and falls back to Homebrew LLVM only when it does not |
-| [adr-0007](.ai/repo/adrs/0007-prismatic-steers-a-company-through-a-standalone-bridge-that-.md) | proposed | Prismatic steers a company through a standalone bridge that drives a Company AI over rcon, not through a Game Script relay |
-| [adr-0008](.ai/repo/adrs/0008-an-agent-reaches-the-game-through-an-embedded-loopback-mcp-s.md) | proposed | An agent reaches the game through an embedded loopback MCP server whose mutations pass a digest-bound human approval and the command system |
+| [adr-0001](.ai/repo/adrs/0001-this-fork-is-a-private-research-target-and-never-interacts-w.md) | accepted | This fork is a private research target and never interacts with upstream |
+| [adr-0002](.ai/repo/adrs/0002-validation-runs-in-three-cost-tiers-behind-one-gate-script-a.md) | accepted | Validation runs in three cost tiers behind one gate script, and a report never claims a step that did not run |
+| [adr-0003](.ai/repo/adrs/0003-principles-are-adapted-from-prismatic-into-this-fork-one-way.md) | accepted | Principles are adapted from Prismatic into this fork one way, and nothing flows back automatically |
+| [adr-0004](.ai/repo/adrs/0004-research-access-to-internals-is-permitted-and-research-code-.md) | accepted | Research access to internals is permitted, and research code is compile-gated, labelled and removable |
+| [adr-0005](.ai/repo/adrs/0005-an-experiment-is-driven-by-the-research-cli-and-its-build-pr.md) | accepted | An experiment is driven by the research CLI and its build profile, runtime flags and evidence are recorded in a versioned manifest |
+| [adr-0006](.ai/repo/adrs/0006-the-research-cli-keeps-the-system-compiler-when-it-supports-.md) | accepted | The research CLI keeps the system compiler when it supports source_location and falls back to Homebrew LLVM only when it does not |
+| [adr-0007](.ai/repo/adrs/0007-prismatic-steers-a-company-through-a-standalone-bridge-that-.md) | accepted | Prismatic steers a company through a standalone bridge that drives a Company AI over rcon, not through a Game Script relay |
+| [adr-0008](.ai/repo/adrs/0008-an-agent-reaches-the-game-through-an-embedded-loopback-mcp-s.md) | accepted | An agent reaches the game through an embedded loopback MCP server whose mutations pass a digest-bound human approval and the command system |
 | [adr-0009](.ai/repo/adrs/0009-the-fork-s-site-is-a-zola-project-published-to-github-pages-.md) | superseded | The fork's site is a Zola project published to GitHub Pages from a fork-only workflow |
-| [adr-0010](.ai/repo/adrs/0010-majordomus-supervises-this-fork-and-the-ai-layer-is-its-trac.md) | proposed | Majordomus supervises this fork and the .ai/ layer is its tracked governance record |
-| [adr-0011](.ai/repo/adrs/0011-the-fork-follows-upstream-by-rebasing-its-commits-onto-upstr.md) | proposed | The fork follows upstream by rebasing its commits onto upstream master, and upstream is a fetch-only remote |
-| [adr-0012](.ai/repo/adrs/0012-every-published-surface-is-derived-from-tracked-markdown-git.md) | proposed | Every published surface is derived from tracked Markdown, git and the .ai layer by one generic generator |
-| [adr-0013](.ai/repo/adrs/0013-every-openttd-process-may-run-its-own-mcp-server-and-its-vie.md) | proposed | Every OpenTTD process may run its own MCP server, and its view tools act on the local viewport only, with no command and no approval |
-| [adr-0014](.ai/repo/adrs/0014-interface-input-from-an-agent-is-armed-per-process-by-the-ow.md) | proposed | Interface input from an agent is armed per process by the owner and yields to the owner's mouse, and every action it causes is an ordinary client command |
-| [adr-0015](.ai/repo/adrs/0015-the-fork-does-not-run-upstream-s-ci-workflows-on-push-pages-.md) | proposed | The fork does not run upstream's CI workflows on push; Pages deploys from Surfaces alone |
-| [adr-0016](.ai/repo/adrs/0016-multiplayer-is-deterministic-lockstep-every-peer-runs-the-sa.md) | proposed | Multiplayer is deterministic lockstep: every peer runs the same command stream and only commands cross the wire |
-| [adr-0017](.ai/repo/adrs/0017-game-objects-live-in-typed-pools-addressed-by-strong-ids-nev.md) | proposed | Game objects live in typed pools addressed by strong IDs, never by persistent pointers |
-| [adr-0018](.ai/repo/adrs/0018-every-savegame-ever-written-stays-loadable-saved-fields-are-.md) | proposed | Every savegame ever written stays loadable: saved fields are gated by SaveLoadVersion and old layouts are converted after load |
-| [adr-0019](.ai/repo/adrs/0019-settings-are-declared-once-in-ini-tables-that-settingsgen-co.md) | proposed | Settings are declared once in ini tables that settingsgen compiles into the tables used by the config file, the savegame, the GUI and network sync |
-| [adr-0020](.ai/repo/adrs/0020-player-facing-text-is-compiled-from-english-txt-by-strgen-an.md) | proposed | Player-facing text is compiled from english.txt by strgen, and translations arrive from eints and are never edited by hand |
-| [adr-0021](.ai/repo/adrs/0021-ai-and-game-scripts-run-in-embedded-squirrel-against-a-gener.md) | proposed | AI and Game Scripts run in embedded Squirrel against a generated API, and old API versions are kept through compatibility scripts |
-| [adr-0022](.ai/repo/adrs/0022-platform-backends-are-drivers-registered-in-factories-and-ch.md) | proposed | Platform backends are drivers registered in factories and chosen at runtime, so one binary can run with a window, headless or silent |
-| [adr-0023](.ai/repo/adrs/0023-the-map-is-a-flat-array-of-tiles-whose-behaviour-is-dispatch.md) | proposed | The map is a flat array of tiles whose behaviour is dispatched by tile type through a table of tile procedures |
-| [adr-0024](.ai/repo/adrs/0024-the-cargodist-link-graph-is-computed-in-background-threads-a.md) | proposed | The cargodist link graph is computed in background threads and joined at a fixed economy date, pausing the game rather than joining late |
-| [adr-0025](.ai/repo/adrs/0025-game-time-runs-on-separate-tick-calendar-economy-and-real-ti.md) | proposed | Game time runs on separate tick, calendar, economy and real-time timers, and periodic work subscribes to the one that matches its meaning |
-| [adr-0026](.ai/repo/adrs/0026-pathfinding-is-yapf-an-a-framework-composed-at-compile-time-.md) | proposed | Pathfinding is YAPF, an A* framework composed at compile time from policy templates and specialised per vehicle type |
-| [adr-0027](.ai/repo/adrs/0027-cmake-is-the-only-build-system-and-every-directory-declares-.md) | proposed | CMake is the only build system, and every directory declares its sources with add_files under explicit conditions |
-| [adr-0028](.ai/repo/adrs/0028-graphics-sounds-and-music-come-from-replaceable-base-sets-an.md) | proposed | Graphics, sounds and music come from replaceable base sets and NewGRFs, and the engine ships no proprietary data |
-| [adr-0029](.ai/repo/adrs/0029-a-research-gated-local-only-override-accepts-a-mismatched-pee.md) | proposed | A research-gated, local-only override accepts a mismatched peer revision for a loopback R&D game, without spoofing the build's own revision |
-| [adr-0030](.ai/repo/adrs/0030-public-servers-are-played-with-an-unmodified-official-client.md) | proposed | Public servers are played with an unmodified official client; fork features run only on the owner's own servers, on a client built on the same release |
-| [adr-0032](.ai/repo/adrs/0032-the-bridge-s-admin-protocol-client-is-a-native-rust-service-.md) | proposed | The bridge's admin-protocol client is a native Rust service (axum + tokio), not the Python/FastAPI bridge |
+| [adr-0010](.ai/repo/adrs/0010-majordomus-supervises-this-fork-and-the-ai-layer-is-its-trac.md) | accepted | Majordomus supervises this fork and the .ai/ layer is its tracked governance record |
+| [adr-0011](.ai/repo/adrs/0011-the-fork-follows-upstream-by-rebasing-its-commits-onto-upstr.md) | accepted | The fork follows upstream by rebasing its commits onto upstream master, and upstream is a fetch-only remote |
+| [adr-0012](.ai/repo/adrs/0012-every-published-surface-is-derived-from-tracked-markdown-git.md) | accepted | Every published surface is derived from tracked Markdown, git and the .ai layer by one generic generator |
+| [adr-0013](.ai/repo/adrs/0013-every-openttd-process-may-run-its-own-mcp-server-and-its-vie.md) | accepted | Every OpenTTD process may run its own MCP server, and its view tools act on the local viewport only, with no command and no approval |
+| [adr-0014](.ai/repo/adrs/0014-interface-input-from-an-agent-is-armed-per-process-by-the-ow.md) | accepted | Interface input from an agent is armed per process by the owner and yields to the owner's mouse, and every action it causes is an ordinary client command |
+| [adr-0015](.ai/repo/adrs/0015-the-fork-does-not-run-upstream-s-ci-workflows-on-push-pages-.md) | accepted | The fork does not run upstream's CI workflows on push; Pages deploys from Surfaces alone |
+| [adr-0016](.ai/repo/adrs/0016-multiplayer-is-deterministic-lockstep-every-peer-runs-the-sa.md) | accepted | Multiplayer is deterministic lockstep: every peer runs the same command stream and only commands cross the wire |
+| [adr-0017](.ai/repo/adrs/0017-game-objects-live-in-typed-pools-addressed-by-strong-ids-nev.md) | accepted | Game objects live in typed pools addressed by strong IDs, never by persistent pointers |
+| [adr-0018](.ai/repo/adrs/0018-every-savegame-ever-written-stays-loadable-saved-fields-are-.md) | accepted | Every savegame ever written stays loadable: saved fields are gated by SaveLoadVersion and old layouts are converted after load |
+| [adr-0019](.ai/repo/adrs/0019-settings-are-declared-once-in-ini-tables-that-settingsgen-co.md) | accepted | Settings are declared once in ini tables that settingsgen compiles into the tables used by the config file, the savegame, the GUI and network sync |
+| [adr-0020](.ai/repo/adrs/0020-player-facing-text-is-compiled-from-english-txt-by-strgen-an.md) | accepted | Player-facing text is compiled from english.txt by strgen, and translations arrive from eints and are never edited by hand |
+| [adr-0021](.ai/repo/adrs/0021-ai-and-game-scripts-run-in-embedded-squirrel-against-a-gener.md) | accepted | AI and Game Scripts run in embedded Squirrel against a generated API, and old API versions are kept through compatibility scripts |
+| [adr-0022](.ai/repo/adrs/0022-platform-backends-are-drivers-registered-in-factories-and-ch.md) | accepted | Platform backends are drivers registered in factories and chosen at runtime, so one binary can run with a window, headless or silent |
+| [adr-0023](.ai/repo/adrs/0023-the-map-is-a-flat-array-of-tiles-whose-behaviour-is-dispatch.md) | accepted | The map is a flat array of tiles whose behaviour is dispatched by tile type through a table of tile procedures |
+| [adr-0024](.ai/repo/adrs/0024-the-cargodist-link-graph-is-computed-in-background-threads-a.md) | accepted | The cargodist link graph is computed in background threads and joined at a fixed economy date, pausing the game rather than joining late |
+| [adr-0025](.ai/repo/adrs/0025-game-time-runs-on-separate-tick-calendar-economy-and-real-ti.md) | accepted | Game time runs on separate tick, calendar, economy and real-time timers, and periodic work subscribes to the one that matches its meaning |
+| [adr-0026](.ai/repo/adrs/0026-pathfinding-is-yapf-an-a-framework-composed-at-compile-time-.md) | accepted | Pathfinding is YAPF, an A* framework composed at compile time from policy templates and specialised per vehicle type |
+| [adr-0027](.ai/repo/adrs/0027-cmake-is-the-only-build-system-and-every-directory-declares-.md) | accepted | CMake is the only build system, and every directory declares its sources with add_files under explicit conditions |
+| [adr-0028](.ai/repo/adrs/0028-graphics-sounds-and-music-come-from-replaceable-base-sets-an.md) | accepted | Graphics, sounds and music come from replaceable base sets and NewGRFs, and the engine ships no proprietary data |
+| [adr-0029](.ai/repo/adrs/0029-a-research-gated-local-only-override-accepts-a-mismatched-pee.md) | accepted | A research-gated, local-only override accepts a mismatched peer revision for a loopback R&D game, without spoofing the build's own revision |
+| [adr-0030](.ai/repo/adrs/0030-public-servers-are-played-with-an-unmodified-official-client.md) | accepted | Public servers are played with an unmodified official client; fork features run only on the owner's own servers, on a client built on the same release |
+| [adr-0032](.ai/repo/adrs/0032-the-bridge-s-admin-protocol-client-is-a-native-rust-service-.md) | accepted | The bridge's admin-protocol client is a native Rust service (axum + tokio), not the Python/FastAPI bridge |
 | [adr-0033](.ai/repo/adrs/0033-every-panel-event-goes-out-on-zeromq-and-into-a-duckdb-store.md) | accepted | Every panel event goes out on a ZeroMQ PUB socket and into a DuckDB store, per instance, from one tap on the bus |
-| [adr-0034](.ai/repo/adrs/0034-planning-decisions-read-recorded-history-and-emit-structured.md) | proposed | Planning decisions read recorded history from the store and publish each choice as a structured event |
+| [adr-0034](.ai/repo/adrs/0034-planning-decisions-read-recorded-history-and-emit-structured.md) | accepted | Planning decisions read recorded history from the store and publish each choice as a structured event |
 | [adr-0035](.ai/repo/adrs/0035-company-ais-are-ranked-in-headless-null-driver-matches-on-ever.md) | accepted | Company AIs are ranked in headless null-driver matches on every reachable LAN machine, and the ranking is a derived record |
 | [adr-0036](.ai/repo/adrs/0036-prismatic-ai-settings-are-tuned-by-a-deterministic-genetic-algorith.md) | accepted | PrismaticAI's settings are tuned by a deterministic genetic algorithm over the LAN battle, and a tuned setting reaches a default only through held-start duels |
 <!-- surfaces:end ai-adrs -->

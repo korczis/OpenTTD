@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0004
 kind: adr
 title: Research access to internals is permitted, and research code is compile-gated, labelled and removable
-status: proposed
+status: accepted
 date: 2026-07-24
 tags:
   - research
@@ -16,7 +16,7 @@ related:
   - file:cmake/Options.cmake
   - file:src/console_cmds.cpp
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:00e4f6d53ba020ccfbef3876fed71b511b4560b1
     - commit:8c4cc4fc322f036c032aa6241073f5f0e20a3b5e
@@ -35,6 +35,8 @@ observable: tick counters, pool sizes, pathfinder decisions. Agents that treated
 rules either refused to look inside or built artificial abstractions to avoid it.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 Controlled access to internals is an expected part of research work in this fork, within an
 already-scoped task: internal headers and symbols, debug builds, `OPTION_USE_ASSERTS`,

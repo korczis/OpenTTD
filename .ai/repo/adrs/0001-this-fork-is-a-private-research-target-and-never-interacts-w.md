@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0001
 kind: adr
 title: This fork is a private research target and never interacts with upstream
-status: proposed
+status: accepted
 date: 2026-07-23
 tags:
   - governance
@@ -15,7 +15,7 @@ related:
   - file:AGENTS.md
   - file:CONTRIBUTING.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:8d5f34027d6a59296b8b1bf33aa06a13fe05799c
     - commit:ad96e57c4ad014a28667773bfbcecd55a6669a8a
@@ -36,6 +36,8 @@ contribution process (commit grammar, PR templates, "ask before large changes") 
 process, or worse, try to send work upstream.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 The fork is a private research target and is never staged for upstream contribution.
 

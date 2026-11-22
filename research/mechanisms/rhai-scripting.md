@@ -65,6 +65,7 @@ The scripts in the library today:
 | [`arena.rhai`](../../tools/research/mcp-panel/rhai/arena.rhai) | keeps the LAN battle's contestants playing in the live game; editing its lineup changes the game live ([Live arena](../live-arena.md)) |
 | [`steward.rhai`](../../tools/research/mcp-panel/rhai/steward.rhai) | the bot asks the owner yes/no questions in the game |
 | [`ask_relay.rhai`](../../tools/research/mcp-panel/rhai/ask_relay.rhai), [`build_plan.rhai`](../../tools/research/mcp-panel/rhai/build_plan.rhai) | answers "Ask the planner..." requests; carries out a planned sentence |
+| [`replan.rhai`](../../tools/research/mcp-panel/rhai/replan.rhai) | re-plans the running bot every game month: trend, competition, the planner's portfolio, a modelled switch, approval-gated changes ([Planner and AlgoGlyph](planner-and-algoglyph.md#replanning-while-the-game-runs)) |
 
 Usage and the built-in list in full: [`../mcp-control.md`](../mcp-control.md) ("Rhai"), and the
 Scripts page in [`../rail-steward.md`](../rail-steward.md) ("The Scripts page").
