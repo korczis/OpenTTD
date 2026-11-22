@@ -35,7 +35,7 @@ relations:
   - type: supports
     target: file:.ai/repo/adrs/0034-planning-decisions-read-recorded-history-and-emit-structured.md
   - type: relates_to
-    target: file:.ai/repo/knowledge/candidates/console-lines-the-panel-parses-are-an-interface.md
+    target: file:.ai/repo/knowledge/curated/console-lines-the-panel-parses-are-an-interface.md
 ---
 
 # Fact
