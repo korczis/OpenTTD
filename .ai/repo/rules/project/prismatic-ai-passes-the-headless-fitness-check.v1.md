@@ -41,9 +41,10 @@ tree and one binary, so it can run on every change to the bot.
   within `hoard_fleet_slack` of the window's start while its money grew `hoard_factor` times to
   at least `hoard_floor` (`hoards`; the owner's co-play game of 2026-11-22 held 35-37 vehicles
   from 1955 to 1960 while its bank rose from 0.6M to 3.77M), its stations not growing either.
-  Only the contestants in `fitness.must_not_hoard` fail on it (default: every healthy one);
-  `PrismaticAI planned` is there because only a planned bot reached that state. Do not remove a
-  contestant from `must_not_hoard` to make a change pass.
+  Only the contestants listed in `fitness.must_not_hoard` of battle.json fail on it (default:
+  every healthy one); the list is read there, not repeated here, and a contestant joins it once
+  the fitness seed shows it spending (research/ai-battle/README.md keeps the evidence). Do not
+  remove a contestant from `must_not_hoard` to make a change pass.
 
 The gate fails with it.
 
