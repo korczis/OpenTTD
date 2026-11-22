@@ -124,6 +124,12 @@ sync = ["python3", "-B", "tools/research/generate_prismatic_docs.py"]
 check = ["tools/check-prismatic-docs.sh"]
 
 [[generators.items]]
+id = "ingame-menu"
+outputs = ["research/prismatic-mcp/README.md"]
+sync = ["python3", "-B", "tools/research/prismatic-mcp-menu"]
+check = ["python3", "-B", "tools/research/prismatic-mcp-menu", "--check"]
+
+[[generators.items]]
 id = "town-model"
 outputs = ["research/mechanisms/town-authority.md", "tools/research/town-model/town_model.json"]
 sync = ["python3", "-B", "tools/research/town-model/derive.py"]

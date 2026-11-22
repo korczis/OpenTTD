@@ -105,18 +105,42 @@ ground rules that apply before any of this.
 
 A research build adds one button to the main toolbar, after the help button: a prism drawn in the
 base set's palette (no sprite of its own). Its dropdown is one table,
-`src/prismatic_mcp/prismatic_mcp_menu.cpp` (`ITEMS`), and every row does one of:
+`src/prismatic_mcp/prismatic_mcp_menu.cpp` (`ITEMS`); an item's group puts it in a submenu.
+
+<!-- ingame-menu:begin -->
+
+Derived from `ITEMS` in `src/prismatic_mcp/prismatic_mcp_menu.cpp` by `tools/research/prismatic-mcp-menu`: 14 items, 4 submenus. The top level lists the items without a submenu and one row per submenu; a submenu opens in place of the list, with `< Back`.
+
+| Where | Item | Action | Target |
+|---|---|---|---|
+| top level | Prismatic control... | `window` | `control` |
+| top level | Ask the planner... | `ask` | `ask` |
+| Requests here > | Serve the towns here | `request` | `serve_here` |
+| Requests here > | Plan a rail line here | `request` | `plan_rail` |
+| Requests here > | Watch my buses | `request` | `watch` |
+| Human player > | Human player: paused | `toggle` | `openttd.input.yield` `{paused}` |
+| MCP server > | MCP server: status | `console` | `prismatic_mcp status` |
+| MCP server > | MCP server: start | `console` | `prismatic_mcp start` |
+| MCP server > | MCP approvals waiting | `console` | `prismatic_mcp approvals` |
+| MCP server > | MCP decisions | `console` | `prismatic_mcp decisions` |
+| Hub and API > | Open the hub | `browse` | `/` |
+| Hub and API > | World view | `browse` | `/viz` |
+| Hub and API > | API (Swagger) | `browse` | `/docs` |
+| Hub and API > | GraphQL schema | `browse` | `/graphql/schema` |
 
 | Action | What a click does |
 |---|---|
-| `console` | runs a console command (`prismatic_mcp status`, `start`, `approvals`, `decisions`) and shows the console |
-| `browse` | opens a hub page: `/`, `/viz` (World view), `/docs` (Swagger), `/graphql/schema`; base `$PRISMATIC_HUB_URL`, else `http://127.0.0.1:8790` |
-| `ask` | "Ask the planner...": the typed sentence becomes a request of kind `ask` |
-| `request` | a request of a fixed kind (`serve_here`, `plan_rail`, `watch`) for the tile under the main view's centre |
-| `toggle` | calls an MCP tool with a boolean it flips (`openttd.input.yield {paused}`), shown checked |
+| `ask` | asks for a sentence; it becomes a request of kind `ask` |
+| `browse` | opens the hub page (base `$PRISMATIC_HUB_URL`, else `http://127.0.0.1:8790`) |
+| `console` | runs the console command and shows the console |
+| `request` | queues a request of that kind for the tile under the main view's centre |
+| `toggle` | calls the MCP tool with the boolean it flips, shown checked |
+| `window` | opens the fork's window of that name |
 
-Over MCP the same table is `openttd://ui/menu` (every row, its action and target, the switches'
-state), `openttd.ui.menu.run {index, text?}` runs a row as a click does, and `openttd://ui/requests`
+<!-- ingame-menu:end -->
+
+Over MCP the same table is `openttd://ui/menu` (every row, its action, target and group, the
+submenus in order, the switches' state), `openttd.ui.menu.run {index, text?}` runs a row as a click does, and `openttd://ui/requests`
 lists every request `{id, kind, text, tile, x, y, date, answered, answer}`. Any client answers
 one with `openttd.ui.requests.answer {id, answer}`; the answer is recorded and shown in the game
 as a news item. `tools/research/mcp-panel/rhai/ask_relay.rhai` answers kind `ask` through the
