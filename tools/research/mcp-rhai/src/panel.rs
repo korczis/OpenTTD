@@ -2366,6 +2366,9 @@ pub fn routes() -> Vec<Route> {
         r("GET", "/api/db/query", "dbQuery", "One read-only statement on the store (?sql=SELECT ...; SELECT, WITH, DESCRIBE, SUMMARIZE or SHOW, one statement, anything else 400; without sql the newest 20 events): {columns, rows, count, capped}, each row a list in column order, at most 5000 rows", false, None, panel_store::h_db_query),
         r("POST", "/api/db/query", "dbQueryPost", "The same read-only query with the statement in the body ({sql}), for statements too long for an address", false,
           s(json!({"sql": st()}), &["sql"]), panel_store::h_db_query),
+        r("GET", "/api/db/named", "dbNamed", "Every named query of the store (one file each in tools/research/mcp-rhai/sql/queries): name, description, parameters read from the prepared statement, and its sql", false, None, panel_store::h_db_named_list),
+        r("POST", "/api/db/named", "dbNamedRun", "Run one named query with its parameters bound, never pasted ({name, params: {company: 0, ...}}): {columns, rows, count, capped}; 404 for an unknown name, 400 for a missing parameter", false,
+          s(json!({"name": st(), "params": obj()}), &["name"]), panel_store::h_db_named_run),
         r("GET", "/api/overview/history", "overviewHistory", "The overview's history kept by the panel: one sample per game day (tick, date, vehicles, towns, per company money, value, loan, net); ?since=<tick> for the newer ones", false, None, h_history),
         r("GET", "/api/catalogue", "catalogue", "MCP initialize, resources/list and tools/list", true, None, h_catalogue),
         r("GET", "/api/resource", "readResource", "Read one MCP resource by ?uri=", true, None, h_resource),
@@ -3225,7 +3228,8 @@ mod tests {
         // And the debugger (POST /api/rhai/debug, GET /api/rhai/debug, POST /api/rhai/debug/command; I0090).
         // And the observation a directive is bound to (GET /api/bridge/observation; agent loop step 1).
         // And evidence retrieval (GET /api/evidence; research/agent-loop.md, Retrieve).
-        assert_eq!(rs.len(), 74);
+        // And the store's named queries (GET and POST /api/db/named; sql/queries).
+        assert_eq!(rs.len(), 76);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -3236,7 +3240,7 @@ mod tests {
         assert!(rs.iter().filter(|r| !r.needs_mcp).all(|r| ["/api/status", "/api/log", "/api/events", "/api/console", "/api/auto-approve",
             "/api/start-ai", "/api/bots/start", "/api/ui/classes", "/api/view/attach", "/api/view/tool", "/api/rhai",
             "/api/content", "/api/content/download", "/api/overview/history", "/api/results", "/api/result", "/api/duel", "/api/scoreboard", "/api/calibration",
-            "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query",
+            "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query", "/api/db/named",
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
             "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
             "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh"].contains(&r.path)));
