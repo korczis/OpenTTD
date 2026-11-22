@@ -124,6 +124,19 @@ static std::string_view ExtractNetworkRevisionHash(std::string_view revision_str
  */
 ResearchNetCompat _research_net_compat;
 
+/** The AI companies the server operator opened for co-play (research/coplay.md). */
+CompanyMask _research_coplay;
+
+/**
+ * Whether a client may join or be moved into this AI company because the operator opened it.
+ * @param company The company the client asks for.
+ * @return True for an existing AI company in #_research_coplay.
+ */
+bool ResearchCoplayAllows(CompanyID company)
+{
+	return Company::IsValidAiID(company) && _research_coplay.Test(company);
+}
+
 /** Split a comma-separated list into non-empty trimmed revisions. */
 static std::vector<std::string> SplitRevisions(std::string_view list)
 {
