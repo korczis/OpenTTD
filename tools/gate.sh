@@ -15,6 +15,10 @@ BASESET_DOC="research/baseset-prerequisite-macos.md"
 RESEARCH_BUILD_DIR="build-gate-research"
 # Every guard of research-only code, as cmake/Options.cmake defines it.
 GATED_MACROS='OTTD_RESEARCH_INSTRUMENTATION|OTTD_PRISMATIC_MCP_SERVER'
+# Extra CMake options for every configure this gate runs, word-split: e.g.
+# GATE_CMAKE_ARGS="-DOPTION_DEDICATED=ON" on a headless Linux host without SDL3 or Allegro, where
+# the default (GUI) configure stops at CMakeLists.txt "SDL3 or Allegro is required".
+read -r -a GATE_CMAKE_EXTRA <<< "${GATE_CMAKE_ARGS:-}"
 
 usage() {
   cat <<EOF
@@ -70,6 +74,12 @@ original TTD data). Without one they hang on macOS instead of failing,
 so every tier that runs ctest checks first; when none is reachable it
 runs the other cases, reports regression_* as NOT RUN, and exits
 $EXIT_PARTIAL (PARTIAL) instead of claiming PASS. See $BASESET_DOC.
+The same holds for a build configured without liblzma: the regression
+savegames are LZMA, so regression_* are NOT RUN and the tier is PARTIAL.
+
+Environment: GATE_CMAKE_ARGS adds CMake options to every configure, e.g.
+GATE_CMAKE_ARGS="-DOPTION_DEDICATED=ON" on a headless Linux host without
+SDL3 or Allegro.
 
 Guarantees: never commits or pushes anything, never writes outside this
 repository, fails fast on the first failing step.
@@ -144,8 +154,29 @@ baseset_available() {
 # $EXIT_PARTIAL when the regression cases had to be left out for want of a base graphics set
 # and everything else passed. Callers run it as `run_ctest dir || status=$?`, which disables
 # set -e inside it, so every ctest status is taken explicitly here.
+# The regression cases load LZMA-compressed savegames (regression/*/test.sav start with "OTTX"), so
+# a build configured without liblzma (link_package LIBLZMA is only ENCOURAGED) runs them to empty
+# output and reports four bogus diffs; such a build leaves them out as NOT RUN instead (lundra,
+# 2026-11-22, a Linux host without liblzma-dev).
+lzma_built_in() {
+  local cache="$1/CMakeCache.txt"
+  [[ -f "$cache" ]] || return 0
+  # FindLibLZMA probes the library's functions only once it found headers and library.
+  grep -qE '^LIBLZMA_INCLUDE_DIR:[A-Z]+=' "$cache" && ! grep -qE '^LIBLZMA_INCLUDE_DIR:[A-Z]+=.*NOTFOUND' "$cache" \
+    && grep -qE '^LIBLZMA_HAS_AUTO_DECODER:INTERNAL=1' "$cache"
+}
+
 run_ctest() {
   local build_dir="$1" rc=0
+  if ! lzma_built_in "$build_dir"; then
+    echo "==> $build_dir was configured without liblzma: regression_* cannot load their savegames"
+    echo "==> ctest --test-dir $build_dir -j$JOBS --timeout 120 -E '^regression_'"
+    CTEST_OUTPUT_ON_FAILURE=1 ctest --test-dir "$build_dir" -j"$JOBS" --timeout 120 \
+      -E '^regression_' || rc=$?
+    echo "regression_*: NOT RUN -- configure with liblzma (its headers and library), then reconfigure $build_dir"
+    [[ "$rc" -eq 0 ]] || return 1
+    return "$EXIT_PARTIAL"
+  fi
   if baseset_available "$build_dir"; then
     echo "==> ctest --test-dir $build_dir -j$JOBS --timeout 120"
     CTEST_OUTPUT_ON_FAILURE=1 ctest --test-dir "$build_dir" -j"$JOBS" --timeout 120 || rc=$?
@@ -341,8 +372,8 @@ cmd_change() {
   if prismatic_changed; then prismatic_coverage || status=$?; fi
 
   if [[ ! -f build/CMakeCache.txt ]]; then
-    echo "==> cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo (initial configure)"
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    echo "==> cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo ${GATE_CMAKE_EXTRA[*]} (initial configure)"
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo ${GATE_CMAKE_EXTRA[@]+"${GATE_CMAKE_EXTRA[@]}"}
   fi
 
   echo "==> cmake --build build -j$JOBS"
@@ -376,6 +407,7 @@ cmd_research() {
 
   # Always (re)configure: cmake is cheap when nothing changed, and an options set that drifted
   # in the cache must not pass for the research configuration.
+  opts+=(${GATE_CMAKE_EXTRA[@]+"${GATE_CMAKE_EXTRA[@]}"})
   echo "==> cmake -S . -B $RESEARCH_BUILD_DIR ${opts[*]}"
   cmake -S . -B "$RESEARCH_BUILD_DIR" "${opts[@]}"
 
@@ -409,8 +441,8 @@ cmd_full() {
   echo "==> rm -rf $build_dir (clean room)"
   rm -rf "$build_dir"
 
-  echo "==> cmake -S . -B $build_dir -DCMAKE_BUILD_TYPE=RelWithDebInfo"
-  cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  echo "==> cmake -S . -B $build_dir -DCMAKE_BUILD_TYPE=RelWithDebInfo ${GATE_CMAKE_EXTRA[*]}"
+  cmake -S . -B "$build_dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo ${GATE_CMAKE_EXTRA[@]+"${GATE_CMAKE_EXTRA[@]}"}
 
   echo "==> cmake --build $build_dir -j$JOBS"
   cmake --build "$build_dir" -j"$JOBS"
