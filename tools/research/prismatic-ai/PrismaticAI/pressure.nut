@@ -130,9 +130,12 @@ function PrismaticAI::ApplyPressure(b, money) {
 	b.pressure = level;
 	b.invest_ppv_div = min(PRESSURE_PPV_DIV_MAX, b.invest_ppv_div + level);
 	b.invest_road_cap = min(PRESSURE_ROAD_CAP_MAX, b.invest_road_cap + PRESSURE_CAP_STEP * level);
-	b.invest_air_cap = min(PRESSURE_AIR_CAP_MAX, b.invest_air_cap + PRESSURE_CAP_STEP * level);
-	local routes = b.air_routes_max + PRESSURE_AIR_ROUTES_STEP * level;
-	b.air_routes_max = min(PRESSURE_AIR_ROUTES_MAX, routes);
-	if (b.air_add_waiting == 0) b.air_add_waiting = PRESSURE_AIR_WAITING;
+	/* rich_air 0 (default): the air limits stay as set (rich.nut ApplyRich). */
+	if (("rich_air" in b) && b.rich_air == 1) {
+		b.invest_air_cap = min(PRESSURE_AIR_CAP_MAX, b.invest_air_cap + PRESSURE_CAP_STEP * level);
+		local routes = b.air_routes_max + PRESSURE_AIR_ROUTES_STEP * level;
+		b.air_routes_max = min(PRESSURE_AIR_ROUTES_MAX, routes);
+		if (b.air_add_waiting == 0) b.air_add_waiting = PRESSURE_AIR_WAITING;
+	}
 	if (level >= 2) b.rail_twin_max = max(b.rail_twin_max, PRESSURE_TWIN_MIN);
 }

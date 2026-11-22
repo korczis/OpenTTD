@@ -348,6 +348,7 @@ function PrismaticAI::Behaviour() {
 		rail_feed = AIController.GetSetting("rail_feed"),
 		rail_double = AIController.GetSetting("rail_double"),
 		rich_growth = AIController.GetSetting("rich_growth"),
+		rich_air = AIController.GetSetting("rich_air"),
 		modernize = AIController.GetSetting("modernize"),
 		compete = AIController.GetSetting("compete"),
 		upgrade_track = AIController.GetSetting("upgrade_track"),

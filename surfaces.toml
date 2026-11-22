@@ -186,3 +186,24 @@ summary = "Every recorded duel, A/B and LAN battle record, and the README's own 
 data = ["tools/research/atlas/atlas", "data"]
 script = "tools/research/atlas/atlas.js"
 e2e = "tools/research/atlas/atlas.e2e.mjs"
+
+# Open findings (tools/surfaces/README.md, "Open findings"): what the records say is missing,
+# blocked, handed off, not run or failed, rendered by the `open-findings` region of
+# research/open-findings.md. tools/surfaces/findings.py names no fact of this repository; only
+# where to look and the vocabulary the records use are declared here.
+[findings]
+# Every kind a finding may carry, in the order the page lists them. `blocked` and `out-of-scope`
+# are the generator's own; the others are this repository's statuses and marker kinds.
+kinds = { "blocked" = "An open issue waits on an issue that is not done; the follow-up is what it waits on", "out-of-scope" = "A finished issue left this out (its non_scope) and no open issue names it", "failed" = "A run or check the records say failed", "not-run" = "A validation the records say did not run", "partial" = "A capability or run the records say is only partly there", "staged" = "Designed and written down, not implemented", "handoff" = "A change asked of another repository; nothing in this one can close it", "unreviewed" = "A knowledge record still awaiting its review", "drift" = "An issue's stamps contradict its delivered work (live only: majordomus plan drift)" }
+# The fail-closed status vocabulary (research/README.md) and the kind each open status files under.
+statuses = { "NOT RUN" = "not-run", "PARTIAL" = "partial", "FAIL" = "failed", "STAGED" = "staged" }
+# The plan: blocked issues, non_scope entries of finished issues, evidence reporting an open status.
+issues = { in = ".ai/repo/project/issues/*.yaml", id = 'I\d{4}', non_scope_of = ["done"] }
+# Status columns of research tables; the vocabulary's own definition table is not a finding.
+tables = { in = ["research/**/*.md", ".ai/repo/knowledge/curated/*.md"], columns = ["Status", "State"], exclude = ["research/concepts/evidence-and-validation-status.md"] }
+# Knowledge candidates awaiting the owner's review.
+front_matter = [{ in = ".ai/repo/knowledge/candidates/*.md", field = "status", values = ["candidate"], kind = "unreviewed" }]
+# Passages a document marks <!-- open-finding kind=K [follow-up=ID] --> (handoffs, recorded failures).
+markers = { in = ["**/*.md"], exclude = ["src/3rdparty/**"] }
+# Answers that depend on the moment: printed by `findings.py --live`, never committed.
+live = [{ id = "plan-drift", kind = "drift", command = ["majordomus", "plan", "drift", "--json"], items = "findings", keep = { class = ["merged_not_recorded", "active_without_work"] }, record = "issue", text = ["class", "remedy"] }]

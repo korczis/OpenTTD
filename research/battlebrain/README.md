@@ -103,32 +103,42 @@ protocol boundary because the runner's outputs carry no schema.
 Battlebrain declares what it needs computed as **capabilities**: a goal with typed inputs and
 outputs, and units on its amounts. `CAPABILITIES` in `battlebrain_contract.rs` is the only place
 they are declared. A **matcher** (`match_capability`) picks the kernel of the discovered catalogue
-that satisfies a capability. It reads only what the catalogue says (id, engine, the runner's
-input shape) and the **adapter registry** (`ADAPTERS`).
+that satisfies a capability. It reads three things: what the catalogue says (id, engine, the
+runner's input shape), the **derived kernel contracts** ([below](#derived-kernel-contracts-i0228)),
+and the **adapter registry** (`ADAPTERS`).
 
-An adapter states, for one kernel id:
+An adapter states, for one kernel id, only what no AlgoGlyph source states (`ADAPTER_HAND_KEPT`
+gives each field's reason, and every match record repeats it):
 
 - the capability it satisfies;
 - how each requirement field maps to the kernel's input and output, with the conversion;
-- whether the answer is exact, and why;
+- whether the answer is exact, and why, citing the AlgoGlyph test that holds it to a reference;
 - the domain check its output must pass (`domain_check` dispatches through the registry).
+
+The engine, the input keys and their JSON types, and the output keys come from the derived
+contract, so the adapter no longer restates the engine.
 
 It is the only explicit kernel list in the contract layer. **Owner:** battlebrain (this file and
 `battlebrain_contract.rs`). **Retirement:** when AlgoGlyph publishes a versioned input and output
-schema with units for each kernel ([proposal](algoglyph-contract-proposal.md)). The matcher then
-reads the mapping from the catalogue, and an adapter shrinks to its domain check or is deleted.
+schema with units and exactness for each kernel ([proposal](algoglyph-contract-proposal.md)). Its
+keys and types are already derived from the source, so an adapter then shrinks to its mapping and
+domain check, or is deleted.
 
 **Matcher rules.** Every kernel of the catalogue is considered. A kernel with no adapter for the
 capability is listed as `unadapted` and is never chosen. A kernel with an adapter is compatible
 only when all of these hold:
 
 - the kernel is in the catalogue;
-- the catalogue lists it with the adapter's engine;
+- the catalogue lists it with the engine its derived contract states;
 - the adapter maps every requirement field exactly once, and no field the requirement lacks;
-- the catalogue's input shape still declares every key the adapter maps. A shape the runner
-  writes as prose, such as `knapsack-dp`'s, counts as `opaque`, and that is recorded.
+- the derived contract of the catalogue's own commit declares every input key the adapter maps
+  (`input_shape_drift`) and every output key (`output_shape_drift`), and no key's derived JSON
+  type contradicts the requirement field's kind (`type_mismatch`). The shape is then `verified`.
+- without a contract of the catalogue's commit (a catalogue read from another AlgoGlyph
+  checkout), the catalogue's input shape must still declare every mapped key. A shape the runner
+  writes as prose counts as `opaque`, and that is recorded with `contract: null`.
 
-The catalogue states no units, so the record says that the adapter asserts them.
+The source states no units, so the record says that the adapter asserts them.
 
 **Ranking** among compatible kernels:
 
@@ -142,7 +152,7 @@ The catalogue states no units, so the record says that the adapter asserts them.
 | a capability nobody declared | `unknown_capability` |
 | a capability that no adapter serves | `no_adapter` |
 | every adapted kernel is absent from the catalogue (expired) | `kernel_expired` |
-| adapted kernels present but none compatible (`engine_mismatch`, `input_shape_drift`, `unmapped_field`, `unknown_field`) | `no_match` |
+| adapted kernels present but none compatible (`engine_mismatch`, `input_shape_drift`, `output_shape_drift`, `type_mismatch`, `unmapped_field`, `unknown_field`) | `no_match` |
 | a tie after the ranking | `ambiguous_capability` |
 
 **Records.** A match is written as an inference record: method `capability-match`, with params
@@ -179,11 +189,52 @@ Catalogue `sha256:97e08572418b44db62dd546959a396dceddb555aa5a49d12ad54a9bd7a455c
 
 | capability | kernel | engine | input shape | exact | verdict |
 |---|---|---|---|---|---|
-| `portfolio-within-budget` | `knapsack-dp` | grid | opaque | yes | **chosen**: the only compatible kernel |
+| `portfolio-within-budget` | `knapsack-dp` | grid | verified | yes | **chosen**: the only compatible kernel |
 | `rail-line-price` | `track-planning` | custom | verified | yes | **chosen**: the only compatible kernel |
 
 Every other kernel of the catalogue was considered and has no adapter for that capability (`portfolio-within-budget`: 52, `rail-line-price`: 52).
 <!-- battlebrain capabilities:end -->
+
+## Derived kernel contracts (I0228)
+
+AlgoGlyph publishes no typed kernel schema yet, and this fork never edits it. What its source
+already states is derived instead, by `algoglyph-contracts`
+(`tools/research/mcp-rhai/src/algoglyph_contracts.rs`), into
+[`tools/research/schema/derived/algoglyph-contracts.json`](../../tools/research/schema/derived/algoglyph-contracts.json):
+one contract per kernel of the catalogue fixture, in the shape the
+[proposal](algoglyph-contract-proposal.md) defines (`algoglyph-kernel-contract/v1`). Each field
+names the source line or the test it comes from (`x-from`, `x-exercised`), and `absent` lists
+what no source states. The generator reads:
+
+- each kernel's own input text (a data form's `input`, or the graph form's doc comment in
+  `src/flow/cli.ts`), or the interface a grid kernel's `fromData` reads, for keys, required keys,
+  enums and descriptions;
+- the predicates its parser applies (`integer`, `finite`, `Array.isArray`, `record`, `typeof`,
+  `every`, `includes`, `length`), its local helpers and its destructuring defaults, for JSON
+  types and defaults. A predicate in a refusal (`if (...) return 'message'`) counts only when it
+  is negated, so `Array.isArray(params)` there says what params is not;
+- the result interface of a grid kernel, or the record a `solve` returns (literals,
+  `Number.isFinite(v) ? v : null`, a field of a typed call's result, a typed spread), for output
+  keys and types;
+- `test/flow-cli.test.ts`, which AlgoGlyph requires to run every data form, for the keys its tests
+  run each kernel on and read from the answer.
+
+The source is read from git at one commit, never from a working tree. Its root is a parameter:
+`--algoglyph DIR`, else `$ALGOGLYPH_ROOT`, else the submodule `.gitmodules` declares for
+AlgoGlyph, else the transitional checkout `~/dev/algoglyph-wt/main` until that submodule lands.
+The derivation refuses a catalogue of another commit than the source.
+
+```sh
+cargo run --release --offline --no-default-features --manifest-path tools/research/mcp-rhai/Cargo.toml --bin algoglyph-contracts            # regenerate
+cargo run --release --offline --no-default-features --manifest-path tools/research/mcp-rhai/Cargo.toml --bin algoglyph-contracts -- --check # exit 1 while stale
+```
+
+`tools/gate.sh change` runs the check. Without an AlgoGlyph checkout the tool reports NOT RUN and
+exits 3, and the tier is PARTIAL rather than PASS (`--source-optional` makes that exit 0 for a
+caller that only wants the NOT RUN line). Like the battle post-mortems, it needs cargo, which the Surfaces
+CI does not have, so it is not a `surfaces.toml` generator. `cargo test --bin algoglyph-contracts`
+also fails while the artifact differs from what the pinned source derives. `cargo test --bin
+battlebrain` fails while the artifact's commit is not the catalogue fixture's.
 
 ## Shadow mode (I0096)
 
@@ -258,7 +309,8 @@ The directive sets `planned_freight_only=1` and one `fr_*` slot.
 - `battlebrain serve --once` hands the directive out to exactly one loopback GET.
 - The executor applies a live block only through a pull keyed with the block's own idempotency
   key, on or before its stale date in game time.
-- `battlebrain rollback` gives the directive back to the baseline (`planned_freight_only=0`).
+- `battlebrain rollback --snapshot <record> --company <id> [--of <live directive>]` gives the
+  company back to the baseline, as a live decision of its own (see the round-2 fixes below).
 
 ## Executor binding after the red-team review (I0117)
 
@@ -268,7 +320,7 @@ are closed here:
 - **The block binds the payload.** `battlebrain-decision/v2` carries `settings_digest`, the digest
   of the exact settings string, and the executor recomputes it (`payload_mismatch`).
 - **One author per slot.** A directive without a decision block may not set any `fr_*` slot
-  (`fr_needs_decision`). The rollback (`planned_freight_only=0`) and other settings still pass.
+  (`fr_needs_decision`). Settings that touch no slot still pass without a block.
 - **One approval that expires.** A live decision is applied only through
   `openttd.ai.set_settings`: all settings under one approval, applied at once, expiring at the end
   of the decision's stale date (`live_expiry`). A game without that tool refuses the decision
@@ -293,6 +345,29 @@ are closed here:
   `POST /api/tools/openttd.ai.set_settings` and a `POST /api/rpc` `tools/call` of either name no
   writer. A call that changes an `fr_*` setting is refused with `fr_needs_writer`. The decision
   executor calls `openttd.ai.set_settings` itself, not through these routes, so it is unaffected.
+
+**Round 2 of the review** closed four more gaps:
+
+- **Rollback.** A blockless rollback never reached the game. The pull needs an observation that
+  `battlebrain serve` never makes (409), `serve` refuses a directive without a key, and slot 1
+  would have stayed set. `battlebrain rollback` now writes a live decision of its own:
+  - the settings are `planned_freight_only=0` with every slot cleared (`fr_from=-1` through
+    `fr16_from=-1`);
+  - it is decided on a snapshot, and its records are a hold candidate and a decision with policy
+    `rollback@1`, derived from the decision it reverses;
+  - it is keyed `<that decision's key>:rollback`.
+
+  It is served and applied like any live decision. A test runs it through `decision_gate`,
+  `live_world` and the directive parser.
+- **The world is checked on the live path.** A block now carries `snapshot_tick`. `apply_live`
+  checks the world (`live_world`) before the stale date and before `openttd.ai.set_settings`. It
+  refuses `world_changed` when the game's tick is behind the snapshot: an earlier save reloaded,
+  even one whose date is on or before `valid_until`, or another world. It refuses
+  `not_an_ai_company` when the company is not an AI company now.
+- **Boundary B6** now covers that order in `apply_live` as well as `pull_with`'s.
+- **The served-key ledger** records a key only once a loopback GET has been accepted, so a
+  failed bind no longer burns it. `BATTLEBRAIN_STATE_DIR` (else `$HOME`) must be an absolute
+  path; a relative one, or no `HOME`, is refused.
 
 Still open:
 
