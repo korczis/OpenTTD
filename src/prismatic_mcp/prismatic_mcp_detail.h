@@ -302,6 +302,81 @@ inline bool StillFresh(uint64_t now, std::optional<uint64_t> expires_tick)
 	return !expires_tick.has_value() || now <= *expires_tick;
 }
 
+/* ---- the approval deadline (research/mechanisms/approval-gate.md "The deadline") ----------- *
+ * A pending approval nobody answers used to wait until its expiry (APPROVAL_TTL_TICKS, about 3.7
+ * game years), and every requester that holds while it waits (replan.rhai) stopped planning: the
+ * owner's game of 2026-11-22 stopped building. The deadline settles it after a number of game
+ * ticks with the operator's standing verdict. `Keep` (the default) retires it: nothing is enacted,
+ * the game keeps what it has, and the requester may ask again. `Approve` executes it, and only
+ * when the action is one a chat approver may decide (ChatScoped: one company's own AI or a
+ * company-level command); anything wider is retired as under `Keep`. The verdict is given in
+ * advance by the operator, so consent stays a decision someone made, never a default of the code. */
+
+/** The operator's standing verdict for an approval that reaches its deadline unanswered. */
+enum class DeadlineVerdict : uint8_t {
+	Keep,    ///< retire it: deny, enact nothing (the default)
+	Approve, ///< execute it, when ChatScoped; else Keep
+};
+
+/** What the deadline does to one approval now. */
+enum class DeadlineAction : uint8_t {
+	None,    ///< not due, not pending, or no deadline
+	Retire,  ///< deny it, with the deadline as the reason
+	Execute, ///< approve and execute it, with the deadline as the channel
+};
+
+/** Ticks per game day (TimerGameTick::DAY_TICKS, src/timer/timer_game_tick.h), kept here so the pure helpers need no game header. */
+inline constexpr uint64_t DEADLINE_DAY_TICKS = 74;
+/** The deadline a server starts with: one game month (30 days), the cadence replan.rhai plans at,
+ * so a plan nobody answered is settled before the next one is asked for. 0 turns the deadline off. */
+inline constexpr uint64_t DEFAULT_DEADLINE_TICKS = 30 * DEADLINE_DAY_TICKS;
+
+/** The operator's deadline policy: after `ticks` game ticks pending, the `verdict`; `ticks` 0 is off. */
+struct DeadlinePolicy {
+	uint64_t ticks = DEFAULT_DEADLINE_TICKS;
+	DeadlineVerdict verdict = DeadlineVerdict::Keep;
+};
+
+/** The tick an approval created at `created` reaches its deadline under `ticks`, or nullopt when the deadline is off. */
+inline std::optional<uint64_t> DeadlineTick(uint64_t created, uint64_t ticks)
+{
+	if (ticks == 0) return std::nullopt;
+	return created + ticks;
+}
+
+/** What the deadline does at tick `now` to an approval created at `created`, pending or not, whose action a chat approver may (`chat_scoped`) or may not decide. */
+inline DeadlineAction DeadlineDue(bool pending, uint64_t created, uint64_t now, const DeadlinePolicy &policy, bool chat_scoped)
+{
+	auto due = DeadlineTick(created, policy.ticks);
+	if (!pending || !due.has_value() || now < *due) return DeadlineAction::None;
+	return policy.verdict == DeadlineVerdict::Approve && chat_scoped ? DeadlineAction::Execute : DeadlineAction::Retire;
+}
+
+/** The verdict's name, as the console, the resource and the log spell it. */
+inline std::string_view DeadlineVerdictName(DeadlineVerdict v)
+{
+	return v == DeadlineVerdict::Approve ? "approve" : "keep";
+}
+
+/** The policy `prismatic_mcp approval_deadline <days> [keep|approve]` asks for, or nullopt for a malformed line. Days are whole game days, 0 (off) to 3650; the verdict defaults to keep. */
+inline std::optional<DeadlinePolicy> ParseDeadlinePolicy(std::string_view days, std::string_view verdict)
+{
+	if (days.empty() || days.size() > 4 || !std::all_of(days.begin(), days.end(), [](char c) { return c >= '0' && c <= '9'; })) return std::nullopt;
+	uint64_t d = 0;
+	for (char c : days) d = d * 10 + (uint64_t)(c - '0');
+	if (d > 3650) return std::nullopt;
+	DeadlinePolicy p;
+	p.ticks = d * DEADLINE_DAY_TICKS;
+	if (verdict.empty() || verdict == "keep") {
+		p.verdict = DeadlineVerdict::Keep;
+	} else if (verdict == "approve") {
+		p.verdict = DeadlineVerdict::Approve;
+	} else {
+		return std::nullopt;
+	}
+	return p;
+}
+
 /** At most this many resources one openttd.resources.read_many call reads: a bound on one main-thread poll. */
 inline constexpr size_t READ_MANY_MAX_URIS = 32;
 /** The only scheme openttd.resources.read_many reads; anything else is refused per entry. */
@@ -436,7 +511,7 @@ struct ChatFacts {
 	bool valid_company = false;    ///< the client plays a company (a spectator does not)
 	bool same_company = false;     ///< the approval's arguments name the client's company
 	bool key_registered = false;   ///< the client's key is in the server's approver list (declared)
-	bool key_in_allow_list = false; ///< the client's key is in that company's allow list (derived from the game)
+	bool key_in_allow_list = false; ///< the client's key is in that company's allow list: told to the asker, never enough to approve
 	bool injecting = false;        ///< the line came from injected UI input, not the person
 };
 
@@ -446,8 +521,9 @@ enum class ChatVerdict : uint8_t { Allow, NoSuchApproval, NotPending, Expired, S
 /**
  * Decide whether a client may approve (or deny) an approval from inside the game. A deny withdraws
  * and executes nothing, so it needs only the approval's own company; an approval executes, so it
- * also needs an approver -- a key the server operator registered (declared) or a key of the
- * company's own allow list (derived) -- and the person's own input (never injected UI input).
+ * also needs an approver -- a key the server's operator registered, and only that: a company's allow
+ * list admits whoever plays it, an agent's own client included, so it never makes an approver
+ * (the owner's decision, 2026-11-22, ADR 0038) -- and the person's own input (never injected input).
  */
 inline ChatVerdict DecideChat(const ChatFacts &f, bool approving)
 {
@@ -459,7 +535,7 @@ inline ChatVerdict DecideChat(const ChatFacts &f, bool approving)
 	if (!f.same_company) return ChatVerdict::NotYourCompany;
 	if (!approving) return ChatVerdict::Allow;
 	if (f.injecting) return ChatVerdict::Injected;
-	if (!f.key_registered && !f.key_in_allow_list) return ChatVerdict::NotAnApprover;
+	if (!f.key_registered) return ChatVerdict::NotAnApprover;
 	return ChatVerdict::Allow;
 }
 
@@ -474,7 +550,7 @@ inline std::string_view ChatVerdictText(ChatVerdict v)
 		case ChatVerdict::ServerOnly: return "it acts beyond one company, so only the server's operator decides it (the panel or the server console)";
 		case ChatVerdict::Spectator: return "a spectator decides nothing; join the company it names";
 		case ChatVerdict::NotYourCompany: return "it is not your company's to decide";
-		case ChatVerdict::NotAnApprover: return "you are not an approver: the server's operator registers you with 'prismatic_mcp approvers add <your client id>' (declared), or your key must be in the company's allow list (derived)";
+		case ChatVerdict::NotAnApprover: return "you are not an approver: only a key the server's operator registered approves ('prismatic_mcp approvers add <your client id>'); playing the company, or being in its allow list, is not enough";
 		case ChatVerdict::Injected: return "it came from injected input, not your own keyboard or mouse";
 	}
 	return "refused";

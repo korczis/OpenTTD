@@ -182,13 +182,30 @@ impl KernelFailure {
     }
 }
 
+/// A checkout this process chose itself (`use_checkout`), for when `MCP_ALGOGLYPH_DIR` is not set.
+static CHECKOUT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Use AlgoGlyph at `dir` when `MCP_ALGOGLYPH_DIR` is not set. The panel's strategist
+/// (src/panel_strategy.rs) passes what hub_algoglyph::dir() found; mcp-plan and mcp-intent never
+/// call it, so for them an unset variable still means the built-in DP. First call wins.
+#[allow(dead_code)] // only the panel's strategist chooses a checkout
+pub fn use_checkout(dir: &std::path::Path) {
+    let _ = CHECKOUT.set(dir.display().to_string());
+}
+
+/// The checkout kernels run in: `$MCP_ALGOGLYPH_DIR`, else the one `use_checkout` chose.
+pub fn checkout() -> Result<String, String> {
+    std::env::var("MCP_ALGOGLYPH_DIR").ok().filter(|d| !d.is_empty()).or_else(|| CHECKOUT.get().cloned())
+        .ok_or_else(|| "MCP_ALGOGLYPH_DIR is not set".to_string())
+}
+
 /// An AlgoGlyph kernel through its flow CLI (`npm run flow -- kernel <id> -`), when MCP_ALGOGLYPH_DIR
 /// names a checkout of it; Err says why there is no answer. With `MCP_ALGOGLYPH_SERVE=1` every
 /// call of the process goes to one long-lived `flow serve` (src/flow_serve.rs), and to the
 /// per-call runner only if that serve cannot start or fails. Callers reach it through `Kernels`.
 pub fn algoglyph_run(kernel: &str, input: &Value) -> Result<Value, KernelFailure> {
     let refused = |v: &Value| KernelFailure::Refused(v.get("errors").cloned().unwrap_or(v.clone()));
-    let dir = std::env::var("MCP_ALGOGLYPH_DIR").map_err(|_| KernelFailure::Unset)?;
+    let dir = checkout().map_err(|_| KernelFailure::Unset)?;
     if flow_serve::wanted() {
         match flow_serve::kernel(std::path::Path::new(&dir), kernel, input) {
             Ok(v) if v["ok"] == true => return Ok(v),

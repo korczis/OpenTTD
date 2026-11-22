@@ -44,7 +44,7 @@ flowchart TB
 - **The shell.** Every page is only its `<main>`. The Flowbite Pro navbar, sidebar and page header
   come from one script, `static/shell.js`, whose `APPS` registry lists the panel's pages and the
   hub's. The panel's pages today: Overview, World, Interface, MCP catalogue (with a page per tool
-  and resource), Duels, Data, Scripts, Towns, API.
+  and resource), Duels, Data, Scripts, Towns, Strategy, API.
 - **Towns.** `/towns` (`static/towns.html`, `static/towns.js`, `src/panel_town.rs`) shows the
   [town-authority model](town-authority.md) derived from the engine sources: what a town likes and
   dislikes (every rating change with its trigger, delta, limit and source), the gates (what the
@@ -55,6 +55,15 @@ flowchart TB
   company is a selector kept in the address. Routes: `GET /api/town/model` (the generated
   `town_model.json`) and `GET /api/town/live?company=N` (an empty list and a reason without a
   game, never an error); Rhai reaches them as `api_townModel` and `api_townLive`.
+- **Strategy.** `/strategy` (`static/strategy.html`, `static/strategy.js`,
+  `src/panel_strategy.rs`) shows the background [strategist and the blackboard](strategist-and-blackboard.md).
+  The strategist recomputes the long-term plan once per game month and at least every
+  `PRISMATIC_STRATEGY_EVERY` seconds: the portfolio (AlgoGlyph knapsack-dp or the built-in DP),
+  AlgoGlyph transport-investment and track-planning, town warnings, BattleBrain's tuning proposals,
+  and what peers on the Majordomus mesh plan. The page also browses the blackboard, every key with
+  its writer, revision, game date and history. Routes: `GET /api/strategy`,
+  `POST /api/strategy/run`, `GET` and `POST /api/blackboard`; Rhai reaches them as `api_strategy`,
+  `api_strategyRun`, `api_blackboard`, `api_blackboardWrite` and through `strategy_lib.rhai`.
 - **Approvals.** Pending decisions get an Approve button; auto-approve is the owner's switch (see
   [Approval gate](approval-gate.md)).
 - **Developer console.** The `~` window runs console lines, `/mcp`, `/read`, `/rhai` and more.
@@ -73,9 +82,10 @@ The surface in full, with every route and page, is [`../mcp-control.md`](../mcp-
 | [`tools/research/mcp-rhai/src/panel_results.rs`](../../tools/research/mcp-rhai/src/panel_results.rs) | duel results, the duel form, the scoreboard routes |
 | [`tools/research/mcp-rhai/src/panel_scripts.rs`](../../tools/research/mcp-rhai/src/panel_scripts.rs) | the Scripts page's library and services |
 | [`tools/research/mcp-rhai/src/panel_town.rs`](../../tools/research/mcp-rhai/src/panel_town.rs) | the Towns page's routes: the derived town model and live towns with town_lib's advice |
+| [`tools/research/mcp-rhai/src/panel_strategy.rs`](../../tools/research/mcp-rhai/src/panel_strategy.rs) | the strategist thread, the blackboard and their routes |
 | [`tools/research/mcp-rhai/src/panel_decision.rs`](../../tools/research/mcp-rhai/src/panel_decision.rs) | Prismatic's decision contract, pulled and applied |
 | [`tools/research/mcp-panel/static/shell.js`](../../tools/research/mcp-panel/static/shell.js) | the one shell and the page registry `APPS` |
-| [`tools/research/mcp-panel/static/`](../../tools/research/mcp-panel/static/) | the pages (`index.html`, `world.html`, `ui.html`, `tool.html`, `results.html`, `data.html`, `scripts.html`, `towns.html`) and their scripts |
+| [`tools/research/mcp-panel/static/`](../../tools/research/mcp-panel/static/) | the pages (`index.html`, `world.html`, `ui.html`, `tool.html`, `results.html`, `data.html`, `scripts.html`, `towns.html`, `strategy.html`) and their scripts |
 | [`tools/research/mcp-panel/input.css`](../../tools/research/mcp-panel/input.css) | the Tailwind source of `static/app.css` |
 | [`tools/research/mcp-e2e`](../../tools/research/mcp-e2e) | starts game, panel, bot and a spectator client in one command |
 
@@ -85,13 +95,13 @@ The surface in full, with every route and page, is [`../mcp-control.md`](../mcp-
   OpenAPI is derived from the table and the live catalogue, bodies are checked against their
   schema, the bus numbers and filters events, a registry record is `mcp-instance/v1`, a script
   runs in process) and those of `panel_bot.rs`, `panel_results.rs`,
-  `panel_scripts.rs`, `panel_decision.rs`, `panel_town.rs`.
+  `panel_scripts.rs`, `panel_decision.rs`, `panel_town.rs`, `panel_strategy.rs`.
 - `node --test tools/research/mcp-panel/test/*.test.mjs`: the shell, every page's pure parts and
   `e2e-coverage.test.mjs`. `tools/gate.sh change` runs them when the panel's pages change.
 - Against a running panel: `tools/research/mcp-panel-check` (derived OpenAPI, routes, Swagger UI,
   events, bus and store), `tools/research/mcp-route-check` (every operation of `/openapi.json`),
   and the browser checks `mcp-overview-check`, `mcp-pages-check`, `mcp-scripts-check`,
-  `mcp-towns-check`.
+  `mcp-towns-check`, `mcp-strategy-check`.
 - `tools/research/mcp-view-check` and `mcp-cluster-panels-check` cover the GUI client proxy and
   several panels at once.
 

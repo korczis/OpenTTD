@@ -19,7 +19,39 @@ use std::sync::{Mutex, OnceLock};
 
 /// Whether the switch asks for one long-lived serve.
 pub fn wanted() -> bool {
-    std::env::var("MCP_ALGOGLYPH_SERVE").is_ok_and(|v| matches!(v.trim(), "1" | "on" | "true" | "yes"))
+    PREFERRED.load(std::sync::atomic::Ordering::SeqCst)
+        || std::env::var("MCP_ALGOGLYPH_SERVE").is_ok_and(|v| matches!(v.trim(), "1" | "on" | "true" | "yes"))
+}
+
+/// Whether the switch is explicitly off (`0`, `off`, `false`, `no`), not merely unset.
+#[allow(dead_code)] // only the panel's strategist distinguishes unset from off
+pub fn refused() -> bool {
+    std::env::var("MCP_ALGOGLYPH_SERVE").is_ok_and(|v| matches!(v.trim(), "0" | "off" | "false" | "no"))
+}
+
+/// A process that keeps calling kernels (the panel's strategist, src/panel_strategy.rs) asks for
+/// the one serve without the variable; `wanted()` is then true for the rest of the process.
+static PREFERRED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[allow(dead_code)] // only the panel's strategist prefers the serve
+pub fn prefer() {
+    PREFERRED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Forget why the serve went away, so the next call starts a new one. A long-lived caller does this
+/// at most once per cycle; a one-shot process never needs it. Answers the reason forgotten.
+#[allow(dead_code)]
+pub fn retry() -> Option<String> {
+    shared().lock().unwrap_or_else(|p| p.into_inner()).gone.take()
+}
+
+/// Stop the serve (its process is killed and reaped; node sees its stdin close), at a panel's stop.
+#[allow(dead_code)]
+pub fn shutdown() {
+    let mut s = shared().lock().unwrap_or_else(|p| p.into_inner());
+    s.serve = None;
+    s.pid = None;
+    s.gone = Some("stopped with the process".into());
 }
 
 /// A running `flow serve`.

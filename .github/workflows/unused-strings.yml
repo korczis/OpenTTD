@@ -1,7 +1,13 @@
 name: Unused strings
 
 on:
+  # Only the files this check reads: a pull request that touches none of them would queue a
+  # runner for a check that cannot change (tools/surfaces/test_checker_workflows.py).
   pull_request:
+    paths:
+    - 'src/**'
+    - '.github/unused-strings.py'
+    - '.github/workflows/unused-strings.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
