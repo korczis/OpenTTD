@@ -23,6 +23,7 @@
 // Everything it needs is derived: the company from the running bot, the settings from the answer,
 // the setting names from what the bot declares. The only thing typed here is the sentence.
 import "ttd" as ttd;
+import "fr_author" as fa;
 
 // The company whose bot we are steering: the first running bot the panel reports.
 // /api/bots -> {source, ais, running[], live}; running[] = {id, name, money, ai, running, settings[]}
@@ -35,11 +36,14 @@ fn running_bot() {
 
 /// Apply the settings an answer proposes to the running bot, and report what came back.
 /// Returns #{pending: [approval ids], refused: [setting names the bot does not declare],
+///            withheld: [settings held back for another planner], held: () or why (fr_author),
 ///            lines: [one human line per call], bot: name}. Applies nothing else and approves
-/// nothing: every call is openttd.ai.set_setting, which is gated.
-fn apply(a) {
+/// nothing: every call is openttd.ai.set_setting, which is gated. `writer` is the caller's name
+/// for the planner key (fr_author.rhai): while planner.<company> names another writer, nothing
+/// is sent (its freight-line slots among it) and the first line says why.
+fn apply_as(a, writer) {
     let settings = (a.build ?? #{}).settings ?? #{};
-    let out = #{ pending: [], refused: [], lines: [], bot: "" };
+    let out = #{ pending: [], refused: [], withheld: [], held: (), lines: [], bot: "" };
     if settings.is_empty() { return out; }
     let bot = running_bot();
     if type_of(bot) == "()" {
@@ -47,6 +51,13 @@ fn apply(a) {
         return out;
     }
     out.bot = bot.name;
+    let w = fa::withhold(bot.id, writer, settings);
+    settings = w.settings;
+    out.withheld = w.withheld;
+    out.held = w.refusal;
+    if !w.withheld.is_empty() {
+        out.lines.push(`${w.withheld.len()} setting(s) not sent (${w.withheld}): ${w.refusal.why}`);
+    }
     let declared = [];
     for s in (bot.settings ?? []) { declared.push(s.name); }
     for name in settings.keys() {
@@ -69,6 +80,9 @@ fn apply(a) {
     }
     out
 }
+
+/// apply_as() under this script's own name.
+fn apply(a) { apply_as(a, "build_plan") }
 
 fn run(text) {
     print(`== sentence: ${text}`);

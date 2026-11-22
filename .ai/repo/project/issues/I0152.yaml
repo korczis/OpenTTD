@@ -1,0 +1,34 @@
+id: I0152
+milestone: battlebrain-decides-live-with-rollback
+title: "One Battlebrain freight-line decision goes live on the owner's game through every cutover gate, its outcome is recorded, and the rollback switch returns the bot to the baseline, read back from the game"
+slug: battlebrain-live-cutover-run
+priority: p1
+profile: deep-work
+parallel_safe: false
+objective: "Write tools/research/battlebrain-live-check, which runs the cutover end to end on a named game: a coherent capture, `battlebrain live`, `battlebrain serve --once`, one keyed pull applied through the executor of I0151 after the operator's approval, the game's own setting values read back, an outcome record after the next decision period, then `battlebrain rollback` and planned_freight_only=0 read back. Run it once on the game the owner chose (co-play :8800) with the owner's approval of the setting change, and record the run."
+why: "External review 2026-11-22 (digest C-46). research/battlebrain/README.md:7 says 'The live cutover itself: not run. Nothing here has reached a game', and I0097's non_scope kept 'The live pull itself on :8800 (it needs the owner's approval of every setting change and p1's go-ahead)'. `battlebrain rollback` exists (tools/research/mcp-rhai/src/bin/battlebrain.rs header) but has never been exercised on a game, and no outcome record exists (research/results holds only battlebrain-shadow records)."
+scope:
+  - "tools/research/battlebrain-live-check"
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs"
+  - "research/battlebrain/README.md"
+  - "research/results/**"
+non_scope:
+  - "Approving the setting change on the owner's behalf (rule: never self-approve)"
+  - "A second decision type"
+depends_on:
+  - I0150
+  - I0151
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "battlebrain-live-check passes against a seeded test game with --auto-approve-test and refuses to auto-approve any other game"
+  - "One live run on the owner's game is recorded: snapshot, decision, approval as given, read-back settings, outcome and rollback read-back"
+  - "research/battlebrain/README.md states the cutover as run, from that record"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain"
+  - "tools/research/battlebrain-live-check --test"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

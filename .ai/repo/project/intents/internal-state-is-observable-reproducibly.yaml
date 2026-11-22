@@ -9,6 +9,7 @@ non_goals:
 - Release-build claims from instrumented runs
 milestones:
 - internals-are-observable-with-recorded-provenance
+- every-battle-match-explains-itself
 satisfaction:
 - id: instrumentation-is-contained
   criterion: "research_status is present in the research-debug binary and absent from the baseline-release binary"
@@ -18,5 +19,9 @@ satisfaction:
   criterion: "The CLI's own suite passes, and a fresh init, build, run, validate and report cycle leaves a manifest that validates against the manifest schema"
   evidence: command
   ref: "bash tools/research/test/research_test.sh && tools/research/research validate --experiment-id <fresh-id> --gate research"
+- id: a-battle-explains-itself
+  criterion: "A new AI battle record carries each AI's script-level-3 decision log, every company's loan on each REF Q sample and the settings read back from the game, and its replay on a second arena with the same build is identical or names its first diverging tick"
+  evidence: command
+  ref: "python3 -m unittest tools/research/test_ai_battle.py tools/research/test_mcp_ab.py"
 created_at: 2026-11-15
-updated_at: '2026-11-15'
+updated_at: '2026-11-22'

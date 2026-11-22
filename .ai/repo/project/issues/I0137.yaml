@@ -1,0 +1,37 @@
+id: I0137
+milestone: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "PrismaticAI moves a vehicle from a route with idle capacity to one where cargo waits, instead of selling and buying, and the move happens at most once across a restart"
+slug: prismatic-ai-fleet-move-at-most-once
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Add a fleet move: when one route of a type sells for lack of cargo while another of the same type and cargo adds for waiting cargo, reassign the vehicle (depot visit, then share the target route's orders) through the AI command path; keep each pending move in the saved state under a move id, and reconcile on restore so a move is completed or dropped, never repeated."
+why: "External review 2026-11-22 (digest A-18): no reassign flow exists; idempotency exists only for decision pulls (tools/research/mcp-rhai/src/panel_decision.rs:609). Today AdjustFleet sells the newest vehicle of a route where too little waits (tools/research/prismatic-ai/PrismaticAI/fleet.nut:215-228) and clones a new one where cargo waits (fleet.nut:242-264) in the same heartbeat loop, paying a new vehicle's price for a move. restore.nut already saves `selling` and `resizing` (restore.nut:64-65), the pattern a pending move needs."
+scope:
+  - "tools/research/prismatic-ai/PrismaticAI/fleet.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/restore.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/info.nut"
+  - "tools/research/prismatic-ai/README.md"
+  - "tools/research/ai-battle/battle.py"
+  - "tools/research/test_ai_battle.py"
+non_scope:
+  - "Rail vehicles, which the steward's line targets govern (lines.nut)"
+  - "Moves ordered from outside the bot (MCP or panel)"
+depends_on:
+  - I0126
+  - I0136
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#prismatic-ai-grows-and-recovers"
+acceptance_criteria:
+  - "Behind a setting; with it off the fitness seed reproduces the previous standings"
+  - "A move logs `fleet move <id>: vehicle V from route A to route B` when it starts and when it completes"
+  - "I0136's recover scenario saves while a move is pending and checks after the load that the vehicle ends on route B exactly once and no second vehicle was bought for it"
+validation:
+  - "python3 -B tools/research/prismatic-ai/derive_docs.py --check"
+  - "python3 -m unittest tools/research/test_ai_battle.py tools/research/test_prismatic_ai_docs.py"
+  - "python3 tools/research/ai-battle/battle.py recover"
+  - "python3 tools/research/ai-battle/battle.py fitness"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
