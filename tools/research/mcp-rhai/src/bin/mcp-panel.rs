@@ -59,6 +59,8 @@ mod rhai_debug;
 mod evidence;
 #[path = "../panel_realworld.rs"]
 mod panel_realworld;
+#[path = "../panel_mesh_page.rs"]
+mod panel_mesh_page;
 #[path = "../panel_store.rs"]
 mod panel_store;
 #[path = "../panel_town.rs"]

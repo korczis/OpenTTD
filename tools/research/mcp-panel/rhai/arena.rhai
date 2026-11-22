@@ -30,6 +30,10 @@ const LINEUP = [
     // "PrismaticAI self-steward": solo-max with the in-bot steward on (ba51ba6022).
     #{ ai: "PrismaticAI",
        settings: "aggressiveness=100,max_routes=30,intercity=1,own_lines=8,cash_reserve=5000,self_steward=1" },
+    // The battle's current second PrismaticAI contestant (battle.json `contestants[1]`, the GA's
+    // configuration). The "solo-max" comment above names its predecessor.
+    #{ ai: "PrismaticAI",
+       settings: "aggressiveness=50,air_add_waiting=0,air_grow_money=0,air_level_max=35,air_level_step=0,air_max_tiles=480,air_routes_max=3,cash_reserve=0,catchment_stops=2,invest_ppv_div=5,invest_road_cap=14,line_budget=80000,max_routes=30,own_fail_pause=0,own_lines=0,rail_twin_max=2" },
 ];
 
 // Seconds between rounds, and rounds between two standings reports.

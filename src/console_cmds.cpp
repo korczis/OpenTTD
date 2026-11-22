@@ -1080,7 +1080,12 @@ static bool ConMoveClient(std::span<std::string_view> argv)
 		return true;
 	}
 
-	if (*company_id != COMPANY_SPECTATOR && !Company::IsHumanID(*company_id)) {
+	if (*company_id != COMPANY_SPECTATOR && !Company::IsHumanID(*company_id)
+#ifdef OTTD_RESEARCH_INSTRUMENTATION
+			/* RESEARCH-ONLY: an AI company the operator opened for co-play (research/coplay.md). */
+			&& !ResearchCoplayAllows(*company_id)
+#endif
+			) {
 		IConsolePrint(CC_ERROR, "You cannot move clients to AI companies.");
 		return true;
 	}
@@ -1843,6 +1848,54 @@ static bool ConResearchNetCompat(std::span<std::string_view> argv)
 		}
 	}
 	IConsolePrint(CC_ERROR, "research_net_compat: expected a policy (strict|whitelist|blocklist|open), 'allow <rev>', 'block <rev>' or 'clear'.");
+	return true;
+}
+
+/** Print which AI companies are open for co-play, as 1-based company numbers. */
+static void PrintResearchCoplayState()
+{
+	std::string open;
+	for (CompanyID c : _research_coplay) open += fmt::format("{}{}", open.empty() ? "" : ",", c + 1);
+	IConsolePrint(CC_DEFAULT, "research_coplay open=[{}]", open);
+}
+
+/**
+ * RESEARCH-ONLY / UNSTABLE: open an AI company for co-play, so a client may join it or be moved
+ * into it while its AI keeps playing (research/coplay.md). Only the server decides who joins; game
+ * state is not touched, so lockstep holds. Only compiled in when OPTION_RESEARCH_INSTRUMENTATION
+ * is ON. @copydoc IConsoleCmdProc
+ */
+static bool ConResearchCoplay(std::span<std::string_view> argv)
+{
+	if (argv.size() < 2) {
+		IConsolePrint(CC_HELP, "RESEARCH-ONLY/UNSTABLE: let a client join an AI company and play it together with its AI.");
+		IConsolePrint(CC_HELP, "Usage: 'research_coplay allow <company-id>' | 'deny <company-id>' | 'clear'. Company 1 is 1.");
+		IConsolePrint(CC_HELP, "Then join it with 'connect <server>#<company-id>' or move a client with 'move <client-id> <company-id>'.");
+		PrintResearchCoplayState();
+		return true;
+	}
+
+	std::string_view verb = argv[1];
+	if ((verb == "allow" || verb == "deny") && argv.size() == 3) {
+		auto company_id = ParseCompanyID(argv[2]);
+		if (!company_id.has_value() || !Company::IsValidAiID(*company_id)) {
+			IConsolePrint(CC_ERROR, "research_coplay: {} is not an AI company; see 'companies'.", argv[2]);
+			return true;
+		}
+		if (verb == "allow") {
+			_research_coplay.Set(*company_id);
+		} else {
+			_research_coplay.Reset(*company_id);
+		}
+		PrintResearchCoplayState();
+		return true;
+	}
+	if (verb == "clear" && argv.size() == 2) {
+		_research_coplay = {};
+		PrintResearchCoplayState();
+		return true;
+	}
+	IConsolePrint(CC_ERROR, "research_coplay: expected 'allow <company-id>', 'deny <company-id>' or 'clear'.");
 	return true;
 }
 #endif /* OTTD_RESEARCH_INSTRUMENTATION */
@@ -3430,6 +3483,7 @@ void IConsoleStdLibRegister()
 #ifdef OTTD_RESEARCH_INSTRUMENTATION
 	IConsole::CmdRegister("research_status",         ConResearchStatus);
 	IConsole::CmdRegister("research_net_compat",     ConResearchNetCompat);
+	IConsole::CmdRegister("research_coplay",         ConResearchCoplay,   ConHookServerOnly);
 #endif
 #ifdef OTTD_PRISMATIC_MCP_SERVER
 	IConsole::CmdRegister("prismatic_mcp",           ConPrismaticMcp);
