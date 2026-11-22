@@ -33,7 +33,8 @@ another personal directory: Linux uses `$XDG_DATA_HOME/openttd`, and a test run 
 | `main.nut` | The heartbeat: the planner's air, freight and passenger lines first, then the bot's own lines, buses, fleet, line reconciliation and loan |
 | `rail.nut` | Rail lines: termini with a throat, the A* line search, laying, the walk check, depots, trains, platform length; the opt-in double track (`BuildDoubleRailLineAndTrain`: a junction at each terminus, two one-way tracks, one-way path signals) |
 | `lines.nut` | Rail lines as desired state: line slots, the record the Rhai steward reads (with station ids), and the reconciliation of its targets; closing removes only what the line owns |
-| `fleet.nut` | Road and air capacity follows waiting cargo and the link graph's planned flow; vehicles that lose money are sold |
+| `fleet.nut` | Road, air and ship capacity follows waiting cargo and the link graph's planned flow; vehicles that lose money are sold |
+| `ships.nut` | Ships behind `ships_max` (0, default: none; RESEARCH-ONLY): the bot's own water routes from an oil rig or a coastal producer to an acceptor by the sea, or between two coastal towns, scored by estimated yearly profit, checked on the map before anything is built (dock sites in `AITestMode`, an A* over water), then docks, a ship depot and ships; `fleet.nut` grows and sells them like road and air routes |
 | `catchment.nut`, `statues.nut` | Mechanisms learned from AAAHogEx: joined drive-through stops that ring each airport to collect the whole town, and statues in the towns of our stations; each behind its setting, off by default |
 | `autopilot.nut` | Autopilot's own air routes for a bot without a plan: the best big-town pairs, built first on borrowed money with a real budget check; a half-built route takes its airport down again |
 | `steward.nut` | The in-bot steward behind `self_steward=1`: the Rhai steward's line policy for lines with no external target, and reinvestment of idle money in more own lines; on a double-track line, a train more while half a trainload waits and no train loads at the source |
@@ -128,6 +129,7 @@ The measured effect is in `research/ai-battle/README.md` (section *Double track*
 | `invest_min`, `invest_ppv_div`, `invest_road_cap`, `invest_air_cap`, `reinvest_budgets` | the same surfaces | when idle money buys vehicles and how far a route grows (`fleet.nut` InvestSurplus), and how many line budgets in the bank fund own lines beyond `own_lines` (`steward.nut`) |
 | `catchment_stops`, `catchment_spacing`, `statue_money`, `air_full_load`, `invest_borrow` | the same surfaces; genes of the battle's GA | mechanisms learned from AAAHogEx's source, each off by default because one recorded ablation (`research/results/ablation-20261119T062938-seed930967890.md`) did not favour turning it on: joined road-stop rings around airports (`catchment.nut`), statues (`statues.nut`), full load at both airports, borrowing for vehicles that pay back |
 | `air_add_waiting`, `rail_twin_max` | the same surfaces; GA genes | a plane more while both airports have passengers waiting; twin rail lines for saturated lines. Both off by default, see the recorded ablations `research/results/ablation-20261119T06*` |
+| `ships_max`, `ships_cap`, `ships_max_tiles` (RESEARCH-ONLY) | the owner, any surface above; not GA genes yet | `ships_max` water routes the bot plans itself (`ships.nut`; 0, default: no ships), at most `ships_cap` ships per route (`fleet.nut`), routes at most `ships_max_tiles` long. Off until measured |
 | `rail_double` | the owner, any surface above | 1: the bot's own new freight lines are double track, see below; 0 (default): single track, unchanged |
 | `autopilot` with a plan | the panel | since 2026-11-19 a plan no longer switches growth off: the planner's lines come first, and then the in-bot steward, the autopilot's own air routes and InvestSurplus run on top (`main.nut` `grows`) |
 | `self_steward` | the owner, e.g. the headless LAN AI battle ([`research/ai-battle/README.md`](../../../research/ai-battle/README.md)) | 1: lines without a steward's target follow the Rhai steward's policy inside the bot, and idle money funds own lines beyond `own_lines` (`steward.nut`); 0 (default): unchanged |
@@ -147,7 +149,7 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 
 <!-- prismatic-ai-settings:begin -->
 
-160 settings in 72 declarations, 160 of them live-changeable (`CONFIG_INGAME`), 35 genes of the battle's genetic algorithm (`tuning` in [`battle.json`](../ai-battle/battle.json)). Derived from [`PrismaticAI/info.nut`](PrismaticAI/info.nut) by `derive_docs.py`.
+163 settings in 75 declarations, 163 of them live-changeable (`CONFIG_INGAME`), 35 genes of the battle's genetic algorithm (`tuning` in [`battle.json`](../ai-battle/battle.json)). Derived from [`PrismaticAI/info.nut`](PrismaticAI/info.nut) by `derive_docs.py`.
 
 | Setting | Default | Range / step | Live | GA | Description |
 |---|---|---|---|---|---|
@@ -222,7 +224,10 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 | [`pressure_mid`](PrismaticAI/info.nut#L545) | 200 | 100 .. 2000 / 5 | yes | gene | Competitive pressure: the leader / ours percent from which the level is mid (twin rail lines from here on); below pressure_low counts as pressure_low (pressure.nut). |
 | [`pressure_high`](PrismaticAI/info.nut#L552) | 400 | 100 .. 2000 / 5 | yes | gene | Competitive pressure: the leader / ours percent from which the level is high; below pressure_mid counts as pressure_mid (pressure.nut). |
 | [`track_keep_budgets`](PrismaticAI/info.nut#L559) | 2 | 0 .. 20 | yes |  | Track upgrade: a rail network is converted only while the bank holds its cost plus this many line budgets (infra.nut UpgradeTrack). |
-| [`air_planes`](PrismaticAI/info.nut#L566) | 1 | 1 .. 8 | yes | gene 1 .. 6 | Aircraft on the planner's air route. |
+| [`ships_max`](PrismaticAI/info.nut#L567) | 0 | 0 .. 30 | yes |  | Ships (ships.nut): most water routes the bot plans itself, from an oil rig or a coastal producer to an acceptor by the sea, or between two coastal towns, one a heartbeat when money plus loan headroom reach line_budget; the fleet grows them like road and air routes (0, the default: no ships). |
+| [`ships_cap`](PrismaticAI/info.nut#L574) | 6 | 1 .. 20 | yes |  | Ships: most ships per water route, for the fleet's additions where cargo waits and InvestSurplus (fleet.nut), and for how many a new route is planned with (ships.nut). |
+| [`ships_max_tiles`](PrismaticAI/info.nut#L581) | 150 | 40 .. 500 / 10 | yes |  | Ships: the longest water route, in tiles between its two ends (the shortest is 20; ships.nut). |
+| [`air_planes`](PrismaticAI/info.nut#L588) | 1 | 1 .. 8 | yes | gene 1 .. 6 | Aircraft on the planner's air route. |
 
 <!-- prismatic-ai-settings:end -->
 

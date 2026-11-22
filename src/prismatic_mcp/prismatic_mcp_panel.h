@@ -21,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace PrismaticMCP::Panel {
 
@@ -32,6 +33,27 @@ namespace PrismaticMCP::Panel {
  * so the window, the console and openttd.ui.control can never disagree.
  */
 nlohmann::json Snapshot();
+
+/** One line of the control window's list. */
+struct Row {
+	enum class Kind : uint8_t {
+		Heading,  ///< A section's title.
+		Text,     ///< A line to read.
+		Approval, ///< An approval waiting: a click selects it for Approve or Deny.
+		Switch,   ///< A menu switch: a click flips it.
+	};
+	Kind kind;         ///< What the line is.
+	std::string text;  ///< What it says.
+	uint64_t id = 0;   ///< Approval: its id. Switch: the menu item's index.
+	bool flag = false; ///< Approval: expired. Switch: on.
+};
+
+/**
+ * Every line the window lists for \p snapshot, in order: the server's status, the approvals, the
+ * decisions, the questions, the switches. A snapshot with keys missing or of the wrong type (a
+ * client's partial copy of a server's queue) gives the sections empty, never an exception.
+ */
+std::vector<Row> Rows(const nlohmann::json &snapshot);
 
 /**
  * Why a click on Approve (\p approve true) or Deny in the control window is refused, or nullopt
