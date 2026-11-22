@@ -10,6 +10,7 @@
   let siteData = null;
 
   const isDark = () => document.documentElement.classList.contains('dark');
+  const themeListeners = [];
 
   function setParam(key, value) {
     if (value === null || value === undefined || value === '') params.delete(key);
@@ -38,6 +39,7 @@
     } catch (e) { /* private mode: the toggle still works for this page */ }
     renderMermaid();
     renderCharts();
+    themeListeners.forEach((fn) => fn(dark));
   });
 
   // ---------------------------------------------------------------- search
@@ -168,10 +170,18 @@
     Object.values(charts).forEach((c) => c.resize());
   }
 
+  // Delegated, so a card a page script draws later maximizes the same way.
   document.querySelectorAll('.maximize').forEach((btn, i) => {
     const card = btn.closest('.chart-card, .diagram');
-    if (!card.id) card.id = 'diagram-' + i;
-    btn.addEventListener('click', () => maximize(card, !card.classList.contains('is-maximized')));
+    if (card && !card.id) card.id = 'diagram-' + i;
+  });
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('.maximize');
+    const card = btn && btn.closest('.chart-card, .diagram');
+    if (!card) return;
+    const on = !card.classList.contains('is-maximized');
+    maximize(card, on);
+    btn.setAttribute('aria-pressed', String(on));
   });
 
   document.addEventListener('keydown', (e) => {
@@ -418,12 +428,37 @@
     renderCharts();
   }
 
+  function restoreMax() {
+    const max = params.get('max');
+    const card = max && document.getElementById(max);
+    if (card) maximize(card, true);
+  }
+
   startCharts()
     .catch((err) => console.error('[surfaces] charts', err))
-    .finally(() => {
-      const max = params.get('max');
-      const card = max && document.getElementById(max);
-      if (card) maximize(card, true);
-    });
+    .finally(restoreMax);
   renderMermaid();
+
+  // What a declared page's own script builds on (surfaces.toml [[pages.items]]): the same URL state,
+  // the same chart registry (resize, maximize, Escape), the same theme and the same libraries.
+  let echartsReady = null;
+  window.surfaces = {
+    root, params, setParam, loadScript, escapeHtml, isDark, maximize, restoreMax, charts,
+    web: document.body.dataset.web || '', sha: document.body.dataset.sha || '',
+    onTheme: (fn) => themeListeners.push(fn),
+    echarts: () => (echartsReady = echartsReady || (window.echarts ? Promise.resolve() : loadScript('js/echarts.min.js'))
+      .then(() => window.echarts)),
+    /** A repository path as a link: a document's page (path.md -> path.html, README.md -> index.html),
+        else the file at the built commit on the forge. Mirrors surfaces.py page_for. */
+    href(path) {
+      if (!path || /^[a-z][a-z0-9+.-]*:/i.test(path) || /^[?#]/.test(path)) return path || '#';
+      const [file, frag] = path.split('#');
+      const md = /\.md$/i.test(file);
+      const page = /(^|\/)readme\.md$/i.test(file) ? file.replace(/readme\.md$/i, 'index.html') : file.replace(/\.md$/i, '.html');
+      // A directory is written with a trailing slash (research/results/): its tree, not a blob.
+      const kind = file.endsWith('/') ? '/tree/' : '/blob/';
+      const url = md ? root + page : this.web + kind + this.sha + '/' + file.replace(/\/$/, '').split('/').map(encodeURIComponent).join('/');
+      return url + (frag ? '#' + frag : '');
+    },
+  };
 })();

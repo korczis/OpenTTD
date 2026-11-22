@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""RESEARCH-ONLY: derive the in-game Prismatic menu's reference table from its one source.
+
+The menu is written down once, as the ITEMS table of src/prismatic_mcp/prismatic_mcp_menu.cpp. This
+tool reads that table from the C++ source (no build, no running game: the docs and CI check run
+without either) and writes the table between `<!-- ingame-menu:begin -->` and
+`<!-- ingame-menu:end -->` in research/prismatic-mcp/README.md: every submenu in the order the
+dropdown shows it, every item with its action and target. `--check` exits 1 when the region is
+stale and writes nothing. Registered in surfaces.toml, so `tools/surfaces/surfaces sync` writes it
+and `surfaces check` (pre-commit, tools/gate.sh change, CI) refuses a stale one.
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+SOURCE = ROOT / "src" / "prismatic_mcp" / "prismatic_mcp_menu.cpp"
+README = ROOT / "research" / "prismatic-mcp" / "README.md"
+BEGIN, END = "<!-- ingame-menu:begin -->", "<!-- ingame-menu:end -->"
+
+# What each action does on a click, by its enum name in prismatic_mcp_menu.h.
+ACTIONS = {
+    "Console": "runs the console command and shows the console",
+    "Browse": "opens the hub page (base `$PRISMATIC_HUB_URL`, else `http://127.0.0.1:8790`)",
+    "Ask": "asks for a sentence; it becomes a request of kind `ask`",
+    "Request": "queues a request of that kind for the tile under the main view's centre",
+    "Toggle": "calls the MCP tool with the boolean it flips, shown checked",
+    "Window": "opens the fork's window of that name",
+}
+
+STRING = r'"((?:[^"\\]|\\.)*)"'
+ROW = re.compile(r"\{\s*" + STRING + r"\s*,\s*Action::(\w+)\s*,\s*" + STRING +
+                 r"(?:\s*,\s*(?:" + STRING + r"|\{\s*\}))?(?:\s*,\s*" + STRING + r")?\s*\}")
+
+
+def items(source: str) -> list[dict]:
+    """The rows of ITEMS: {label, action, arg, key, group}, in table order."""
+    m = re.search(r"std::array<Item,\s*(\d+)>\s+ITEMS\s*=\s*\{\{(.*?)\}\};", source, re.S)
+    if not m:
+        raise SystemExit(f"prismatic-mcp-menu: no ITEMS table in {SOURCE.relative_to(ROOT)}")
+    body = re.sub(r"/\*.*?\*/|//[^\n]*", "", m.group(2), flags=re.S)
+    rows = [{"label": r[0], "action": r[1], "arg": r[2], "key": r[3] or "", "group": r[4] or ""}
+            for r in ROW.findall(body)]
+    if len(rows) != int(m.group(1)):
+        raise SystemExit(f"prismatic-mcp-menu: ITEMS declares {m.group(1)} rows, {len(rows)} parsed")
+    return rows
+
+
+def groups(rows: list[dict]) -> list[str]:
+    out: list[str] = []
+    for r in rows:
+        if r["group"] and r["group"] not in out:
+            out.append(r["group"])
+    return out
+
+
+def render(rows: list[dict]) -> str:
+    gs = groups(rows)
+    lines = [f"Derived from `ITEMS` in `src/prismatic_mcp/prismatic_mcp_menu.cpp` by "
+             f"`tools/research/prismatic-mcp-menu`: {len(rows)} items, {len(gs)} submenus. The top "
+             "level lists the items without a submenu and one row per submenu; a submenu opens in "
+             "place of the list, with `< Back`.", "",
+             "| Where | Item | Action | Target |", "|---|---|---|---|"]
+    order = [""] + gs
+    for g in order:
+        for r in rows:
+            if r["group"] != g:
+                continue
+            target = f"`{r['arg']}`" + (f" `{{{r['key']}}}`" if r["key"] else "")
+            lines.append(f"| {g + ' >' if g else 'top level'} | {r['label']} | `{r['action'].lower()}` "
+                         f"| {target} |")
+    lines += ["", "| Action | What a click does |", "|---|---|"]
+    for a in sorted({r["action"] for r in rows}):
+        lines.append(f"| `{a.lower()}` | {ACTIONS.get(a, '(undocumented action: add it to ACTIONS)')} |")
+    return "\n".join(lines)
+
+
+def replace(text: str, body: str) -> str:
+    if BEGIN not in text or END not in text:
+        raise SystemExit(f"prismatic-mcp-menu: {README.relative_to(ROOT)} lacks {BEGIN} ... {END}")
+    a, b = text.index(BEGIN), text.index(END) + len(END)
+    return text[:a] + f"{BEGIN}\n\n{body}\n\n{END}" + text[b:]
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--check", action="store_true", help="exit 1 when the region is stale; write nothing")
+    args = ap.parse_args(argv)
+    text = README.read_text()
+    new = replace(text, render(items(SOURCE.read_text())))
+    if args.check:
+        if new != text:
+            print(f"prismatic-mcp-menu: {README.relative_to(ROOT)} menu table is stale: run tools/surfaces/surfaces sync",
+                  file=sys.stderr)
+            return 1
+        return 0
+    if new != text:
+        README.write_text(new)
+        print(f"prismatic-mcp-menu: wrote {README.relative_to(ROOT)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
