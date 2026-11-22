@@ -25,7 +25,7 @@ observations:
   statement: "Added 2026-11-22 at origin/master 73ccdde469 from an external review checked against the repository: prismatic_mcp_server.cpp:176 and :1665 hard-code read_only=true beside approval-gated mutations, its header (:15-18) says no mutation is exposed, research/mcp-control.md:671 lists shipped openttd.ai.* tools and client mode as planned, five feature records are draft with no definition of draft, and no single capability matrix exists (I0110-I0116)"
   source: file:src/prismatic_mcp/prismatic_mcp_server.cpp
 - id: zip-advisories-open
-  statement: "Added 2026-11-22: Dependabot, enabled that day, reports four open advisories on zip 6.0.0 in tools/research/mcp-rhai/Cargo.lock (1 critical, 2 high, 1 medium; fixed in >= 9.0.5), pulled in only as a build-dependency of libduckdb-sys (I0117)"
+  statement: "Added 2026-11-22: Dependabot, enabled that day, reports four open advisories on zip 6.0.0 in tools/research/mcp-rhai/Cargo.lock (1 critical, 2 high, 1 medium; fixed in >= 9.0.5), pulled in only as a build-dependency of libduckdb-sys (I0220)"
   source: file:tools/research/mcp-rhai/Cargo.lock
 - id: zip-advisories-fixed
   statement: "Added 2026-11-22T13:49Z: after PR #63 the open Dependabot alert count on korczis/OpenTTD is 0 (alerts 1-4 state fixed)"

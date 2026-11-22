@@ -19,7 +19,7 @@ non_scope:
   - "A network embedding service, or indexing uncommitted changes"
   - "Editing v1's questions"
 depends_on:
-  - I0117
+  - I0220
 serves:
   - "an-agent-plays-the-game-through-governed-channels#prismatic-closes-one-real-loop"
 acceptance_criteria:

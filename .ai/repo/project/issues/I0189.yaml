@@ -15,7 +15,7 @@ non_scope:
   - "Raising coverage of untouched Rust code"
 depends_on:
   - I0180
-  - I0117
+  - I0220
 serves:
   - "openttd-validates-agent-driven-engineering#every-changed-line-is-tested"
 acceptance_criteria:
