@@ -255,7 +255,8 @@ The directive sets `planned_freight_only=1` and one `fr_*` slot.
 - `battlebrain serve --once` hands the directive out to exactly one loopback GET.
 - The executor applies a live block only through a pull keyed with the block's own idempotency
   key, on or before its stale date in game time.
-- `battlebrain rollback` gives the directive back to the baseline (`planned_freight_only=0`).
+- `battlebrain rollback --snapshot <record> --company <id> [--of <live directive>]` gives the
+  company back to the baseline, as a live decision of its own (see the round-2 fixes below).
 
 ## Executor binding after the red-team review (I0117)
 
@@ -265,7 +266,7 @@ are closed here:
 - **The block binds the payload.** `battlebrain-decision/v2` carries `settings_digest`, the digest
   of the exact settings string, and the executor recomputes it (`payload_mismatch`).
 - **One author per slot.** A directive without a decision block may not set any `fr_*` slot
-  (`fr_needs_decision`). The rollback (`planned_freight_only=0`) and other settings still pass.
+  (`fr_needs_decision`). Settings that touch no slot still pass without a block.
 - **One approval that expires.** A live decision is applied only through
   `openttd.ai.set_settings`: all settings under one approval, applied at once, expiring at the end
   of the decision's stale date (`live_expiry`). A game without that tool refuses the decision
@@ -290,6 +291,29 @@ are closed here:
   `POST /api/tools/openttd.ai.set_settings` and a `POST /api/rpc` `tools/call` of either name no
   writer. A call that changes an `fr_*` setting is refused with `fr_needs_writer`. The decision
   executor calls `openttd.ai.set_settings` itself, not through these routes, so it is unaffected.
+
+**Round 2 of the review** closed four more gaps:
+
+- **Rollback.** A blockless rollback never reached the game. The pull needs an observation that
+  `battlebrain serve` never makes (409), `serve` refuses a directive without a key, and slot 1
+  would have stayed set. `battlebrain rollback` now writes a live decision of its own:
+  - the settings are `planned_freight_only=0` with every slot cleared (`fr_from=-1` through
+    `fr16_from=-1`);
+  - it is decided on a snapshot, and its records are a hold candidate and a decision with policy
+    `rollback@1`, derived from the decision it reverses;
+  - it is keyed `<that decision's key>:rollback`.
+
+  It is served and applied like any live decision. A test runs it through `decision_gate`,
+  `live_world` and the directive parser.
+- **The world is checked on the live path.** A block now carries `snapshot_tick`. `apply_live`
+  checks the world (`live_world`) before the stale date and before `openttd.ai.set_settings`. It
+  refuses `world_changed` when the game's tick is behind the snapshot: an earlier save reloaded,
+  even one whose date is on or before `valid_until`, or another world. It refuses
+  `not_an_ai_company` when the company is not an AI company now.
+- **Boundary B6** now covers that order in `apply_live` as well as `pull_with`'s.
+- **The served-key ledger** records a key only once a loopback GET has been accepted, so a
+  failed bind no longer burns it. `BATTLEBRAIN_STATE_DIR` (else `$HOME`) must be an absolute
+  path; a relative one, or no `HOME`, is refused.
 
 Still open:
 
