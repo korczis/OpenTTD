@@ -41,12 +41,6 @@ mod battlebrain_contract;
 #[path = "../reads.rs"]
 mod reads;
 
-/// The game's resources a track plan reads, as hub_algoglyph assembles them (from/to added later).
-fn linecost_input(read: &dyn Fn(&str) -> Result<Option<serde_json::Value>, String>) -> Result<serde_json::Value, String> {
-    let ends = serde_json::json!({"from": {}, "to": {}});
-    hub_algoglyph::track_input(&ends, read)
-}
-
 /// Where resources come from: a panel's derived routes, an MCP server read directly through the
 /// token file `prismatic_mcp start` writes ({"agent_token","endpoint"}), for a stack without a panel,
 /// or a capture written by --capture (I0096), replayed only where every file is still what was read.
@@ -436,8 +430,8 @@ fn main() {
         // track-planning (src/linecost.rs) instead of distance x tile cost, before the portfolio.
         if track > 0 {
             let read = |r: &str| -> Result<Option<serde_json::Value>, String> { Ok(src.resource(r).ok()) };
-            let mut base = linecost_input(&read)?;
-            if let Some(o) = base.as_object_mut() { o.remove("from"); o.remove("to"); }
+            // The game's resources as hub_algoglyph assembles them, the map and terrain of one land.
+            let (base, read_as) = linecost::coherent_input(&read, linecost::READ_TRIES)?;
             let stations = out["params"]["costs"]["rail_stations"].as_f64().unwrap_or(1480.0);
             let rail_tile = out["params"]["costs"]["rail_tile"].as_f64().unwrap_or(100.0);
             let mut log = Vec::new();
@@ -446,7 +440,7 @@ fn main() {
                 if let Some(arr) = arr { log.extend(linecost::price(arr, &base, stations, rail_tile, track)); }
             }
             out["line_costs"] = serde_json::json!({"solver": "algoglyph track-planning on map, map/ways, map/terrain, economy/prices, bridges",
-                                                   "priced": log});
+                                                   "input": read_as, "priced": log});
             // --yards N: prove up to N transfer yards offline (src/yards.rs): the better line's route
             // blocked, can the other still leave from a platform beside it?
             if yards_n > 0 {
