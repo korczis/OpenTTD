@@ -204,7 +204,7 @@ class StoreOff(Exception):
 
 
 def valid_instance(name):
-    """An instance name as the registry writes it (kernel_feed.rs valid_instance), so it can stand
+    """An instance name as the registry writes it (letters, digits, `-`, `_`, `.`), so it can stand
     in a quoted literal of a read-only statement."""
     return bool(name) and len(name) <= 64 and all(c.isascii() and (c.isalnum() or c in "-_.") for c in name)
 

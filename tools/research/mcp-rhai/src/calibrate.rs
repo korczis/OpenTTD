@@ -13,9 +13,12 @@
 //!
 //! A reading outlives its game in the panel's store (issue I0082, ADR 0034 point 1): `POST
 //! /api/calibration` publishes it as plan.calibration, so it lands in the instance's `events`, and the
-//! planned bot reads every stored reading back with `readings_sql` (scope `PRISMATIC_PLAN_CALIBRATION`:
-//! `all`, `seed`, or off by default) and derives the factors with `factors`. No file is read.
+//! planned bot reads every stored reading back with `readings_query` (`sql/queries/calibration_readings.sql`;
+//! scope `PRISMATIC_PLAN_CALIBRATION`: `all`, `seed`, or off by default) and derives the factors with
+//! `factors`. No file is read.
 use serde_json::{json, Value};
+
+use crate::store_sql::Named;
 
 /// Only vehicles at least this old (in days) have a whole last year to measure.
 pub const MIN_AGE_DAYS: f64 = 730.0;
@@ -221,28 +224,26 @@ pub fn game_of(seed: i64, state: &Value) -> Value {
 /// The newest readings one store answers; enough for every recorded game so far.
 pub const QUERY_READINGS: usize = 200;
 
-/// The read-only statement that reads the calibration readings of one store: every plan.calibration
-/// event, with the seed of the run it belongs to (the newest run of its instance started before it)
-/// and the map its game had, newest first. `game` (`game_of`) narrows it to one seed and map; an
-/// error when the `seed` scope has no map to compare.
-pub fn readings_sql(scope: &Scope, game: &Value) -> Result<String, String> {
-    let filter = match scope {
+/// The query that reads the calibration readings of one store (`sql/queries/calibration_readings.sql`):
+/// every plan.calibration event, with the seed of the run it belongs to (the newest run of its
+/// instance started before it) and the map its game had, newest first, at most `QUERY_READINGS`.
+/// The `seed` scope binds this game's (`game_of`) seed and map, `all` binds null to both; an error
+/// when the `seed` scope has no map to compare.
+pub fn readings_query(scope: &Scope, game: &Value) -> Result<Named, String> {
+    let (seed, map) = match scope {
         Scope::Seed => {
             let seed = game["seed"].as_i64().ok_or("the seed scope needs this game's seed")?;
-            let map = game["map"].as_str().filter(|m| m.chars().all(|c| c.is_ascii_digit() || c == 'x'))
+            let map = game["map"].as_str().filter(|m| !m.is_empty())
                 .ok_or("the seed scope needs this game's map size, and openttd://game/state gave none")?;
-            format!(" AND r.seed = {seed} AND json_extract_string(e.data, '$.inputs.live.game.map') = '{map}'")
+            (json!(seed), json!(map))
         }
-        Scope::All => String::new(),
+        Scope::All => (Value::Null, Value::Null),
         Scope::Off | Scope::Unknown(_) => return Err("no query: calibration is not asked for".into()),
     };
-    Ok(format!("WITH r AS (SELECT instance, seed, started_ms, lead(started_ms) OVER (PARTITION BY instance ORDER BY started_ms) AS until_ms FROM runs) \
-SELECT e.instance, e.seq, e.ts_ms, r.seed, json_extract_string(e.data, '$.inputs.live.game.map') AS map, CAST(json_extract(e.data, '$.choice.reading.lines') AS VARCHAR) AS lines \
-FROM events e LEFT JOIN r ON r.instance = e.instance AND e.ts_ms >= r.started_ms AND (r.until_ms IS NULL OR e.ts_ms < r.until_ms) \
-WHERE e.kind = 'plan.calibration'{filter} ORDER BY e.ts_ms DESC LIMIT {QUERY_READINGS}"))
+    Ok(Named::new("calibration_readings", json!({"seed": seed, "map": map, "limit": QUERY_READINGS})))
 }
 
-/// The readings of a `readings_sql` answer (`{columns, rows}`), each `{instance, seq, ts_ms, seed, map,
+/// The readings of a `readings_query` answer (`{columns, rows}`), each `{instance, seq, ts_ms, seed, map,
 /// lines}` with only its measured lines; a row whose lines measured nothing is left out.
 pub fn readings_of(answer: &Value) -> Vec<Value> {
     let cols: Vec<&str> = answer["columns"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
@@ -343,11 +344,15 @@ mod tests {
         assert_eq!(game, json!({"seed": 3, "map": "256x128"}));
         assert_eq!(game_of(3, &json!({"availability": "available", "data": {"map_width": 64, "map_height": 64}}))["map"], "64x64",
                    "the resource's envelope");
-        assert!(readings_sql(&Scope::Seed, &game).unwrap().ends_with(&format!(
-            "WHERE e.kind = 'plan.calibration' AND r.seed = 3 AND json_extract_string(e.data, '$.inputs.live.game.map') = '256x128' ORDER BY e.ts_ms DESC LIMIT {QUERY_READINGS}")));
-        assert!(readings_sql(&Scope::All, &game).unwrap().contains("WHERE e.kind = 'plan.calibration' ORDER BY"));
-        assert!(readings_sql(&Scope::Seed, &game_of(3, &json!({}))).unwrap_err().contains("map size"));
-        assert!(readings_sql(&Scope::Off, &game).is_err());
+        let seed = readings_query(&Scope::Seed, &game).unwrap();
+        assert_eq!(seed.to_json(), json!({"name": "calibration_readings", "params": {"seed": 3, "map": "256x128", "limit": QUERY_READINGS}}));
+        assert!(seed.sql().contains("($map IS NULL OR json_extract_string(e.data, '$.inputs.live.game.map') = $map)"));
+        assert_eq!(readings_query(&Scope::All, &game).unwrap().params, json!({"seed": null, "map": null, "limit": QUERY_READINGS})
+                   .as_object().unwrap().clone(), "every game");
+        assert!(readings_query(&Scope::Seed, &game_of(3, &json!({}))).unwrap_err().contains("map size"));
+        assert!(readings_query(&Scope::Seed, &json!({"map": "1x1"})).unwrap_err().contains("seed"));
+        assert!(readings_query(&Scope::Off, &game).is_err());
+        assert!(readings_query(&Scope::Unknown("x".into()), &game).is_err());
     }
 
     #[test]
