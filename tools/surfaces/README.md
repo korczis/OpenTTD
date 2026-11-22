@@ -181,9 +181,15 @@ race, so the workflow keeps the branches current itself:
   anywhere else aborts the merge and leaves the branch to its owner (exit 10).
 - **The push is a fast-forward of what was fetched, never a force.** When the owner pushed in the
   meantime it is refused, and the next push to master retries.
-- **A push made with `GITHUB_TOKEN` starts no workflow**, so the job dispatches Surfaces on the
-  branch; that run reports "Check and build" on the new head, which is what branch protection and
-  auto-merge wait for. Dispatched runs do not refresh again, so a sync commit cannot start another.
+- **It pushes with the owner's token when the repository holds one** (secret `REFRESH_TOKEN`, a
+  fine-grained PAT for this repository with Contents: write, Pull requests: read and Actions:
+  write). Such a push is the owner's and starts the branch's ordinary pull_request runs. A push
+  made with `GITHUB_TOKEN` instead starts runs that wait for an approval (`action_required`), and
+  a pull request with such a suite stays blocked even after a dispatched "Check and build" passed
+  (#82, #83, #86 on 2026-11-22). Without the secret the job falls back to dispatching Surfaces and
+  Research Rust on the branch itself. Dispatched runs do not refresh again, so a sync commit cannot
+  start another. Locally the token lives in `.envrc.local` (ignored, loaded by direnv through the
+  ignored `.envrc`) and is set with `gh secret set REFRESH_TOKEN -R korczis/OpenTTD`.
 - **The default branch builds from regenerated regions**, so a count that still slipped through
   never stops the site and the wiki from deploying; the next pull request brings the file back in
   step.

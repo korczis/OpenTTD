@@ -128,10 +128,15 @@ jobs:
       group: refresh-${{ github.head_ref || github.ref }}
       cancel-in-progress: false
     steps:
+      # With the owner's token (secret REFRESH_TOKEN) the push is the owner's: it starts the branch's
+      # ordinary pull_request runs. A push made with GITHUB_TOKEN starts runs that wait for an
+      # approval (action_required), which keeps a pull request blocked even after the dispatched
+      # check passed, so without the secret the job falls back to dispatching the checks itself.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           filter: blob:none
+          token: ${{ secrets.REFRESH_TOKEN || github.token }}
 
       - uses: actions/setup-python@v7
         with:
@@ -141,6 +146,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.head_ref }}
+          OWNER_PUSH: ${{ secrets.REFRESH_TOKEN != '' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -156,7 +162,7 @@ jobs:
             tools/surfaces/refresh-branch --push "$b"
             rc=$?
             set -e
-            if [ $rc -eq 3 ]; then
+            if [ $rc -eq 3 ] && [ "$OWNER_PUSH" != "true" ]; then
               gh workflow run surfaces.yml -R "$GITHUB_REPOSITORY" --ref "$b"
               # The other check a pull request's new head needs (.github/workflows/research-rust.yml).
               gh workflow run research-rust.yml -R "$GITHUB_REPOSITORY" --ref "$b"
