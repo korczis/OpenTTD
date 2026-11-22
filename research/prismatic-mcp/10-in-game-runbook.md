@@ -35,8 +35,9 @@ cmake --build build-mcp --target openttd -j
 
 # Run dedicated server from a fixture save; feed console via a FIFO
 ./build-mcp/openttd -D -c <cfg> -g <save.sav> < fifo > log 2>&1 &
-echo "prismatic_mcp start" > fifo    # -> "MCP server started: http://127.0.0.1:8731/mcp"
-echo "prismatic_mcp token" > fifo    # -> 64-hex bearer token (local operator only)
+echo "prismatic_mcp start 8731 $PWD/token.json" > fifo
+# -> "MCP server started: http://127.0.0.1:8731/mcp", "Token written to .../token.json (mode 0600)"
+echo "prismatic_mcp token" > fifo    # -> the token file's path and fingerprint, never the token
 ```
 
 Server banner: `OpenTTD 20260724-prismatic-mcp-server-m0822f6b762`. Console log:

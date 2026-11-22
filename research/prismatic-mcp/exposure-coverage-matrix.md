@@ -17,7 +17,7 @@ is catalogued as designed-but-not-yet-adapted, not pretended-covered.
 | Settings schema | `NOT_YET_ADAPTED` | game settings are not exposed; AI settings are, through `openttd://ai`. Secrets omitted/redacted when added. |
 | Network clients (IP, keys, names) | `WITHHELD_PRIVACY` | redacted-by-default resource; not exposed in this build. |
 | Admin password / client_secret_key / X25519 keys | `WITHHELD_SECRET` | never serialized. |
-| Bearer token | `WITHHELD_SECRET` | only via explicit `prismatic_mcp token`; never in cfg/logs/snapshots. |
+| Bearer token | `WITHHELD_SECRET` | only in the 0600 token file `prismatic_mcp start` writes (`token` prints its path and fingerprint); never in a console, cfg, log or snapshot. |
 | Raw pointers / process memory / filesystem | `NOT_APPLICABLE` | never serialized by design (forbidden-shortcuts list). |
 | Game-state mutations (pause/AI/vehicle/commands) | `EXPOSED_APPROVAL_REQUIRED` | `openttd.game.set_pause`, `openttd.cmd.<Name>` (one per exposable game command), `openttd.ai.set_setting/set_settings/start/stop/reload`, and `openttd.api.*` with `execute: true`; all through the approval gate (`16-decision-contract.md`). |
 | Server-admin ops | `EXPOSED_SERVER_ONLY` (target) | staged; server-authority + audit required. |
