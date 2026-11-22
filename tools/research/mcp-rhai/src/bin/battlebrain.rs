@@ -1383,7 +1383,9 @@ mod tests {
     fn a_tie_leaves_every_compatible_kernel_unchosen_in_the_table() {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(path("catalogue.json")).unwrap()).unwrap();
         let mut kernels = v["kernels"].as_array().unwrap().clone();
-        kernels.push(json!({"id": "knapsack-twin", "engine": "grid", "input": "the kernel's data form"}));
+        // A shape the catalogue states, so the twin ranks as high as knapsack-dp (exact, verified):
+        // with an opaque shape the ranking would choose knapsack-dp and there would be no tie.
+        kernels.push(json!({"id": "knapsack-twin", "engine": "grid", "input": "{weights: number[], values: number[], capacity}"}));
         let cat = bb::Catalogue::from_runner(&json!(kernels), v["commit"].as_str().unwrap()).unwrap();
         let knapsack = bb::ADAPTERS.iter().find(|a| a.kernel == "knapsack-dp").unwrap();
         let twin = bb::Adapter { kernel: "knapsack-twin", ..*knapsack };
