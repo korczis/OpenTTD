@@ -191,6 +191,15 @@ so that CmdLevelLand stops before the reserve. It turned the year-one bust of `g
 steep-site busts, which the brain's target already clamps at `BRAIN_SHARE_FLOOR`, so the brain needs
 neither a cut nor a rebase for it.
 
+No arena edition ran between `ac8bc71d06` (#46, rich growth with its air lifts, default on) and
+`c560f5565f` (#68, `rich_air=0`): the tournament was paused from 06:02 to past both merges on
+2026-11-22. #46 as merged replayed at -29.2% against `fced659668` (8 matches); with #68, master
+`c5bf32182a` replays at -1.8% geometric against `c86fbd1ccb`, the last master before #46 (24 matches,
+14 up and 10 down, 0.56 to 1.51). That is within replay noise, so #46 plus #68 needs neither a cut nor
+a rebase of its own. The rebase pending from `fced659668` (rail_len=4 and TrainsOf, +5.7% over 8
+matches against `386b0bf3b5`) still applies once the arena resumes: older rows by 1/1.057, with the
+`5e5b9f93` cut kept.
+
 ### Why trust-region parents need four rows
 
 In edition `eb9cae38` the safe pick `g241.brainSafe` finished last on seed 199435860. The four other

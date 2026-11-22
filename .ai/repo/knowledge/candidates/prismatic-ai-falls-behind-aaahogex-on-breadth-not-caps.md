@@ -47,6 +47,7 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 | `rich_air=0`: rich growth and pressure leave the air caps alone, vs `rich_air=1` | 6 | +35.5% | 6 |
 | `rich_growth=0` (hoards; fails `fitness.must_not_hoard`) vs `rich_air=0` | 6 | +6.6% | 4 |
 | `rich_air=1` with `air_add_waiting=150` or `300` vs `rich_air=0` (both thresholds byte-identical: the planes come from new air routes, not from more planes per route) | 6 | -10.2% | 2 |
+| master `c5bf32182a` (#46 with #68) vs `c86fbd1ccb` (before #46) | 24 | -1.8% | 14 |
 
 # How to apply it
 
