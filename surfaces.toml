@@ -165,6 +165,16 @@ outputs = ["README.md", "docs/atlas/hero-light.svg", "docs/atlas/hero-dark.svg"]
 sync = ["tools/research/atlas/atlas", "render"]
 check = ["tools/research/atlas/atlas", "render", "--check"]
 
+# The capability matrix promises a `path:line` for every code path: each is cited anchored
+# (`path:line:Symbol`) and must still hold its symbol on master. `sync` moves a line whose symbol
+# moved when its new line is unambiguous; a symbol that is gone, or moved ambiguously, fails until a
+# person edits the row.
+[[generators.items]]
+id = "capability-matrix-refs"
+outputs = ["research/capability-matrix.md"]
+sync = ["tools/knowledge/refs", "check", "--pathspec", "research/capability-matrix.md", "--strict-lines", "--fix-lines"]
+check = ["tools/knowledge/refs", "check", "--pathspec", "research/capability-matrix.md", "--strict-lines"]
+
 # Pages of the site beyond the documents, each drawn by its own script from a JSON data contract
 # that a declared command prints when the site is built (tools/surfaces/README.md, "Declared pages").
 # The cards the data carries are rendered as plain HTML; the script draws the interactive views; the
