@@ -39,7 +39,9 @@ flowchart TB
   by the game's own autorenew.
 - **Rail a train can always run** (`rail.nut`). No 90-degree turn anywhere (`Turns90`, because
   `pf.forbid_90_deg` is on by default). Termini with two platforms joined by a throat with path
-  signals. The laid line is walked (`VerifyRailLine`) before a train is bought. The depot stands
+  signals. A line search gets a node budget by its distance (`RAIL_NODES_PER_TILE`), so one that
+  cannot succeed stops instead of trying every tile it can reach. The laid line is walked (`VerifyRailLine`) before a
+  train is bought. The depot stands
   behind a platform. Platform length and wagons follow demand (`PlatformPlan`).
 - **Lines as desired state** (`lines.nut`). Each line has a slot and logs a record
   (`PrismaticAI: rail line <slot>: label=...|a=...|...|state=...`) when built and every game month.
