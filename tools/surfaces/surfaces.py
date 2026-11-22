@@ -703,6 +703,7 @@ def mermaid_chart_spec(src: str) -> dict | None:
     or a chart this reader does not understand: that one stays a Mermaid diagram."""
     body = re.sub(r"\A\s*---\n.*?\n---\n", "", src, flags=re.S).strip()
     names = re.search(r"^\s*%% series: (.*)$", body, re.M)
+    marks = re.search(r"^\s*%% links: (.*)$", body, re.M)
     lines = [l.strip() for l in body.splitlines() if l.strip() and not l.strip().startswith("%%")]
     if not lines:
         return None
@@ -715,6 +716,8 @@ def mermaid_chart_spec(src: str) -> dict | None:
                     spec["title"] = l[6:].strip()
                 elif (m := re.fullmatch(r'"(.*)"\s*:\s*(-?[\d.]+)', l)):
                     spec["items"].append([m[1], float(m[2])])
+            if marks:
+                spec["links"] = marks[1].split(" | ")
             return spec if spec["items"] else None
         if lines[0].split()[0] == "xychart-beta":
             spec = {"kind": "xy", "title": "", "labels": [], "y": "", "series": []}
@@ -731,6 +734,8 @@ def mermaid_chart_spec(src: str) -> dict | None:
                     spec["series"].append({"type": word, "data": json.loads("[" + re.search(r"\[(.*)\]", l)[1] + "]")})
             for x, name in zip(spec["series"], names[1].split(" | ") if names else []):
                 x["name"] = name
+            if marks:
+                spec["links"] = marks[1].split(" | ")
             return spec if spec["series"] and spec["labels"] else None
     except (TypeError, ValueError):
         return None
@@ -755,6 +760,8 @@ def render_html(md: MarkdownIt, links: Links, doc: Doc, tokens) -> str:
     def fence(self, tokens, idx, options, env):
         tok = tokens[idx]
         if tok.info.strip().split(" ")[0] == "mermaid" and (spec := mermaid_chart_spec(tok.content)):
+            if spec.get("links"):
+                spec["links"] = [links.site(doc, t.strip()) for t in spec["links"]]
             return (
                 '<figure class="diagram not-format relative my-6 rounded-lg border border-gray-200 '
                 'bg-white p-4 dark:border-gray-700 dark:bg-gray-800">'
@@ -764,7 +771,7 @@ def render_html(md: MarkdownIt, links: Links, doc: Doc, tokens) -> str:
                 f'<div id="chart-{idx}" class="chart" style="height:380px" data-chart="inline" '
                 f'data-option="{html.escape(json.dumps(spec), quote=True)}"></div>'
                 '<details class="mt-2 text-sm text-gray-500 dark:text-gray-400"><summary>Source '
-                f'(generated Mermaid, as GitHub shows it)</summary><pre>{html.escape(tok.content)}</pre>'
+                f'(generated Mermaid, as GitHub shows it)</summary><pre class="chart-source">{html.escape(tok.content)}</pre>'
                 '</details></figure>'
             )
         if tok.info.strip().split(" ")[0] == "mermaid":
@@ -859,20 +866,27 @@ def mermaid_label(text: str) -> str:
     return plain(str(text)).replace('"', "'")
 
 
-def mermaid_pie(title: str, items: list[tuple[str, float]]) -> str:
-    lines = ["```mermaid", f"pie showData title {mermaid_label(title)}"]
+def mermaid_links(links: list[str] | None) -> list[str]:
+    """A Mermaid comment the site reads back: one link target per bar or slice, in order, so every
+    mark opens its page (GitHub ignores the comment)."""
+    return [f"    %% links: {' | '.join(links)}"] if links else []
+
+
+def mermaid_pie(title: str, items: list[tuple[str, float]], links: list[str] | None = None) -> str:
+    lines = ["```mermaid", f"pie showData title {mermaid_label(title)}"] + mermaid_links(links)
     lines += [f'    "{mermaid_label(k)}" : {v:g}' for k, v in items if v]
     return "\n".join(lines + ["```"])
 
 
-def mermaid_bars(title: str, labels: list[str], series: list[tuple[str, list[float]]]) -> str:
+def mermaid_bars(title: str, labels: list[str], series: list[tuple[str, list[float]]],
+                 links: list[str] | None = None) -> str:
     """A bar per label for the first series, a line for each further one."""
     top = max([v for _, vals in series for v in vals] + [1])
     xs = ", ".join(f'"{mermaid_label(l)}"' for l in labels)
     lines = ["```mermaid", "---", "config:", "  xyChart:", "    width: 900", "    height: 360",
              "  themeVariables:", "    xyChart:", f'      plotColorPalette: "{CHART_PALETTE}"', "---",
              "xychart-beta", f'    title "{mermaid_label(title)}"', f"    x-axis [{xs}]",
-             f"    %% series: {' | '.join(mermaid_label(n) for n, _ in series)}",
+             f"    %% series: {' | '.join(mermaid_label(n) for n, _ in series)}", *mermaid_links(links),
              f'    y-axis "{mermaid_label(series[0][0])}" 0 --> {top * 1.1:.4g}']
     for i, (_, vals) in enumerate(series):
         lines.append(f"    {'bar' if i == 0 else 'line'} [{', '.join(f'{v:g}' for v in vals)}]")
@@ -1058,14 +1072,15 @@ class Regions:
 
     def gen_ai_plan(self, args: dict, doc: Doc) -> str:
         if args.get("as") == "bar":
-            labels, done, total = [], [], []
+            labels, done, total, links = [], [], [], []
             for n, m in enumerate(self.layer.milestones, 1):
                 issues = [i for i in self.layer.issues if i.get("milestone") == m.get("id")]
                 labels.append(f"M{n}")
+                links.append(rel_md(doc, m["path"]))
                 done.append(sum(i["status"] == "done" for i in issues))
                 total.append(len(issues))
             return mermaid_bars("Issues done (bar) and planned (line) per milestone, in plan order",
-                                labels, [("Issues", done), ("Planned", total)])
+                                labels, [("Issues done", done), ("Issues planned", total)], links)
         rows = []
         for n, m in enumerate(self.layer.milestones, 1):
             issues = [i for i in self.layer.issues if i.get("milestone") == m.get("id")]

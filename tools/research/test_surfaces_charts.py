@@ -67,6 +67,13 @@ class ChartsAreGenerated(unittest.TestCase):
                          (["r1", "r2"], "Value", ["bar", "line"]))
         self.assertIsNone(run("spec", "flowchart LR\n  a --> b\n"))
 
+    def test_series_names_and_links_read_back(self):
+        xy = ('xychart-beta\n    title "V"\n    x-axis ["r1", "r2"]\n    %% series: Planned | Unplanned\n'
+              '    %% links: a.md | b.md\n    y-axis "Value" 0 --> 10\n    bar [1, 2]\n    line [3, 4]\n')
+        spec = run("spec", xy)
+        self.assertEqual([x["name"] for x in spec["series"]], ["Planned", "Unplanned"])
+        self.assertEqual(spec["links"], ["a.md", "b.md"])
+
     def test_the_toc_lists_the_headings_after_it(self):
         body = ("## Before\n\n<!-- surfaces:begin toc -->\n<!-- surfaces:end toc -->\n\n"
                 "## One\n\n### Two\n\n```\n## not a heading\n```\n\n## One\n")

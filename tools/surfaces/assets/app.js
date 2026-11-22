@@ -202,7 +202,7 @@
             type: 'pie', radius: ['35%', '66%'], top: 24, bottom: 28,
             itemStyle: { borderRadius: 4, borderColor: isDark() ? '#1F2937' : '#fff', borderWidth: 2 },
             label: { formatter: '{b}: {c}' },
-            data: s.items.map(([name, value]) => ({ name, value })),
+            data: s.items.map(([name, value], i) => ({ name, value, href: (s.links || [])[i] })),
           }],
         };
       }
@@ -221,7 +221,8 @@
         yAxis: { type: 'value', name: s.y, nameTextStyle: { align: 'left' } },
         dataZoom: many ? [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 4 }] : [],
         series: s.series.map((x, i) => ({
-          type: x.type, data: x.data, smooth: x.type === 'line',
+          type: x.type, data: x.data.map((value, k) => ({ value, href: (s.links || [])[k] })),
+          smooth: x.type === 'line', cursor: s.links ? 'pointer' : 'default',
           name: x.name || (i === 0 ? (s.y || 'value') : x.type + ' ' + i),
           itemStyle: x.type === 'bar' ? { borderRadius: [3, 3, 0, 0] } : undefined,
         })),
@@ -344,8 +345,9 @@
       option.textStyle = { fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif' };
       chart.setOption(option);
       chart.on('click', (p) => {
-        const url = p.data && p.data.url;
-        if (url) location.href = root + url;
+        const d = p.data || {};
+        if (d.href) location.href = d.href;
+        else if (d.url) location.href = root + d.url;
       });
       charts[el.id || id] = chart;
     });
