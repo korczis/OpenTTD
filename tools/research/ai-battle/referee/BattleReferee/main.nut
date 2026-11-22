@@ -10,10 +10,49 @@
  * cargo is cargo delivered and expenses the expenses, both of the last completed quarter.
  * value/income/perf are for the last *completed* quarter (GSCompany quarter index 1);
  * money, vehicles and stations are the current values.
+ *
+ * Shared producers, one line per producing industry whose output rail stations of two or more
+ * companies pick up (a station with a rating for one of its cargoes), after the company lines
+ * of each quarter:
+ *   REF S date=<y>-<m> ind=<industry id> owners=<cid>,<cid>[,...] name=<industry name>
+ * Two lines at one producer split its output by station rating; the orchestrator fails the fitness
+ * check when two of them are PrismaticAI's (research/incident-2026-11-22-sibling-industries.md).
  */
 class BattleReferee extends GSController {
 	function Start();
 	function Report();
+	function ReportShared(d);
+}
+
+function BattleReferee::ReportShared(d)
+{
+	local radius = GSStation.GetCoverageRadius(GSStation.STATION_TRAIN);
+	foreach (i, _ in GSIndustryList()) {
+		if (GSIndustry.IsBuiltOnWater(i)) continue;
+		local tiles = GSTileList_IndustryProducing(i, radius);
+		if (tiles.IsEmpty()) continue;
+		tiles.Valuate(GSRail.IsRailStationTile);
+		tiles.KeepValue(1);
+		/* Only a station that picks up what the industry produces: one with a rating for one of
+		 * its cargoes. A station that delivers to a sawmill or a factory also catches it, and two
+		 * companies delivering to one acceptor take nothing from each other. */
+		local made = GSCargoList_IndustryProducing(i);
+		local owners = {};
+		foreach (t, _ in tiles) {
+			local st = GSStation.GetStationID(t);
+			foreach (c, _ in made) {
+				if (GSStation.HasCargoRating(st, c)) { owners[GSTile.GetOwner(t)] <- true; break; }
+			}
+		}
+		if (owners.len() < 2) continue;
+		local ids = [];
+		foreach (o, _ in owners) ids.push(o);
+		ids.sort();
+		local list = "";
+		foreach (k, o in ids) list += (k > 0 ? "," : "") + o;
+		GSLog.Error("REF S date=" + GSDate.GetYear(d) + "-" + GSDate.GetMonth(d) + " ind=" + i
+			+ " owners=" + list + " name=" + GSIndustry.GetName(i));
+	}
 }
 
 function BattleReferee::Report()
@@ -55,6 +94,7 @@ function BattleReferee::Report()
 			+ " expenses=" + GSCompany.GetQuarterlyExpenses(c, 1)
 			+ " name=" + GSCompany.GetName(c));
 	}
+	this.ReportShared(d);
 }
 
 function BattleReferee::Start()
