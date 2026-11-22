@@ -1,0 +1,36 @@
+id: I0130
+milestone: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "A failed PrismaticAI build removes what it laid and is never tried again, and the fitness check fails on a station the bot left without vehicles"
+slug: prismatic-ai-failed-build-cleanup
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Give every failure path of a rail or road build a cleanup that removes the stations, track, stops and depot it built (only its own tiles), record the pair as tried or failed so it is not retried, and add a monthly self-audit line (own stations no vehicle calls at) that battle.py turns into a fitness anomaly."
+why: "External review 2026-11-22 (digest C-29). Rail: BuildRailLineAndTrain cleans up only when no path is found (tools/research/prismatic-ai/PrismaticAI/rail.nut:787-791) and when the second station fails (rail.nut:1160,1188); after track is laid it returns 0 with stations and track standing when laying fails, the line is broken, no depot fits or no train is bought (rail.nut:794,796-799,804,812), and the double-track variant likewise (rail.nut:933,938,971,986,993). Road: a pair whose stops are not joined or whose depot fails returns null without FAILED_PAIRS and keeps its stops and road (intercity.nut:143-152), while stop failures do blacklist (intercity.nut:138,141). A restored line has no tile list, so closing it leaves track standing (restore.nut:17-21)."
+scope:
+  - "tools/research/prismatic-ai/PrismaticAI/rail.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/intercity.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/main.nut"
+  - "tools/research/ai-battle/battle.py"
+  - "tools/research/test_ai_battle.py"
+  - "research/ai-battle/README.md"
+non_scope:
+  - "Removing track of a restored line whose tile list is unknown (logged, not guessed)"
+  - "Other companies' tiles, which are never touched"
+depends_on:
+  - I0118
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#prismatic-ai-grows-and-recovers"
+acceptance_criteria:
+  - "Every `return 0` / `return null` after construction started in BuildRailLineAndTrain, BuildDoubleRailLineAndTrain and BuildIntercityRoute removes what that call built, and logs what it removed"
+  - "A road pair that failed for any reason is in FAILED_PAIRS; a rail pair that failed is in the tried set; neither is attempted again in the same game (FAILED_PAIRS survives a restart through restore.nut)"
+  - "The bot logs monthly how many of its stations no vehicle serves; battle.py adds an `orphans` anomaly above a threshold and the fitness check fails on it; a test covers the anomaly on a fixture series"
+  - "The fitness match passes with no `orphans` anomaly for any PrismaticAI lineup"
+validation:
+  - "python3 -m unittest tools/research/test_ai_battle.py"
+  - "python3 tools/research/ai-battle/battle.py fitness"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

@@ -1,0 +1,39 @@
+id: I0135
+milestone: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "A freight line handed to PrismaticAI is built at the station sites the planner chose, and the site rule lives only in sites.rs"
+slug: prismatic-ai-builds-at-planned-sites
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Hand the planner's station sites (tile, axis and depot from tools/research/mcp-rhai/src/sites.rs) to the bot with each fr_* line, have BuildRailStationAt build at a handed site and fall back to its own search only when that site is no longer buildable (logged as a divergence), and correct sites.rs's header, which still points at a bridge repository."
+why: "External review 2026-11-22 (digest B-07): the station-site rule exists twice. sites.rs re-implements PrismaticAI's rule and says it was copied from the `bridge repository rail.nut` (tools/research/mcp-rhai/src/sites.rs:1-3), though rail.nut lives in this repository; the planner computes sites (tools/research/mcp-rhai/src/bin/mcp-plan.rs:420), but the fr_* hand-over carries only industries and cargo (tools/research/prismatic-ai/PrismaticAI/info.nut:145,172-186), so the bot picks again (rail.nut:378 BuildRailStationAt). A planned line that the bot then fails to site is a failure the planner never sees. Open PR #55 (battlebrain-governance) adds authority-boundary checks in tools/research/mcp-rhai/src/bin/battlebrain.rs and authority_boundaries.rs; this hand-over lands after it and passes its check."
+scope:
+  - "tools/research/mcp-rhai/src/sites.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-plan.rs"
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/mcp-rhai/src/panel_bot.rs"
+  - "tools/research/prismatic-ai/PrismaticAI/rail.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/info.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/main.nut"
+  - "tools/research/prismatic-ai/README.md"
+non_scope:
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs and authority_boundaries.rs, owned by open PR #55"
+  - "Passenger rail pairs (rail_a, rail_b) and air routes"
+depends_on:
+  - I0129
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#prismatic-ai-grows-and-recovers"
+acceptance_criteria:
+  - "Each handed freight line can carry both station sites; with none handed the bot behaves as today"
+  - "BuildRailStationAt builds at a handed site when it is still buildable, else logs `site diverged` with the reason and uses its own rule"
+  - "sites.rs's header names rail.nut in this repository; a Rust test proves sites.rs and the bot agree on a fixture map, or the bot no longer decides a handed site at all"
+  - "PR #55's authority-boundary check passes with the new hand-over"
+validation:
+  - "cargo test --manifest-path tools/research/mcp-rhai/Cargo.toml sites"
+  - "python3 -B tools/research/prismatic-ai/derive_docs.py --check"
+  - "python3 tools/research/ai-battle/battle.py fitness"
+  - "tools/gate.sh change"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

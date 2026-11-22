@@ -1,0 +1,32 @@
+id: I0119
+milestone: every-battle-match-explains-itself
+title: "The battle referee's REF Q sample carries every company's loan and maximum loan, and the battle record and charts use them"
+slug: referee-records-loan
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Extend the BattleReferee GameScript's REF Q line with `loan=` (and `max_loan=` once per sample date) through the GS API, parse it in battle.py, keep it in the record schema, and show net worth (value, money, loan) instead of company value alone where the record renders standings."
+why: "External review 2026-11-22 (digest C-23). referee/BattleReferee/main.nut:6 and :44 emit `REF Q date= cid= value= money= income= perf= vehicles=` plus per-mode counts and profit, but no loan. Capital use and debt risk of each contestant, the core of the 'PrismaticAI holds idle money / borrows too early' questions, cannot be read from any record."
+scope:
+  - "tools/research/ai-battle/referee/**"
+  - "tools/research/ai-battle/battle.py"
+  - "tools/research/test_ai_battle.py"
+  - "tools/research/schema/**"
+  - "research/ai-battle/README.md"
+non_scope:
+  - "Rewriting older records; they stay valid and say loan is absent"
+depends_on:
+  - I0118
+serves:
+  - "internal-state-is-observable-reproducibly#a-battle-explains-itself"
+acceptance_criteria:
+  - "REF Q lines in a new match carry loan= for every company; the referee's header comment documents the field"
+  - "battle.py parses it, the record schema accepts records with and without it, and a test covers both"
+  - "The rendered record (and any chart generated from it) shows loan beside money and value"
+validation:
+  - "python3 -m unittest tools/research/test_ai_battle.py"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
