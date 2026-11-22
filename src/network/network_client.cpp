@@ -34,6 +34,10 @@
 #include "../social_integration.h"
 
 #include "table/strings.h"
+#ifdef OTTD_PRISMATIC_MCP_SERVER
+#include "../prismatic_mcp/prismatic_mcp_ui.h" /* RESEARCH-ONLY: no approval from an armed client */
+#include "../prismatic_mcp/prismatic_mcp_detail.h" /* RESEARCH-ONLY: the chat line read as the server reads it */
+#endif
 
 #include "../safeguards.h"
 
@@ -421,6 +425,15 @@ NetworkRecvStatus ClientNetworkGameSocketHandler::SendCommand(const CommandPacke
 NetworkRecvStatus ClientNetworkGameSocketHandler::SendChat(NetworkAction action, NetworkChatDestinationType type, int dest, std::string_view msg, int64_t data)
 {
 	Debug(Facility::Net, Severity::Trace3, "Client::SendChat(): action={}, type={}, dest={}", action, type, dest);
+#ifdef OTTD_PRISMATIC_MCP_SERVER
+	/* RESEARCH-ONLY (ADR 0038): a script can type into a client whose input is armed for MCP tools,
+	 * so no approval leaves it. This is the one path every chat of a client takes (the chat window,
+	 * 'say' and the console's forwarding), and the line is read exactly as the server reads it. */
+	if ((PrismaticMCP::UI::InputArmed() || PrismaticMCP::UI::InjectingInput()) && PrismaticMCP::detail::ParseChatApproval(msg).verb == PrismaticMCP::detail::ChatRequest::Verb::Approve) {
+		IConsolePrint(CC_ERROR, "Refused: this client's input is armed for MCP tools (PRISMATIC_MCP_INPUT=1), so it sends no approval.");
+		return NetworkRecvStatus::Okay;
+	}
+#endif
 
 	auto p = std::make_unique<Packet>(my_client, PacketGameType::ClientChat);
 

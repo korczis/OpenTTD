@@ -116,7 +116,7 @@ function renderTool(it) {
     let v; try { v = JSON.parse(text); } catch { v = text; }
     const pending = v && v.status === 'pending_approval';
     $('answer').innerHTML = (pending
-      ? alert(`Waiting for the owner's approval #${esc(v.approval_id)}. Approve it in the panel (<a href="/#control" class="underline">Control and approvals</a>) or in the game: prismatic_mcp approve ${esc(v.approval_id)}. Then call again with the same values.`, 'yellow')
+      ? alert(`Waiting for the owner's approval #${esc(v.approval_id)}. Approve it in the panel (<a href="/#control" class="underline">Control and approvals</a>) or in the game: prismatic_mcp approve ${esc(v.approval_id)}. Approving carries it out; do not call it again (that asks for a fresh approval).`, 'yellow')
       : r.ok ? '' : alert(`HTTP ${r.status}`, 'red'))
       + `<pre class="p-3 max-h-[32rem] overflow-auto text-xs bg-gray-50 rounded-lg dark:bg-gray-900 text-gray-800 dark:text-gray-200">${esc(typeof v === 'string' ? v : JSON.stringify(v, null, 2))}</pre>`;
   };

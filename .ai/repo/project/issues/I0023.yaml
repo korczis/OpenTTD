@@ -16,7 +16,7 @@ depends_on:
 serves:
 - "an-agent-plays-the-game-through-governed-channels#mcp-mutation-is-approved-and-commanded"
 acceptance_criteria:
-- "submit returns a pending approval; approve then resubmit executes via Command<Commands::Pause>::Post"
+- "submit returns a pending approval; approving it executes it at once via Command<Commands::Pause>::Post, with no resubmit (ADR 0038; before it, approve then resubmit executed it)"
 - a replayed approval is refused
 - changed arguments after approval are refused
 - "the approval stores the canonical arguments or a SHA-256, not only a 64-bit FNV-1a digest"
