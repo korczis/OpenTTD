@@ -61,7 +61,7 @@ allowed to turn a candidate into an executable choice.
 | portfolio within a budget | `cargo.rs` knapsack-dp **or a built-in copy** | AlgoGlyph knapsack-dp as candidate evidence; the built-in copy is a separate, named solver |
 | aggressiveness | Prismatic `OpenttdController` Monte Carlo | unchanged (outside this slice) |
 | GA settings | `battle.py` offline, `prismatic_tune.rhai` live | offline only; it feeds the policy parameters |
-| approval | the operator, but also panel auto-approve and armed UI input | the operator (auto-approve is outside this slice) |
+| approval | the operator; a live decision (`openttd.ai.set_settings`) only at the game's console, never through the panel, auto-approve or Rhai, and the panel's other approvals need its owner secret ([mcp-control](../mcp-control.md#approval-is-bound-to-the-owner)); armed UI input remains | the operator (auto-approve is outside this slice) |
 
 ## Contracts (I0095)
 
@@ -281,11 +281,35 @@ are closed here:
 - **Before a live pull,** the shared key `planner.<company>` is set to `battlebrain`, so every
   other proposer of that company's `fr_*` slots stands down (the authority matrix lists them).
   `rail_steward.rhai` and `rail_lib.rhai` set `line<n>_trains`/`line<n>_wagons` only, never `fr_*`.
+- **A slot change names its writer.** `POST /api/bots/setting` sends an `fr_*` setting only when
+  the request names its `writer` and `planner.<company>` is unset or names that writer. A request
+  without a writer is refused with `fr_needs_writer` (422). A writer that is not the planner is
+  refused with `fr_planner_held` (409). Nothing reaches the game in either case, and the refusal
+  is a `panel.ai` event. Other settings pass as before. `build_plan.rhai` (and so `ask_relay` and
+  `replan`) and `prismatic_tune.rhai` name themselves (`ttd::set_bot(company, name, value,
+  writer)`). The rule is `fr_author::change_refusal`, and the check is
+  `panel_bot::slot_refusal`.
+- **The raw MCP routes set no slot.** `POST /api/tools/openttd.ai.set_setting`,
+  `POST /api/tools/openttd.ai.set_settings` and a `POST /api/rpc` `tools/call` of either name no
+  writer. A call that changes an `fr_*` setting is refused with `fr_needs_writer`. The decision
+  executor calls `openttd.ai.set_settings` itself, not through these routes, so it is unaffected.
 
-Still open: the panel's loopback `/api/approve`, `/api/auto-approve` and armed UI input are not
-bound to the owner. That is outside this slice and is the owner's operating rule. A raw
-`POST /api/bots/setting` or `openttd.ai.set_setting` call names no writer, so the planner key
-cannot be checked there; the scripts above are the writers that use it.
+Still open:
+
+- The panel's loopback `/api/approve`, `/api/auto-approve` and armed UI input are not bound to the
+  owner. That is outside this slice and is the owner's operating rule.
+- A client of the game's own MCP endpoint (its bearer token: `mcp-auto`, `mcp-human`, Rhai
+  `mcp_call`) can still call `openttd.ai.set_setting` or `openttd.ai.set_settings` with an `fr_*`
+  name. The owner's approval of that request is the only check there.
+- The C++ side is unchanged, on purpose. The planner key lives in the panel's memory, which the
+  game cannot read. A rule such as "`set_setting` refuses `fr_*`, use `set_settings`" would leave
+  `set_settings` open to the same client, so it would only move the hole. It would also break the
+  writers above, which send one slot at a time while no planner key is set, and the "no stacking"
+  checks of `prismatic_tune` and `replan`, which count pending `openttd.ai.set_setting` requests.
+- A writer names itself: the loopback API authenticates no one. The check keeps the panel's own
+  writers from contradicting the planner. It is not a credential.
+- A new AI started with `fr_*` settings (`openttd.ai.start`, `start_ai`) is not checked. It has no
+  company id until it starts.
 
 ## Cutover thresholds (the Phase 04 gate)
 
@@ -301,6 +325,39 @@ condition, not output equality:
 - PrismaticAI runs with `planned_freight_only=1`, so the line has one author;
 - every divergence across at least three captures (seeds, maps or companies) is classified, and
   none is `defect`.
+
+## Phase 06: evidence, duels and regression gates
+
+[`experiment-freight-margin.md`](experiment-freight-margin.md) pre-registers the experiment. It
+fixes the hypotheses, the arms, the metrics, the seeds, the sample size, the stopping rules and
+five separate checks before any pair is played. H1 (correctness) says a freight-margin@2 decision
+never applies an unpriced or unaffordable line. H2 (strategy) says a battlebrain-steered company
+does not end with a lower value share than under planner v4 on held-start pairs, within a margin
+of 10%.
+
+**Every strategy result is NOT RUN.** On 2026-11-22 the owner ordered that only one game runs on
+the mesh: the co-play game on :8800, which belongs to another session. No duel, capture or live
+decision has been run for this experiment. C2 (per-pair correctness), C3 (performance), C4
+(strategy, H2) and C5 (operator safety) are NOT RUN for that reason.
+
+- **The sample size is derived.** `battle.py power` reads the 351 battle records. Their split-half
+  Kendall tau of the GA score is 0.212, so one seed carries a rank reliability of only 0.065. The
+  paired log value ratio has a median standard deviation of 0.366 across seeds. That gives **93
+  held-start pairs** for a one-sided non-inferiority test at a margin of 10% (α 0.05, power 0.8),
+  or 27 pairs at a margin of 20%.
+- **The harness reuses mcp-duel.** Arm P is a duel with `--capture-at-start`: the held start is
+  captured after company A is founded, while the game is still paused. `battlebrain live` decides
+  on that capture. Arm BB is a duel of the same seed with `--directive`. `mcp-duel pair-check`
+  makes a pair valid only if both starts lead to the same decision. `--directive` refuses a
+  directive that leaves any other `fr*` slot to the planner, so arm BB can run only once the
+  directive clears them (I0117).
+- **Regression gate C1** (`tools/research/mcp-rhai/src/battlebrain_regression.rs`, run by
+  `cargo test --bin battlebrain`): every freight-margin@2 shadow result is replayed on its capture,
+  and its comparison block must be unchanged. The selected line must also be priced and
+  affordable. It needs at least three such results. The first run found that the 1953-02-09
+  result's reason named `freight-margin@1`, a label written before fcac673236. The result was
+  re-recorded from the same capture; its lines, budget, divergence and selection are unchanged.
+  Since then, all three reproduce.
 
 ## Architecture boundaries (Phase 07)
 

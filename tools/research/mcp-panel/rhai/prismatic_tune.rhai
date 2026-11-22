@@ -36,7 +36,8 @@ import "fr_author" as fa;
 const CHAIN_KEY = "policy.chain";
 // This tuner's name for the planner key planner.<company> (fr_author.rhai): while the key names
 // another writer (Battlebrain during a cutover), it asks for nothing for that company, so no
-// freight-line slot either, whatever setting a stage or the GA's /api/tuning names.
+// freight-line slot either, whatever setting a stage or the GA's /api/tuning names. Every request
+// names it, so the panel checks the same key before it asks the game (POST /api/bots/setting).
 const WRITER = "prismatic_tune";
 
 fn dry() { env("TUNE_DRY") == "1" }
@@ -350,7 +351,7 @@ fn tune_round() {
         if sent >= c.max_requests { print(`tune:   ${x.name} ${x.from} -> ${x.to}: next round (${c.max_requests} a round)`); continue; }
         if dry() { print(`tune:   ${x.name} ${x.from} -> ${x.to} (${x.why}), dry run`); sent += 1; continue; }
         try {
-            let a = ttd::set_bot(ctx.company, x.name, x.to);
+            let a = ttd::set_bot(ctx.company, x.name, x.to, global::WRITER);
             let id = a.approval_id ?? ();
             print(`tune:   ${x.name} ${x.from} -> ${x.to} (${x.why}): ${if id == () { `${a.status ?? a}` } else { `pending approval #${id}` }}`);
             say(`proposes ${x.name} ${x.from} -> ${x.to} (${x.why})`);
