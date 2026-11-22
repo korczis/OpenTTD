@@ -40,7 +40,10 @@ flowchart TB
   by the game's own autorenew.
 - **Rail a train can always run** (`rail.nut`). No 90-degree turn anywhere (`Turns90`, because
   `pf.forbid_90_deg` is on by default). Termini with two platforms joined by a throat with path
-  signals. A line search gets a node budget by its distance (`RAIL_NODES_PER_TILE`), so one that
+  signals. A terminus takes the catching site with the most cargo on the axis toward the other end,
+  then on the other axis, then with its exit reversed: flat land first, then sloped land on
+  foundations where `construction.build_on_slopes` allows it, and a levelled site last
+  (`BuildRailStationAt`). A line search gets a node budget by its distance (`RAIL_NODES_PER_TILE`), so one that
   cannot succeed stops instead of trying every tile it can reach. The laid line is walked (`VerifyRailLine`) before a
   train is bought. The depot stands
   behind a platform. Platform length and wagons follow demand (`PlatformPlan`).

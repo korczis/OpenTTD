@@ -24,7 +24,7 @@ RAIL_LINES <- [];
 PRISMATIC_FULL_LOAD <- 0;
 /* The most levelling one airport site may cost (setting air_level_max, in thousands; air.nut). */
 AIR_LEVEL_MAX <- 15000;
-/* Levelling a rail station site when none is flat (rail.nut BuildRailStationAt): at most this
+/* Levelling a rail station site, the last resort (rail.nut LevelRailStationSite): at most this
  * estimated cost per site, corners within RAIL_LEVEL_STEP height steps, and RAIL_LEVEL_KEEP left. */
 RAIL_LEVEL_MAX <- 40000;
 RAIL_LEVEL_STEP <- 1;
