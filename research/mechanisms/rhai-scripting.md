@@ -66,9 +66,39 @@ The scripts in the library today:
 | [`steward.rhai`](../../tools/research/mcp-panel/rhai/steward.rhai) | the bot asks the owner yes/no questions in the game |
 | [`ask_relay.rhai`](../../tools/research/mcp-panel/rhai/ask_relay.rhai), [`build_plan.rhai`](../../tools/research/mcp-panel/rhai/build_plan.rhai) | answers "Ask the planner..." requests; carries out a planned sentence |
 | [`replan.rhai`](../../tools/research/mcp-panel/rhai/replan.rhai) | re-plans the running bot every game month: trend, competition, the planner's portfolio, a modelled switch, approval-gated changes ([Planner and AlgoGlyph](planner-and-algoglyph.md#replanning-while-the-game-runs)) |
+| [`watchdog.rhai`](../../tools/research/mcp-panel/rhai/watchdog.rhai) | finds a company that has built or bought nothing for longer than a threshold tuned from the game's own data, and says what holds it ([The progress watchdog](#the-progress-watchdog)) |
 
 Usage and the built-in list in full: [`../mcp-control.md`](../mcp-control.md) ("Rhai"), and the
 Scripts page in [`../rail-steward.md`](../rail-steward.md) ("The Scripts page").
+
+### The progress watchdog
+
+No company should go for long without building or buying anything while nobody knows why. In the
+owner's game of 2026-11-22, company 1 kept 32 vehicles from 1952-07 to 1953-08 while twenty approvals
+waited. [`watchdog.rhai`](../../tools/research/mcp-panel/rhai/watchdog.rhai) runs as a panel service
+(`POST /api/services/start {"name":"watchdog"}`) and looks every 20 s:
+
+- **Progress** is a change in a company's vehicles by type or in its stations
+  (`openttd://companies` `fleet`, `openttd://stations` `owner`). The game days since the last change
+  (`game_tick` / 74) are its quiet time.
+- **The threshold is derived from the game's own data.** Every quiet time that ends, for any
+  company, is kept on the blackboard (`watchdog.tuning.gaps`, the last 64). The threshold starts at
+  7 game days (the owner: "zacneme treba tyden"). Once there are 5 quiet times, it is 1.5 times their
+  90th percentile, kept within 7 to 365 days. On the live game it went from 7 to 21 days after ten
+  quiet times.
+- **A stalled company is told why**, from what the panel reports:
+  - the approvals pending for it (`status().pending`),
+  - replan's hold (`replan.<company>.held`),
+  - its money against the bot's `line_budget`,
+  - every service that the panel's supervisor reports `stalled` or `gave_up` (`api_services()`).
+  If none of these applies, it says so: the bot chose to build nothing.
+- **Where it goes:** the blackboard key `watchdog.<company>` (`signature`, `since_day`,
+  `quiet_days`, `threshold_days`, `stalled`, `reasons`), which reaches the bus and the DuckDB store
+  as a `rhai.shared` event. When the owner's company becomes stalled, one chat line goes out, once
+  per stall.
+- **It changes nothing in the game.** A waiting approval is settled by the server's deadline
+  ([Approval gate](approval-gate.md)), never here. The file's first line, `// stall: 180`, tells the
+  panel's supervisor how long the service may stay quiet before it is restarted.
 
 ## Where it lives
 
@@ -84,7 +114,9 @@ Scripts page in [`../rail-steward.md`](../rail-steward.md) ("The Scripts page").
 
 - `cargo test` in `tools/research/mcp-rhai`: `main.rs` tests run `rail_lib.rhai` and
   `director_lib.rhai` on fixtures (`rail_*`, the director), check that every hub method but streams
-  is a Rhai function, and that a kernel refusal is an error; `panel_scripts.rs` tests cover names,
+  is a Rhai function, and that a kernel refusal is an error; `watchdog_*` run `watchdog.rhai`
+  against a scripted panel (a stall found, said once with its reasons, the threshold tuned) and its
+  pure functions; `panel_scripts.rs` tests cover names,
   docs, imports, the parse check, and a service that hot-reloads on a library edit.
 - `node --test tools/research/mcp-panel/test/scripts.test.mjs`: tokens, the outline, stream frames.
 - `tools/research/mcp-scripts-check <panel-url>` drives the Scripts page in a real Chrome.

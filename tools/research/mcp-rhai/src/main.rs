@@ -1007,4 +1007,102 @@ mod tests {
         assert_eq!(v, vec!["plant 9 tree tiles near the town", "serve or remove the idle stations",
                            "src/tree_cmd.cpp CmdPlantTree", "true", "true", "build freely"]);
     }
+
+    /// The progress watchdog (mcp-panel/rhai/watchdog.rhai): a company whose vehicles and stations
+    /// do not change for longer than the threshold is stalled, its reasons are read from the panel
+    /// (pending approvals for it, replan's hold, money against line_budget, a stalled service), the
+    /// owner's company is told once, and the threshold follows the quiet times seen.
+    #[test]
+    fn watchdog_service_finds_a_stall_says_why_once_and_tunes_its_threshold() {
+        use std::sync::{Arc, Mutex};
+        use serde_json::{json, Value};
+        let mut e = lib_engine();
+        let looks = Arc::new(Mutex::new(0i64));
+        let shared: Arc<Mutex<std::collections::BTreeMap<String, Value>>> = Arc::new(Mutex::new(
+            [("replan.0", json!({"held": "18 earlier change(s) wait for the owner's approval"}))]
+                .into_iter().map(|(k, v)| (k.to_string(), v)).collect()));
+        let said = Arc::new(Mutex::new(Vec::<String>::new()));
+        e.register_fn("env", |name: &str| -> String { if name == "WATCHDOG_ROUNDS" { "5".into() } else { String::new() } });
+        let l = looks.clone();
+        e.register_fn("sleep", move |_ms: i64| { *l.lock().unwrap() += 1; });
+        let l = looks.clone();
+        e.register_fn("read", move |uri: &str| -> super::R<rhai::Dynamic> {
+            let n = *l.lock().unwrap();
+            // Company 1 buys a bus in every round; company 0 never changes after the first round.
+            let tick = [74 * 100, 74 * 105, 74 * 110, 74 * 120, 74 * 140][n as usize];
+            match uri {
+                "openttd://game/state" => super::to_dyn(json!({"game_tick": tick, "game_date": format!("1951-01-{:02}", n + 1)})),
+                "openttd://stations" => super::to_dyn(json!({"data": {"stations": [{"owner": 0}, {"owner": 0}, {"owner": 1}]}})),
+                "openttd://companies" => super::to_dyn(json!({"data": {"companies": [
+                    {"id": 0, "name": "Owner Co", "money": 9000, "fleet": {"train": 1, "road": 25, "ship": 0, "aircraft": 6}},
+                    {"id": 1, "name": "Rival", "money": 90000, "fleet": {"train": 0, "road": 10 + n, "ship": 0, "aircraft": 0}}]}})),
+                other => Err(format!("unexpected read {other}").into()),
+            }
+        });
+        e.register_fn("status", || -> super::R<rhai::Dynamic> {
+            super::to_dyn(json!({"pending": [{"id": 22, "tool": "openttd.ai.set_setting", "args": {"company": 0, "name": "fr2_to", "value": 3}},
+                                             {"id": 23, "tool": "openttd.ai.set_setting", "args": {"company": 1, "name": "fr2_to", "value": 4}}]}))
+        });
+        e.register_fn("api_services", || -> super::R<rhai::Dynamic> {
+            super::to_dyn(json!({"services": [{"name": "replan", "stalled": false}, {"name": "arena", "stalled": true}]}))
+        });
+        e.register_fn("api_bots", || -> super::R<rhai::Dynamic> {
+            super::to_dyn(json!({"running": [{"id": 0, "settings": [{"name": "line_budget", "value": 30000}]}]}))
+        });
+        let s = shared.clone();
+        e.register_fn("shared_get", move |k: &str| -> super::R<rhai::Dynamic> {
+            s.lock().unwrap().get(k).cloned().map_or(Ok(rhai::Dynamic::UNIT), super::to_dyn)
+        });
+        let s = shared.clone();
+        e.register_fn("shared_set", move |k: &str, v: rhai::Dynamic| -> super::R<i64> {
+            s.lock().unwrap().insert(k.to_string(), super::from_dyn(v)?);
+            Ok(1)
+        });
+        let t = said.clone();
+        e.register_fn("con_say", move |text: &str| { t.lock().unwrap().push(text.to_string()); });
+        let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai/watchdog.rhai")).unwrap();
+        e.run(&script).unwrap();
+
+        assert_eq!(*looks.lock().unwrap(), 4, "five rounds, a sleep between each");
+        let shared = shared.lock().unwrap();
+        let w0 = &shared["watchdog.0"];
+        assert_eq!((w0["since_day"].clone(), w0["quiet_days"].clone(), w0["stalled"].clone(), w0["said"].clone()),
+                   (json!(100), json!(40), json!(true), json!(true)), "{w0}");
+        assert_eq!(w0["signature"], json!("train 1 road 25 ship 0 aircraft 6 stations 2"));
+        assert_eq!(w0["reasons"], json!([
+            "1 approval(s) wait for the owner (first #22)",
+            "replan holds: 18 earlier change(s) wait for the owner's approval",
+            "money 9000 is below the line budget 30000",
+            "service arena is stalled"]));
+        let w1 = &shared["watchdog.1"];
+        assert_eq!((w1["quiet_days"].clone(), w1["stalled"].clone()), (json!(0), json!(false)), "the rival buys every round: {w1}");
+        // Company 1's quiet times 5, 5, 10, 20 were seen; four are fewer than MIN_GAPS, so the start value holds.
+        assert_eq!(shared["watchdog.tuning"]["gaps"], json!([5, 5, 10, 20]));
+        assert_eq!(shared["watchdog.tuning"]["threshold_days"], json!(7));
+        let said = said.lock().unwrap();
+        assert_eq!(said.len(), 1, "the owner's company is told once per stall: {said:?}");
+        assert!(said[0].starts_with("\"[watchdog] Owner Co: nothing built or bought for 10 game day(s) (threshold 7): 1 approval(s) wait"), "{}", said[0]);
+    }
+
+    /// The threshold follows the data: the start value until MIN_GAPS quiet times, then 1.5 times
+    /// their 90th percentile within MIN_DAYS..MAX_DAYS; a new signature resets the quiet time.
+    #[test]
+    fn watchdog_threshold_and_assessment_are_pure() {
+        let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai/watchdog.rhai")).unwrap();
+        let functions = script.split("\nlet looks = 0;").next().unwrap().to_string();
+        let out: rhai::Array = lib_engine().eval(&format!(r#"{functions}
+            [threshold_of([]), threshold_of([1, 2, 3, 4]), threshold_of([10, 10, 10, 10, 10]),
+             threshold_of([1, 1, 1, 1, 1]), threshold_of([400, 400, 400, 400, 400]),
+             threshold_of([2, 4, 6, 8, 10, 12, 14, 16, 18, 20]),
+             assess((), "a", 10, 7).value.quiet_days, assess((), "a", 10, 7).ended,
+             assess(#{{ signature: "a", since_day: 10, said: true }}, "a", 30, 7).value.stalled,
+             assess(#{{ signature: "a", since_day: 10, said: true }}, "a", 30, 7).value.said,
+             assess(#{{ signature: "a", since_day: 10 }}, "b", 30, 7).ended,
+             assess(#{{ signature: "a", since_day: 10 }}, "b", 30, 7).value.said,
+             reasons(0, [], (), 5, 0, [])[0]]
+        "#)).unwrap();
+        let got: Vec<String> = out.iter().map(|x| x.to_string()).collect();
+        assert_eq!(got, vec!["7", "7", "15", "7", "365", "27", "0", "", "true", "true", "20", "false",
+                             "nothing that holds it is visible; the bot itself chose to build nothing"]);
+    }
 }
