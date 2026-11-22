@@ -436,7 +436,7 @@ struct ChatFacts {
 	bool valid_company = false;    ///< the client plays a company (a spectator does not)
 	bool same_company = false;     ///< the approval's arguments name the client's company
 	bool key_registered = false;   ///< the client's key is in the server's approver list (declared)
-	bool key_in_allow_list = false; ///< the client's key is in that company's allow list (derived from the game)
+	bool key_in_allow_list = false; ///< the client's key is in that company's allow list: told to the asker, never enough to approve
 	bool injecting = false;        ///< the line came from injected UI input, not the person
 };
 
@@ -446,8 +446,9 @@ enum class ChatVerdict : uint8_t { Allow, NoSuchApproval, NotPending, Expired, S
 /**
  * Decide whether a client may approve (or deny) an approval from inside the game. A deny withdraws
  * and executes nothing, so it needs only the approval's own company; an approval executes, so it
- * also needs an approver -- a key the server operator registered (declared) or a key of the
- * company's own allow list (derived) -- and the person's own input (never injected UI input).
+ * also needs an approver -- a key the server's operator registered, and only that: a company's allow
+ * list admits whoever plays it, an agent's own client included, so it never makes an approver
+ * (the owner's decision, 2026-11-22, ADR 0038) -- and the person's own input (never injected input).
  */
 inline ChatVerdict DecideChat(const ChatFacts &f, bool approving)
 {
@@ -459,7 +460,7 @@ inline ChatVerdict DecideChat(const ChatFacts &f, bool approving)
 	if (!f.same_company) return ChatVerdict::NotYourCompany;
 	if (!approving) return ChatVerdict::Allow;
 	if (f.injecting) return ChatVerdict::Injected;
-	if (!f.key_registered && !f.key_in_allow_list) return ChatVerdict::NotAnApprover;
+	if (!f.key_registered) return ChatVerdict::NotAnApprover;
 	return ChatVerdict::Allow;
 }
 
@@ -474,7 +475,7 @@ inline std::string_view ChatVerdictText(ChatVerdict v)
 		case ChatVerdict::ServerOnly: return "it acts beyond one company, so only the server's operator decides it (the panel or the server console)";
 		case ChatVerdict::Spectator: return "a spectator decides nothing; join the company it names";
 		case ChatVerdict::NotYourCompany: return "it is not your company's to decide";
-		case ChatVerdict::NotAnApprover: return "you are not an approver: the server's operator registers you with 'prismatic_mcp approvers add <your client id>' (declared), or your key must be in the company's allow list (derived)";
+		case ChatVerdict::NotAnApprover: return "you are not an approver: only a key the server's operator registered approves ('prismatic_mcp approvers add <your client id>'); playing the company, or being in its allow list, is not enough";
 		case ChatVerdict::Injected: return "it came from injected input, not your own keyboard or mouse";
 	}
 	return "refused";
