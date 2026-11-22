@@ -10,6 +10,7 @@
 #ifdef OTTD_PRISMATIC_MCP_SERVER
 
 #include "../3rdparty/catch2/catch.hpp"
+#include "../core/format.hpp"
 #include "../prismatic_mcp/prismatic_mcp_detail.h"
 #include "../prismatic_mcp/prismatic_mcp_menu.h"
 #include "../prismatic_mcp/prismatic_mcp_ui.h"
@@ -652,6 +653,7 @@ TEST_CASE("Every client tool says whether it changes anything", "[prismatic_mcp]
 	for (const auto &t : PrismaticMCP::View::Tools()) tools.push_back(t);
 	for (const auto &t : PrismaticMCP::UI::Tools()) tools.push_back(t);
 	for (const auto &t : PrismaticMCP::Menu::Tools()) tools.push_back(t);
+	tools.push_back(ReadManyTool());
 	REQUIRE_FALSE(tools.empty());
 	for (const auto &t : tools) {
 		INFO(t["name"].get<std::string>());
@@ -659,6 +661,52 @@ TEST_CASE("Every client tool says whether it changes anything", "[prismatic_mcp]
 		CHECK(t["annotations"].contains("readOnlyHint"));
 		CHECK(t["annotations"]["readOnlyHint"].is_boolean());
 	}
+}
+
+TEST_CASE("Several resources at one tick: the call is bounded, and a bad uri fails only its own entry", "[prismatic_mcp]")
+{
+	auto known = [](const std::string &u) { return u == "openttd://towns" || u == "openttd://map"; };
+
+	/* The tool reads only, and its schema says the cap and the scheme the plan enforces. */
+	json tool = ReadManyTool();
+	CHECK(tool["name"] == "openttd.resources.read_many");
+	CHECK(tool["annotations"]["readOnlyHint"] == true);
+	CHECK(tool["inputSchema"]["required"] == json::array({"uris"}));
+	CHECK(tool["inputSchema"]["properties"]["uris"]["maxItems"] == READ_MANY_MAX_URIS);
+	CHECK(tool["inputSchema"]["properties"]["uris"]["minItems"] == 1);
+
+	/* Malformed arguments refuse the whole call, before anything is read. */
+	for (const json &bad : {json::object(), json::array(), json{{"uris", "openttd://towns"}}, json{{"uris", json::array()}}}) {
+		INFO(bad.dump());
+		ReadManyPlan p = PlanReadMany(bad, known);
+		CHECK_FALSE(p.error.empty());
+		CHECK(p.entries.empty());
+	}
+
+	/* The cap: exactly READ_MANY_MAX_URIS is planned, one more is refused as a whole. */
+	json at_cap = {{"uris", json::array()}};
+	for (size_t i = 0; i < READ_MANY_MAX_URIS; i++) at_cap["uris"].push_back(fmt::format("openttd://x{}", i));
+	ReadManyPlan full = PlanReadMany(at_cap, known);
+	CHECK(full.error.empty());
+	CHECK(full.entries.size() == READ_MANY_MAX_URIS);
+	at_cap["uris"].push_back("openttd://towns");
+	ReadManyPlan over = PlanReadMany(at_cap, known);
+	CHECK(over.error.find("at most") != std::string::npos);
+	CHECK(over.entries.empty());
+
+	/* Per entry, in the order asked: known ones are read; the rest say why, and the call still goes on. */
+	json args = {{"uris", json::array({"openttd://towns", "openttd://nope", 7, "https://example.com/", "openttd://map", "openttd://towns"})}};
+	ReadManyPlan p = PlanReadMany(args, known);
+	REQUIRE(p.error.empty());
+	REQUIRE(p.entries.size() == 6);
+	CHECK(p.entries[0].uri == "openttd://towns");
+	CHECK(p.entries[0].error.empty());
+	CHECK(p.entries[1].error == "unknown resource uri");
+	CHECK(p.entries[2].uri == "7");
+	CHECK(p.entries[2].error == "not a string");
+	CHECK(p.entries[3].error == "only openttd:// resources");
+	CHECK(p.entries[4].error.empty());
+	CHECK(p.entries[5].error.starts_with("duplicate"));
 }
 
 TEST_CASE("The approval state machine binds to the tool and canonical args, executes once, refuses replay, changed args and another tool", "[prismatic_mcp]")

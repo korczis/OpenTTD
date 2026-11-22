@@ -85,7 +85,7 @@ function PrismaticAI::InvestSurplus(b) {
 	local best = null, best_ppv = 0;
 	foreach (k, r in routes) {
 		if (r.judged == 0 || r.count >= ((r.type == AIVehicle.VT_AIR) ? b.invest_air_cap : b.invest_road_cap)) continue;
-		/* A rich cap (growth.nut) above what the airports hold would only jam them. */
+		/* A rich cap (rich.nut) above what the airports hold would only jam them. */
 		if (r.type == AIVehicle.VT_AIR && !PrismaticAI.RouteHasAirRoom(r.sample)) continue;
 		/* At most as many unjudged vehicles (under a year old) as judged ones: the profit per vehicle
 		 * counts only the judged, so it does not fall as vehicles are added, and without this GA

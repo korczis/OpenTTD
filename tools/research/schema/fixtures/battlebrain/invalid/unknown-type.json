@@ -1,0 +1,36 @@
+{
+ "case": "a type outside the closed set",
+ "expect": "invalid_field",
+ "value": {
+  "at": {
+   "date": "1961-01-01",
+   "tick": 74000
+  },
+  "body": {
+   "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "max_age_days": 31,
+   "sources": [
+    {
+     "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "uri": "openttd://world/graph"
+    },
+    {
+     "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "uri": "openttd://companies"
+    }
+   ]
+  },
+  "id": "bb:6511d6bed9491487918f525e1e3688561c1f7ba9bcc891e48376994daf50948b",
+  "producer": {
+   "id": "mcp-panel",
+   "version": "fixture"
+  },
+  "schema": "battlebrain-record/v1",
+  "scope": {
+   "company": 1,
+   "instance": "research-fixture"
+  },
+  "status": "current",
+  "type": "plan"
+ }
+}

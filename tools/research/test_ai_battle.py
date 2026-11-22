@@ -7,9 +7,10 @@ Run: python3 -B tools/research/test_ai_battle.py
 Covered: the referee line parser and company-id mapping, the match status contract (exit 0 and the
 final-year report), scoring and its exclusions, the replay comparison, the console start script
 (double quotes, settings), tick arithmetic, the record validator, the derived Markdown and README
-region, the tar export that strips a directory's parents, the run guards (probe parsing on
-macOS, Linux and garbage, the PAUSED marker, the STOP file, the resource floor, the ORCHESTRATOR
-file and the match's owner marker) and the records a commit can hold (git index in a hook).
+region, the ablation validator and its derived page with charts, the tar export that strips a
+directory's parents, the run guards (probe parsing on macOS, Linux and garbage, the PAUSED marker,
+the STOP file, the resource floor, the ORCHESTRATOR file and the match's owner marker) and the
+records a commit can hold (git index in a hook).
 """
 import importlib.util
 import io
@@ -890,6 +891,88 @@ class Records(unittest.TestCase):
 def redirect():
     import contextlib
     return contextlib.redirect_stdout(io.StringIO())
+
+
+def ablation(**over):
+    rows = [{"variant": v, "settings": s, "exit_code": 0, "value": value, "money": 1, "vehicles": rail + road + air,
+             "rail": rail, "road": road, "air": air, "errors": 0, "field_best": best, "t": "1970-01"}
+            for v, s, value, best, rail, road, air in (("off", "x=0", 2000000, 8000000, 4, 10, 6),
+                                                       ("on+x", "x=1", 3000000, 6000000, 9, 2, 5),
+                                                       ("worse", "x=2", 1500000, 0, 1, 1, 1))]
+    for r, vs in zip(rows, battle.ablation_vs_first(rows)):
+        r["vs_first"] = vs
+    rec = {"schema": battle.ABLATION_SCHEMA, "id": "ablation-20261119T000000-seed7",
+           "generated_at": "2026-11-19T00:00:00+00:00", "seed": 7, "years": 10, "field": ["F1", "F2"],
+           "match_cfg": dict(MC, years=10), "rev": "b" * 40, "tree_dirty": False, "rows": rows}
+    rec.update(over)
+    return rec
+
+
+class Ablations(unittest.TestCase):
+    NAME = "ablation-20261119T000000-seed7.json"
+
+    def test_valid_ablation_passes_and_a_forged_ratio_or_twin_variant_is_refused(self):
+        self.assertEqual(battle.validate_ablation(ablation(), self.NAME), [])
+        rec = ablation()
+        rec["rows"][1]["vs_first"] += 0.01
+        rec["rows"][2]["variant"] = "off"
+        errs = "\n".join(battle.validate_ablation(rec, self.NAME))
+        self.assertIn("vs_first is not derived", errs)
+        self.assertIn("named twice", errs)
+        self.assertTrue(battle.validate_ablation(ablation(rows=[]), self.NAME))
+        self.assertTrue(battle.validate_ablation(ablation(), "ablation-other.json"))
+        self.assertTrue(battle.validate_ablation(ablation(schema="x"), self.NAME))
+
+    def test_the_page_charts_every_variant_after_its_table(self):
+        rec = ablation()
+        md = battle.render_ablation_md(rec)
+        a, b = md.index(battle.ABLATION_CHARTS_BEGIN), md.index(battle.ABLATION_CHARTS_END)
+        charts = md[a:b]
+        self.assertLess(md.index("| Variant | Value |"), a)
+        self.assertEqual(charts.count("```mermaid"), 4)
+        page = f"{rec['id']}.md"
+        # Each bar opens its variant's row; a "+" in a name is quoted in the query.
+        self.assertIn(f"%% links: {page}?col=Variant&filter=off | {page}?col=Variant&filter=on%2Bx | "
+                      f"{page}?col=Variant&filter=worse", charts)
+        self.assertIn("%% series: Final value | Best opponent", charts)
+        self.assertIn("    bar [2000000, 3000000, 1500000]\n    line [8000000, 6000000, 0]", charts)
+        self.assertIn("    bar [0, 50, -25]", charts)                 # change against "off", in %
+        self.assertIn("    bar [25, 50, 0]", charts)                  # share of the best opponent
+        self.assertIn("%% series: Rail | Road | Air\n", charts)
+        self.assertIn("Spread between them: 100.0% of the lowest", charts)
+        self.assertIn("lowest: worse (-25.0%)", charts)
+        self.assertNotIn("e+", charts)                                 # plain digits only
+        region = md[a:b + len(battle.ABLATION_CHARTS_END)]
+        self.assertEqual(battle.render_ablation_md(rec, charts=False), md.replace("\n" + region + "\n", ""))
+
+    def test_render_rewrites_a_stale_ablation_page_and_check_fails_until_it_does(self):
+        import contextlib
+        import os
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp).resolve()
+            rec = ablation()
+            (d / f"{rec['id']}.json").write_text(json.dumps(rec))
+            page = d / f"{rec['id']}.md"
+            page.write_text("hand-edited\n")
+            readme = d / "README.md"
+            readme.write_text(f"x\n{battle.render_region(None)}\n")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            err = io.StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(battle, "RESULTS_DIR", d), mock.patch.object(battle, "README", readme), \
+                    mock.patch.object(battle, "REPO", d), redirect(), contextlib.redirect_stderr(err):
+                self.assertEqual(battle.cmd_check(), 11)
+                self.assertIn(f"{page.name}: not derived from {rec['id']}.json", err.getvalue())
+                self.assertEqual(battle.cmd_render(), 0)
+                self.assertEqual(page.read_text(), battle.render_ablation_md(rec))
+                self.assertEqual(battle.cmd_check(), 0)
+                before = page.stat().st_mtime_ns
+                self.assertEqual(battle.cmd_render(), 0)   # current: nothing is written again
+                self.assertEqual(page.stat().st_mtime_ns, before)
+                rec["rows"][0]["vs_first"] = 0.5            # a forged record is a contract failure
+                (d / f"{rec['id']}.json").write_text(json.dumps(rec))
+                self.assertEqual(battle.cmd_check(), 10)
 
 
 class Export(unittest.TestCase):

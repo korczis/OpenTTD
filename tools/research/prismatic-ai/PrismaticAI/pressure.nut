@@ -8,7 +8,7 @@
  * vehicles with a company value of 4.3M and 3.7M idle in the bank, while AAAHogEx ran 562 vehicles
  * at a value of 11.7M (2.7 times ours). The owner: limits must change dynamically; it is not
  * acceptable that other AIs build, improve and modernize while ours does not. Rich growth
- * (growth.nut) lifts the caps that ran out once the bank holds rich_budgets line budgets (default
+ * (rich.nut) lifts the caps that ran out once the bank holds rich_budgets line budgets (default
  * ten); it does not look
  * at the rivals, and InvestSurplus (fleet.nut) still wanted every route to earn a third of a
  * vehicle's price per vehicle and stopped at six road vehicles or planes per route.
@@ -32,7 +32,7 @@
  * - invest_ppv_div +1: a route gets one more vehicle while its vehicles earn price / div a year,
  *   so a larger divisor asks less of it (3 -> 4, 5, 6);
  * - invest_road_cap and invest_air_cap + PRESSURE_CAP_STEP: more vehicles per route (planes still
- *   only while every airport of the route has room, growth.nut AirportHasRoom);
+ *   only while every airport of the route has room, rich.nut AirportHasRoom);
  * - air_routes_max + PRESSURE_AIR_ROUTES_STEP;
  * - air_add_waiting, if off (0), PRESSURE_AIR_WAITING: a plane more while both airports have
  *   passengers waiting (fleet.nut);

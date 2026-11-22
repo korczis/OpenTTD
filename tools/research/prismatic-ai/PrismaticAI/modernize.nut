@@ -265,7 +265,7 @@ function PrismaticAI::AcceptPreviews() {
 	}
 }
 
-/* Not rich (growth.nut): the bot's own replacement rules are lifted, so money that is not idle
+/* Not rich (rich.nut): the bot's own replacement rules are lifted, so money that is not idle
  * is not spent on replacing working vehicles. In the headless fitness match (seed 930967890, solo-max
  * lineup) modernizing on every budget cost 22% of the final value in six years: a replacement costs
  * a new vehicle's full price and pays back over its life. A rule someone else set stays. */

@@ -132,7 +132,7 @@ function PrismaticAI::SelfSteward() {
 }
 
 /* How many own lines the bot may plan: own_lines, or up to STEWARD_OWN_LINES_MAX with self_steward
- * once the bank (not the loan) holds `reinvest_budgets` line budgets. A rich bot (growth.nut) has no
+ * once the bank (not the loan) holds `reinvest_budgets` line budgets. A rich bot (rich.nut) has no
  * cap but money and own_fail_pause: on the owner's map 27 of 32 tries were spent by 1958 with 3.7M
  * idle. */
 function PrismaticAI::OwnLinesCap(b, money) {

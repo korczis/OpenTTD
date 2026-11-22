@@ -37,6 +37,9 @@ mod panel;
 mod panel_bot;
 #[path = "../panel_play.rs"]
 mod panel_play;
+#[allow(dead_code)]
+#[path = "../battlebrain_contract.rs"]
+mod battlebrain_contract;
 #[path = "../panel_decision.rs"]
 mod panel_decision;
 #[path = "../panel_mesh.rs"]

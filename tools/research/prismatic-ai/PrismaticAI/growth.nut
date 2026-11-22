@@ -1,108 +1,279 @@
 /*
- * Rich growth (RESEARCH-ONLY; setting rich_growth, default 1): money the bot holds and cannot spend
- * lifts the caps that ran out, instead of piling up in the bank.
+ * Growing stations (RESEARCH-ONLY): a busy rail line's platforms get longer, so its trains get longer.
  *
- * The incident: in the owner's live co-play game (2026-11-22, seed 20261122, company 0, a planned
- * bot: nine planner freight lines and a rail pair) the fleet stayed at 35-37 vehicles from 1955 to
- * 1960 while the bank balance rose from 0.6M to 3.77M. Every growth sink had hit a limit that money
- * never moved:
- * - air: every route ran invest_air_cap (6) planes, 539 passengers waited at one airport, and the
- *   pool of fresh town pairs was empty (foreign_airports marked 18 of 25 towns, air_reuse=0 left out
- *   our own 7);
- * - own freight lines: NextOwnFreightLine wants a producer nobody transports from, and with eight
- *   companies on a 256x256 map none was left after 1958; one farm with no station site took five of
- *   own_fail_pause's six tries in January 1957, one per acceptor;
- * - road: routes 23 >= max_routes 4, because air and rail routes count too, and a planned bot does
- *   not get the autopilot's floors.
+ * PlatformPlan (rail.nut) sizes a terminus by the supply when the line is built, usually 2 to 3 tiles
+ * and 5 wagons. Served industries grow, and AAAHogEx runs long trains on long platforms. In the battle,
+ * 4-tile platforms from the start beat the derived length in 9 of 9 replayed matches (+13.5%
+ * geometric), while 7 tiles from the start lost 8%: length pays where the cargo is, not everywhere.
+ * So a line grows its platforms one tile at a time, only while it earns, its trains are already as
+ * long as the platforms take, and a full trainload still waits.
  *
- * Rich means the bank holds rich_budgets line budgets. Then (Behaviour, main.nut): max_routes
- * is at least the autopilot's, air_reuse is on (a new route may start at an airport we already
- * have), invest_air_cap rises by one plane per rich_air_money above the threshold up to
- * rich_air_cap_max, own lines have no cap but own_fail_pause and money (steward.nut OwnLinesCap),
- * and NextOwnFreightLine (rail.nut) also takes producers others serve poorly (below
- * rich_served_below percent), within a wider distance window (rich_min_tiles to rich_max_tiles).
- * Planes are added only while every airport of the route has room (AirportHasRoom, scaled by
- * airport_fill): a small airport jams long before thirty planes. StayAfloat, BuildFrozen and
- * RepaySurplus (main.nut) are untouched: rich growth spends only money above the threshold.
+ * Growth adds one station tile behind the dead end of every platform of the line, at both ends,
+ * joined to the same station (AIRail.BuildRailStation with the station's id), so a platform stays
+ * one platform. A depot standing behind a platform moves one tile back when no vehicle is inside it.
+ * The new tiles are tried in test mode at both ends first, so a line never ends up with platforms of
+ * two lengths. Only stations that load and unload grow: an idle station costs its town rating.
  *
- * Every number is an AI setting (info.nut, CONFIG_INGAME), read at every heartbeat, so Rhai
- * policies, openttd.ai.set_setting and the battle's genetic algorithm steer them live. The values
- * the incident above led to (10 line budgets, since lowered to 5 so the bot spends below the fitness hoards floor, one plane per 250000, at most 30 planes, served below
- * 60%, 80-320 tiles, airports filled to 100%) are now the settings' defaults.
+ * Setting rail_grow_max: the longest platform growth makes (0: off), never beyond the game's
+ * vehicle.max_train_length and station.station_spread.
  */
 
-/* Rich: the producer share and distance window NextOwnFreightLine (rail.nut, no `b` there) reads.
- * Globals, not consts: ApplyRich assigns them from b.rich_served_below, b.rich_min_tiles and
- * b.rich_max_tiles at every heartbeat; the initial values are the settings' defaults. */
-RICH_SERVED_BELOW <- 60;
-RICH_MIN_TILES <- 80;
-RICH_MAX_TILES <- 320;
-/* The percent of AirportPlanesMax an airport is filled to (AirportHasRoom, static and called from
- * fleet.nut without `b`): ApplyRich assigns it from b.airport_fill at every heartbeat. */
-AIRPORT_FILL <- 100;
-/* This heartbeat's Behaviour().rich, for the static helpers that have no `b` (rail.nut, fleet.nut,
- * modernize.nut): every mechanism of this change acts only while money is idle, so a bot that is
- * not rich plays, and is timed, as before it (the fitness and ablation matches of 2026-11-22). */
-RICH_NOW <- false;
-
-/* Whether `money` makes the bot rich under the behaviour `b` (rich_growth on). */
-function PrismaticAI::Rich(b, money) {
-	return b.rich_growth == 1 && money >= b.rich_budgets * b.line_budget;
+/* The new tiles behind the dead ends of a station record's platforms (rail.nut TerminusGeometry
+ * `backs`: [tile behind, platform end]), with the tile beyond each one for a moved depot. */
+function PrismaticAI::GrowthTiles(st) {
+	local out = [];
+	if (!("backs" in st)) return out;
+	foreach (b in st.backs) out.push({tile = b[0], beyond = b[0] + (b[0] - b[1]), end = b[1]});
+	return out;
 }
 
-/* Planes per air route when rich: invest_air_cap plus one per b.rich_air_money above the
- * threshold, at most b.rich_air_cap_max (never below invest_air_cap). */
-function PrismaticAI::RichAirCap(b, money) {
-	local above = max(0, money - b.rich_budgets * b.line_budget);
-	local per = max(1, b.rich_air_money);
-	return min(max(b.invest_air_cap, b.rich_air_cap_max), max(b.invest_air_cap, b.invest_air_cap + 1 + above / per));
+/* The smallest index among `tiles` (a rectangle's corner for AIRail.BuildRailStation). */
+function PrismaticAI::MinTile(tiles) {
+	local m = tiles[0].tile;
+	foreach (t in tiles) if (t.tile < m) m = t.tile;
+	return m;
 }
 
-/* The planes one airport of `type` serves before it jams: its hangars and terminals by the game's
- * default layouts, about two planes per terminal and the hangar, scaled by AIRPORT_FILL percent
- * (setting airport_fill; at least one plane). Unknown types count as small. */
-function PrismaticAI::AirportPlanesMax(type) {
-	local base = 8;
-	if (type == AIAirport.AT_INTERNATIONAL || type == AIAirport.AT_INTERCON) base = 24;
-	else if (type == AIAirport.AT_METROPOLITAN) base = 18;
-	else if (type == AIAirport.AT_LARGE) base = 14;
-	else if (type == AIAirport.AT_COMMUTER) base = 10;
-	return max(1, base * AIRPORT_FILL / 100);
-}
-
-/* Whether the airport station `st` takes one plane more: fewer aircraft call there (every route)
- * than AirportPlanesMax of its type. A station that is no airport always has room. */
-function PrismaticAI::AirportHasRoom(st) {
-	local tile = AIStation.GetLocation(st);
-	if (!AIAirport.IsAirportTile(tile)) return true;
-	local planes = 0;
-	foreach (v, _ in AIVehicleList_Station(st)) {
-		if (AIVehicle.GetVehicleType(v) == AIVehicle.VT_AIR) planes++;
-	}
-	return planes < PrismaticAI.AirportPlanesMax(AIAirport.GetAirportType(tile));
-}
-
-/* Whether every airport in the orders of plane `v` has room for one more (AirportHasRoom). */
-function PrismaticAI::RouteHasAirRoom(v) {
-	if (!RICH_NOW) return true; /* below the rich caps no route outgrows its airports */
-	for (local i = 0; i < AIOrder.GetOrderCount(v); i++) {
-		local st = AIStation.GetStationID(AIOrder.GetOrderDestination(v, i));
-		if (AIStation.IsValidStation(st) && !PrismaticAI.AirportHasRoom(st)) return false;
-	}
+/* Whether no vehicle stands in `depot`. */
+function PrismaticAI::DepotEmpty(depot) {
+	local list = AIVehicleList();
+	list.Valuate(AIVehicle.GetLocation);
+	list.KeepValue(depot);
+	foreach (v, _ in list) if (AIVehicle.IsInDepot(v)) return false;
 	return true;
 }
 
-/* Applies rich growth to the behaviour `b` (main.nut Behaviour), for the bank balance `money`. */
-function PrismaticAI::ApplyRich(b, money) {
-	/* The statics rail.nut and fleet.nut read without `b` follow the settings at every heartbeat. */
-	::RICH_SERVED_BELOW = b.rich_served_below;
-	::RICH_MIN_TILES = b.rich_min_tiles;
-	::RICH_MAX_TILES = max(b.rich_min_tiles, b.rich_max_tiles);
-	::AIRPORT_FILL = b.airport_fill;
-	b.rich <- PrismaticAI.Rich(b, money);
-	::RICH_NOW = b.rich;
-	if (!b.rich) return;
-	b.max_routes = max(b.max_routes, AUTOPILOT_MAX_ROUTES);
-	b.air_reuse = 1;
-	b.invest_air_cap = PrismaticAI.RichAirCap(b, money);
+/* The longest platform the game allows growth to: rail_grow_max, the train length limit and the
+ * station spread. */
+function PrismaticAI::GrowCap(b) {
+	local cap = b.rail_grow_max;
+	if (AIGameSettings.IsValid("vehicle.max_train_length")) cap = min(cap, AIGameSettings.GetValue("vehicle.max_train_length"));
+	if (AIGameSettings.IsValid("station.station_spread")) cap = min(cap, AIGameSettings.GetValue("station.station_spread"));
+	return cap;
+}
+
+/* Lengthens `line`'s platforms by one tile at both ends. Returns null when it did, else why not. */
+function PrismaticAI::GrowLine(line) {
+	local plan = [];
+	foreach (st in line.stations) {
+		local tiles = PrismaticAI.GrowthTiles(st);
+		if (tiles.len() == 0) return "no dead ends recorded";
+		local id = AIStation.GetStationID(st.tile);
+		if (!AIStation.IsValidStation(id)) return "station gone";
+		local axis = (st.step == 1) ? AIRail.RAILTRACK_NE_SW : AIRail.RAILTRACK_NW_SE;
+		plan.push({st = st, tiles = tiles, id = id, axis = axis});
+	}
+	/* A depot in the way moves; one with a vehicle inside stops the growth. */
+	local depot_moves = [];
+	foreach (p in plan) {
+		foreach (t in p.tiles) {
+			if (t.tile == line.depot) {
+				if (!PrismaticAI.DepotEmpty(line.depot)) return "a vehicle is in the depot behind a platform";
+				depot_moves.push(t);
+			} else if (!AITile.IsBuildable(t.tile)) {
+				return "tile " + t.tile + " behind a platform is not buildable" + (AIRail.IsRailDepotTile(t.tile) ? " (another depot)" : (AIRail.IsRailTile(t.tile) ? " (track)" : ""));
+			}
+		}
+	}
+	{
+		local test = AITestMode();
+		foreach (p in plan) {
+			local rows = p.tiles.len();
+			/* The depot tile is not buildable in test mode; test the other rows only then. */
+			local free = [];
+			foreach (t in p.tiles) if (t.tile != line.depot) free.push(t);
+			if (free.len() == 0) continue;
+			if (free.len() == rows && !AIRail.BuildRailStation(PrismaticAI.MinTile(free), p.axis, rows, 1, p.id)) return "test refused: " + AIError.GetLastErrorString();
+		}
+	}
+	foreach (t in depot_moves) AITile.DemolishTile(t.tile);
+	local done = [];
+	foreach (p in plan) {
+		if (!AIRail.BuildRailStation(PrismaticAI.MinTile(p.tiles), p.axis, p.tiles.len(), 1, p.id)) {
+			AILog.Warning("PrismaticAI: growing the platforms at tile " + p.st.tile + " refused: " + AIError.GetLastErrorString());
+			foreach (q in done) AIRail.RemoveRailStationTileRectangle(PrismaticAI.MinTile(q.tiles), PrismaticAI.MinTile(q.tiles) + (q.tiles.len() - 1) * (q.st.step == 1 ? AIMap.GetMapSizeX() : 1), false);
+			foreach (t in depot_moves) AIRail.BuildRailDepot(t.tile, t.end);
+			return "refused: " + AIError.GetLastErrorString();
+		}
+		done.push(p);
+	}
+	/* The records follow: new dead ends, a longer rectangle, the depot behind its new end. */
+	foreach (p in plan) {
+		local backs = [];
+		foreach (t in p.tiles) backs.push([t.beyond, t.tile]);
+		p.st.backs = backs;
+		local r = p.st.platform_rect;
+		local lo = min(min(r[0], r[1]), PrismaticAI.MinTile(p.tiles));
+		local hi = r[0], far = r[1];
+		foreach (t in p.tiles) if (t.tile > far) far = t.tile;
+		hi = max(max(r[0], r[1]), far);
+		p.st.platform_rect = [lo, hi];
+		p.st.len <- (("len" in p.st) ? p.st.len : line.len) + 1;
+	}
+	foreach (t in depot_moves) {
+		if (AIRail.BuildRailDepot(t.beyond, t.tile)) {
+			line.depot = t.beyond;
+		} else {
+			local d = null;
+			foreach (st in line.stations) { d = PrismaticAI.BuildRailDepotBehind(st); if (d != null) break; }
+			if (d != null) line.depot = d;
+			else AILog.Warning("PrismaticAI: line " + line.label + " lost its depot while its platforms grew");
+		}
+	}
+	line.len++;
+	if ("wagons_fit" in line) delete line.wagons_fit;
+	return null;
+}
+
+/* Once a game month, at most one line grows: the one with the most cargo waiting per trainload among
+ * those that earn, run trains as long as their platforms and still leave a full trainload waiting. */
+function PrismaticAI::GrowPlatforms(b) {
+	if (!("rail_grow_max" in b) || b.rail_grow_max <= 0) return;
+	local cap = PrismaticAI.GrowCap(b);
+	local money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
+	if (money < b.cash_reserve + 20000) return;
+	local best = null, best_loads = 1.0;
+	foreach (i, line in RAIL_LINES) {
+		if (line.closed || line.len >= cap || !("stations" in line) || line.stations.len() != 2) continue;
+		if (("len_cap" in line) && line.len >= line.len_cap) continue;
+		local s = this.LineStats(line);
+		if (s.trains == 0 || s.capacity <= 0 || s.profit_last <= 0) continue;
+		local fit = ("wagons_fit" in line) ? line.wagons_fit : s.wagons;
+		if (s.wagons < fit) continue;
+		local loads = PrismaticAI.LineWaiting(line).tofloat() * s.trains / s.capacity.tofloat();
+		if (loads >= best_loads) { best_loads = loads; best = [i, line]; }
+	}
+	if (best == null) return;
+	local line = best[1];
+	local slot = best[0] + 1;
+	local why = PrismaticAI.GrowLine(line);
+	if (why == null) {
+		AILog.Info("PrismaticAI: grew the platforms of rail line " + slot + " (" + line.label + ") to " + line.len +
+			" tiles: " + best_loads + " trainloads waiting, trains at full length");
+		AILog.Info(PrismaticAI.LineRecord(slot, line));
+		/* The point of the longer platform: every train of the line takes the wagons it now holds at
+		 * once (lines.nut resizes them in the depot), rather than waiting for the steward's lengthen
+		 * rule, which a second train added meanwhile kept from firing. */
+		local cur = this.self_targets.rawin(slot) ? this.self_targets[slot] : { trains = -1, wagons = -1 };
+		this.self_targets[slot] <- { trains = cur.trains, wagons = line.wagons_fit };
+		AILog.Info("PrismaticAI: self-steward line " + slot + " (" + line.label + "): lengthen to " + line.wagons_fit + " wagons after the platforms grew");
+	} else {
+		AILog.Info("PrismaticAI: rail line " + slot + " (" + line.label + ") cannot grow its platforms at " + line.len + " tiles: " + why);
+		line.len_cap <- line.len;
+	}
+}
+
+/*
+ * Feeding a station from more sources (setting rail_feed): one station serves several industries.
+ *
+ * A producing industry of a line's cargo that nobody serves and that lies within reach of the line's
+ * source station gets a single rail station tile beside it, joined to that station
+ * (AIRail.BuildRailStation with the station's id; station.distant_join_stations). The tile carries no
+ * track: it only puts the industry into the station's catchment, so its cargo waits at the line's
+ * platforms and the line's trains take it, after AAAHogEx's catchment ring around airports
+ * (catchment.nut). Only a line that earns grows its sources, one industry a game month, at most
+ * rail_feed per line. It is the station side of multi-source lines: the planner (rail.nut) decides
+ * which line a cluster feeds; JoinSourceToStation does the building.
+ */
+
+/* Joins `industry` into the catchment of the station at `st_tile` with one station tile, and returns
+ * that tile or null. */
+function PrismaticAI::JoinSourceToStation(st_tile, industry, cargo) {
+	local id = AIStation.GetStationID(st_tile);
+	if (!AIStation.IsValidStation(id) || !AIIndustry.IsValidIndustry(industry)) return null;
+	if (AIGameSettings.IsValid("station.distant_join_stations") && AIGameSettings.GetValue("station.distant_join_stations") == 0) return null;
+	local spread = AIGameSettings.IsValid("station.station_spread") ? AIGameSettings.GetValue("station.station_spread") : 12;
+	local box = PrismaticAI.RailStationBox(id);
+	local tiles = AITileList_IndustryProducing(industry, AIStation.GetCoverageRadius(AIStation.STATION_TRAIN));
+	tiles.Valuate(AITile.IsBuildable);
+	tiles.KeepValue(1);
+	tiles.Valuate(PrismaticAI.FitsSpread, 1, 1, box, spread);
+	tiles.KeepValue(1);
+	/* Nearest to the station first, so the station's sign stays where its platforms are. */
+	tiles.Valuate(AITile.GetDistanceManhattanToTile, st_tile);
+	tiles.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
+	local tried = 0;
+	foreach (t, _ in tiles) {
+		if (tried++ >= 12) break;
+		if (AITile.GetSlope(t) != AITile.SLOPE_FLAT) continue;
+		if (AITile.GetCargoProduction(t, cargo, 1, 1, AIStation.GetCoverageRadius(AIStation.STATION_TRAIN)) <= 0) continue;
+		foreach (axis in [AIRail.RAILTRACK_NE_SW, AIRail.RAILTRACK_NW_SE]) {
+			if (AIRail.BuildRailStation(t, axis, 1, 1, id)) return t;
+		}
+	}
+	return null;
+}
+
+function PrismaticAI::FeedStations(b) {
+	if (!("rail_feed" in b) || b.rail_feed <= 0) return;
+	if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) < b.cash_reserve + 10000) return;
+	local reach = AIGameSettings.IsValid("station.station_spread") ? AIGameSettings.GetValue("station.station_spread") : 12;
+	reach += AIStation.GetCoverageRadius(AIStation.STATION_TRAIN);
+	foreach (i, line in RAIL_LINES) {
+		if (line.closed || !("from" in line)) continue;
+		if (!("fed" in line)) line.fed <- {};
+		if (line.fed.len() >= b.rail_feed) continue;
+		local s = this.LineStats(line);
+		if (s.trains == 0 || s.profit_last <= 0) continue;
+		local best = null, best_prod = 0;
+		foreach (p, _ in AIIndustryList_CargoProducing(line.cargo)) {
+			if (p == line.from || line.fed.rawin(p) || AIIndustry.IsBuiltOnWater(p)) continue;
+			if (AIIndustry.GetDistanceManhattanToTile(p, line.a) > reach) continue;
+			if (AIIndustry.GetLastMonthTransported(p, line.cargo) > 0) continue;
+			local prod = AIIndustry.GetLastMonthProduction(p, line.cargo);
+			if (prod > best_prod) { best_prod = prod; best = p; }
+		}
+		if (best == null) continue;
+		line.fed[best] <- true;
+		local t = PrismaticAI.JoinSourceToStation(line.a, best, line.cargo);
+		if (t != null) {
+			AILog.Info("PrismaticAI: rail line " + (i + 1) + " (" + line.label + ") now also takes " + AICargo.GetCargoLabel(line.cargo) +
+				" from " + AIIndustry.GetName(best) + " (" + best_prod + " a month) through a station tile at " + t);
+		} else {
+			AILog.Info("PrismaticAI: rail line " + (i + 1) + " (" + line.label + "): no station tile reaches " + AIIndustry.GetName(best));
+		}
+		return;
+	}
+}
+
+/* The production of the `feed` largest unserved producers of `cargo` near industry `p`, close enough
+ * that a station at p can join them (station spread plus the catchment radius). */
+function PrismaticAI::ClusterProduction(p, cargo, feed) {
+	local reach = AIGameSettings.IsValid("station.station_spread") ? AIGameSettings.GetValue("station.station_spread") : 12;
+	reach += AIStation.GetCoverageRadius(AIStation.STATION_TRAIN);
+	local prods = [];
+	foreach (q, _ in AIIndustryList_CargoProducing(cargo)) {
+		if (q == p || AIIndustry.IsBuiltOnWater(q)) continue;
+		if (AIIndustry.GetDistanceManhattanToTile(q, AIIndustry.GetLocation(p)) > reach) continue;
+		if (AIIndustry.GetLastMonthTransported(q, cargo) > 0) continue;
+		prods.push(AIIndustry.GetLastMonthProduction(q, cargo));
+	}
+	prods.sort(function(a, b) { return b - a; });
+	local sum = 0;
+	for (local i = 0; i < min(feed, prods.len()); i++) sum += prods[i];
+	return sum;
+}
+
+/* Right after a line is built: join up to `feed` unserved producers of its cargo near its source
+ * station into that station (JoinSourceToStation). */
+function PrismaticAI::FeedNewLine(slot, feed) {
+	local line = RAIL_LINES[slot - 1];
+	if (!("from" in line)) return;
+	if (!("fed" in line)) line.fed <- {};
+	local reach = AIGameSettings.IsValid("station.station_spread") ? AIGameSettings.GetValue("station.station_spread") : 12;
+	reach += AIStation.GetCoverageRadius(AIStation.STATION_TRAIN);
+	local cands = AIIndustryList_CargoProducing(line.cargo);
+	cands.Valuate(AIIndustry.GetDistanceManhattanToTile, line.a);
+	cands.KeepBelowValue(reach + 1);
+	cands.RemoveItem(line.from);
+	cands.Valuate(AIIndustry.GetLastMonthProduction, line.cargo);
+	cands.Sort(AIList.SORT_BY_VALUE, AIList.SORT_DESCENDING);
+	foreach (q, prod in cands) {
+		if (line.fed.len() >= feed) break;
+		if (AIIndustry.IsBuiltOnWater(q) || AIIndustry.GetLastMonthTransported(q, line.cargo) > 0) continue;
+		line.fed[q] <- true;
+		local t = PrismaticAI.JoinSourceToStation(line.a, q, line.cargo);
+		AILog.Info("PrismaticAI: rail line " + slot + " (" + line.label + ") " + (t != null ? "also takes " + AICargo.GetCargoLabel(line.cargo) +
+			" from " + AIIndustry.GetName(q) + " (" + prod + " a month) through a station tile at " + t : "found no station tile reaching " + AIIndustry.GetName(q)));
+	}
 }
