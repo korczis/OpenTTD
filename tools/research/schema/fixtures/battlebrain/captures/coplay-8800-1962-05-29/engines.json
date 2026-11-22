@@ -1,0 +1,1488 @@
+{
+  "availability": "available",
+  "data": {
+    "cargos": [
+      {
+        "freight": false,
+        "id": 0,
+        "mail": false,
+        "name": "Passengers",
+        "passengers": true,
+        "payment": 3185,
+        "transit_periods": [
+          0,
+          24
+        ]
+      },
+      {
+        "freight": true,
+        "id": 1,
+        "mail": false,
+        "name": "Coal",
+        "passengers": false,
+        "payment": 5916,
+        "transit_periods": [
+          7,
+          255
+        ]
+      },
+      {
+        "freight": false,
+        "id": 2,
+        "mail": true,
+        "name": "Mail",
+        "passengers": false,
+        "payment": 4550,
+        "transit_periods": [
+          20,
+          90
+        ]
+      },
+      {
+        "freight": true,
+        "id": 3,
+        "mail": false,
+        "name": "Oil",
+        "passengers": false,
+        "payment": 4437,
+        "transit_periods": [
+          25,
+          255
+        ]
+      },
+      {
+        "freight": true,
+        "id": 4,
+        "mail": false,
+        "name": "Livestock",
+        "passengers": false,
+        "payment": 4322,
+        "transit_periods": [
+          4,
+          18
+        ]
+      },
+      {
+        "freight": true,
+        "id": 5,
+        "mail": false,
+        "name": "Goods",
+        "passengers": false,
+        "payment": 6144,
+        "transit_periods": [
+          5,
+          28
+        ]
+      },
+      {
+        "freight": true,
+        "id": 6,
+        "mail": false,
+        "name": "Grain",
+        "passengers": false,
+        "payment": 4778,
+        "transit_periods": [
+          4,
+          40
+        ]
+      },
+      {
+        "freight": true,
+        "id": 7,
+        "mail": false,
+        "name": "Wood",
+        "passengers": false,
+        "payment": 5005,
+        "transit_periods": [
+          15,
+          255
+        ]
+      },
+      {
+        "freight": true,
+        "id": 8,
+        "mail": false,
+        "name": "Iron Ore",
+        "passengers": false,
+        "payment": 5120,
+        "transit_periods": [
+          9,
+          255
+        ]
+      },
+      {
+        "freight": true,
+        "id": 9,
+        "mail": false,
+        "name": "Steel",
+        "passengers": false,
+        "payment": 5688,
+        "transit_periods": [
+          7,
+          255
+        ]
+      },
+      {
+        "freight": true,
+        "id": 10,
+        "mail": false,
+        "name": "Valuables",
+        "passengers": false,
+        "payment": 7509,
+        "transit_periods": [
+          1,
+          32
+        ]
+      }
+    ],
+    "engines": [
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 0,
+        "cargo": null,
+        "effective_speed_kmh": 64,
+        "id": 0,
+        "intro_year": 1925,
+        "max_speed_kmh": 64,
+        "name": "Kirby Paul Tank (Steam)",
+        "power_hp": 300,
+        "price": 8203,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 45,
+        "running_cost_per_year": 820,
+        "type": "rail",
+        "wagon": false
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 0,
+        "cargo": null,
+        "effective_speed_kmh": 112,
+        "id": 8,
+        "intro_year": 1934,
+        "max_speed_kmh": 112,
+        "name": "Chaney 'Jubilee' (Steam)",
+        "power_hp": 1000,
+        "price": 15234,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 1968,
+        "type": "rail",
+        "wagon": false
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 0,
+        "cargo": null,
+        "effective_speed_kmh": 128,
+        "id": 9,
+        "intro_year": 1935,
+        "max_speed_kmh": 128,
+        "name": "Ginzu 'A4' (Steam)",
+        "power_hp": 1200,
+        "price": 22265,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 83,
+        "running_cost_per_year": 2296,
+        "type": "rail",
+        "wagon": false
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 0,
+        "cargo": null,
+        "effective_speed_kmh": 144,
+        "id": 10,
+        "intro_year": 1954,
+        "max_speed_kmh": 144,
+        "name": "SH '8P' (Steam)",
+        "power_hp": 1600,
+        "price": 25781,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 2132,
+        "type": "rail",
+        "wagon": false
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 76,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 112,
+        "id": 11,
+        "intro_year": 1956,
+        "max_speed_kmh": 112,
+        "name": "Manley-Morel DMU (Diesel)",
+        "power_hp": 600,
+        "price": 12890,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 84,
+        "running_cost_per_year": 1294,
+        "type": "rail",
+        "wagon": false
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 0,
+        "cargo": null,
+        "effective_speed_kmh": 144,
+        "id": 14,
+        "intro_year": 1960,
+        "max_speed_kmh": 144,
+        "name": "UU '37' (Diesel)",
+        "power_hp": 1750,
+        "price": 19921,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 77,
+        "running_cost_per_year": 1828,
+        "type": "rail",
+        "wagon": false
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 40,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 0,
+        "id": 27,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Passenger Carriage",
+        "power_hp": 0,
+        "price": 1447,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 30,
+        "cargo": "Mail",
+        "effective_speed_kmh": 0,
+        "id": 28,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Mail Van",
+        "power_hp": 0,
+        "price": 1335,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 30,
+        "cargo": "Coal",
+        "effective_speed_kmh": 0,
+        "id": 29,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Coal Truck",
+        "power_hp": 0,
+        "price": 1031,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 30,
+        "cargo": "Oil",
+        "effective_speed_kmh": 0,
+        "id": 30,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Oil Tanker",
+        "power_hp": 0,
+        "price": 1171,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 25,
+        "cargo": "Livestock",
+        "effective_speed_kmh": 0,
+        "id": 31,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Livestock Van",
+        "power_hp": 0,
+        "price": 1125,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 25,
+        "cargo": "Goods",
+        "effective_speed_kmh": 0,
+        "id": 32,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Goods Van",
+        "power_hp": 0,
+        "price": 1113,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 30,
+        "cargo": "Grain",
+        "effective_speed_kmh": 0,
+        "id": 33,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Grain Hopper",
+        "power_hp": 0,
+        "price": 1066,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 30,
+        "cargo": "Wood",
+        "effective_speed_kmh": 0,
+        "id": 34,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Wood Truck",
+        "power_hp": 0,
+        "price": 1060,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 30,
+        "cargo": "Iron Ore",
+        "effective_speed_kmh": 0,
+        "id": 35,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Iron Ore Hopper",
+        "power_hp": 0,
+        "price": 1048,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 20,
+        "cargo": "Steel",
+        "effective_speed_kmh": 0,
+        "id": 36,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Steel Truck",
+        "power_hp": 0,
+        "price": 1148,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 20,
+        "cargo": "Valuables",
+        "effective_speed_kmh": 0,
+        "id": 37,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Armoured Van",
+        "power_hp": 0,
+        "price": 1494,
+        "railtypes": [
+          "RAIL"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 45,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 0,
+        "id": 57,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Passenger Carriage",
+        "power_hp": 0,
+        "price": 1447,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 35,
+        "cargo": "Mail",
+        "effective_speed_kmh": 0,
+        "id": 58,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Mail Van",
+        "power_hp": 0,
+        "price": 1335,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 35,
+        "cargo": "Coal",
+        "effective_speed_kmh": 0,
+        "id": 59,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Coal Truck",
+        "power_hp": 0,
+        "price": 1031,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 35,
+        "cargo": "Oil",
+        "effective_speed_kmh": 0,
+        "id": 60,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Oil Tanker",
+        "power_hp": 0,
+        "price": 1171,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 30,
+        "cargo": "Livestock",
+        "effective_speed_kmh": 0,
+        "id": 61,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Livestock Van",
+        "power_hp": 0,
+        "price": 1125,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 30,
+        "cargo": "Goods",
+        "effective_speed_kmh": 0,
+        "id": 62,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Goods Van",
+        "power_hp": 0,
+        "price": 1113,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 35,
+        "cargo": "Grain",
+        "effective_speed_kmh": 0,
+        "id": 63,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Grain Hopper",
+        "power_hp": 0,
+        "price": 1066,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 35,
+        "cargo": "Wood",
+        "effective_speed_kmh": 0,
+        "id": 64,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Wood Truck",
+        "power_hp": 0,
+        "price": 1060,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 35,
+        "cargo": "Iron Ore",
+        "effective_speed_kmh": 0,
+        "id": 65,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Iron Ore Hopper",
+        "power_hp": 0,
+        "price": 1048,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 25,
+        "cargo": "Steel",
+        "effective_speed_kmh": 0,
+        "id": 66,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Steel Truck",
+        "power_hp": 0,
+        "price": 1148,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 25,
+        "cargo": "Valuables",
+        "effective_speed_kmh": 0,
+        "id": 67,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Armoured Van",
+        "power_hp": 0,
+        "price": 1494,
+        "railtypes": [
+          "MONO"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 47,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 0,
+        "id": 89,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Passenger Carriage",
+        "power_hp": 0,
+        "price": 1447,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 37,
+        "cargo": "Mail",
+        "effective_speed_kmh": 0,
+        "id": 90,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Mail Van",
+        "power_hp": 0,
+        "price": 1335,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 37,
+        "cargo": "Coal",
+        "effective_speed_kmh": 0,
+        "id": 91,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Coal Truck",
+        "power_hp": 0,
+        "price": 1031,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 37,
+        "cargo": "Oil",
+        "effective_speed_kmh": 0,
+        "id": 92,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Oil Tanker",
+        "power_hp": 0,
+        "price": 1171,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 32,
+        "cargo": "Livestock",
+        "effective_speed_kmh": 0,
+        "id": 93,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Livestock Van",
+        "power_hp": 0,
+        "price": 1125,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 32,
+        "cargo": "Goods",
+        "effective_speed_kmh": 0,
+        "id": 94,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Goods Van",
+        "power_hp": 0,
+        "price": 1113,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 37,
+        "cargo": "Grain",
+        "effective_speed_kmh": 0,
+        "id": 95,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Grain Hopper",
+        "power_hp": 0,
+        "price": 1066,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 37,
+        "cargo": "Wood",
+        "effective_speed_kmh": 0,
+        "id": 96,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Wood Truck",
+        "power_hp": 0,
+        "price": 1060,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 37,
+        "cargo": "Iron Ore",
+        "effective_speed_kmh": 0,
+        "id": 97,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Iron Ore Hopper",
+        "power_hp": 0,
+        "price": 1048,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 27,
+        "cargo": "Steel",
+        "effective_speed_kmh": 0,
+        "id": 98,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Steel Truck",
+        "power_hp": 0,
+        "price": 1148,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 76,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [],
+        "capacity": 27,
+        "cargo": "Valuables",
+        "effective_speed_kmh": 0,
+        "id": 99,
+        "intro_year": 1925,
+        "max_speed_kmh": 0,
+        "name": "Armoured Van",
+        "power_hp": 0,
+        "price": 1494,
+        "railtypes": [
+          "MGLV"
+        ],
+        "reliability_pct": 89,
+        "running_cost_per_year": 0,
+        "type": "rail",
+        "wagon": true
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 31,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 56,
+        "id": 116,
+        "intro_year": 1929,
+        "max_speed_kmh": 56,
+        "name": "MPS Regal Bus",
+        "price": 4921,
+        "reliability_pct": 93,
+        "running_cost_per_year": 426,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 20,
+        "cargo": "Coal",
+        "effective_speed_kmh": 48,
+        "id": 123,
+        "intro_year": 1935,
+        "max_speed_kmh": 48,
+        "name": "Balogh Coal Truck",
+        "price": 4429,
+        "reliability_pct": 98,
+        "running_cost_per_year": 421,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 22,
+        "cargo": "Mail",
+        "effective_speed_kmh": 48,
+        "id": 126,
+        "intro_year": 1935,
+        "max_speed_kmh": 48,
+        "name": "MPS Mail Truck",
+        "price": 4716,
+        "reliability_pct": 86,
+        "running_cost_per_year": 421,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 21,
+        "cargo": "Oil",
+        "effective_speed_kmh": 48,
+        "id": 132,
+        "intro_year": 1935,
+        "max_speed_kmh": 48,
+        "name": "Witcombe Oil Tanker",
+        "price": 4511,
+        "reliability_pct": 86,
+        "running_cost_per_year": 421,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 14,
+        "cargo": "Livestock",
+        "effective_speed_kmh": 48,
+        "id": 135,
+        "intro_year": 1935,
+        "max_speed_kmh": 48,
+        "name": "Talbott Livestock Van",
+        "price": 4306,
+        "reliability_pct": 98,
+        "running_cost_per_year": 421,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 14,
+        "cargo": "Goods",
+        "effective_speed_kmh": 48,
+        "id": 138,
+        "intro_year": 1935,
+        "max_speed_kmh": 48,
+        "name": "Balogh Goods Truck",
+        "price": 4388,
+        "reliability_pct": 86,
+        "running_cost_per_year": 421,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 20,
+        "cargo": "Grain",
+        "effective_speed_kmh": 48,
+        "id": 141,
+        "intro_year": 1935,
+        "max_speed_kmh": 48,
+        "name": "Hereford Grain Truck",
+        "price": 4675,
+        "reliability_pct": 98,
+        "running_cost_per_year": 421,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 20,
+        "cargo": "Wood",
+        "effective_speed_kmh": 48,
+        "id": 144,
+        "intro_year": 1935,
+        "max_speed_kmh": 48,
+        "name": "Witcombe Wood Truck",
+        "price": 4839,
+        "reliability_pct": 86,
+        "running_cost_per_year": 421,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 22,
+        "cargo": "Iron Ore",
+        "effective_speed_kmh": 48,
+        "id": 147,
+        "intro_year": 1935,
+        "max_speed_kmh": 48,
+        "name": "MPS Iron Ore Truck",
+        "price": 4962,
+        "reliability_pct": 98,
+        "running_cost_per_year": 421,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 15,
+        "cargo": "Steel",
+        "effective_speed_kmh": 48,
+        "id": 150,
+        "intro_year": 1935,
+        "max_speed_kmh": 48,
+        "name": "Balogh Steel Truck",
+        "price": 4593,
+        "reliability_pct": 86,
+        "running_cost_per_year": 421,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 12,
+        "cargo": "Valuables",
+        "effective_speed_kmh": 48,
+        "id": 153,
+        "intro_year": 1935,
+        "max_speed_kmh": 48,
+        "name": "Balogh Armoured Truck",
+        "price": 5947,
+        "reliability_pct": 98,
+        "running_cost_per_year": 421,
+        "type": "road"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 220,
+        "cargo": "Oil",
+        "effective_speed_kmh": 24,
+        "id": 204,
+        "intro_year": 1928,
+        "max_speed_kmh": 24,
+        "name": "MPS Oil Tanker",
+        "price": 30468,
+        "reliability_pct": 87,
+        "running_cost_per_year": 2296,
+        "type": "ship"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 100,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 32,
+        "id": 206,
+        "intro_year": 1926,
+        "max_speed_kmh": 32,
+        "name": "MPS Passenger Ferry",
+        "price": 18281,
+        "reliability_pct": 92,
+        "running_cost_per_year": 1476,
+        "type": "ship"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 160,
+        "cargo": "Goods",
+        "effective_speed_kmh": 24,
+        "id": 211,
+        "intro_year": 1927,
+        "max_speed_kmh": 24,
+        "name": "Yate Cargo Ship",
+        "price": 24375,
+        "reliability_pct": 83,
+        "running_cost_per_year": 2460,
+        "type": "ship"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 65,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 118,
+        "id": 216,
+        "intro_year": 1947,
+        "max_speed_kmh": 473,
+        "name": "Coleman Count",
+        "plane_type": "small",
+        "price": 30761,
+        "reliability_pct": 77,
+        "running_cost_per_year": 2812,
+        "type": "air"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 90,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 236,
+        "id": 217,
+        "intro_year": 1954,
+        "max_speed_kmh": 947,
+        "name": "FFP Dart",
+        "plane_type": "big",
+        "price": 32812,
+        "reliability_pct": 76,
+        "running_cost_per_year": 3656,
+        "type": "air"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 30,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 118,
+        "id": 219,
+        "intro_year": 1933,
+        "max_speed_kmh": 473,
+        "name": "Bakewell Cotswald LB-3",
+        "plane_type": "small",
+        "price": 30761,
+        "reliability_pct": 61,
+        "running_cost_per_year": 2756,
+        "type": "air"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 200,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 236,
+        "id": 220,
+        "intro_year": 1958,
+        "max_speed_kmh": 947,
+        "name": "Bakewell Luckett LB-8",
+        "plane_type": "big",
+        "price": 36914,
+        "reliability_pct": 79,
+        "running_cost_per_year": 6750,
+        "type": "air"
+      },
+      {
+        "buildable_by": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "capacity": 40,
+        "cargo": "Passengers",
+        "effective_speed_kmh": 80,
+        "id": 253,
+        "intro_year": 1958,
+        "max_speed_kmh": 320,
+        "name": "Tricario Helicopter",
+        "plane_type": "helicopter",
+        "price": 30761,
+        "reliability_pct": 98,
+        "running_cost_per_year": 2278,
+        "type": "air"
+      }
+    ],
+    "note": "every engine some company can buy now; effective_speed_kmh divides aircraft by the plane_speed setting; price and running cost in the game's base currency, after inflation; cargos: payment rate (after inflation) and transit periods of every cargo, the inputs of the game's payment formula"
+  },
+  "game_date": "1962-05-29",
+  "game_mode": "normal",
+  "game_tick": 336611,
+  "next_cursor": null,
+  "protocol_version": "2025-11-25",
+  "redactions": [],
+  "schema_version": "1.0",
+  "source": "OpenTTD",
+  "source_revision": "20261122-research-coplay-mf7b71d8b3d",
+  "truncated": false
+}
