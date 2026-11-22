@@ -61,6 +61,10 @@ const ONCE = false;
 
 const TYPES = ["train", "road", "aircraft", "ship"];
 
+// The paths a plan record claims on the mesh, which refuses a claim of none: a plan changes the
+// AI settings PrismaticAI declares there.
+const RECORD_SCOPE = ["tools/research/prismatic-ai/PrismaticAI/info.nut"];
+
 fn bot() {
     for r in api_bots().running ?? [] {
         if r.ai == global::AI { return r; }
@@ -243,7 +247,7 @@ fn say(text) {
 fn record(company, summary) {
     shared_set(`replan.${company}`, summary);
     try {
-        mesh_record_write(#{ kind: "plan", task: `openttd:replan:${company}`, scope: [],
+        mesh_record_write(#{ kind: "plan", task: `openttd:replan:${company}`, scope: global::RECORD_SCOPE,
             title: `replan of company ${company + 1} on ${summary.date}: ${if summary.model.adopt { "switch" } else { "hold" }}`,
             body: to_json(summary) });
     } catch (err) {
