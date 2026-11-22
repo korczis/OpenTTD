@@ -298,7 +298,7 @@ json Tools()
 		{"description", "GUI only, no approval: save what this window shows right now (the whole screen buffer, UI included) and answer the file path"},
 		{"inputSchema", obj}});
 	arr.push_back({{"name", "openttd.view.news.list"},
-		{"description", "GUI only, no approval: the news this client has shown (newest first): text, type, style, date"},
+		{"description", "GUI only, no approval: the news this client has shown (newest first): text, type, style, date; advice (vehicle_lost, train_stuck, vehicle_unprofitable, ...) for an advice item; refs, the objects it names ({vehicle, unit, owner}, {station}, {tile, x, y}, {industry}, {town}, {engine})"},
 		{"inputSchema", {{"type", "object"}, {"properties", {{"limit", {{"type", "integer"}}}}}}},
 		{"annotations", {{"readOnlyHint", true}}}});
 	arr.push_back({{"name", "openttd.view.news.show"},
@@ -399,16 +399,45 @@ std::optional<json> Call(const std::string &name, const json &args)
 			"economy", "industry_company", "industry_other", "industry_nobody", "advice", "new_vehicles",
 			"acceptance", "subsidies", "general"};
 		static constexpr std::string_view STYLES[] = {"thin", "small", "normal", "vehicle", "company"};
+		/* AdviceType, in its order (news_type.h): what an advice item is about, so a reader can act on it. */
+		static constexpr std::string_view ADVICE[] = {"aircraft_destination_too_far", "autorenew_failed", "order",
+			"refit_failed", "train_stuck", "vehicle_lost", "vehicle_old", "vehicle_unprofitable", "vehicle_waiting"};
+		static_assert(std::size(ADVICE) == to_underlying(AdviceType::Invalid));
+		/* A news reference as the object it names, as the news window itself resolves it (news_gui.cpp). */
+		struct RefJson {
+			json operator()(const std::monostate &) { return nullptr; }
+			json operator()(const TileIndex &t) { return json{{"tile", t.base()}, {"x", TileX(t)}, {"y", TileY(t)}}; }
+			json operator()(const VehicleID v)
+			{
+				json j{{"vehicle", v.base()}};
+				if (const Vehicle *veh = Vehicle::GetIfValid(v); veh != nullptr) {
+					j["unit"] = veh->unitnumber;
+					j["owner"] = veh->owner.base();
+				}
+				return j;
+			}
+			json operator()(const StationID s) { return json{{"station", s.base()}}; }
+			json operator()(const IndustryID i) { return json{{"industry", i.base()}}; }
+			json operator()(const TownID t) { return json{{"town", t.base()}}; }
+			json operator()(const EngineID e) { return json{{"engine", e.base()}}; }
+		};
 		size_t limit = std::min<size_t>(args.value("limit", 20), 200);
 		json list = json::array();
 		for (const NewsItem &ni : GetNews()) {
 			if (list.size() >= limit) break;
 			auto ymd = TimerGameCalendar::ConvertDateToYMD(ni.date);
 			auto t = static_cast<size_t>(ni.type), st = static_cast<size_t>(ni.style);
-			list.push_back({{"text", PlainText(ni.headline.GetDecodedString())},
+			json item{{"text", PlainText(ni.headline.GetDecodedString())},
 				{"type", t < std::size(TYPES) ? json(TYPES[t]) : json(t)},
 				{"style", st < std::size(STYLES) ? json(STYLES[st]) : json(st)},
-				{"date", fmt::format("{:04}-{:02}-{:02}", ymd.year.base(), ymd.month + 1, ymd.day)}});
+				{"date", fmt::format("{:04}-{:02}-{:02}", ymd.year.base(), ymd.month + 1, ymd.day)}};
+			if (auto a = static_cast<size_t>(ni.advice_type); a < std::size(ADVICE)) item["advice"] = ADVICE[a];
+			json refs = json::array();
+			for (const NewsReference &r : {ni.ref1, ni.ref2}) {
+				if (json j = std::visit(RefJson{}, r); !j.is_null()) refs.push_back(std::move(j));
+			}
+			if (!refs.empty()) item["refs"] = std::move(refs);
+			list.push_back(std::move(item));
 		}
 		return json{{"ok", true}, {"news", std::move(list)}};
 	}
