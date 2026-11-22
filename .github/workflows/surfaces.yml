@@ -83,6 +83,11 @@ jobs:
           CHROME: /usr/bin/google-chrome
         run: tools/surfaces/diagrams-check
 
+      - name: Every declared page works in Chrome, light and dark, desktop and phone (tools/surfaces/README.md)
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: tools/surfaces/pages-check
+
       - name: Build the wiki
         run: tools/surfaces/surfaces wiki
 
