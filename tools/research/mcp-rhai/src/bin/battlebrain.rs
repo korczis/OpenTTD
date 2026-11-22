@@ -142,12 +142,10 @@ pub struct LiveGate {
 /// kernel id).
 const PLAN_KERNELS: &[(&str, &str)] = &[("portfolio-within-budget", "/portfolio/kernel/id")];
 
-/// The catalogue a file holds: `{"kernels": [...], "commit": ...}`, as tools/research/schema/
-/// fixtures/battlebrain/catalogue.json records the runner's answer.
+/// The catalogue a file holds (`bb::Catalogue::from_value`).
 fn catalogue_file(path: &str) -> Result<bb::Catalogue, Vec<bb::Refusal>> {
     let v = read_json(path).map_err(|e| vec![bb::Refusal::new("unreadable", "", e)])?;
-    let v = v.get("value").cloned().unwrap_or(v);
-    bb::Catalogue::from_runner(&v["kernels"], v["commit"].as_str().unwrap_or_default()).map_err(|r| vec![r])
+    bb::Catalogue::from_value(&v).map_err(|r| vec![r])
 }
 
 /// Add to a shadow or live run one capability-match inference per capability (derived from the

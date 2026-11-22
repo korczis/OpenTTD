@@ -34,7 +34,8 @@ flowchart TB
 
 - **Built-ins.** `rpc`, `read`, `overview`, `status`, `console`, `pause`, `approve`,
   `auto_approve`, `events`, `mcp_call`, `mcp_read`, `world_plan`, `world_graph`, `kernel`,
-  `kernels`, `board_post`, `loopback_get` (JSON from a loopback URL only: no other host, no
+  `kernels`, `board_post`, `build_audit` (the construction rules of `hub.audit`, pure over
+  `read()` answers), `loopback_get` (JSON from a loopback URL only: no other host, no
   userinfo, no redirects), `env`, `sleep`, `to_json`, and `tools()`, `commands()`, `help()` to list
   what was derived (header of `main.rs`).
 - **Derived functions** (`derive` in `main.rs`): a tool name with dots turned into underscores, an
@@ -65,6 +66,7 @@ The scripts in the library today:
 | [`arena.rhai`](../../tools/research/mcp-panel/rhai/arena.rhai) | keeps the LAN battle's contestants playing in the live game; editing its lineup changes the game live ([Live arena](../live-arena.md)) |
 | [`steward.rhai`](../../tools/research/mcp-panel/rhai/steward.rhai) | the bot asks the owner yes/no questions in the game |
 | [`ask_relay.rhai`](../../tools/research/mcp-panel/rhai/ask_relay.rhai), [`build_plan.rhai`](../../tools/research/mcp-panel/rhai/build_plan.rhai) | answers "Ask the planner..." requests; carries out a planned sentence |
+| [`build_audit.rhai`](../../tools/research/mcp-panel/rhai/build_audit.rhai) | once a game month judges every company's construction (depots without an exit, duplicate depots and stations, drive-through against bay stops) and keeps it in the shared key `audit.<company>` and the store's view `build_audit`; one chat line for a new defect of the owner's company ([Hub](../mcp-hub.md#no-duplicate-buildings)) |
 | [`replan.rhai`](../../tools/research/mcp-panel/rhai/replan.rhai) | re-plans the running bot every game month: trend, competition, the planner's portfolio, a modelled switch, approval-gated changes ([Planner and AlgoGlyph](planner-and-algoglyph.md#replanning-while-the-game-runs)) |
 
 Usage and the built-in list in full: [`../mcp-control.md`](../mcp-control.md) ("Rhai"), and the
@@ -83,7 +85,8 @@ Scripts page in [`../rail-steward.md`](../rail-steward.md) ("The Scripts page").
 ## How it is tested
 
 - `cargo test` in `tools/research/mcp-rhai`: `main.rs` tests run `rail_lib.rhai` and
-  `director_lib.rhai` on fixtures (`rail_*`, the director), check that every hub method but streams
+  `director_lib.rhai` on fixtures (`rail_*`, the director), run `build_audit.rhai` against fakes of
+  the panel's reads, shared memory and chat (`build_audit_*`), check that every hub method but streams
   is a Rhai function, and that a kernel refusal is an error; `panel_scripts.rs` tests cover names,
   docs, imports, the parse check, and a service that hot-reloads on a library edit.
 - `node --test tools/research/mcp-panel/test/scripts.test.mjs`: tokens, the outline, stream frames.
