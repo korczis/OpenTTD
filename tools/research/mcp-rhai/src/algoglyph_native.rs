@@ -10,7 +10,7 @@
 //!
 //! One namespace: the flow runner's ids come first. A native kernel whose id the runner already
 //! lists at the pin (today `topological-sort`, a graph kernel there) stays the runner's, in the
-//! catalogue and in a call; [`shadowed`] names them. The runner's ids at the pin are the recorded
+//! catalogue and in a call. The runner's ids at the pin are the recorded
 //! runner answer in `tools/research/vendor/algoglyph.pin.json`, which `algoglyph-pin bump` writes
 //! with the gitlink and a test holds to it, so routing a call never boots npm to decide.
 //!
@@ -46,7 +46,9 @@ fn ids(runner: &Value) -> BTreeSet<String> {
     runner.as_array().into_iter().flatten().filter_map(|k| k["id"].as_str().map(str::to_string)).collect()
 }
 
-/// The native kernels whose id the runner lists at the pin: they stay the runner's.
+/// The native kernels whose id the runner lists at the pin: they stay the runner's. Only the tests
+/// read it; no binary reports it.
+#[cfg(test)]
 pub fn shadowed() -> Vec<&'static str> {
     let runner = ids(&pin()["kernels"]);
     sorting::REGISTRY.iter().map(|e| e.meta.id).filter(|id| runner.contains(*id)).collect()
