@@ -15,6 +15,7 @@ use crate::panel::{py_int, py_json, py_str, run, Game};
 use crate::calibrate::{self, Scope};
 use crate::panel_events::{self, Stored};
 use crate::panel_store::Across;
+use crate::store_sql::Named;
 use crate::duel_outcomes;
 
 fn ai_dir() -> PathBuf {
@@ -406,6 +407,65 @@ pub fn set_bot_setting(g: &Arc<Game>, company: &Value, name: &str, value: &Value
     g.tool("openttd.ai.set_setting", json!({"company": py_int(company)?, "name": name, "value": py_int(value)?}))
 }
 
+/// Where a freight-line slot is sent from, named in every refusal of one.
+pub const GOVERNED_PATHS: &str = "a freight-line slot is sent by the company's planner as POST /api/bots/setting \
+    {company, name, value, writer}, or as a live Battlebrain decision through POST /api/decision/pull";
+
+/// The refusal of a request that changes freight-line slots (fr_*, fr2_* .. fr16_*) of `company`
+/// on behalf of `writer` (None: it names none). `names` are the settings it changes, the others
+/// no concern here; `holder` reads a company's planner key (rhai_shared::planner_of). None when it
+/// names no slot, or names a writer that may send them (fr_author::change_refusal). Else
+/// (422 fr_needs_writer or 409 fr_planner_held, the answer). A company that is no integer reaches
+/// no AI, and the game refuses that call itself (AiCompany), so it is let through to it.
+pub fn slot_refusal(company: &Value, names: &[String], writer: Option<&str>, holder: &dyn Fn(i64) -> Option<Value>) -> Option<(u16, Value)> {
+    let slots: Vec<&str> = names.iter().map(String::as_str).filter(|n| crate::panel_decision::is_freight_slot_setting(n)).collect();
+    if slots.is_empty() {
+        return None;
+    }
+    let c = company.as_i64()?;
+    let r = crate::rhai_shared::fr_author::change_refusal(holder(c).as_ref(), c, writer)?;
+    let status = if r["code"] == crate::rhai_shared::fr_author::NO_WRITER { 422 } else { 409 };
+    Some((status, json!({"error": format!("{} not sent: {}", slots.join(", "), py_str(r.get("why"))),
+                         "outcome": r["code"], "refusal": r, "settings": slots, "governed": GOVERNED_PATHS})))
+}
+
+/// Answer a refusal from slot_refusal and say it as an event, so the owner sees what was not asked.
+fn refused(g: &Arc<Game>, (status, answer): (u16, Value)) -> (u16, Value) {
+    g.event("ai", &format!("{} ({})", py_str(answer.get("error")), py_str(answer.get("outcome"))));
+    (status, answer)
+}
+
+/// POST /api/bots/setting {company, name, value, writer?}: set_bot_setting, except that a
+/// freight-line slot is refused before the game is asked unless the request names its `writer`
+/// and the company's planner key is unset or names that writer (slot_refusal). Every other
+/// setting is sent as before, with or without a writer.
+pub fn bot_setting(g: &Arc<Game>, body: &Value) -> Result<(u16, Value), String> {
+    let name = py_str(body.get("name"));
+    let writer = body.get("writer").and_then(Value::as_str);
+    if let Some(r) = slot_refusal(&body["company"], std::slice::from_ref(&name), writer, &crate::rhai_shared::planner_of) {
+        return Ok(refused(g, r));
+    }
+    Ok((200, set_bot_setting(g, &body["company"], &name, &body["value"])?))
+}
+
+/// The settings of a company's AI that an MCP call changes: `name` of openttd.ai.set_setting, the
+/// keys of openttd.ai.set_settings' `settings`; none for any other tool.
+pub fn settings_of_call(tool: &str, args: &Value) -> Vec<String> {
+    match tool {
+        "openttd.ai.set_setting" => vec![py_str(args.get("name"))],
+        "openttd.ai.set_settings" => args["settings"].as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// A raw MCP call through the panel (POST /api/tools/<tool>, POST /api/rpc tools/call) names no
+/// writer, so it changes no freight-line slot: refused as a writer-less /api/bots/setting is.
+/// None for every other call. The decision executor (src/panel_decision.rs) and set_bot_setting
+/// call the game themselves (Game::tool), never through these routes.
+pub fn raw_call_refusal(g: &Arc<Game>, tool: &str, args: &Value) -> Option<(u16, Value)> {
+    slot_refusal(&args["company"], &settings_of_call(tool, args), None, &crate::rhai_shared::planner_of).map(|r| refused(g, r))
+}
+
 /// Settings in the order they were set, a key set again keeping its place (a Python dict).
 #[derive(Default)]
 pub struct Settings(pub Vec<(String, Value)>);
@@ -677,10 +737,10 @@ pub struct Calibration {
 pub const CALIBRATION_OFF: &str = "calibration is off (PRISMATIC_PLAN_CALIBRATION unset or off, the default: the three-seed held-start A/B averaged about zero, knowledge the-planner-overpredicts-what-a-line-earns; ADR 0034 point 6)";
 
 /// The calibration of `scope` for a game (`calibrate::game_of`), read with `read` (every store,
-/// `panel_store::query_every_store`): the factors of every reading it returns, or the fallback
+/// `panel_store::every_store`): the factors of every reading it returns, or the fallback
 /// `uncalibrated` with its reason when calibration is off, the scope is not one, the store is off or
 /// it holds no reading. Never a silent default (ADR 0034 point 2).
-pub fn calibration(scope: &Scope, game: &Value, read: impl FnOnce(&str) -> Result<Across, String>) -> Calibration {
+pub fn calibration(scope: &Scope, game: &Value, read: impl FnOnce(&Named) -> Result<Across, String>) -> Calibration {
     let name = match scope {
         Scope::Off => "off".to_string(),
         Scope::All => "all".to_string(),
@@ -700,31 +760,37 @@ pub fn calibration(scope: &Scope, game: &Value, read: impl FnOnce(&str) -> Resul
         }
         _ => {}
     }
-    let sql = match calibrate::readings_sql(scope, game) {
+    let query = match calibrate::readings_query(scope, game) {
         Ok(q) => q,
         Err(why) => return fallback(why, json!({})),
     };
-    let across = match read(&sql) {
+    let across = match read(&query) {
         Ok(a) => a,
-        Err(why) => return fallback(why, json!({"query": sql})),
+        Err(why) => return fallback(why, query.record()),
     };
     let answer = json!({"columns": across.columns, "rows": across.rows});
     let readings = calibrate::readings_of(&answer);
     if readings.is_empty() {
+        let mut read = query.record();
+        read["rows"] = json!(across.rows.len());
+        read["stores"] = json!(across.stores);
         return fallback(format!("the store holds no calibration reading for this scope ({} row(s) from {} store(s))",
-                                across.rows.len(), across.stores.len()),
-                        json!({"query": sql, "rows": across.rows.len(), "stores": across.stores}));
+                                across.rows.len(), across.stores.len()), read);
     }
     let f = calibrate::factors(&readings);
     let used: Vec<Value> = readings.iter().map(|r| json!({"instance": r["instance"], "seq": r["seq"], "ts_ms": r["ts_ms"],
                                                           "seed": r["seed"], "map": r["map"], "lines": r["lines"].as_array().map_or(0, Vec::len)}))
         .collect();
+    let mut record = query.record();
+    if let (Some(r), Some(x)) = (record.as_object_mut(), json!({"scope": name, "used": true, "rows": across.rows.len(),
+            "stores": across.stores, "game": game, "readings": used, "lines": f["lines"], "modes": f["modes"],
+            "factors": f["params"]["calibration"], "rule": calibrate::RULE}).as_object()) {
+        r.extend(x.clone());
+    }
     Calibration {
         factors: Some(f["params"]["calibration"].clone()),
-        stored: Stored::Query { sql: sql.clone(), rows: across.rows.len() },
-        record: json!({"scope": name, "used": true, "query": sql, "rows": across.rows.len(), "stores": across.stores, "game": game,
-                       "readings": used, "lines": f["lines"], "modes": f["modes"], "factors": f["params"]["calibration"],
-                       "rule": calibrate::RULE}),
+        stored: Stored::Query { query, rows: across.rows.len() },
+        record,
         readings,
     }
 }
@@ -798,7 +864,7 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
     } else {
         json!({"seed": g.args.seed, "map": null})
     };
-    let cal = calibration(&scope, &game, crate::panel_store::query_every_store);
+    let cal = calibration(&scope, &game, crate::panel_store::every_store);
     if let Some(f) = &cal.factors {
         g.event("ai", &format!("planner: calibration from the store ({}, {} reading(s) in {} row(s)): {f}",
                                cal.record["scope"].as_str().unwrap_or(""), cal.record["readings"].as_array().map_or(0, Vec::len),
@@ -863,7 +929,7 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
     // otherwise, and when the stores give no pair, the constants above, with the reason in the event.
     let handed = p.bot_settings["freight"].as_array().map_or(0, Vec::len);
     let from_duels = duel_outcomes::from_duels(duel_outcomes::enabled(), handed, OWN_LINES as i64, p.bot_settings["rail_after"].as_i64(),
-                                               crate::panel_store::query_every_store);
+                                               crate::panel_store::every_store);
     if from_duels.record["used"] == true {
         apply_from_duels(&mut p, &from_duels, &mut |text| g.event("ai", &text));
     } else if duel_outcomes::enabled() {
@@ -1157,7 +1223,7 @@ mod tests {
         assert_eq!(refused["choice"]["settings"]["own_lines"], 8);
     }
 
-    /// An answer of every store to `readings_sql`, as `panel_store::query_every_store` gives it.
+    /// An answer of every store to `readings_query`, as `panel_store::every_store` gives it.
     fn across(rows: Vec<Value>) -> Across {
         Across { columns: json!(["instance", "seq", "ts_ms", "seed", "map", "lines"]), stores: vec![json!({"store": "panel-1.duckdb", "via": "this panel", "rows": rows.len()})],
                  rows }
@@ -1169,11 +1235,15 @@ mod tests {
         let rows = vec![json!(["panel-1", 9, 200, 3, "256x256", "[{\"mode\":\"bus\",\"ratio\":0.2},{\"mode\":\"rail\",\"ratio\":0.6}]"]),
                         json!(["calibration-import", 1, 100, null, null, "[{\"mode\":\"bus\",\"ratio\":0.4}]"]),
                         json!(["panel-1", 4, 50, 3, "256x256", "[{\"mode\":\"rail\",\"why\":\"far\"}]"])];
-        let mut asked = String::new();
-        let c = calibration(&Scope::All, &game, |sql| { asked = sql.to_string(); Ok(across(rows.clone())) });
-        assert_eq!(asked, calibrate::readings_sql(&Scope::All, &game).unwrap(), "the statement of src/calibrate.rs");
+        let mut asked = None;
+        let c = calibration(&Scope::All, &game, |q| { asked = Some(q.clone()); Ok(across(rows.clone())) });
+        let want = calibrate::readings_query(&Scope::All, &game).unwrap();
+        assert_eq!(asked.as_ref(), Some(&want), "the query of src/calibrate.rs");
         assert_eq!(c.factors, Some(json!({"bus": 0.3, "rail": 0.6, "default": 0.4})), "bus: median of 0.2 and 0.4");
-        assert_eq!(c.stored.to_json(), json!({"query": asked, "rows": 3}));
+        let mut stored = want.record();
+        stored["rows"] = json!(3);
+        assert_eq!(c.stored.to_json(), stored);
+        assert_eq!((c.record["query"].clone(), c.record["name"].clone()), (json!(want.sql()), json!("calibration_readings")));
         assert_eq!(c.record["used"], true);
         assert_eq!(c.record["readings"], json!([{"instance": "panel-1", "seq": 9, "ts_ms": 200, "seed": 3, "map": "256x256", "lines": 2},
                                                {"instance": "calibration-import", "seq": 1, "ts_ms": 100, "seed": null, "map": null, "lines": 1}]),
@@ -1185,11 +1255,12 @@ mod tests {
         assert_eq!(off.factors, None);
         assert_eq!(off.stored.to_json(), json!({"fallback": "uncalibrated: store off: built without the store feature"}));
         assert_eq!((off.record["fallback"].clone(), off.record["used"].clone()), (json!("uncalibrated"), json!(false)));
+        assert_eq!(off.record["name"], "calibration_readings", "the query it could not run");
         // Too little history: an empty store, or only readings that measured nothing.
         let empty = calibration(&Scope::All, &game, |_| Ok(across(vec![rows[2].clone()])));
         assert_eq!(empty.factors, None);
         assert!(empty.stored.to_json()["fallback"].as_str().unwrap().starts_with("uncalibrated: the store holds no calibration reading"));
-        assert_eq!(empty.record["rows"], 1);
+        assert_eq!((empty.record["rows"].clone(), empty.record["params"]["limit"].clone()), (json!(1), json!(calibrate::QUERY_READINGS)));
         // The seed scope without a map size never queries; a file name is refused, never read.
         let blind = calibration(&Scope::Seed, &json!({"seed": 3, "map": null}), |_| panic!("no query without a map"));
         assert!(blind.record["why"].as_str().unwrap().contains("map size"));
@@ -1210,7 +1281,9 @@ mod tests {
         let off = duel_outcomes::from_duels(false, 2, 8, Some(2), |_| unreachable!());
         let mut b = bot_settings_event(&mut p, "", Some(7), &off);
         with_calibration(&mut b, &used);
-        assert_eq!(b["inputs"]["stored"], json!({"query": calibrate::readings_sql(&Scope::All, &game).unwrap(), "rows": 1}));
+        let mut stored = calibrate::readings_query(&Scope::All, &game).unwrap().record();
+        stored["rows"] = json!(1);
+        assert_eq!(b["inputs"]["stored"], stored);
         assert_eq!(b["inputs"]["live"]["calibration"]["readings"][0]["seq"], 9);
         assert_eq!(b["inputs"]["live"]["portfolio_seq"], 7);
         let mut b = bot_settings_event(&mut p, "", Some(7), &off);
@@ -1219,7 +1292,7 @@ mod tests {
         assert_eq!(b["inputs"]["live"]["calibration"]["scope"], "off");
     }
 
-    /// A store's answer to `duel_outcomes::outcomes_sql`: one held-start ten-year pair handing over
+    /// A store's answer to `duel_outcomes::outcomes_query`: one held-start ten-year pair handing over
     /// two lines, own_lines 0 against 8, the 8 ahead by 50% against a 0.2% rival spread.
     fn outcome_rows() -> Across {
         let duel = |seq: i64, a: f64, b: f64| json!(["panel-9", seq, seq * 10, "plan.duel", json!({"version": {"params": {"opponent": "PrismaticAI"}},
@@ -1246,7 +1319,9 @@ mod tests {
         assert_eq!(said.len(), 1);
         assert!(said[0].starts_with("planner: own_lines 16 from stored duel outcomes (constant 8): "), "{}", said[0]);
         let b = bot_settings_event(&mut p, "", Some(3), &d);
-        assert_eq!(b["inputs"]["stored"], json!({"query": duel_outcomes::outcomes_sql(), "rows": 4}));
+        let mut stored = duel_outcomes::outcomes_query().record();
+        stored["rows"] = json!(4);
+        assert_eq!(b["inputs"]["stored"], stored);
         let live = &b["inputs"]["live"]["from_duels"];
         assert_eq!((live["used"].clone(), live["rule"].clone()), (json!(true), json!(duel_outcomes::RULE)));
         assert_eq!(live["outcomes"].as_array().unwrap().len(), 2);
@@ -1290,6 +1365,37 @@ mod tests {
         assert_eq!(choice["held"]["withheld"].as_array().unwrap().len(), 6);
         assert_eq!(choice["held"]["by"][0]["holder"], "battlebrain");
         assert!(choice["held"]["by"][0]["why"].as_str().unwrap().contains("planner.0"));
+    }
+
+    /// The panel's check of a change that names its slots: none named, or a company that is no
+    /// integer, lets it through; a writer-less one is 422, one whose writer is not the planner 409,
+    /// and the planner itself (or anyone while the key is unset) passes.
+    #[test]
+    fn a_slot_change_needs_a_writer_that_holds_the_planner_key() {
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let held = |c: i64| (c == 2).then(|| json!("battlebrain"));
+        assert!(slot_refusal(&json!(2), &names(&["rail_a", "own_lines"]), None, &held).is_none(), "no slot: no concern");
+        assert!(slot_refusal(&json!("2"), &names(&["fr_from"]), None, &held).is_none(), "no integer company: the game refuses it");
+        let (status, out) = slot_refusal(&json!(2), &names(&["rail_a", "fr_from", "fr3_to"]), None, &held).unwrap();
+        assert_eq!((status, out["outcome"].as_str(), out["settings"].clone()), (422, Some("fr_needs_writer"), json!(["fr_from", "fr3_to"])));
+        assert_eq!(out["refusal"]["holder"], "battlebrain");
+        let (status, out) = slot_refusal(&json!(2), &names(&["fr_from"]), Some("owner"), &held).unwrap();
+        assert_eq!((status, out["outcome"].as_str()), (409, Some("fr_planner_held")));
+        assert!(out["error"].as_str().unwrap().starts_with("fr_from not sent: company 2's freight-line slots are planned by battlebrain"), "{out}");
+        assert_eq!(out["governed"], GOVERNED_PATHS);
+        assert!(slot_refusal(&json!(2), &names(&["fr_from"]), Some("battlebrain"), &held).is_none(), "the planner itself");
+        assert!(slot_refusal(&json!(1), &names(&["fr_from"]), Some("owner"), &held).is_none(), "unset: any named writer");
+    }
+
+    /// What an MCP call changes on a company's AI, by tool: one name, every key, or nothing.
+    #[test]
+    fn the_settings_an_mcp_call_changes() {
+        assert_eq!(settings_of_call("openttd.ai.set_setting", &json!({"company": 0, "name": "fr_to", "value": 1})), ["fr_to"]);
+        let mut every = settings_of_call("openttd.ai.set_settings", &json!({"settings": {"rail_a": 1, "fr_to": 2}}));
+        every.sort();
+        assert_eq!(every, ["fr_to", "rail_a"]);
+        assert!(settings_of_call("openttd.ai.set_settings", &json!({"settings": 3})).is_empty());
+        assert!(settings_of_call("openttd.ai.start", &json!({"settings": {"fr_to": 2}})).is_empty(), "a new AI company is no running bot's slot");
     }
 
     /// The plan is for the panel's AI: a held company that runs another AI does not hold it, one

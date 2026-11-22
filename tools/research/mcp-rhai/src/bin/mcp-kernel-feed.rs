@@ -1,7 +1,7 @@
 //! RESEARCH-ONLY / UNSTABLE. AlgoGlyph's kernels fed from a panel's recorded history (I0086): one
 //! long-lived `flow serve` answers every request, and each kernel's input is completed from a
-//! trailing window of the store's samples (seeded by one read-only statement on the panel's
-//! /api/db/query, kept current by the ZeroMQ bus's game.sample envelopes). src/kernel_feed.rs
+//! trailing window of the store's samples (seeded by one named query, sql/queries/kernel_window.sql,
+//! on the panel's /api/db/named, kept current by the ZeroMQ bus's game.sample envelopes). src/kernel_feed.rs
 //! holds the rules; this is the process around them.
 //!
 //! Usage: mcp-kernel-feed [--panel http://127.0.0.1:8800] [--window DAYS] [--no-store] [--no-bus] [--publish]
@@ -11,7 +11,7 @@
 //! | fallback, kernel_input}, runner, choice}}, where `choice` is the kernel's answer. The process
 //! ends when standard input closes. --no-store feeds nothing from history (the A/B arm "as today");
 //! --no-bus keeps the seed only. AlgoGlyph is $MCP_ALGOGLYPH_DIR, else ~/dev/algoglyph-wt/main,
-//! else ~/dev/algoglyph. Reads only (GET /api/bus, POST /api/db/query, the bus), unless --publish:
+//! else ~/dev/algoglyph. Reads only (GET /api/bus, POST /api/db/named, the bus), unless --publish:
 //! then each event also goes to the panel's POST /api/bus/publish (plan.kernel is a kind the panel
 //! declares as external, src/panel_events.rs), so it reaches the bus, ZeroMQ and the store; the
 //! panel's answer is the printed event's `published`.
@@ -34,6 +34,9 @@ mod kernel_feed;
 #[path = "../panel_events.rs"]
 #[allow(dead_code)]
 mod panel_events;
+#[path = "../store_sql.rs"]
+#[allow(dead_code)]
+mod store_sql;
 
 use kernel_feed::{Source, Window};
 
@@ -69,10 +72,10 @@ fn get(url: &str) -> Result<Value, String> {
     ureq::get(url).timeout(Duration::from_secs(10)).call().map_err(|e| format!("{url}: {e}"))?.into_json().map_err(|e| format!("{url}: {e}"))
 }
 
-/// The store's answer to one read-only statement, through the panel (the file is locked while it runs).
-fn query(panel: &str, sql: &str) -> Result<Value, String> {
-    let url = format!("{panel}/api/db/query");
-    match ureq::post(&url).timeout(Duration::from_secs(20)).send_json(json!({"sql": sql})) {
+/// The store's answer to one named query, through the panel (the file is locked while it runs).
+fn named(panel: &str, q: &store_sql::Named) -> Result<Value, String> {
+    let url = format!("{panel}/api/db/named");
+    match ureq::post(&url).timeout(Duration::from_secs(20)).send_json(q.to_json()) {
         Ok(r) => r.into_json().map_err(|e| format!("{url}: {e}")),
         Err(ureq::Error::Status(code, r)) => Err(format!("{url}: {code} {}", r.into_string().unwrap_or_default())),
         Err(e) => Err(format!("{url}: {e}")),
@@ -89,14 +92,14 @@ fn publish(panel: &str, e: &Value) -> Value {
     }
 }
 
-/// Seed the window from the instance's latest run; the statement, or why there is none.
+/// Seed the window from the instance's latest run; the query, or why there is none.
 fn seed(w: &mut Window, panel: &str, instance: &str) {
-    let r = kernel_feed::seed_sql(instance, w.days).and_then(|sql| {
-        let rows = kernel_feed::samples_of_answer(&query(panel, &sql)?)?;
+    let q = kernel_feed::seed_query(instance, w.days);
+    let rows = named(panel, &q).and_then(|a| kernel_feed::samples_of_answer(&a));
+    w.seed = rows.map(|rows| {
         for s in rows { w.push(s, Source::Store); }
-        Ok(sql)
+        q
     });
-    w.seed = r;
 }
 
 /// Follow the bus on its own thread: game.sample and game.new_world into the window.
@@ -184,5 +187,31 @@ fn main() {
         if let Some(id) = q.get("id") { e["id"] = id.clone(); }
         let _ = writeln!(out, "{e}");
         let _ = out.flush();
+    }
+}
+
+#[cfg(test)]
+#[path = "../http_stub.rs"]
+mod http_stub;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_window_is_seeded_by_the_named_query_on_the_panel() {
+        let answer = json!({"columns": ["company", "game_tick", "game_date", "money", "loan", "value", "net", "vehicles"],
+                            "rows": [[0, 10, "1950-01-01", 5.0, 1.0, 2.0, 0.0, 1]], "count": 1, "capped": false});
+        let (url, h) = http_stub::serve(vec![(200, answer), (400, json!({"error": "kernel_window: missing parameter: days"}))]);
+        let mut w = Window::new(7);
+        seed(&mut w, &url, "panel-1");
+        assert_eq!(w.seed, Ok(kernel_feed::seed_query("panel-1", 7)));
+        assert_eq!(w.rows(), 1);
+        let mut w = Window::new(7);
+        seed(&mut w, &url, "panel-1");
+        assert!(w.seed.unwrap_err().contains("400"), "the panel's refusal is the reason");
+        let sent = h.join().unwrap();
+        assert_eq!(sent[0].0, "POST /api/db/named HTTP/1.1");
+        assert_eq!(sent[0].1, json!({"name": "kernel_window", "params": {"instance": "panel-1", "days": 7}}));
     }
 }

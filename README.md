@@ -465,7 +465,7 @@ decides when a measurement may change a default.
 | [Income per delivery is distance times a time factor; ground vehicles cover about 0.036 tiles a day per km/h](.ai/repo/knowledge/curated/cargo-payment-and-vehicle-speed.md) | When a planner, bot or script estimates what a route earns, how long cargo is in transit, or which mode of transport pays. |
 | [Classic cheats leave no gamelog entry; a savegame records them only as been_used flags in the CHTS chunk](.ai/repo/knowledge/curated/cheats-are-not-recorded-in-the-gamelog.md) | When reconstructing a savegame's history for research provenance, or adding a cheat. |
 | [A check run against :8800 can test an old panel: mcp-e2e moves a new stack to a free port when 8800 is held](.ai/repo/knowledge/curated/checks-can-test-an-old-panel-when-a-stack-moves-port.md) | When restarting the main stack and then running mcp-panel-check, mcp-route-check or mcp-view-check against the default address. |
-| [The panel parses console output, so a reworded console line in src/ can stop every stack; run mcp-e2e after changing one](.ai/repo/knowledge/curated/console-lines-the-panel-parses-are-an-interface.md) | Before changing the text of a console line that tools/research parses (the bearer token line, the MCP endpoint, approvals). |
+| [The panel parses console output, so a reworded console line in src/ can stop every stack; run mcp-e2e after changing one](.ai/repo/knowledge/curated/console-lines-the-panel-parses-are-an-interface.md) | Before changing the text of a console line that tools/research parses (the token-file line, the MCP endpoint, approvals). |
 | [src/core string files, utf8 and getoptdata also compile into the host tools strgen and settingsgen, where game headers are not available](.ai/repo/knowledge/curated/core-string-files-also-build-into-strgen-and-settingsgen.md) | When adding an include, a Debug() call or a game dependency to src/core/string.cpp, src/core/utf8.cpp or src/misc/getoptdata.cpp. |
 | [A dedicated server's console runs one line per select(): lines written together wait in the stream buffer](.ai/repo/knowledge/curated/dedicated-console-reads-one-buffered-line-per-select.md) | When a tool writes several console commands to a dedicated server's stdin in quick succession (the panel, a script, a ~ plan answer). |
 | [The headless research run feeds console commands on stdin after a fixed delay, and a loaded machine can lose them](.ai/repo/knowledge/curated/dedicated-server-stdin-startup-race.md) | When a research run passes but its research_status line is missing, or when scheduling a run next to a heavy build. |
@@ -783,21 +783,21 @@ from the code. The right-hand column says what was counted.
 | Count | What | Counted from |
 |---|---|---|
 | **146** | [game commands, each an MCP tool an agent can call (`openttd.cmd.*`)](research/mcp-api.md) | `DEF_CMD_TRAIT\(Commands::` in `src/*_cmd.h` |
-| **22** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
-| **34** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
+| **23** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
+| **36** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **48** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **49** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **12** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **18** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **37** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
-| **205** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
+| **206** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **98** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 48
+    "research tools and checks (tools/research/, shell and Python)" : 49
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 12
     "Rhai scripts that drive a live game (director, narrator, steward, …)" : 18
 ```
@@ -1221,6 +1221,7 @@ the bridge: [a real place as the map](#a-real-place-as-the-map).
 | [`tools/research/vanilla-client`](./tools/research/vanilla-client), [`real-game-check`](./tools/research/real-game-check) | The unmodified release client for public servers ([`research/vanilla-client.md`](./research/vanilla-client.md)) and the readiness check for a hosted real game ([`research/real-game.md`](./research/real-game.md)). |
 | [`tools/research/e2e-coverage`](./tools/research/e2e-coverage) and the `tools/research/mcp-*-check` family | Every web page driven in a real browser, and one live check per surface of the panel, the hub and the game. |
 | [`tools/gate.sh`](./tools/gate.sh), [`tools/research/research`](./tools/research/research) | Layered local validation (0.5) and the research-mode CLI with its experiment manifest ([`research/tooling.md`](./research/tooling.md)). |
+| [`tools/coverage/`](./tools/coverage/README.md) | `changed-lines`: every changed Python line runs under a test, or the change gate and CI refuse it by file and line (rule [`project.new-code-tested`](.ai/repo/rules/project/new-code-tested.v1.md)); C++, Rust and JavaScript are named, not yet measured. |
 | [`tools/surfaces/`](./tools/surfaces/README.md), [`surfaces.toml`](./surfaces.toml), [`tools/knowledge/`](./tools/knowledge/README.md) | The published surfaces (0.4.2), and the checks that keep the `.ai/` records' citations true. |
 | [`tools/research/town-model/`](./tools/research/town-model/README.md) | The town-authority model derived from `src/`, and its outputs for the bot, Rhai, the panel and [its page](./research/mechanisms/town-authority.md). |
 | [`tools/research/real-world/`](./tools/research/real-world/) | `rw-scenario`: a real place compiled from open data into a heightmap and a GameScript ([`research/real-world-scenario.md`](./research/real-world-scenario.md)). |
@@ -1253,7 +1254,7 @@ A real, compiling, connectable read-only vertical, plus approval-gated mutations
    ```bash
    cmake --build build-mcp --target openttd_test -j$(sysctl -n hw.ncpu) && ctest --test-dir build-mcp -R prismatic --output-on-failure
    ```
-6. **Start the server and connect** — In the in-game console: prismatic_mcp start, then prismatic_mcp token to get the bearer token, and prismatic_mcp approve <id> or deny <id> for a pending mutation. Never share the token; it is never logged.
+6. **Start the server and connect** — In the in-game console: prismatic_mcp start writes the bearer token to a 0600 file and prints only its path (prismatic_mcp token prints the path and a fingerprint), then prismatic_mcp approve <id> or deny <id> for a pending mutation. Never share the token; it is never printed or logged.
 7. **Run the local validation gate before proposing a change**
    ```bash
    tools/gate.sh change
@@ -1356,7 +1357,7 @@ itself (generated):
 | [Duel evidence audit and a frozen duel set](research/duel-evidence-audit.md) | RESEARCH-ONLY. What the recorded duels (research/results/duel-.json) hold constant and what they let vary, and one set of duels run with every input frozen and named. Tool: tools/research/mcp-duel; scoreboard:... |
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |
 | [Incident 2026-11-19 to 11-22: an unowned AI battle held three machines, and master's CI broke twice](research/incident-2026-11-19-ai-battle-overload.md) | Post-mortem. Two failures overlapped. For three days the AI battle tournament held this Mac and the Linux build host at their limits, and nobody on either machine could tell whose processes they were. In the same... |
-| [Live arena](research/live-arena.md) | RESEARCH-ONLY. The live arena is the visible counterpart of the LAN AI battle. It has the same contestants as the battle: PrismaticAI from this repository, its solo-max variant, and four AIs from BaNaNaS. They play... |
+| [Live arena](research/live-arena.md) | RESEARCH-ONLY. The live arena is the visible counterpart of the LAN AI battle. It plays the battle's contestants, read from the battle's own configuration (battle.json contestants) and never copied, plus the arena's... |
 | [The public C++ API through MCP and OpenAPI](research/mcp-api.md) | RESEARCH-ONLY. Issue I0036, rule project.public-api-is-exposed. |
 | [The MCP catalogue in the in-game console](research/mcp-console.md) | RESEARCH-ONLY, UNSTABLE. Issue I0067; rule project.mcp-surfaces-are-derived. |
 | [Driving OpenTTD from outside: MCP panel, developer console and Rhai](research/mcp-control.md) | RESEARCH-ONLY. The embedded MCP server (ADR 0008, research/prismatic-mcp/) is the channel; this is the tooling that drives a running game through it. Everything binds to loopback. |
@@ -1364,6 +1365,7 @@ itself (generated):
 | [A person-like player: the interface as data, the mouse as input](research/mcp-human.md) | RESEARCH-ONLY. The embedded MCP server (ADR 0008, research/prismatic-mcp/) runs in every OpenTTD process: a dedicated server and each GUI client have their own. This document covers the part that lets a bot play the... |
 | [World View: the game's world in the external console](research/mcp-viz.md) | RESEARCH-ONLY. The hub (research/mcp-hub.md) serves /viz, a page built only on tools/research/mcp-panel/static/components.js and the hub's WebSocket. Everything on it is read live from one instance's own MCP... |
 | [A loopback R&D game across a revision mismatch](research/net-compat.md) | RESEARCH-ONLY, UNSTABLE. Issue I0070; ADR 0029; rule project.research-net-compat-is-local-and-non-spoofing. |
+| [Open findings](research/open-findings.md) | What this repository's own records say is still missing, blocked, handed off, not run or failed, in one table. Nothing on this page is written by hand: tools/surfaces/surfaces sync computes it from the records with... |
 | [Play in the browser](research/play-in-browser.md) | RESEARCH-ONLY. The panel's Play page (/play) runs the game in your browser, fullscreen if you want. The browser does not get a video stream or screenshots. It runs the real OpenTTD client, compiled to WebAssembly by... |
 | [Rail lines that pay: geometry, a steward and a monitor](research/rail-steward.md) | RESEARCH-ONLY. How the owner's bot builds rail that trains can always run, and what keeps each line paying afterwards. The parts: |
 | [A real game: a real opponent, over the real internet](research/real-game.md) | RESEARCH-ONLY. The owner's goal (2026-11-18): play a real game, over the real internet, against a real opponent. This page covers: |
@@ -1382,7 +1384,7 @@ tool, and this fork does not fake one. `tools/gate.sh --help` lists the exact co
 | Tier | Command | Cost | When to use it |
 |---|---|---|---|
 | Smoke | `tools/gate.sh smoke` | cheapest | fast feedback while iterating (incremental build, optional targeted tests) |
-| Change | `tools/gate.sh change` | standard | before calling a change done: docs, surfaces, scoreboard and knowledge checks, build, the full suite |
+| Change | `tools/gate.sh change` | standard | before calling a change done: docs, surfaces, scoreboard and knowledge checks, every Python test with changed-line coverage, build, the full suite |
 | Research | `tools/gate.sh research` | standard+ | code behind `OPTION_RESEARCH_INSTRUMENTATION` or the MCP server option, which the other tiers never compile |
 | Full | `tools/gate.sh full` | expensive | significant changes or a baseline: a clean-room build in `build-fullgate/` |
 | Evaluation | `tools/research/research validate --gate research` | n/a | checks a generated `manifest.json` for completeness and honesty |
@@ -1408,6 +1410,7 @@ those files:
 | [project.long-runs-are-owned-bounded-and-stoppable](.ai/repo/rules/project/long-runs-are-owned-bounded-and-stoppable.v1.md) | blocking | Before a job runs unattended or on another machine, make it write who owns it and how to stop it on every host, refuse new work over the host's load ceiling or under its 35 GiB disk floor, and honour a PAUSED file on the host and a STOP file beside it. |
 | [project.mcp-surfaces-are-derived](.ai/repo/rules/project/mcp-surfaces-are-derived.v1.md) | blocking | Derive every surface of the MCP integration from the live catalogue and the one route table; do not hand-list tools, routes, functions or settings in a second place. |
 | [project.never-report-unrun-validation-as-pass](.ai/repo/rules/project/never-report-unrun-validation-as-pass.v1.md) | blocking | Report every validation layer with the command that ran and its exit status, mark a layer that did not run as NOT RUN, and never round PARTIAL or ambiguous up to PASS. |
+| [project.new-code-tested](.ai/repo/rules/project/new-code-tested.v1.md) | blocking | Ship every change with tests that run every line it adds or modifies; keep tools/coverage/changed-lines passing, which refuses any changed Python line no test runs (file:line) and accepts an untestable one only through an exemption with a written reason that every run prints; until the other languages are measured, cover their changed lines with tests anyway and say in the report that no gate measured them. |
 | [project.no-commit-without-current-instruction](.ai/repo/rules/project/no-commit-without-current-instruction.v1.md) | blocking | Commit, push, rewrite history or force-push only on an explicit, current instruction from the owner that covers this change. |
 | [project.no-upstream-interaction](.ai/repo/rules/project/no-upstream-interaction.v1.md) | blocking | Never push to, open an issue against, or open a pull request against OpenTTD/OpenTTD; keep every commit, branch and experiment in korczis/OpenTTD, and keep the upstream remote fetch-only. |
 | [project.panel-charts-go-through-one-layer](.ai/repo/rules/project/panel-charts-go-through-one-layer.v1.md) | blocking | Create a panel chart only through components.js ecInit, register it with its parameters and drill target, keep its parameters in the address, make its card maximizable, and commit a static/app.css rebuilt from input.css and the current markup. |
@@ -1428,7 +1431,7 @@ those files:
 ```mermaid
 pie showData title Rules (project) by class
     %% links: README.md?col=Class&filter=blocking#06-ground-rules-short-version | README.md?col=Class&filter=advisory#06-ground-rules-short-version
-    "blocking" : 21
+    "blocking" : 22
     "advisory" : 2
 ```
 <!-- surfaces:end ai-rules -->
@@ -1624,7 +1627,7 @@ Milestones of the plan with the issues done and still open, derived from the iss
 | M7 | [NoirGFX: the game in the owner's SIG NIHL noir, from OpenGFX and Kenney models](.ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml) | 1/1 | — |
 | M8 | [Planning decisions read recorded history from the store and publish what they chose as data](.ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml) | 7/7 | — |
 | M9 | [Rhai is a live IDE: edited, run, debugged and inspected in the panel, and it reaches Prismatic's models and blackboard](.ai/repo/project/milestones/rhai-is-a-live-ide.yaml) | 6/6 | — |
-| M10 | [Every status surface and record says what the code does today, and a capability matrix proves it](.ai/repo/project/milestones/records-and-status-tell-the-truth.yaml) | 0/7 | I0110, I0111, I0112, I0113, I0114, I0115, I0116 |
+| M10 | [Every status surface and record says what the code does today, and a capability matrix proves it](.ai/repo/project/milestones/records-and-status-tell-the-truth.yaml) | 0/8 | I0110, I0111, I0112, I0113, I0114, I0115, I0116, I0226 |
 | M11 | [The fork's own toolchain carries no open dependency vulnerability, and new alerts are seen and triaged](.ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml) | 1/1 | — |
 | M12 | [Every changed line is run by a test, and a coverage gate refuses a change whose new lines no test ran](.ai/repo/project/milestones/every-changed-line-is-tested.yaml) | 0/4 | I0180, I0181, I0189, I0190 |
 | M13 | [Every AI battle match records why each company won or lost, with the settings it actually ran under, and replays identically on another arena](.ai/repo/project/milestones/every-battle-match-explains-itself.yaml) | 0/7 | I0118, I0119, I0120, I0121, I0122, I0123, I0124 |
@@ -1658,7 +1661,7 @@ xychart-beta
     %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml | .ai/repo/project/milestones/records-and-status-tell-the-truth.yaml | .ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml | .ai/repo/project/milestones/every-changed-line-is-tested.yaml | .ai/repo/project/milestones/every-battle-match-explains-itself.yaml | .ai/repo/project/milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml | .ai/repo/project/milestones/the-planner-reads-one-coherent-priced-world.yaml | .ai/repo/project/milestones/battlebrain-decides-live-with-rollback.yaml | .ai/repo/project/milestones/evaluations-are-fair-pre-registered-and-paired.yaml | .ai/repo/project/milestones/prismatic-closes-one-real-loop.yaml | .ai/repo/project/milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml | .ai/repo/project/milestones/the-live-agent-workbench.yaml | .ai/repo/project/milestones/the-panel-has-integrity.yaml | .ai/repo/project/milestones/algoglyph-is-accountable.yaml | .ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml
     y-axis "Issues done" 0 --> 58.3
     bar [2, 4, 8, 10, 53, 7, 1, 7, 6, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    line [2, 4, 8, 10, 53, 7, 1, 7, 6, 7, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 6, 2]
+    line [2, 4, 8, 10, 53, 7, 1, 7, 6, 8, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 6, 2]
 ```
 <!-- surfaces:end ai-plan -->
 
