@@ -119,7 +119,7 @@ pub fn bridge_companies(companies: &Value, vehicles: &Value) -> Value {
         e.1 += v.get("profit_last_year").and_then(Value::as_i64).unwrap_or(0);
         e.2 += v.get("profit_this_year").and_then(Value::as_i64).unwrap_or(0);
     }
-    let list = companies.pointer("/data/companies").or_else(|| companies.get("companies")).and_then(Value::as_array).cloned().unwrap_or_default();
+    let list = crate::battlebrain_contract::company_list(companies);
     Value::Array(list.into_iter().map(|c| {
         let id = c.get("id").and_then(Value::as_i64).unwrap_or(-1);
         let (counts, last, this) = per.remove(&id).unwrap_or_default();
@@ -725,7 +725,7 @@ fn apply_live(g: &Arc<Game>, url: &str, raw: &Value, d: &Directive, ignored: &[S
     let Some(company) = d.company_id else { return refuse(422, "invalid_decision_block", "a live decision names its company_id".into()) };
     let (now_tick, today) = game_time(g)?;
     let companies = g.resource("openttd://companies")?;
-    let list = companies.get("companies").or_else(|| companies.get("data")).cloned().unwrap_or(companies.clone());
+    let list = Value::Array(crate::battlebrain_contract::company_list(&companies));
     let world = live_world(&raw["decision"], now_tick, &list, company);
     if let Some((outcome, _)) = world.first() {
         return refuse(409, outcome, world.iter().map(|w| w.1.clone()).collect::<Vec<_>>().join("; "));
@@ -874,6 +874,10 @@ mod tests {
     #[test]
     fn a_live_decision_is_refused_in_a_world_behind_its_snapshot_or_without_its_ai_company() {
         let block = json!({"snapshot_tick": 74000});
+        // apply_live reads the game's openttd://companies envelope through company_list.
+        let envelope = json!({"game_tick": 74000, "data": {"companies": [{"id": 1, "is_ai": true, "name": "A"}]}});
+        assert!(live_world(&block, 74000, &Value::Array(crate::battlebrain_contract::company_list(&envelope)), 1).is_empty());
+        assert_eq!(live_world(&block, 74000, &envelope, 1)[0].0, "not_an_ai_company", "the raw envelope is no company list");
         let list = json!([{"id": 1, "is_ai": true, "name": "A"}, {"id": 0, "is_ai": false, "name": "Human"}]);
         assert!(live_world(&block, 74000, &list, 1).is_empty(), "the snapshot's own tick");
         assert!(live_world(&block, 80000, &list, 1).is_empty());

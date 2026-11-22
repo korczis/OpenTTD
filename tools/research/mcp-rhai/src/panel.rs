@@ -4121,7 +4121,8 @@ mod tests {
                 "tools/list" => json!({"jsonrpc": "2.0", "id": 1, "result": {"tools": [{"name": "openttd.ai.set_settings"}]}}),
                 "resources/read" => match call["params"]["uri"].as_str().unwrap_or("") {
                     "openttd://game/state" => res(json!({"game_tick": tick, "game_date": date})),
-                    "openttd://companies" => res(json!({"companies": [{"id": 1, "is_ai": true, "name": "A"}]})),
+                    // The game's own envelope (prismatic_mcp_server.cpp: env["data"] = {companies}).
+                    "openttd://companies" => res(json!({"game_tick": tick, "data": {"companies": [{"id": 1, "is_ai": true, "name": "A"}]}})),
                     other => res(json!({"error": format!("no {other}")})),
                 },
                 _ => {

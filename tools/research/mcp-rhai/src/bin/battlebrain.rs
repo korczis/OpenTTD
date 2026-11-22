@@ -240,8 +240,8 @@ pub fn run(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &
     if snapshot["scope"]["company"].as_i64() != Some(company) {
         return Err(refuse("scope_mismatch", format!("the snapshot is scoped to company {}, not {company}", snapshot["scope"]["company"])));
     }
-    let list = companies.pointer("/data/companies").or_else(|| companies.get("companies")).or_else(|| companies.get("data")).unwrap_or(companies);
-    let Some(co) = list.as_array().and_then(|a| a.iter().find(|c| c["id"].as_i64() == Some(company))) else {
+    let list = bb::company_list(companies);
+    let Some(co) = list.iter().find(|c| c["id"].as_i64() == Some(company)) else {
         return Err(refuse("unknown_company", format!("company {company} is not in the companies record")));
     };
     let snap_id = snapshot["id"].as_str().map(str::to_string).unwrap_or_else(|| bb::record_id(snapshot));
