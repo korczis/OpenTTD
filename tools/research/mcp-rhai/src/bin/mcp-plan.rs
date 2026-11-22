@@ -40,12 +40,8 @@ mod hub_algoglyph;
 mod battlebrain_contract;
 #[path = "../reads.rs"]
 mod reads;
-
-/// The game's resources a track plan reads, as hub_algoglyph assembles them (from/to added later).
-fn linecost_input(read: &dyn Fn(&str) -> Result<Option<serde_json::Value>, String>) -> Result<serde_json::Value, String> {
-    let ends = serde_json::json!({"from": {}, "to": {}});
-    hub_algoglyph::track_input(&ends, read)
-}
+#[path = "../plan_pipeline.rs"]
+mod plan_pipeline;
 
 /// Where resources come from: a panel's derived routes, an MCP server read directly through the
 /// token file `prismatic_mcp start` writes ({"agent_token","endpoint"}), for a stack without a panel,
@@ -397,75 +393,11 @@ fn main() {
         if capture_dir.is_some() {
             capture_note("companies", &src.fetch("companies"));
         }
-        let towns = src.resource("towns")?;
-        let g = graph::derive_with_ways(&src.resource("map")?, &towns, &src.resource("stations")?, &src.resource("map/ways").unwrap_or(serde_json::Value::Null))?;
-        // Live vehicles when the game offers openttd://engines; the plan says so when it does not.
-        let engines = src.resource("engines").unwrap_or(serde_json::Value::Null);
-        // Construction costs follow the game's prices now (openttd://economy/prices) where it offers
-        // them; a parameter the caller set wins.
-        let prices = src.resource("economy/prices").unwrap_or(serde_json::Value::Null);
-        let params = plan::with_prices(&params, &prices);
-        let mut out = plan::plan(&towns, &g, limit, &params, &engines)?;
-        // Freight from the world graph's industries, and the portfolio over passengers and freight.
-        let world = src.resource("world/graph").unwrap_or(serde_json::Value::Null);
-        let freight = cargo::freight_pairs(&world, &engines, &out["params"], limit.max(10));
-        out["freight"] = serde_json::Value::Array(freight);
-        // Station sites for every rail candidate (freight and passengers), by the bot's own rule
-        // (src/sites.rs), so an executor builds the plan without a rule of its own.
-        let map = src.resource("map")?;
-        let pos = |v: &serde_json::Value| (v["x"].as_i64().unwrap_or(0), v["y"].as_i64().unwrap_or(0));
-        let add_sites = |c: &mut serde_json::Value| {
-            let (a, b) = if c.get("producer").is_some() { (pos(&c["producer"]), pos(&c["acceptor"])) } else { (pos(&c["a"]), pos(&c["b"])) };
-            c["stations"] = serde_json::json!({
-                "from": sites::site(&map, a.0, a.1, b.0, b.1, 3), "to": sites::site(&map, b.0, b.1, a.0, a.1, 3),
-                "rule": "axis toward the other end, buildable flat rectangle and exit tile, nearest site (as PrismaticAI rail.nut)"});
-        };
-        if let Some(arr) = out["freight"].as_array_mut() {
-            for c in arr.iter_mut().filter(|c| c["mode"] == "freight_rail") { add_sites(c); }
-        }
-        if let Some(arr) = out["by_mode"]["rail"].as_array_mut() { for c in arr.iter_mut() { add_sites(c); } }
-        // --calibrate: what the running lines really earn against what this plan predicts for the
-        // same towns or industries, per mode (src/calibrate.rs); `calibration.params` goes back in
-        // as --params for the next plan. Read before track pricing changes any score.
-        if calibrate_too {
-            let mut cands: Vec<serde_json::Value> = out["pairs"].as_array().cloned().unwrap_or_default();
-            cands.extend(out["freight"].as_array().cloned().unwrap_or_default());
-            out["calibration"] = calibrate::calibrate(&src.resource("vehicles")?, &src.resource("stations")?, &cands, calibrate::REACH_TILES);
-        }
-        // --track N: the N best rail lines of each list priced on the real map by AlgoGlyph's
-        // track-planning (src/linecost.rs) instead of distance x tile cost, before the portfolio.
-        if track > 0 {
-            let read = |r: &str| -> Result<Option<serde_json::Value>, String> { Ok(src.resource(r).ok()) };
-            let mut base = linecost_input(&read)?;
-            if let Some(o) = base.as_object_mut() { o.remove("from"); o.remove("to"); }
-            let stations = out["params"]["costs"]["rail_stations"].as_f64().unwrap_or(1480.0);
-            let rail_tile = out["params"]["costs"]["rail_tile"].as_f64().unwrap_or(100.0);
-            let mut log = Vec::new();
-            for list in ["freight", "rail"] {
-                let arr = if list == "freight" { out["freight"].as_array_mut() } else { out["by_mode"]["rail"].as_array_mut() };
-                if let Some(arr) = arr { log.extend(linecost::price(arr, &base, stations, rail_tile, track)); }
-            }
-            out["line_costs"] = serde_json::json!({"solver": "algoglyph track-planning on map, map/ways, map/terrain, economy/prices, bridges",
-                                                   "priced": log});
-            // --yards N: prove up to N transfer yards offline (src/yards.rs): the better line's route
-            // blocked, can the other still leave from a platform beside it?
-            if yards_n > 0 {
-                let mut lines: Vec<serde_json::Value> = out["freight"].as_array().cloned().unwrap_or_default();
-                lines.extend(out["by_mode"]["rail"].as_array().cloned().unwrap_or_default());
-                out["yards"] = serde_json::json!({"solver": "algoglyph track-planning, the better line's tiles blocked (src/yards.rs)",
-                                                  "pairs": yards::prove(&lines, &base, yards_n)});
-            }
-        }
-        let mut candidates: Vec<serde_json::Value> = Vec::new();
-        for (_, ps) in out["by_mode"].as_object().cloned().unwrap_or_default() {
-            for p in ps.as_array().cloned().unwrap_or_default() { candidates.push(p); }
-        }
-        candidates.extend(out["freight"].as_array().cloned().unwrap_or_default());
-        candidates.sort_by(|a, b| b["score"].as_f64().unwrap_or(0.0).total_cmp(&a["score"].as_f64().unwrap_or(0.0)));
-        out["portfolio"] = cargo::portfolio(&candidates, out["params"]["budget"].as_f64());
-        if invest_inputs { return Ok(invest::input(&out, &engines, &towns).unwrap_or(serde_json::Value::Null)); }
-        if invest_too { out["investment"] = invest::decide(&out, &engines, &towns); }
-        out["model"] = serde_json::json!("v4: v3 for passengers, freight pairs from the world graph's industries priced with each cargo's own payment rate and transit periods, and a portfolio chosen by knapsack within the budget");
+        let read = |name: &str| src.resource(name);
+        let opts = plan_pipeline::Options { limit, params: params.clone(), track, yards: yards_n,
+                                            calibrate: calibrate_too, invest: invest_too, invest_inputs };
+        let mut out = plan_pipeline::run(&read, &opts)?;
+        if invest_inputs { return Ok(out); }
         // Which runner answered the kernel calls, only when the one-serve switch is on (I0086), so
         // the default answer stays as it was.
         if cargo::flow_serve::wanted() { out["algoglyph"] = cargo::flow_serve::summary(); }

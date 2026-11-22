@@ -85,6 +85,9 @@ export PRISMATIC_BOT_SETTINGS="$BOT_SETTINGS"
 # A held start (knowledge duels-run-side-by-side-are-noisy): the panel keeps the game paused until
 # both AI companies exist, so two runs of one seed start from the same state. 0 starts unpaused.
 export PRISMATIC_START_PAUSED="${PRISMATIC_START_PAUSED:-2}"
+# No background strategist (research/mechanisms/strategist-and-blackboard.md): its MCP reads and
+# console line would change a measured run's timing. A caller's own value wins.
+export PRISMATIC_STRATEGIST="${PRISMATIC_STRATEGIST:-0}"
 echo "==> duel on :$PANEL, seed $SEED, $MONTHS months, held start $PRISMATIC_START_PAUSED${BOT_SETTINGS:+, bot settings $BOT_SETTINGS}"
 "$ROOT_DIR/tools/research/mcp-e2e" --no-gui --no-browser --seed "$SEED" --panel-port "$PANEL" \
   --mcp-port "$(free)" --game-port "$(free)" > "$TMP/stack.log" 2>&1 &

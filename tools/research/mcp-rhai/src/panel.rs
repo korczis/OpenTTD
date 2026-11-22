@@ -2418,6 +2418,15 @@ pub fn routes() -> Vec<Route> {
           None, h_instances),
         r("GET", "/api/mesh", "mesh", "The Majordomus mesh this repository's server cooperates with (src/panel_mesh_page.rs, read-only): `mesh` (identity, trust policy, providers, tallies), `peers` (machines, runtimes, sessions, claims) and `nodes` (every discovered node with trust, presence and endpoints), read from the Majordomus server ($MAJORDOMUS_URL, else the one `majordomus serve ensure` names for this checkout) /api/v1/mesh, /peers and /nodes unchanged; 200 also when Majordomus is down (`reachable` false, `errors` per part)", false,
           None, crate::panel_mesh_page::h_mesh),
+        // The strategist and the blackboard (src/panel_strategy.rs, research/mechanisms/strategist-and-blackboard.md).
+        r("GET", "/api/strategy", "strategy", "The background strategist: enabled, running, cycles, its configuration (PRISMATIC_STRATEGIST, PRISMATIC_STRATEGY_*), strategy.status, strategy.summary, the last cycle with each part's duration and error (plan, track, towns, tuning), the next run, and the current strategy from the blackboard: portfolio (AlgoGlyph knapsack-dp or the built-in DP, named), AlgoGlyph transport-investment, track-planning of the best rail lines, town warnings per rated company, BattleBrain's tuning proposals, a bot settings suggestion (data only, never applied) and the mesh peers' plans. Reads and computes only; the game is never changed", false,
+          None, crate::panel_strategy::h_strategy),
+        r("POST", "/api/strategy/run", "strategyRun", "Run one strategist cycle now (also with PRISMATIC_STRATEGIST=0): with wait: true the answer is the cycle's record (parts, durations, errors, the plan.strategy event's sequence number), else 202 and the cycle runs in the background; 409 without a game", false,
+          s(json!({"wait": {"type": "boolean"}}), &[]), crate::panel_strategy::h_strategy_run),
+        r("GET", "/api/blackboard", "blackboard", "The panel's blackboard, the shared working state of this instance: one key (?key=, 404 when absent) or every key under ?prefix=, each with its value, writer (by), revision, wall time (written_at), game date and its last values (history; ?history=0 leaves them out). strategy.* is the strategist's, mesh.* what it read from the Majordomus mesh. In the panel's memory: a restarted panel starts empty", false,
+          None, crate::panel_strategy::h_blackboard),
+        r("POST", "/api/blackboard", "blackboardWrite", "Write a blackboard key for scripts, pages and services to share ({key, value, by?}); the reserved strategy.* and mesh.* keys are refused (403). Published as a blackboard.write event", false,
+          s(json!({"key": st(), "value": {}, "by": st()}), &["key", "value"]), crate::panel_strategy::h_blackboard_write),
         r("POST", "/api/instances/call", "instancesCall", "One MCP JSON-RPC call on a named instance of the cluster (a panel's server or a GUI client)", true,
           s(json!({"name": st(), "method": st(), "params": obj()}), &["name", "method"]), h_instances_call),
         r("GET", "/api/news", "news", "The news the owner's game window has shown, newest first (openttd.view.news.list on the GUI client); ?limit=N", true,
@@ -3229,7 +3238,9 @@ mod tests {
         // And the observation a directive is bound to (GET /api/bridge/observation; agent loop step 1).
         // And evidence retrieval (GET /api/evidence; research/agent-loop.md, Retrieve).
         // And the store's named queries (GET and POST /api/db/named; sql/queries).
-        assert_eq!(rs.len(), 76);
+        // And the strategist and its blackboard (GET /api/strategy, POST /api/strategy/run, GET and
+        // POST /api/blackboard; panel_strategy.rs).
+        assert_eq!(rs.len(), 80);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -3243,7 +3254,8 @@ mod tests {
             "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query", "/api/db/named",
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
             "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
-            "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh"].contains(&r.path)));
+            "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh",
+            "/api/strategy", "/api/strategy/run", "/api/blackboard"].contains(&r.path)));
     }
 
     /// A store with two runs of one instance: the older run's days must not feed the books.
