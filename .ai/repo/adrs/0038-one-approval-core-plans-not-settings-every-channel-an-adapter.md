@@ -156,16 +156,21 @@ The owner's answers (AskUserQuestion, session b8d35f8c, 2026-11-22, verbatim):
 The rule below was settled with openttd-08 (no objection) and openttd-b8. The decision itself is
 the pure `detail::DecideChat`, unit-tested branch by branch.
 
-**Who** (declared OR derived): the client's public key is in the server's approver list, or in the
-allow list of the company the approval names.
+**Who** (declared only, amended 2026-11-22): the client's public key is in the server's approver
+list. The owner decided, in openttd-51's session (relayed by the coordinator): in-game approval
+goes through separate identities. The owner's client is unarmed and registered as an approver,
+agents drive only through their own armed client, and an agent's client is never an approver. A
+company's allow list admits whoever plays that company, an agent's own client included, so it no
+longer counts. It is still read, to say in the refusal and the audit line that the key is a
+member, not an approver.
 
 - The approver list is declared data: `prismatic_mcp approvers add <client id>|remove <key>|list`,
   kept per server port in `<personal dir>/prismatic_mcp_approvers.<port>.txt` (written atomically,
   0600). It can name the owner's client even when that client is in no company's allow list
   (co-play).
-- The allow list is derived from OpenTTD's own access control for that company, and only for a
-  human company that does not admit anyone (`allow_any` off). An AI or co-play-opened company
-  derives nobody, since anyone it admits could add their own key.
+- The allow list (OpenTTD's own access control for a human company) approves nothing since the
+  amendment. Until then it counted for a human company that did not admit anyone (`allow_any`
+  off).
 - A spectator decides nothing.
 
 **What** (data-driven by the command's own flags and category, `detail::ChatScoped`): the chat
@@ -193,7 +198,7 @@ decides only what acts on one company.
   - Input a UI tool injects (`PrismaticMCP::UI::InjectingInput()`, the control window's injection
     scope from PR #66) never approves either, armed or not.
 - Every decision records `approved_via`: the console, or the chat client and company, and
-  whether a registered approver or the company's allow list allowed it.
+  whether a registered approver allowed it (a deny also names a company member).
 - A newer pending `ai.set_settings` for a company, or `ai.set_setting` of the same name,
   withdraws the older one.
 

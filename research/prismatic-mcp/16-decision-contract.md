@@ -52,8 +52,9 @@ tools"). Snapshot-staleness checks are staged.
     - the approval names the client's company;
     - the action acts on one company (`ai.set_setting`/`ai.set_settings`, or a command without
       the Server, Offline or Deity flag, outside the `server_setting` and `cheat` categories);
-    - the client's key is a registered approver (`prismatic_mcp approvers add <client id>`) or
-      in the allow list of that human company, when it does not admit anyone;
+    - the client's key is a registered approver (`prismatic_mcp approvers add <client id>`),
+      and only that: a key in the company's allow list is not one (ADR 0038, amended
+      2026-11-22);
     - the client is not armed for MCP input (`PRISMATIC_MCP_INPUT=1`).
   - Every refusal names the condition that failed.
   - One id per line. `!approvals` answers one `[approvals] {json}` line per approval and a count

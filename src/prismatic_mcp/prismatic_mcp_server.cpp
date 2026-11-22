@@ -1753,8 +1753,9 @@ bool HoldsPending(uint64_t id)
 
 /* ---- approvers: who may approve from inside the game (ADR 0038) --------------------------- *
  * Declared: the keys the server's operator registered ('prismatic_mcp approvers add <client id>'),
- * kept one per line in the personal directory so they survive a restart. Derived: the allow list of
- * the company an approval names, which is OpenTTD's own access control for that company. */
+ * kept one per line in the personal directory so they survive a restart. Only these approve: a
+ * company's allow list admits whoever plays it (an agent's armed client included), so it is never
+ * an approver (the owner's decision, 2026-11-22). */
 static std::vector<std::string> _approver_keys;
 static std::string _approvers_loaded_from; ///< the file the list was read from; another port's file is read afresh
 
@@ -1892,8 +1893,8 @@ bool ChatApproval(uint32_t client_id, int company, std::string_view key, bool in
 	f.valid_company = valid_company;
 	f.same_company = f.exists && valid_company && CompanyOf(*a) == company;
 	f.key_registered = !key.empty() && std::find(_approver_keys.begin(), _approver_keys.end(), key) != _approver_keys.end();
-	/* Derived only from a human company's own allow list: an AI or co-play-opened company admits
-	 * anyone, who could then add their own key to it. */
+	/* Whether the key is in a human company's allow list: said in the audit line, never enough to
+	 * approve (DecideChat counts registered keys only). */
 	if (!key.empty() && valid_company && Company::IsValidHumanID(CompanyID(company))) {
 		const Company *c = Company::Get(CompanyID(company));
 		f.key_in_allow_list = !c->allow_any && c->allow_list.Contains(key);
@@ -1908,7 +1909,7 @@ bool ChatApproval(uint32_t client_id, int company, std::string_view key, bool in
 	}
 	std::string m;
 	std::string via = fmt::format("chat client {} company {} key {} ({})", client_id, company, detail::KeyFingerprint(key),
-		f.key_registered ? "registered approver" : "company allow list");
+		f.key_registered ? "registered approver" : f.key_in_allow_list ? "company allow list, deny only" : "company member, deny only");
 	if (approving) {
 		ApproveById(req.id, m, via);
 	} else if (DenyById(req.id, m)) {
