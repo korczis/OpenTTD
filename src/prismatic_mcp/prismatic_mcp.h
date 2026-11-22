@@ -89,8 +89,8 @@ bool HoldsPending(uint64_t id);
  * '!approvals [page]' answers the company's pending approvals, one machine-readable line each
  * ("[approvals] {json}") and a last count line; '!approve <id>' and '!deny <id>' (one id per line)
  * decide through ApproveById/DenyById when detail::DecideChat allows it: an approval naming the
- * client's company, of a company-scoped action, approved by a registered approver or a key of that
- * company's allow list, and not from injected input. `replies` go to the asker alone, each within
+ * client's company, of a company-scoped action, approved only by a key the server's operator
+ * registered (never by a company's allow list), and not from injected input. `replies` go to the asker alone, each within
  * the chat length.
  * @return false when the line is not one of these (it is chat as usual).
  */

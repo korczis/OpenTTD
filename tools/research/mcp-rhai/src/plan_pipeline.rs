@@ -38,12 +38,6 @@ pub struct Options {
     pub invest_inputs: bool,
 }
 
-/// The game's resources a track plan reads, as hub_algoglyph assembles them (from/to added later).
-fn linecost_input(read: &dyn Fn(&str) -> Result<Option<Value>, String>) -> Result<Value, String> {
-    let ends = json!({"from": {}, "to": {}});
-    crate::hub_algoglyph::track_input(&ends, read)
-}
-
 /// One planner run. `read(name)` answers the data of resource `openttd://<name>`; every AlgoGlyph
 /// call goes to the kernel `kernels` matches for its capability (cargo.rs `Kernels`).
 pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &Kernels) -> Result<Value, String> {
@@ -87,8 +81,8 @@ pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &
     // track-planning (src/linecost.rs) instead of distance x tile cost, before the portfolio.
     if o.track > 0 {
         let opt = |r: &str| -> Result<Option<Value>, String> { Ok(read(r).ok()) };
-        let mut base = linecost_input(&opt)?;
-        if let Some(b) = base.as_object_mut() { b.remove("from"); b.remove("to"); }
+        // The game's resources as hub_algoglyph assembles them, the map and terrain of one land.
+        let (base, read_as) = crate::linecost::coherent_input(&opt, crate::linecost::READ_TRIES)?;
         let stations = out["params"]["costs"]["rail_stations"].as_f64().unwrap_or(1480.0);
         let rail_tile = out["params"]["costs"]["rail_tile"].as_f64().unwrap_or(100.0);
         let mut log = Vec::new();
@@ -97,6 +91,7 @@ pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &
             if let Some(arr) = arr { log.extend(crate::linecost::price(arr, &base, stations, rail_tile, o.track, kernels)); }
         }
         out["line_costs"] = line_costs(kernels, log);
+        out["line_costs"]["input"] = read_as;
         // yards N: prove up to N transfer yards offline (src/yards.rs): the better line's route
         // blocked, can the other still leave from a platform beside it?
         if o.yards > 0 {

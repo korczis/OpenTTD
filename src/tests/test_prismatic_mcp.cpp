@@ -1196,11 +1196,16 @@ TEST_CASE("A chat decision names the condition that failed, and only an approver
 	CHECK(DecideChat(with([](ChatFacts &f) { f.chat_decidable = false; }), false) == ChatVerdict::ServerOnly);
 	CHECK(DecideChat(with([](ChatFacts &f) { f.valid_company = false; }), true) == ChatVerdict::Spectator);
 	CHECK(DecideChat(with([](ChatFacts &f) { f.same_company = false; }), false) == ChatVerdict::NotYourCompany);
-	/* Approving needs an approver, declared or derived; denying withdraws and needs neither. */
+	/* Approving needs a registered approver; denying withdraws and needs none. */
 	ChatFacts nobody = with([](ChatFacts &f) { f.key_registered = false; f.key_in_allow_list = false; });
 	CHECK(DecideChat(nobody, true) == ChatVerdict::NotAnApprover);
 	CHECK(DecideChat(nobody, false) == ChatVerdict::Allow);
-	CHECK(DecideChat(with([](ChatFacts &f) { f.key_registered = false; f.key_in_allow_list = true; }), true) == ChatVerdict::Allow);
+	/* A key in the company's allow list is not an approver: an agent's own client playing the
+	 * owner's company is in it, and must never approve (the owner's decision, 2026-11-22). */
+	ChatFacts member = with([](ChatFacts &f) { f.key_registered = false; f.key_in_allow_list = true; });
+	CHECK(DecideChat(member, true) == ChatVerdict::NotAnApprover);
+	CHECK(DecideChat(member, false) == ChatVerdict::Allow);
+	CHECK(DecideChat(with([](ChatFacts &f) { f.key_registered = true; f.key_in_allow_list = false; }), true) == ChatVerdict::Allow);
 	/* Injected input never approves (a script driving the owner's client), but it may withdraw. */
 	CHECK(DecideChat(with([](ChatFacts &f) { f.injecting = true; }), true) == ChatVerdict::Injected);
 	CHECK(DecideChat(with([](ChatFacts &f) { f.injecting = true; }), false) == ChatVerdict::Allow);
@@ -1210,6 +1215,7 @@ TEST_CASE("A chat decision names the condition that failed, and only an approver
 		CHECK_FALSE(ChatVerdictText(v).empty());
 	}
 	CHECK(ChatVerdictText(ChatVerdict::NotAnApprover).find("approvers add") != std::string_view::npos);
+	CHECK(ChatVerdictText(ChatVerdict::NotAnApprover).find("allow list, is not enough") != std::string_view::npos);
 	CHECK(ChatVerdictText(static_cast<ChatVerdict>(200)) == "refused");
 }
 

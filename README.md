@@ -319,9 +319,10 @@ Examples from [`tools/research/mcp-panel/rhai/`](tools/research/mcp-panel/rhai/)
 
 The libraries they import: [`ttd.rhai`](tools/research/mcp-panel/rhai/ttd.rhai) (high-level game
 commands), [`rail_lib.rhai`](tools/research/mcp-panel/rhai/rail_lib.rhai) (rail lines as pure
-data, shared by the steward and the monitor) and
+data, shared by the steward and the monitor), [`advice_lib.rhai`](tools/research/mcp-panel/rhai/advice_lib.rhai)
+(the game's advice news as data, read by the monitor) and
 [`director_lib.rhai`](tools/research/mcp-panel/rhai/director_lib.rhai) (the director's event logic);
-`rail_lib` and `director_lib` are tested offline with `cargo test` in `tools/research/mcp-rhai`.
+`rail_lib`, `advice_lib` and `director_lib` are tested offline with `cargo test` in `tools/research/mcp-rhai`.
 
 ## Plans in a sentence
 
@@ -515,6 +516,7 @@ decides when a measurement may change a default.
 | [The main toolbar's click and menu tables and its tooltips are indexed by widget id, so a new WID_TN value must be added at the same position everywhere](.ai/repo/knowledge/curated/toolbar-dispatch-tables-are-indexed-by-widget-id.md) | When adding, removing or reordering a main or scenario-editor toolbar button. |
 | [Town-authority rules (ratings, gates, actions) are derived from src/ into one model; read it, do not copy numbers](.ai/repo/knowledge/curated/town-authority-rules-are-derived-from-the-engine.md) | Before writing bot, script or panel logic about town ratings: where the derived model is, what it holds, and the rules a company most often trips over. |
 | [A town's generated name is not saved; it is regenerated from townnameparts and the compiled name tables on every read](.ai/repo/knowledge/curated/town-names-are-regenerated-from-the-name-tables.md) | When editing src/table/townname.h or a town-name generator, or comparing town names across builds or saves. |
+| [AlgoGlyph track-planning refuses openttd://map/terrain read on other land than openttd://map; one terraform between the two reads leaves every rail line of a plan without a price](.ai/repo/knowledge/curated/track-planning-refuses-a-map-and-terrain-read-at-different-moments.md) | When building a track-planning input from a running game (mcp-plan --track, yards, algoglyph.track_plan), or reading why a planner round priced none of its rail lines. |
 | [On 2026-11-15 the fork moved from 317 commits behind upstream to a linear series on top of it](.ai/repo/knowledge/curated/upstream-rebase-2026-11-15.md) | When the next upstream sync needs a baseline, or when a hash from before 2026-11-15 does not resolve. |
 | [The widget enums in src/widgets/widget.h are generated into the ScriptWindow API, so widgets are appended, never inserted](.ai/repo/knowledge/curated/widget-enums-are-part-of-the-script-api.md) | Before adding, renaming or reordering a widget. |
 <!-- surfaces:end docs-index -->
@@ -635,7 +637,8 @@ What runs now ([`research/rail-steward.md`](research/rail-steward.md)):
   lengthens and adds trains where cargo waits, and renews old locomotives. The bot reconciles the
   line to that target, the way a controller reconciles desired state.
 - **A Rhai monitor reports what is wrong.** [`rail_monitor.rhai`](tools/research/mcp-panel/rhai/rail_monitor.rhai)
-  posts lost and broken trains to the Majordomus board, where agent sessions read them.
+  posts lost and broken trains to the Majordomus board, where agent sessions read them, and
+  answers the game's own advice news (a lost train, one that loses money) with a line in chat.
 - **The scripts run as services.** The panel's Scripts page edits each script with a live parse
   check, runs it in the background and reloads it when its file changes.
 
@@ -789,10 +792,10 @@ from the code. The right-hand column says what was counted.
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
 | **54** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
-| **20** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
+| **21** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **38** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **209** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
-| **98** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
+| **99** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
@@ -800,7 +803,7 @@ from the code. The right-hand column says what was counted.
 pie showData title Counted from the sources: tooling
     "research tools and checks (tools/research/, shell and Python)" : 54
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 13
-    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 20
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 21
 ```
 <!-- surfaces:end facts -->
 
@@ -1220,7 +1223,7 @@ the bridge: [a real place as the map](#a-real-place-as-the-map).
 | [`tools/research/mcp-panel/`](./tools/research/mcp-panel/) | The panel's pages and its Rhai scripts (`rhai/`): director, narrator, steward, full game, ... |
 | [`tools/research/mcp-e2e`](./tools/research/mcp-e2e), [`mcp-duel`](./tools/research/mcp-duel), [`mcp-human`](./tools/research/mcp-human/) | The one-command stack, bot-vs-bot duels (results in [`research/results/`](./research/results/)), a bot that plays through the UI. |
 | [`tools/research/prismatic-ai/`](./tools/research/prismatic-ai/README.md) | The owner's company AI (Squirrel content, not engine code; linked into the personal `ai/` folder by its `install`, which moves an old copy to `ai-backup/`): planned freight, passenger, air and bus lines, rail termini trains can always run, and line targets the Rhai steward sets — see [`research/rail-steward.md`](./research/rail-steward.md). |
-| [`tools/research/mcp-panel/rhai/rail_steward.rhai`](./tools/research/mcp-panel/rhai/rail_steward.rhai), [`rail_monitor.rhai`](./tools/research/mcp-panel/rhai/rail_monitor.rhai) | The steward that sets each rail line's target and the monitor that posts lost and broken trains to the Majordomus board. |
+| [`tools/research/mcp-panel/rhai/rail_steward.rhai`](./tools/research/mcp-panel/rhai/rail_steward.rhai), [`rail_monitor.rhai`](./tools/research/mcp-panel/rhai/rail_monitor.rhai) | The steward that sets each rail line's target and the monitor that posts lost and broken trains to the Majordomus board and reacts to the game's advice news ([`advice_lib.rhai`](./tools/research/mcp-panel/rhai/advice_lib.rhai)). |
 | [`tools/research/vanilla-client`](./tools/research/vanilla-client), [`real-game-check`](./tools/research/real-game-check) | The unmodified release client for public servers ([`research/vanilla-client.md`](./research/vanilla-client.md)) and the readiness check for a hosted real game ([`research/real-game.md`](./research/real-game.md)). |
 | [`tools/research/e2e-coverage`](./tools/research/e2e-coverage) and the `tools/research/mcp-*-check` family | Every web page driven in a real browser, and one live check per surface of the panel, the hub and the game. |
 | [`tools/gate.sh`](./tools/gate.sh), [`tools/research/research`](./tools/research/research) | Layered local validation (0.5) and the research-mode CLI with its experiment manifest ([`research/tooling.md`](./research/tooling.md)). |
@@ -1361,6 +1364,7 @@ itself (generated):
 | [Duel evidence audit and a frozen duel set](research/duel-evidence-audit.md) | RESEARCH-ONLY. What the recorded duels (research/results/duel-.json) hold constant and what they let vary, and one set of duels run with every input frozen and named. Tool: tools/research/mcp-duel; scoreboard:... |
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |
 | [Incident 2026-11-19 to 11-22: an unowned AI battle held three machines, and master's CI broke twice](research/incident-2026-11-19-ai-battle-overload.md) | Post-mortem. Two failures overlapped. For three days the AI battle tournament held this Mac and the Linux build host at their limits, and nobody on either machine could tell whose processes they were. In the same... |
+| [Incident 2026-11-22: four PrismaticAI companies of one map built on the same mines](research/incident-2026-11-22-sibling-industries.md) | Post-mortem. In the owner's live 8-company game on :8800 (seed 2927, master c5bf32182a), four companies ran PrismaticAI: 0, 1, 6 and 7. Two or more of them built rail lines from the same mine or forest, so each such... |
 | [Live arena](research/live-arena.md) | RESEARCH-ONLY. The live arena is the visible counterpart of the LAN AI battle. It plays the battle's contestants, read from the battle's own configuration (battle.json contestants) and never copied, plus the arena's... |
 | [The public C++ API through MCP and OpenAPI](research/mcp-api.md) | RESEARCH-ONLY. Issue I0036, rule project.public-api-is-exposed. |
 | [The MCP catalogue in the in-game console](research/mcp-console.md) | RESEARCH-ONLY, UNSTABLE. Issue I0067; rule project.mcp-surfaces-are-derived. |
