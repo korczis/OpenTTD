@@ -20,13 +20,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # The whole history, blobs fetched only when a diff needs them. A shallow clone truncates
+    # `git rev-list HEAD^..HEAD^2` at its boundary and leaves a commit's parent missing, and
+    # `git diff <h>^..<h>` then exits 128 (seen on #11).
     - name: Checkout
       uses: actions/checkout@v7
       with:
-        fetch-depth: 4
-
-    - name: Get pull-request commits
-      uses: OpenTTD/actions/checkout-pull-request@v7
+        fetch-depth: 0
+        filter: blob:none
 
     - name: Checkout the commit hooks
       uses: actions/checkout@v7
