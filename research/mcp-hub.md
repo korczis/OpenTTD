@@ -25,10 +25,19 @@ cargo build --offline --release --manifest-path tools/research/mcp-rhai/Cargo.to
 tools/research/mcp-rhai/target/release/mcp-hub --port 8790        # then open http://127.0.0.1:8790/
 tools/research/mcp-rhai/target/release/mcp-hub --panel http://127.0.0.1:8800   # add a panel the registry lacks
 tools/research/mcp-rhai/target/release/mcp-hub --bus-port 8791 --no-store       # a fixed bus port, no store
+tools/research/mcp-rhai/target/release/mcp-hub --panel http://127.0.0.1:8841 --pidfile ~/.local/state/prismatic-mcp/hub.pid --exit-with-parent
 ```
 
 Beyond loopback the hub takes the panel's access flags and policy (`--bind`, `--allow-origin`,
 `--token`; [mcp-control.md](mcp-control.md#who-may-use-it-locally-on-the-lan-on-the-web-adr-0038)).
+
+The hub never outlives what it serves
+([`daemon.rs`](../tools/research/mcp-rhai/src/daemon.rs)): it stops with exit status 4 when its
+working directory, its registry or its pages (each one that existed at start) are deleted, when no
+`--panel` has answered for `--panel-deadline` seconds (default 600, 0 never), and with
+`--exit-with-parent` when the process that started it is gone. `--pidfile` refuses a second copy
+(exit 5) and takes over a dead one's file. One hub ran 7 h after its worktree and its panel were
+deleted (2026-11-22); `tests/daemons.rs` runs the binary through each of these cases.
 
 ## The surface
 
@@ -89,8 +98,12 @@ While the hub runs it holds the store file's lock, as a panel does: read through
 
 ## AlgoGlyph: the planning engine
 
-AlgoGlyph (`$MCP_ALGOGLYPH_DIR`, else a checkout of origin/main at `~/dev/algoglyph-wt/main`, else
-`~/dev/algoglyph`) is the planning engine; the hub only
+AlgoGlyph is the planning engine. It is the git submodule `tools/research/vendor/algoglyph`,
+pinned at one commit (ADR 0039; `tools/research/algoglyph-pin`). The runner is
+`$MCP_ALGOGLYPH_DIR` when it is set, else the first installed checkout cleanly at the pin: the
+submodule, `~/dev/algoglyph-wt/main` or `~/dev/algoglyph`. `algoglyph.kernels` lists the runner's
+kernels, then the pinned crate's Rust kernels with engine `native-rust`, which `algoglyph.kernel`
+answers in-process. For the rest the hub only
 forwards (`tools/research/mcp-rhai/src/hub_algoglyph.rs`). `algoglyph.track_plan` reads the five
 resources of the named game back to back (track-planning checks the terrain's slopes against the
 map's heights, so they must be one moment) and pipes them with `from` and `to` to the kernel; a

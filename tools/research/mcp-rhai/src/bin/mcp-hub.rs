@@ -4,6 +4,7 @@
 //! Usage:
 //!   mcp-hub [serve] [--port 8790] [--registry DIR] [--panel URL]... [--static DIR] [--audit-every S]
 //!                   [--bus-port N] [--no-store] [--bind IP] [--allow-origin O ...] [--token T]
+//!                   [--pidfile PATH] [--exit-with-parent] [--panel-deadline S]
 //!   mcp-hub check [--hub ws://127.0.0.1:8790/ws] [--event-wait SECONDS]
 //!   mcp-hub audit [--hub ws://127.0.0.1:8790/ws] [--json]
 //!   mcp-hub intent-check [--hub ws://127.0.0.1:8790/ws] ["<sentence>"]...
@@ -18,6 +19,11 @@
 //! ZeroMQ PUB socket of its own (tcp://127.0.0.1:<--bus-port, default an ephemeral port>, GET
 //! /api/bus) and into a DuckDB store of its own ($PRISMATIC_STORE_DIR/hub-<port>.duckdb, GET
 //! /api/db/query; --no-store leaves it out). Relayed panel events stay in their panel's store.
+//! It never outlives what it serves (src/daemon.rs): it stops (exit 4) when its working directory,
+//! its registry or its pages (each one that existed at start) are deleted, when no --panel has
+//! answered for --panel-deadline seconds (default 600, 0 never; only with --panel), and, with
+//! --exit-with-parent, when the process that started it is gone. --pidfile refuses a second copy
+//! (exit 5) and takes over a dead one's file.
 //! check: connects to a hub, calls every read-only operation of every instance that needs no
 //! required input, and waits for one streamed event; exits 1 on any failure.
 //! intent-check: sends each sentence (the owner's own examples by default, Czech with and without
@@ -33,6 +39,9 @@ use std::time::{Duration, Instant};
 #[path = "../bus_sinks.rs"]
 #[allow(dead_code)]
 mod bus_sinks;
+#[path = "../daemon.rs"]
+#[allow(dead_code)]
+mod daemon;
 #[path = "../hub.rs"]
 mod hub;
 #[path = "../web_access.rs"]
@@ -286,7 +295,34 @@ fn sink_config(args: &[String], port: u16) -> hub::SinkConfig {
     hub::SinkConfig { name, bus_port: arg(args, "--bus-port").and_then(|p| p.parse().ok()).unwrap_or(0), store }
 }
 
+/// How long the --panel instances may all not answer before the hub stops.
+const PANEL_DEADLINE: Duration = Duration::from_secs(600);
+/// How often the hub checks that what it serves is still there.
+const WATCH_EVERY: Duration = Duration::from_millis(500);
+
+/// Whether one of the --panel instances (`bases`) answers: its catalogue read, and no error since.
+fn panels_alive(s: &hub::State, bases: &[String]) -> bool {
+    s.instances.iter()
+        .filter(|i| bases.iter().any(|b| b.trim_end_matches('/') == i.base()))
+        .any(|i| s.ops.contains_key(&i.name) && !s.errors.contains_key(&i.name))
+}
+
+/// What the hub must not outlive: its working directory, its registry and its pages (those that
+/// exist at start), and with --exit-with-parent the process that started it.
+fn hub_watch(args: &[String], registry: &std::path::Path, statics: &std::path::Path) -> daemon::Watch {
+    let mut w = daemon::Watch::default().cwd();
+    if args.iter().any(|a| a == "--exit-with-parent") { w = w.with_parent(); }
+    for (what, p) in [("registry", registry), ("pages", statics)] {
+        if p.exists() { w = w.path(what, p.to_path_buf()); }
+    }
+    w
+}
+
 fn serve(args: &[String]) -> i32 {
+    let _pidfile = match arg(args, "--pidfile").map(|p| daemon::Pidfile::claim(std::path::Path::new(&p))) {
+        Some(Err(e)) => { eprintln!("mcp-hub: {e}"); return 5; }
+        held => held.map(Result::unwrap),
+    };
     let port = arg(args, "--port").unwrap_or_else(|| "8790".into());
     // The one web access policy (src/web_access.rs): --bind, --allow-origin (repeatable), --token.
     let mut web = web_access::Policy::default();
@@ -313,6 +349,8 @@ fn serve(args: &[String]) -> i32 {
         sinks: Some(sink_config(args, listener.local_addr().map(|a| a.port()).unwrap_or(0))),
     };
     let addr = listener.local_addr().map(|a| a.to_string()).unwrap_or_default();
+    let watch = hub_watch(args, &cfg.registry, &cfg.statics);
+    let bases = cfg.panels.clone();
     let state = hub::run(listener, cfg);
     {
         let s = state.lock().unwrap();
@@ -325,7 +363,21 @@ fn serve(args: &[String]) -> i32 {
             }
         }
     }
-    loop { std::thread::sleep(Duration::from_secs(3600)); }
+    let deadline = arg(args, "--panel-deadline").and_then(|v| v.parse::<f64>().ok()).filter(|v| *v >= 0.0)
+        .map_or(PANEL_DEADLINE, Duration::from_secs_f64);
+    let mut dead = daemon::Idle::new((!bases.is_empty()).then_some(deadline));
+    loop {
+        std::thread::sleep(WATCH_EVERY);
+        if let Some(why) = watch.gone() {
+            eprintln!("mcp-hub: stopping: {why}");
+            return 4;
+        }
+        let alive = panels_alive(&state.lock().unwrap(), &bases);
+        if dead.tick(alive, Instant::now()) {
+            eprintln!("mcp-hub: stopping: no --panel ({}) answered for {} s", bases.join(", "), deadline.as_secs());
+            return 4;
+        }
+    }
 }
 
 fn main() {
@@ -343,8 +395,10 @@ fn main() {
         "check" => (&["--hub", "--event-wait"], &["--hub", "--event-wait"]),
         "audit" => (&["--hub", "--json"], &["--hub"]),
         "intent-check" => (&["--hub"], &["--hub"]),
-        _ => (&["--port", "--panel", "--registry", "--static", "--audit-every", "--bus-port", "--no-store", "--help", "--bind", "--allow-origin", "--token"],
-              &["--port", "--panel", "--registry", "--static", "--audit-every", "--bus-port", "--bind", "--allow-origin", "--token"]),
+        _ => (&["--port", "--panel", "--registry", "--static", "--audit-every", "--bus-port", "--no-store", "--help", "--bind", "--allow-origin", "--token",
+                "--pidfile", "--exit-with-parent", "--panel-deadline"],
+              &["--port", "--panel", "--registry", "--static", "--audit-every", "--bus-port", "--bind", "--allow-origin", "--token",
+                "--pidfile", "--panel-deadline"]),
     };
     if let Some(f) = unknown_flag(rest, known, valued) {
         eprintln!("mcp-hub {cmd}: unknown option {f} (-h for usage)");
@@ -382,6 +436,35 @@ mod tests {
             "/api/events/stream": {"get": {"operationId": "eventStream", "responses": {"200": {"content": {"text/event-stream": {}}}}}},
             "/api/resources/stations": {"get": {"operationId": "resource_stations"}}
         }})
+    }
+
+    #[test]
+    fn a_panel_is_alive_while_its_catalogue_reads_and_the_watch_takes_what_exists() {
+        let mut s = hub::State::default();
+        let bases = vec!["http://127.0.0.1:8841/".to_string()];
+        assert!(!panels_alive(&s, &bases), "not discovered yet");
+        s.instances.push(hub::Instance { name: "panel-8841".into(), kind: "panel".into(),
+                                         access: hub::Access::Panel { base: "http://127.0.0.1:8841".into() }, supervisor: Value::Null });
+        s.instances.push(hub::Instance { name: "panel-8800".into(), kind: "panel".into(),
+                                         access: hub::Access::Panel { base: "http://127.0.0.1:8800".into() }, supervisor: Value::Null });
+        s.ops.insert("panel-8800".into(), vec![]);
+        assert!(!panels_alive(&s, &bases), "another panel answering is not ours");
+        s.ops.insert("panel-8841".into(), vec![]);
+        assert!(panels_alive(&s, &bases));
+        s.errors.insert("panel-8841".into(), "connection refused".into());
+        assert!(!panels_alive(&s, &bases), "an error since the catalogue read is a dead panel");
+
+        let d = std::env::temp_dir().join(format!("mcp-hub-watch-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let missing = d.join("no-pages");
+        let w = hub_watch(&["--exit-with-parent".to_string()], &d, &missing);
+        assert!(w.parent.is_some());
+        let names: Vec<&str> = w.paths.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["working directory", "registry"], "pages that never existed are not watched");
+        assert_eq!(w.gone(), None);
+        std::fs::remove_dir_all(&d).unwrap();
+        assert!(w.gone().unwrap().contains("registry"));
+        assert!(hub_watch(&[], &missing, &missing).parent.is_none());
     }
 
     #[test]

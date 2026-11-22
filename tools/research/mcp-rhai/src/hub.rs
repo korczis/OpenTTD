@@ -873,10 +873,10 @@ pub fn handle(state: &Shared, req: &Value, subscriber: Option<u64>) -> Option<Va
             if let Some(sub) = s.subscribers.iter_mut().find(|x| x.id == sid) { sub.filter = filter; }
             ok(&id, json!({"subscribed": method == "hub.subscribe"}))
         }
-        "algoglyph.kernels" => match algoglyph::flow(&["kernels"], None) { Ok(v) => ok(&id, v), Err(e) => err(&id, -32000, e) },
+        "algoglyph.kernels" => match algoglyph::kernels() { Ok(v) => ok(&id, v), Err(e) => err(&id, -32000, e) },
         "algoglyph.kernel" => {
             let Some(kernel) = p.get("kernel").and_then(Value::as_str) else { return Some(err(&id, -32602, "algoglyph.kernel needs kernel")) };
-            match algoglyph::flow(&["kernel", kernel, "-"], Some(p.get("input").unwrap_or(&json!({})))) { Ok(v) => ok(&id, v), Err(e) => err(&id, -32000, e) }
+            match algoglyph::kernel(kernel, p.get("input").unwrap_or(&json!({}))) { Ok(v) => ok(&id, v), Err(e) => err(&id, -32000, e) }
         }
         "algoglyph.track_plan" => {
             let Some(inst) = p.get("instance").and_then(Value::as_str) else { return Some(err(&id, -32602, "algoglyph.track_plan needs instance")) };
@@ -1190,4 +1190,30 @@ pub fn run(listener: TcpListener, cfg: Config) -> Shared {
         }
     });
     state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One JSON-RPC call on a hub with no instances.
+    fn call(method: &str, params: Value) -> Value {
+        let state: Shared = Arc::new(Mutex::new(State::default()));
+        handle(&state, &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}), None).unwrap_or(Value::Null)
+    }
+
+    #[test]
+    fn algoglyph_native_kernel_is_answered_by_the_hub_in_process() {
+        let id = algoglyph::native::entries(&json!([]))[0]["id"].as_str().unwrap().to_string();
+        let r = call("algoglyph.kernel", json!({"kernel": id, "input": {"keys": [3, 1, 2]}}));
+        assert_eq!(r["result"]["ok"], true, "{r}");
+        assert_eq!(r["result"]["kernel"]["engine"], algoglyph::native::ENGINE);
+        assert_eq!(call("algoglyph.kernel", json!({}))["error"]["code"], -32602);
+        // The catalogue needs the runner: where none is installed the hub answers the refusal,
+        // never a catalogue without the runner's kernels (and the test never boots npm).
+        if !algoglyph::runnable(&algoglyph::dir()) {
+            let k = call("algoglyph.kernels", json!({}));
+            assert!(k["error"]["message"].as_str().unwrap().contains("algoglyph-pin install"), "{k}");
+        }
+    }
 }
