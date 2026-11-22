@@ -1,0 +1,32 @@
+id: I0117
+milestone: the-toolchain-carries-no-known-vulnerability
+title: "The four Dependabot advisories on zip 6.0.0 in tools/research/mcp-rhai are closed: duckdb upgraded to a release whose build uses zip >= 9.0.5, or each alert dismissed with its evidence"
+slug: mcp-rhai-zip-advisories
+priority: p0
+profile: implementation
+parallel_safe: true
+objective: "Close Dependabot alerts 1-4 on tools/research/mcp-rhai/Cargo.lock. First try the fix: find the earliest duckdb / libduckdb-sys release whose build-dependency on zip resolves to >= 9.0.5, upgrade, rebuild and run the mcp-rhai suites (the store and every binary that links duckdb). If no such release exists yet, or the upgrade breaks the store, dismiss each alert through the API with reason tolerable_risk or vulnerable_code_not_used and a comment stating the evidence (zip runs only in libduckdb-sys's build script on an archive shipped inside the crate), record that as a decision the owner accepts, and leave a tracked note naming the upstream release to watch."
+why: "Dependabot, enabled 2026-11-22, reports zip 6.0.0 with a critical advisory (alert 1, fixed in 9.0.5) and three others fixed in 9.0.0. `cargo tree -i zip` shows the only path: zip <- libduckdb-sys v1.10505.0 [build-dependencies] <- duckdb v1.10505.0 <- mcp-rhai. A critical alert left open teaches everyone to ignore the alert list."
+scope:
+  - "tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-rhai/Cargo.lock"
+  - "tools/research/mcp-rhai/src/**"
+  - "research/mcp-control.md"
+non_scope:
+  - "Upgrading unrelated crates beyond what the duckdb upgrade pulls in"
+  - "Changing the store schema or its SQL files"
+depends_on: []
+serves:
+  - "openttd-validates-agent-driven-engineering#no-open-dependency-alert"
+acceptance_criteria:
+  - "cargo tree --offline -i zip in tools/research/mcp-rhai shows zip >= 9.0.5, or every alert 1-4 is dismissed with a reason and an evidence comment"
+  - "cargo test --release --offline for every mcp-rhai binary that links duckdb passes after the change; the store's tests and mcp-panel-check still pass"
+  - "If dismissed: a majordomus decision records the owner's acceptance and the upstream release to watch"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-panel-check"
+  - "gh api 'repos/korczis/OpenTTD/dependabot/alerts?state=open' --jq length"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

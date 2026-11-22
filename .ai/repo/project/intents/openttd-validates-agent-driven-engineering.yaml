@@ -13,6 +13,7 @@ milestones:
 - a-change-is-validated-in-cost-tiers
 - the-fork-is-published-supervised-and-current
 - records-and-status-tell-the-truth
+- the-toolchain-carries-no-known-vulnerability
 satisfaction:
 - id: ground-rules-are-one-source
   criterion: "Every AGENTS.md ground rule maps to a project rule under .ai/repo/rules/project/, and every tracked provider file links AGENTS.md"
@@ -42,5 +43,9 @@ satisfaction:
   criterion: "No status surface or tracked record contradicts the code on master: openttd://mcp/status derives its capability fields from the registry, no tracked text calls a shipped capability absent or planned, feature maturity is defined and met, and every path in research/capability-matrix.md resolves"
   evidence: command
   ref: "tools/check-prismatic-docs.sh && tools/knowledge/refs check && majordomus doctor"
+- id: no-open-dependency-alert
+  criterion: "The default branch has no open Dependabot alert: each is fixed by an upgrade or dismissed with a recorded reason the owner accepted"
+  evidence: command
+  ref: "test \"$(gh api 'repos/korczis/OpenTTD/dependabot/alerts?state=open' --jq length)\" -eq 0"
 created_at: 2026-11-15
 updated_at: '2026-11-22'
