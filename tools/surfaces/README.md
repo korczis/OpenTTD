@@ -10,6 +10,7 @@ sources are its tracked Markdown, its git history and its `.ai/` layer. The outp
 | Markdown regions | `surfaces sync` | Tables inside the documents themselves (document indexes, features, decisions, rules, plan, surfaces, facts, a table of contents, a region included from another document), between markers, after every declared generator has run | The repository |
 | Gate | `surfaces check` | Fails while a region is stale, a declared generator's check fails, a relative link or anchor leads nowhere, a document's front matter does not parse, a tool's flags and its usage disagree, or a diagram is drawn in characters instead of Mermaid | Pre-commit, `tools/gate.sh`, CI |
 | Diagrams | `diagrams-check` | Opens every built page with a Mermaid block in Chrome and fails on a diagram that does not render to an SVG | CI, after `site` |
+| Declared pages | `pages-check` | Opens every page `[[pages.items]]` declares in Chrome, desktop and phone, light and dark, then runs the page's own scenario | CI, after `site` |
 
 Nothing in the generator names a repository. Every fact comes from git (`origin`, `HEAD`,
 the tracked files, the log), from the `.ai/manifest.yaml` sections, and from each
@@ -236,6 +237,42 @@ the tooltip. Search reads the title, path, summary, headings and the first part 
 and is shown at every width. `404.html` carries a `<base href>` set to the Pages path, because
 GitHub serves it at whatever URL was missed.
 
+## Declared pages
+
+A page that is not a document, such as a view over a repository's own records, is declared in
+`surfaces.toml` instead of written into the generator, which stays generic:
+
+```toml
+[[pages.items]]
+id = "atlas"                                   # published as atlas.html, listed in the sidebar
+title = "Research Atlas"
+summary = "One paragraph: the page's intro, its meta description and its search entry."
+data = ["tools/research/atlas/atlas", "data"]  # run at build time; stdout is the page's JSON
+script = "tools/research/atlas/atlas.js"       # the page's own client script, copied to js/<id>.js
+e2e = "tools/research/atlas/atlas.e2e.mjs"     # the scenario pages-check runs in Chrome
+```
+
+- **Data.** `surfaces site` runs `data` from the repository root and publishes its stdout as
+  `data/<id>.json`. It must be a JSON object that names its `schema`; a failing command or other
+  output stops the build. The data is derived at build time, so it cannot drift from the commit.
+- **Cards.** When the data carries `cards` (`value`, `label`, `detail`, `view`, `chain` of
+  `{label, href}`), the page renders them as plain HTML, so it states what it found with no
+  script at all. A `chain` href is a repository path (a document becomes its page, any other file
+  the forge at the built commit, a trailing `/` a directory); `view` is a query on the page itself.
+- **Script.** The page's script draws into `#page-app` and builds on `window.surfaces`
+  (`assets/app.js`): the URL state (`params`, `setParam`), the chart registry (`charts`, so a chart
+  resizes and its `.chart-card` maximizes and restores on Escape), `echarts()` (the site's own
+  copy), `onTheme`, `href(path)` and `restoreMax`. It sets `data-state="ready"` once every view is
+  drawn, or `"error"` with a message when its data does not load. Tailwind scans the script, so its
+  classes are in the stylesheet.
+- **Checked.** `surfaces check` fails on a declaration without a slug id, title, summary, a data
+  command whose first word is tracked, or a tracked `script` and `e2e` (finding `page`): a page no
+  browser check drives is not built. `pages-check [SITE_DIR] [--shots DIR]` opens each declared
+  page (from the built `data/pages.json`) at 1440 and 390 px in light and dark, waits for its
+  ready state rather than a fixed time, and fails on a page error, a console error, sideways scroll
+  or a relative link to nothing; then it imports the page's `e2e` module and calls its default
+  export with `{browser, base, url, site, root, open, check}`.
+
 ## Wiki
 
 GitHub keeps a wiki in a separate repository, `<repo>.wiki.git`, which exists only after
@@ -291,5 +328,6 @@ The project rule `project.published-surfaces-are-derived` states the contract.
 | `surfaces.py` | The generator: discovery, rendering, regions, check |
 | `assets/input.css`, `assets/app.js` | The site's stylesheet source and client script (Mermaid theme, ECharts builders, maximize) |
 | `diagrams-check` | Every Mermaid diagram of a built site renders, in Chrome |
+| `pages-check` | Every declared page of a built site works, in Chrome, with its own scenario |
 | `package.json`, `package-lock.json` | Pinned front-end dependencies |
 | `requirements.txt` | Pinned Python dependencies |
