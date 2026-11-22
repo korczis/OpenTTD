@@ -643,7 +643,9 @@ pub fn validate_invocation(inv: &Value, cat: &Catalogue) -> Result<(), Vec<Refus
 // Capabilities (Phase 05, I0098): what Battlebrain needs computed, as typed requirements, and the
 // kernels of the discovered catalogue that satisfy them. The requirement table is the one place a
 // capability is declared; the adapter registry is the one explicit list of kernel ids in this
-// crate's contract layer, at the protocol boundary where AlgoGlyph publishes no schema yet.
+// crate's contract layer, at the protocol boundary where AlgoGlyph publishes no schema yet. What
+// the pinned AlgoGlyph source does state (engine, input keys and types, output keys) is read from
+// the derived contracts (I0228) first; an adapter keeps only what no source states.
 // ---------------------------------------------------------------------------------------------
 
 /// The version of a capability-match decision (the `params` of a capability-match inference).
@@ -656,12 +658,12 @@ pub const FIELD_KINDS: &[&str] = &["amount", "amount[]", "number", "number[]", "
 /// Why a capability resolved to no kernel.
 pub const MATCH_REFUSALS: &[&str] = &["unknown_capability", "no_adapter", "kernel_expired", "no_match", "ambiguous_capability"];
 /// Why one candidate kernel was rejected for a capability.
-pub const CANDIDATE_REJECTIONS: &[&str] = &["kernel_absent", "engine_mismatch", "unmapped_field", "unknown_field", "input_shape_drift"];
+pub const CANDIDATE_REJECTIONS: &[&str] = &["kernel_absent", "engine_mismatch", "unmapped_field", "unknown_field", "input_shape_drift", "output_shape_drift", "type_mismatch"];
 /// The ranking among compatible kernels, in order. It is deterministic and uses only the adapter
 /// and the catalogue; a tie after every rule is refused, never broken by name.
 pub const RANKING: &[&str] = &[
     "exact: a kernel whose adapter states it returns an optimal answer ranks above a heuristic one",
-    "verified: a kernel whose catalogue input shape declares every key the adapter maps ranks above one whose shape is opaque",
+    "verified: a kernel whose derived contract (or, without one of the catalogue's commit, the catalogue's input shape) declares every key the adapter maps ranks above one whose shape is opaque",
     "a tie after both rules is refused as ambiguous_capability; a kernel id never breaks a tie",
 ];
 
@@ -728,16 +730,83 @@ pub fn capability(id: &str) -> Option<&'static Capability> {
     CAPABILITIES.iter().find(|c| c.id == id)
 }
 
+/// The kernel contracts derived from the pinned AlgoGlyph source (I0228, `algoglyph-contracts`),
+/// a generated artifact committed beside the catalogue fixture.
+pub const DERIVED_CONTRACTS_PATH: &str = "tools/research/schema/derived/algoglyph-contracts.json";
+const DERIVED_CONTRACTS: &str = include_str!("../../schema/derived/algoglyph-contracts.json");
+
+/// The derived contracts as committed (`algoglyph-derived-contracts/v1`); Null if they do not parse.
+pub fn derived_contracts() -> &'static Value {
+    static C: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    C.get_or_init(|| serde_json::from_str(DERIVED_CONTRACTS).unwrap_or(Value::Null))
+}
+
+/// The derived contract of `kernel`, and whether it was derived at `commit` (the catalogue's): only
+/// a contract of the catalogue's own commit speaks for the kernel's keys.
+fn contract_of<'a>(contracts: &'a Value, kernel: &str, commit: &str) -> Option<(&'a Value, bool)> {
+    let c = contracts["contracts"].as_array()?.iter().find(|c| c["id"] == kernel)?;
+    Some((c, contracts["source"]["commit"] == commit))
+}
+
+/// The JSON types a derived schema states (`type`, an `enum`'s values, an `anyOf`'s members).
+fn json_types(s: &Value) -> Vec<String> {
+    let mut out: Vec<String> = match &s["type"] {
+        Value::String(t) => vec![t.clone()],
+        Value::Array(ts) => ts.iter().filter_map(|t| t.as_str().map(str::to_string)).collect(),
+        _ => vec![],
+    };
+    for v in s["enum"].as_array().into_iter().flatten() {
+        out.push(match v {
+            Value::String(_) => "string",
+            Value::Number(_) => "number",
+            _ => "other",
+        }.to_string());
+    }
+    for a in s["anyOf"].as_array().into_iter().flatten() {
+        out.extend(json_types(a));
+    }
+    out
+}
+
+/// Whether a requirement field of `kind` can be carried by a kernel field of schema `s`. A schema
+/// that states no type cannot contradict it.
+fn kind_fits(kind: &str, s: &Value) -> bool {
+    let types = json_types(s);
+    let numeric = |t: &str| t == "number" || t == "integer";
+    let want = |t: &str| match kind {
+        "amount" | "number" => numeric(t),
+        "amount[]" | "number[]" | "index[]" | "list" => t == "array",
+        "tile" | "resource" => t == "object",
+        _ => t == "string",
+    };
+    if !types.is_empty() && !types.iter().any(|t| want(t)) {
+        return false;
+    }
+    let items = json_types(&s["items"]);
+    !(kind.ends_with("[]") && !items.is_empty() && !items.iter().any(|t| numeric(t)))
+}
+
+/// What an adapter still keeps by hand, and why no source gives it (I0228). Everything else about
+/// a kernel (its engine, its input keys and their types, its output keys) is read from its derived
+/// contract.
+pub const ADAPTER_HAND_KEPT: &[(&str, &str)] = &[
+    ("capability", "Battlebrain's own vocabulary; AlgoGlyph describes kernels, never capabilities (the proposal's Not proposed)"),
+    ("inputs, outputs (the mapping)", "which kernel key carries which requirement field is a choice of meaning (costs -> weights) no source states; each mapped key and its JSON type are checked against the derived contract"),
+    ("conversion", "a caller-side unit conversion (money -> thousands); it stays the caller's by the proposal"),
+    ("exact, exact_because", "no kernel declares optimality; the evidence is a test against an independent reference, which the adapter cites"),
+    ("units", "no kernel declares a unit for any field"),
+    ("check", "the caller's domain check of an answer against its input; it stays the caller's by the proposal"),
+];
+
 /// An adapter: the declaration that one kernel of the catalogue satisfies one capability, how each
 /// requirement field maps onto the kernel's input and output, and the domain check its output must
 /// pass. It is the one explicit kernel list, at a protocol boundary: the runner's answers carry no
-/// schema. Owner: `ADAPTER_OWNER`; retirement: `ADAPTER_RETIREMENT`.
+/// schema, and it holds only what the derived contracts cannot give (`ADAPTER_HAND_KEPT`).
+/// Owner: `ADAPTER_OWNER`; retirement: `ADAPTER_RETIREMENT`.
 #[derive(Clone, Copy)]
 pub struct Adapter {
     pub capability: &'static str,
     pub kernel: &'static str,
-    /// The engine the catalogue must list the kernel with.
-    pub engine: &'static str,
     /// (requirement input, kernel input key, conversion).
     pub inputs: &'static [(&'static str, &'static str, &'static str)],
     /// (requirement output, path in the kernel's answer).
@@ -752,14 +821,13 @@ pub struct Adapter {
 /// Who owns the adapter registry.
 pub const ADAPTER_OWNER: &str = "battlebrain (tools/research/mcp-rhai/src/battlebrain_contract.rs, research/battlebrain/README.md)";
 /// When the adapter registry retires.
-pub const ADAPTER_RETIREMENT: &str = "when AlgoGlyph publishes, per kernel, a versioned input and output schema with units (research/battlebrain/algoglyph-contract-proposal.md): the matcher then reads the mapping from the catalogue, and an adapter shrinks to its domain check or goes";
+pub const ADAPTER_RETIREMENT: &str = "when AlgoGlyph publishes, per kernel, a versioned input and output schema with units and exactness (research/battlebrain/algoglyph-contract-proposal.md): the keys and types are already derived from its source (I0228), so an adapter then shrinks to its mapping and domain check, or goes";
 
 /// The adapters, declared once. Nothing else in the contract layer names a kernel.
 pub const ADAPTERS: &[Adapter] = &[
     Adapter {
         capability: "portfolio-within-budget",
         kernel: "knapsack-dp",
-        engine: "grid",
         inputs: &[
             ("costs", "weights", "ceil(money / 1000): the kernel counts integer thousands (cargo.rs portfolio)"),
             ("values", "values", "as is"),
@@ -767,13 +835,12 @@ pub const ADAPTERS: &[Adapter] = &[
         ],
         outputs: &[("chosen", "result.items"), ("total_value", "result.best")],
         exact: true,
-        exact_because: "dynamic programming over integer capacities: the optimum of the 0/1 knapsack",
+        exact_because: "dynamic programming over integer capacities: the optimum of the 0/1 knapsack, held to brute force by algoglyph test/flow-cli.test.ts 'knapsack-dp finds the best value and a set of items that achieves it'",
         check: check_knapsack,
     },
     Adapter {
         capability: "rail-line-price",
         kernel: "track-planning",
-        engine: "custom",
         inputs: &[
             ("from", "from", "the station tile itself, leaving by its exit (linecost.rs endpoints)"),
             ("to", "to", "the station tile itself, entered against its exit"),
@@ -782,7 +849,7 @@ pub const ADAPTERS: &[Adapter] = &[
         ],
         outputs: &[("status", "result.status"), ("price", "result.money"), ("pieces", "result.pieces")],
         exact: true,
-        exact_because: "A* with an admissible heuristic, tested against Dijkstra (algoglyph src/plates/track-planning/plan.ts): the least-cost route of its cost model",
+        exact_because: "A* with an admissible heuristic, held to Dijkstra by algoglyph test/track-planning.test.ts 'A* finds Dijkstra's optimum with no more expansions, and every plan validates' (src/plates/track-planning/plan.ts): the least-cost route of its cost model",
         check: check_track,
     },
 ];
@@ -880,24 +947,50 @@ fn requirement_json(c: &Capability) -> Value {
     json!({"id": c.id, "goal": c.goal, "used_by": c.used_by, "inputs": f(c.inputs), "outputs": f(c.outputs)})
 }
 
-/// The rejections of one adapter for its capability against the catalogue, and the evidence on it.
-fn judge(c: &Capability, a: &Adapter, cat: &Catalogue) -> Value {
+/// The rejections of one adapter for its capability against the catalogue and the derived
+/// contracts, and the evidence on it. The derived contract of the catalogue's own commit speaks
+/// for the kernel's keys and types; without one, the catalogue's input shape does. The engine a
+/// derived contract states is expected whatever its commit.
+fn judge(c: &Capability, a: &Adapter, cat: &Catalogue, contracts: &Value) -> Value {
     let mut why = Vec::new();
     let k = cat.kernel(a.kernel);
+    let derived = contract_of(contracts, a.kernel, &cat.commit);
+    let current = derived.filter(|(_, same)| *same).map(|(d, _)| d);
+    let field = |fs: &'static [Field], name: &str| fs.iter().find(|f| f.name == name).copied();
     let mut shape = Value::Null;
     match k {
         None => why.push(Refusal::new("kernel_absent", "kernel.id", format!("{} is not in the catalogue {} at {}: the adapter has expired", a.kernel, cat.digest, cat.commit))),
         Some(k) => {
-            if k.engine != a.engine {
-                why.push(Refusal::new("engine_mismatch", "kernel.engine", format!("the adapter expects engine {:?}, the catalogue lists {:?}", a.engine, k.engine)));
+            if let Some((d, _)) = derived.filter(|(d, _)| d["engine"].as_str() != Some(k.engine.as_str())) {
+                why.push(Refusal::new("engine_mismatch", "kernel.engine", format!("the derived contract ({DERIVED_CONTRACTS_PATH}, algoglyph {}) states engine {}, the catalogue lists {:?}", contracts["source"]["commit"].as_str().unwrap_or("?"), d["engine"], k.engine)));
             }
             let mut opaque = false;
-            for (_, key, _) in a.inputs {
+            for (req, key, _) in a.inputs {
                 let top = key.split('.').next().unwrap_or(key);
-                match shape_declares(k.input.as_deref(), top) {
-                    None => opaque = true,
-                    Some(true) => {}
-                    Some(false) => why.push(Refusal::new("input_shape_drift", &format!("input.{top}"), format!("the catalogue's input shape of {} no longer declares {top:?}", a.kernel))),
+                match current.map(|d| d["input"]["properties"].get(top)) {
+                    Some(None) => why.push(Refusal::new("input_shape_drift", &format!("input.{top}"), format!("the derived contract of {} declares no input key {top:?}", a.kernel))),
+                    Some(Some(p)) => {
+                        if let Some(f) = field(c.inputs, req).filter(|f| !kind_fits(f.kind, p)) {
+                            why.push(Refusal::new("type_mismatch", &format!("input.{top}"), format!("{} is {} but the derived contract of {} types {top} {:?}", f.name, f.kind, a.kernel, json_types(p))));
+                        }
+                    }
+                    None => match shape_declares(k.input.as_deref(), top) {
+                        None => opaque = true,
+                        Some(true) => {}
+                        Some(false) => why.push(Refusal::new("input_shape_drift", &format!("input.{top}"), format!("the catalogue's input shape of {} no longer declares {top:?}", a.kernel))),
+                    },
+                }
+            }
+            for (req, path) in a.outputs {
+                let key = path.strip_prefix("result.").unwrap_or(path).split('.').next().unwrap_or(path);
+                let Some(out) = current.map(|d| &d["output"]).filter(|o| o.is_object()) else { continue };
+                match out["properties"].get(key) {
+                    None => why.push(Refusal::new("output_shape_drift", &format!("output.{key}"), format!("the derived contract of {} answers no {key:?}", a.kernel))),
+                    Some(p) => {
+                        if let Some(f) = field(c.outputs, req).filter(|f| !kind_fits(f.kind, p)) {
+                            why.push(Refusal::new("type_mismatch", &format!("output.{key}"), format!("{} is {} but the derived contract of {} types {key} {:?}", f.name, f.kind, a.kernel, json_types(p))));
+                        }
+                    }
                 }
             }
             shape = json!(if opaque { "opaque" } else { "verified" });
@@ -916,8 +1009,10 @@ fn judge(c: &Capability, a: &Adapter, cat: &Catalogue) -> Value {
             }
         }
     }
+    let contract = current.map(|d| json!({"source": DERIVED_CONTRACTS_PATH, "commit": contracts["source"]["commit"], "module": d["module"]}));
     json!({"kernel": a.kernel, "engine": k.map(|k| k.engine.clone()), "compatible": why.is_empty(), "exact": a.exact,
-        "exact_because": a.exact_because, "shape": shape, "units": "asserted by the adapter; the catalogue states none",
+        "exact_because": a.exact_because, "shape": shape, "units": "asserted by the adapter; the pinned source states none",
+        "contract": contract, "hand_kept": ADAPTER_HAND_KEPT.iter().map(|(f, r)| json!({"field": f, "why": r})).collect::<Vec<_>>(),
         "mapping": {"inputs": a.inputs.iter().map(|(r, k, conv)| json!({"field": r, "kernel": k, "conversion": conv})).collect::<Vec<_>>(),
                     "outputs": a.outputs.iter().map(|(r, k)| json!({"field": r, "kernel": k})).collect::<Vec<_>>()},
         "rejected": why.iter().map(Refusal::to_json).collect::<Vec<_>>()})
@@ -933,10 +1028,15 @@ pub struct Match {
 }
 
 /// Select the kernel of the discovered catalogue that satisfies capability `cap`, using only what
-/// the catalogue says (id, engine, input shape) and the adapters. Every catalogue kernel is
-/// considered: those with an adapter for `cap` are judged, the rest are listed as unadapted.
-/// Nothing is executed.
+/// the catalogue says (id, engine, input shape), the contracts derived from the pinned AlgoGlyph
+/// source (`derived_contracts`) and the adapters. Every catalogue kernel is considered: those with
+/// an adapter for `cap` are judged, the rest are listed as unadapted. Nothing is executed.
 pub fn match_capability(cap: &str, cat: &Catalogue, adapters: &[Adapter]) -> Match {
+    match_capability_with(cap, cat, adapters, derived_contracts())
+}
+
+/// `match_capability` against the given derived contracts.
+pub fn match_capability_with(cap: &str, cat: &Catalogue, adapters: &[Adapter], contracts: &Value) -> Match {
     let catalogue = json!({"digest": cat.digest, "commit": cat.commit, "source": CATALOGUE_SOURCE, "kernels": cat.kernels.len()});
     let base = |requirement: Value, candidates: Vec<Value>, unadapted: Vec<&str>| json!({
         "schema": MATCH_SCHEMA, "requirement": requirement, "catalogue": catalogue,
@@ -960,7 +1060,7 @@ pub fn match_capability(cap: &str, cat: &Catalogue, adapters: &[Adapter]) -> Mat
         return finish(d, Err(Refusal::new("unknown_capability", "requirement.id", format!("no capability {cap:?} is declared (CAPABILITIES)"))));
     };
     let mine: Vec<&Adapter> = adapters.iter().filter(|a| a.capability == cap).collect();
-    let candidates: Vec<Value> = mine.iter().map(|a| judge(c, a, cat)).collect();
+    let candidates: Vec<Value> = mine.iter().map(|a| judge(c, a, cat, contracts)).collect();
     let unadapted: Vec<&str> = cat.kernels.iter().map(|k| k.id.as_str()).filter(|id| !mine.iter().any(|a| a.kernel == *id)).collect();
     let d = base(requirement_json(c), candidates.clone(), unadapted);
     if mine.is_empty() {
@@ -1198,8 +1298,10 @@ pub fn schema(name: &str) -> Option<Value> {
                         "required": ["kernel", "engine", "compatible", "exact", "shape", "mapping", "rejected"], "properties": {
                             "kernel": nonempty, "engine": {"type": ["string", "null"], "description": "as the catalogue lists it; null when absent"},
                             "compatible": {"type": "boolean"}, "exact": {"type": "boolean"}, "exact_because": nonempty,
-                            "shape": {"enum": ["verified", "opaque", null], "description": "verified: the catalogue's input shape declares every mapped key"},
-                            "units": nonempty, "mapping": {"type": "object"}, "rejected": {"type": "array", "items": refusal(CANDIDATE_REJECTIONS)}}}},
+                            "shape": {"enum": ["verified", "opaque", null], "description": "verified: the derived contract (or, without one of the catalogue's commit, the catalogue's input shape) declares every mapped key"},
+                            "units": nonempty, "mapping": {"type": "object"}, "rejected": {"type": "array", "items": refusal(CANDIDATE_REJECTIONS)},
+                            "contract": {"type": ["object", "null"], "description": format!("the derived contract the keys and types were checked against ({DERIVED_CONTRACTS_PATH}); null when none is of the catalogue's commit")},
+                            "hand_kept": {"type": "array", "description": "what the adapter still keeps by hand, each with why no source gives it", "items": {"type": "object", "required": ["field", "why"], "properties": {"field": nonempty, "why": nonempty}}}}}},
                     "unadapted": {"type": "array", "items": nonempty, "description": "the catalogue's kernels no adapter declares for this capability: considered, never chosen"},
                     "chosen": {"type": ["string", "null"]},
                     "why": {"type": ["string", "null"]},
@@ -1382,10 +1484,16 @@ mod tests {
 
     /// The real catalogue with `edit` applied to its kernel list: a synthetic catalogue.
     fn synthetic(edit: impl FnOnce(&mut Vec<Value>)) -> Catalogue {
-        let (k, commit) = real_kernels();
+        let (_, commit) = real_kernels();
+        synthetic_at(&commit, edit)
+    }
+
+    /// A synthetic catalogue said to come from another AlgoGlyph checkout than the derived contracts.
+    fn synthetic_at(commit: &str, edit: impl FnOnce(&mut Vec<Value>)) -> Catalogue {
+        let (k, _) = real_kernels();
         let mut list = k.as_array().unwrap().clone();
         edit(&mut list);
-        Catalogue::from_runner(&json!(list), &commit).unwrap()
+        Catalogue::from_runner(&json!(list), commit).unwrap()
     }
 
     fn code(m: &Match) -> &'static str {
@@ -1408,8 +1516,9 @@ mod tests {
         }
         for a in ADAPTERS {
             let c = capability(a.capability).unwrap_or_else(|| panic!("{} adapts the undeclared capability {}", a.kernel, a.capability));
-            let j = judge(c, a, &catalogue());
+            let j = judge(c, a, &catalogue(), derived_contracts());
             assert_eq!(j["rejected"], json!([]), "{} for {}", a.kernel, a.capability);
+            assert_eq!(j["contract"]["commit"], catalogue().commit, "{}: checked against the derived contract of the catalogue's commit", a.kernel);
         }
     }
 
@@ -1417,7 +1526,9 @@ mod tests {
     fn on_the_real_catalogue_portfolio_is_knapsack_dp_and_rail_pricing_is_track_planning() {
         let cat = catalogue();
         assert_eq!(cat.kernels.len(), 53);
-        for (cap, kernel, shape) in [("portfolio-within-budget", "knapsack-dp", "opaque"), ("rail-line-price", "track-planning", "verified")] {
+        // Both shapes are verified now: knapsack-dp's catalogue input is prose, but its derived
+        // contract declares weights, values and capacity (I0228).
+        for (cap, kernel, shape) in [("portfolio-within-budget", "knapsack-dp", "verified"), ("rail-line-price", "track-planning", "verified")] {
             let m = match_capability(cap, &cat, ADAPTERS);
             assert_eq!(m.chosen.as_deref(), Some(kernel), "{cap}: {:?}", m.refusal);
             let d = &m.decision;
@@ -1464,18 +1575,43 @@ mod tests {
         let m = match_capability("portfolio-within-budget", &cat, ADAPTERS);
         assert_eq!(code(&m), "no_match");
         assert_eq!(m.decision["candidates"][0]["rejected"][0]["code"], "engine_mismatch");
-        let cat = synthetic(|l| l.iter_mut().filter(|k| k["id"] == "track-planning").for_each(|k| k["input"] = json!("{map?: data, from: {x, y}, to: {x, y}}")));
+        // Against the derived contract of the catalogue's commit: a key it does not declare.
+        let renamed = Adapter { inputs: &[("from", "from", ""), ("to", "to", ""), ("map", "map", ""), ("prices", "price_table", "")], ..ADAPTERS[1] };
+        let m = match_capability("rail-line-price", &catalogue(), &[renamed]);
+        assert_eq!(code(&m), "no_match");
+        assert_eq!(m.decision["candidates"][0]["rejected"][0]["code"], "input_shape_drift");
+        assert_eq!(m.decision["candidates"][0]["rejected"][0]["path"], "input.price_table");
+        // An output key the contract does not answer, and a key whose derived type contradicts the requirement.
+        let worth = Adapter { outputs: &[("chosen", "result.items"), ("total_value", "result.worth")], ..ADAPTERS[0] };
+        let m = match_capability("portfolio-within-budget", &catalogue(), &[worth]);
+        assert_eq!(m.decision["candidates"][0]["rejected"][0]["code"], "output_shape_drift");
+        assert_eq!(m.decision["candidates"][0]["rejected"][0]["path"], "output.worth");
+        let swapped = Adapter { inputs: &[("costs", "capacity", ""), ("values", "values", ""), ("budget", "weights", "")], outputs: &[("chosen", "result.best"), ("total_value", "result.items")], ..ADAPTERS[0] };
+        let m = match_capability("portfolio-within-budget", &catalogue(), &[swapped]);
+        let paths: Vec<&str> = m.decision["candidates"][0]["rejected"].as_array().unwrap().iter().map(|r| { assert_eq!(r["code"], "type_mismatch"); r["path"].as_str().unwrap() }).collect();
+        assert_eq!(paths, ["input.capacity", "input.weights", "output.best", "output.items"]);
+        assert!(validate_match(&m.decision).is_ok());
+        // Without a derived contract of the catalogue's commit, the catalogue's own input shape speaks
+        // for the keys, and the engine the derived contract states is still expected.
+        let other = "0123456789abcdef0123456789abcdef01234567";
+        let cat = synthetic_at(other, |l| l.iter_mut().filter(|k| k["id"] == "track-planning").for_each(|k| k["input"] = json!("{map?: data, from: {x, y}, to: {x, y}}")));
         let m = match_capability("rail-line-price", &cat, ADAPTERS);
         assert_eq!(code(&m), "no_match");
         assert_eq!(m.decision["candidates"][0]["rejected"][0]["code"], "input_shape_drift");
         assert_eq!(m.decision["candidates"][0]["rejected"][0]["path"], "input.prices");
+        assert_eq!(m.decision["candidates"][0]["contract"], Value::Null);
+        let cat = synthetic_at(other, |l| l.iter_mut().filter(|k| k["id"] == "knapsack-dp").for_each(|k| k["engine"] = json!("numeric")));
+        assert_eq!(match_capability("portfolio-within-budget", &cat, ADAPTERS).decision["candidates"][0]["rejected"][0]["code"], "engine_mismatch");
+        let m = match_capability("portfolio-within-budget", &synthetic_at(other, |_| {}), ADAPTERS);
+        assert_eq!((m.chosen.as_deref(), &m.decision["candidates"][0]["shape"]), (Some("knapsack-dp"), &json!("opaque")), "the catalogue's prose shape is opaque");
         // An adapter that leaves a requirement field unmapped, or maps one the requirement lacks.
         let short = Adapter { outputs: &[("chosen", "result.items")], ..ADAPTERS[0] };
         let m = match_capability("portfolio-within-budget", &catalogue(), &[short]);
         assert_eq!(code(&m), "no_match");
         assert_eq!(m.decision["candidates"][0]["rejected"][0]["code"], "unmapped_field");
         let extra = Adapter { outputs: &[("chosen", "result.items"), ("total_value", "result.best"), ("weight", "result.weight")], ..ADAPTERS[0] };
-        assert_eq!(match_capability("portfolio-within-budget", &catalogue(), &[extra]).decision["candidates"][0]["rejected"][0]["code"], "unknown_field");
+        let codes: Vec<Value> = match_capability("portfolio-within-budget", &catalogue(), &[extra]).decision["candidates"][0]["rejected"].as_array().unwrap().iter().map(|r| r["code"].clone()).collect();
+        assert_eq!(codes, [json!("output_shape_drift"), json!("unknown_field")], "result.weight is no key of the derived output, and weight no field of the requirement");
     }
 
     #[test]
@@ -1494,21 +1630,23 @@ mod tests {
             l.push(json!({"id": "knapsack-shaped", "engine": "grid", "input": "{weights: number[], values: number[], capacity}"}));
         });
         let twin = Adapter { kernel: "knapsack-twin", ..ADAPTERS[0] };
-        // Both exact, both opaque: a tie, refused rather than broken by name.
-        let m = match_capability("portfolio-within-budget", &cat, &[ADAPTERS[0], twin]);
+        let shaped = Adapter { kernel: "knapsack-shaped", ..ADAPTERS[0] };
+        // Both exact, both verified (knapsack-dp by its derived contract, knapsack-shaped by its
+        // catalogue shape): a tie, refused rather than broken by name.
+        let m = match_capability("portfolio-within-budget", &cat, &[ADAPTERS[0], shaped]);
         assert_eq!(code(&m), "ambiguous_capability");
         assert!(validate_match(&m.decision).is_ok());
         // Exact beats heuristic, whatever the order.
-        let greedy = Adapter { exact: false, ..twin };
+        let greedy = Adapter { exact: false, ..shaped };
         for set in [[ADAPTERS[0], greedy], [greedy, ADAPTERS[0]]] {
             let m = match_capability("portfolio-within-budget", &cat, &set);
             assert_eq!(m.chosen.as_deref(), Some("knapsack-dp"));
             assert!(m.decision["why"].as_str().unwrap().starts_with("ranked first of 2"));
         }
         // Among exact kernels, a verified shape beats an opaque one.
-        let shaped = Adapter { kernel: "knapsack-shaped", ..ADAPTERS[0] };
-        let m = match_capability("portfolio-within-budget", &cat, &[ADAPTERS[0], shaped]);
-        assert_eq!(m.chosen.as_deref(), Some("knapsack-shaped"));
+        let m = match_capability("portfolio-within-budget", &cat, &[twin, ADAPTERS[0]]);
+        assert_eq!(m.chosen.as_deref(), Some("knapsack-dp"));
+        assert_eq!(m.decision["candidates"][0]["shape"], "opaque");
         assert_eq!(m.decision["candidates"][1]["shape"], "verified");
     }
 
@@ -1524,6 +1662,29 @@ mod tests {
         let mut d = m.decision.clone();
         d["schema"] = json!("capability-match/v2");
         assert_eq!(validate_match(&d).unwrap_err()[0].code, "unknown_schema");
+    }
+
+    #[test]
+    fn the_derived_contracts_are_of_the_catalogues_commit_and_type_what_the_adapters_map() {
+        let d = derived_contracts();
+        assert_eq!(d["schema"], "algoglyph-derived-contracts/v1");
+        assert_eq!(d["source"]["commit"], json!(catalogue().commit), "regenerate the contracts with the catalogue ({DERIVED_CONTRACTS_PATH})");
+        let ids: Vec<&str> = d["contracts"].as_array().unwrap().iter().filter_map(|c| c["id"].as_str()).collect();
+        assert_eq!(ids.len(), catalogue().kernels.len(), "one contract per catalogue kernel");
+        let (k, same) = contract_of(d, "knapsack-dp", &catalogue().commit).unwrap();
+        assert!(same);
+        assert_eq!((k["input"]["properties"]["capacity"]["type"].as_str(), k["output"]["required"].clone()), (Some("integer"), json!(["best", "items"])));
+        assert!(contract_of(d, "knapsack-quantum", &catalogue().commit).is_none());
+        assert_eq!(contract_of(&Value::Null, "knapsack-dp", "x"), None);
+        // json_types reads type, enum values and anyOf members; kind_fits refuses only a stated contradiction.
+        assert_eq!(json_types(&json!({"type": ["number", "null"]})), ["number", "null"]);
+        assert_eq!(json_types(&json!({"enum": ["a", 1, true]})), ["string", "number", "other"]);
+        assert_eq!(json_types(&json!({"anyOf": [{"type": "array"}, {"enum": ["flat"]}]})), ["array", "string"]);
+        assert!(kind_fits("status", &json!({"enum": ["found", "budget"]})));
+        assert!(kind_fits("tile", &json!({"type": "object"})) && !kind_fits("resource", &json!({"type": "array"})));
+        assert!(kind_fits("amount", &json!({})), "a schema without a type cannot contradict");
+        assert!(!kind_fits("index[]", &json!({"type": "array", "items": {"type": "string"}})));
+        assert!(kind_fits("amount[]", &json!({"type": "array", "items": {"type": "integer"}})));
     }
 
     #[test]
