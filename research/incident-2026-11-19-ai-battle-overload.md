@@ -84,9 +84,13 @@ Each new test fails against the code before the fix.
   battle binary executable again (`chmod +x ~/ttd-battle/openttd-src/build/openttd`). The reason
   is written in `~/ttd-battle/PAUSED.txt` on each machine. With the guards in place, a host comes
   back `busy` while it is over its floors.
-- **Not run for these fixes:** `tools/gate.sh change`. Its full C++ build and ctest would have
-  loaded a machine that was already over its floors (load 25 on 18 cores, 27 GiB free), and no
-  C++ changed. The Python tests and the checks named above were run.
+- **Validation of these fixes:** `tools/gate.sh change` was not run on this Mac, which was over its
+  floors. It ran on lundra (Linux, 8 cores) instead. On master c2d7d5f: change PASS, ctest 98/98
+  with the regression cases. On 9d4fd64 (the ASCII and gate fixes): change PASS (98/98) and research
+  PASS (ctest 128/128; test_prismatic_mcp 796 assertions in 27 cases). Getting there showed three
+  gaps in the gate on a headless Linux host, each now fixed in it: the battle-postmortem check
+  linked libduckdb, a build without liblzma ran the LZMA regression savegames to empty output, and
+  every configure was a GUI one (`GATE_CMAKE_ARGS`).
 
 The orchestrator's own checkout, on the other Mac, was fast-forwarded to 28f104e on 2026-11-22, so
 its next run carries the guards.
