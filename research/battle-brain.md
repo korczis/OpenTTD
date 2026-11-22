@@ -200,6 +200,14 @@ a rebase of its own. The rebase pending from `fced659668` (rail_len=4 and Trains
 matches against `386b0bf3b5`) still applies once the arena resumes: older rows by 1/1.057, with the
 `5e5b9f93` cut kept.
 
+Master `5cc9cdbf8d` then merged three bot changes: #213 (a rail search that cannot find its line
+stops within its distance's budget), #163 (ship routes, off by default) and #217 (a road depot's exit
+always leads onto the route). Together they replay at +11.8% geometric against `c5bf32182a` over the
+same 24 matches (19 up and 5 down, 0.73 to 1.88). Which of the three carries the gain is not measured;
+#163 is off by default, so it is #213, #217 or both. That step is large enough to need a rebase of its
+own when the arena resumes: rows played before `5cc9cdbf8d` by 1/1.118, on top of the 1/1.057 for rows
+before `fced659668`.
+
 ### Why trust-region parents need four rows
 
 In edition `eb9cae38` the safe pick `g241.brainSafe` finished last on seed 199435860. The four other
