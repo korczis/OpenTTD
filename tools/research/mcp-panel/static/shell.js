@@ -24,6 +24,7 @@
     { key: 'world', href: '/world', label: 'World: map, plan, yards', title: 'World', icon: 'M9 20l-6-3V4l6 3m0 13 6-3m-6 3V7m6 10 6 3V7l-6-3m0 13V4M9 7l6-3' },
     { key: 'play', href: '/play', label: 'Play: the game in your browser', title: 'Play', icon: 'M7 5l12 7-12 7z' },
     { key: 'battle', href: '/battle', label: 'Battle: every LAN arena', title: 'Battle', icon: 'M4 20h16M6 16V9m4 7V5m4 11v-5m4 5V7' },
+    { key: 'mesh', href: '/mesh', label: 'Mesh: Majordomus peers and nodes', title: 'Mesh', icon: 'M5 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm14 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6.7 11l4.2 6.2M17.3 11l-4.2 6.2M7 10h10' },
     { key: 'ui', href: '/ui', label: 'Interface: every window', title: 'Interface', icon: 'M4 5h16v14H4zM4 9h16M8 5v4' },
     { key: 'tools', href: '/tools', label: 'MCP catalogue', title: 'Catalogue', icon: 'M4 6h16M4 12h16M4 18h10' },
     { key: 'results', href: '/results', label: 'Duels', title: 'Duels', icon: 'M7 4h10v4a5 5 0 0 1-10 0zM5 5H3v2a4 4 0 0 0 4 4m12-6h2v2a4 4 0 0 1-4 4m-5 2v4m-4 3h8' },
