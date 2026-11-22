@@ -241,7 +241,10 @@ mod tests {
 
     #[test]
     fn without_the_variable_the_submodule_serves_else_a_checkout_only_at_the_pin() {
-        let home = std::env::temp_dir().join(format!("hub-algoglyph-{}", std::process::id()));
+        // This file is compiled into two modules of one test binary (hub::algoglyph and
+        // rhai_host::algoglyph), so each test runs twice in one process at once: the scratch
+        // directory names the module as well as the process.
+        let home = std::env::temp_dir().join(format!("hub-algoglyph-{}-{}", module_path!().replace("::", "-"), std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         let sub = home.join("repo/tools/research/vendor/algoglyph");
         let (main, primary) = (home.join("dev/algoglyph-wt/main"), home.join("dev/algoglyph"));
@@ -266,7 +269,7 @@ mod tests {
 
     #[test]
     fn a_clean_head_is_the_commit_of_a_checkout_with_no_tracked_change() {
-        let d = std::env::temp_dir().join(format!("hub-algoglyph-git-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("hub-algoglyph-git-{}-{}", module_path!().replace("::", "-"), std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         let git = |args: &[&str]| assert!(Command::new("git").arg("-C").arg(&d).args(args).output().unwrap().status.success(), "git {args:?}");
