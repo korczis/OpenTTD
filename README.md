@@ -788,7 +788,7 @@ from the code. The right-hand column says what was counted.
 |---|---|---|
 | **146** | [game commands, each an MCP tool an agent can call (`openttd.cmd.*`)](research/mcp-api.md) | `DEF_CMD_TRAIT\(Commands::` in `src/*_cmd.h` |
 | **24** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
-| **43** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
+| **45** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
 | **54** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
@@ -1365,6 +1365,7 @@ itself (generated):
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |
 | [Incident 2026-11-19 to 11-22: an unowned AI battle held three machines, and master's CI broke twice](research/incident-2026-11-19-ai-battle-overload.md) | Post-mortem. Two failures overlapped. For three days the AI battle tournament held this Mac and the Linux build host at their limits, and nobody on either machine could tell whose processes they were. In the same... |
 | [Incident 2026-11-22: four PrismaticAI companies of one map built on the same mines](research/incident-2026-11-22-sibling-industries.md) | Post-mortem. In the owner's live 8-company game on :8800 (seed 2927, master c5bf32182a), four companies ran PrismaticAI: 0, 1, 6 and 7. Two or more of them built rail lines from the same mine or forest, so each such... |
+| [Incident 2026-11-23: PrismaticAI ran one train for eight years in the owner's live game](research/incident-2026-11-23-live-game-15805.md) | Post-mortem. In the owner's live 8-company game on :8800 (seed 15805, start 1950, binary 20261122-master-g6d1eda39e1), company 0 runs PrismaticAI and the owner co-plays it. By the end of 1957 AAAHogEx was worth... |
 | [Live arena](research/live-arena.md) | RESEARCH-ONLY. The live arena is the visible counterpart of the LAN AI battle. It plays the battle's contestants, read from the battle's own configuration (battle.json contestants) and never copied, plus the arena's... |
 | [The public C++ API through MCP and OpenAPI](research/mcp-api.md) | RESEARCH-ONLY. Issue I0036, rule project.public-api-is-exposed. |
 | [The MCP catalogue in the in-game console](research/mcp-console.md) | RESEARCH-ONLY, UNSTABLE. Issue I0067; rule project.mcp-surfaces-are-derived. |
