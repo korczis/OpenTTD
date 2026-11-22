@@ -52,6 +52,11 @@ Usage: $SELF <smoke|change|research|research-free|full> [options]
             file this change touches (tools/knowledge/refs impact HEAD)
             and how many src/ files no subsystem map tracks
             (tools/knowledge/refs coverage src/, informational).
+            Runs every test_*.py of the repository under line tracing and
+            fails on a changed Python line no test ran, by file and line
+            (tools/coverage/changed-lines, rule project.new-code-tested);
+            changed C++, Rust, JavaScript and shell files are named there
+            as not judged yet, never refused.
             Always proves the decision-authority boundaries (cargo test
             --bin battlebrain, offline; rule project.decision-authority-
             boundaries), that every source line naming research is inside
@@ -498,9 +503,10 @@ cmd_change() {
   tools/knowledge/refs impact HEAD
   echo "==> tools/knowledge/refs coverage src/ (tracked files no subsystem map attaches to; informational)"
   tools/knowledge/refs coverage src/ | tail -n 1
-  # Offline unit tests of the research tools, found by name (tools/research/test_*.py), not listed.
-  echo "==> python3 -B -m unittest discover -s tools/research -p 'test_*.py' (research tool tests)"
-  python3 -B -m unittest discover -s tools/research -p 'test_*.py'
+  # Every test_*.py of the repository, found by name, run under line tracing; a changed Python
+  # line no test ran fails here (rule project.new-code-tested). C++/Rust/JS are named, not judged.
+  echo "==> tools/coverage/changed-lines (rule project.new-code-tested: every changed Python line runs under a test)"
+  python3 -B tools/coverage/changed-lines
   if panel_changed; then panel_tests; fi
   if bot_changed; then
     echo "==> tools/research/ai-battle/battle.py fitness (PrismaticAI in one short headless match)"

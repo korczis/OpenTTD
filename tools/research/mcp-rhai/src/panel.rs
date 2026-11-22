@@ -4178,6 +4178,87 @@ mod tests {
         assert_eq!(books_from_caller(&body(json!({"cash": 5, "max_loan": 9}))), json!({"cash": "caller", "loan": "missing", "max_loan": "caller"}));
     }
 
+    /// A game's MCP server for the live path: openttd://game/state at `tick`, one AI company 1,
+    /// openttd.ai.set_settings offered; every set_settings call is kept in `calls`.
+    fn fake_game(tick: i64, date: &str, calls: Arc<Mutex<Vec<Value>>>) -> u16 {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let date = date.to_string();
+        thread::spawn(move || for mut c in l.incoming().flatten() {
+            let Some(req) = read_request(&mut c) else { continue };
+            let call: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+            let res = |v: Value| json!({"jsonrpc": "2.0", "id": 1, "result": {"contents": [{"text": v.to_string()}]}});
+            let out = match call["method"].as_str().unwrap_or("") {
+                "tools/list" => json!({"jsonrpc": "2.0", "id": 1, "result": {"tools": [{"name": "openttd.ai.set_settings"}]}}),
+                "resources/read" => match call["params"]["uri"].as_str().unwrap_or("") {
+                    "openttd://game/state" => res(json!({"game_tick": tick, "game_date": date})),
+                    // The game's own envelope (prismatic_mcp_server.cpp: env["data"] = {companies}).
+                    "openttd://companies" => res(json!({"game_tick": tick, "data": {"companies": [{"id": 1, "is_ai": true, "name": "A"}]}})),
+                    other => res(json!({"error": format!("no {other}")})),
+                },
+                _ => {
+                    calls.lock().unwrap().push(call["params"].clone());
+                    json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": json!({"ok": true, "applied": 17}).to_string()}]}})
+                }
+            };
+            hub::respond(c, 200, "application/json", out.to_string().as_bytes());
+        });
+        port
+    }
+
+    #[test]
+    fn a_rollback_is_applied_through_the_live_path_and_never_in_a_world_behind_its_snapshot() {
+        // battlebrain rollback's directive (I0117 round 2), served once like any decision.
+        let snap: Value = serde_json::from_str(&std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../schema/fixtures/battlebrain/valid/snapshot.json")).unwrap()).unwrap();
+        let out = crate::battlebrain_contract::rollback_directive(&snap["value"], 1, None, "test").unwrap();
+        let directive = out["directive"].clone();
+        let key = directive["decision"]["idempotency_key"].as_str().unwrap().to_string();
+        let tick = snap["value"]["at"]["tick"].as_i64().unwrap();
+        let serve = |d: Value| {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/decision", l.local_addr().unwrap());
+            thread::spawn(move || for mut c in l.incoming().flatten() {
+                if read_request(&mut c).is_none() { continue }
+                hub::respond(c, 200, "application/json", d.to_string().as_bytes());
+            });
+            url
+        };
+        let panel_on = |game_port: u16, port: &str| {
+            let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", port, "--mcp-port", &game_port.to_string()].map(String::from)).unwrap();
+            let g = Game::new(args);
+            g.mcp_up.store(true, Ordering::SeqCst);
+            *g.token.lock().unwrap() = Some("t".into());
+            (g.clone(), Panel { game: g, routes: routes() })
+        };
+        // The world is the snapshot's or later: one set_settings, every slot cleared, under one approval.
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (_, p) = panel_on(fake_game(tick + 74, "1961-01-02", calls.clone()), "5");
+        let (code, res) = post_to(&p, "/api/decision/pull", json!({"url": serve(directive.clone()), "key": key}));
+        assert_eq!(code, 200, "{res}");
+        let seen = calls.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert_eq!(seen[0]["name"], "openttd.ai.set_settings");
+        let settings = &seen[0]["arguments"]["settings"];
+        assert_eq!(settings["planned_freight_only"], 0);
+        assert_eq!(settings["fr_from"], -1);
+        assert_eq!(settings[format!("{}from", crate::battlebrain_contract::freight_slot_prefix(crate::battlebrain_contract::FREIGHT_SLOTS))], -1);
+        assert!(seen[0]["arguments"]["expires_tick"].as_i64().unwrap() > tick + 74);
+        // An earlier save reloaded (its date still before valid_until): refused before any call.
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (g, p) = panel_on(fake_game(tick - 1, "1961-01-01", calls.clone()), "6");
+        let since = g.bus.seq();
+        // (A key's answer is kept for KEY_TTL, so this pull uses its own decision: a rollback of the rollback.)
+        let again = crate::battlebrain_contract::rollback_directive(&snap["value"], 1, Some(&directive["decision"]), "test").unwrap();
+        let again_key = again["directive"]["decision"]["idempotency_key"].as_str().unwrap().to_string();
+        let (code, res) = post_to(&p, "/api/decision/pull", json!({"url": serve(again["directive"].clone()), "key": again_key}));
+        assert_eq!(code, 409, "{res}");
+        assert!(res["error"].as_str().unwrap().contains("behind the snapshot"), "{res}");
+        assert!(calls.lock().unwrap().is_empty(), "nothing set in a world behind the snapshot");
+        let ev = g.bus.since(since, &kinds_of("plan.directive"), 10);
+        assert_eq!(ev.last().unwrap()["data"]["choice"]["outcome"], "world_changed");
+    }
+
     #[test]
     fn a_directive_decided_without_an_observation_is_refused_and_published() {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();

@@ -119,7 +119,7 @@ pub fn bridge_companies(companies: &Value, vehicles: &Value) -> Value {
         e.1 += v.get("profit_last_year").and_then(Value::as_i64).unwrap_or(0);
         e.2 += v.get("profit_this_year").and_then(Value::as_i64).unwrap_or(0);
     }
-    let list = companies.pointer("/data/companies").or_else(|| companies.get("companies")).and_then(Value::as_array).cloned().unwrap_or_default();
+    let list = crate::battlebrain_contract::company_list(companies);
     Value::Array(list.into_iter().map(|c| {
         let id = c.get("id").and_then(Value::as_i64).unwrap_or(-1);
         let (counts, last, this) = per.remove(&id).unwrap_or_default();
@@ -702,9 +702,28 @@ pub fn decision_gate(raw: &Value, key: Option<&str>, today: Option<&str>) -> Res
     }
 }
 
-/// Apply a live decision (I0117): its company must be an AI company now, the game must offer
-/// openttd.ai.set_settings, and every setting goes under one approval that expires with the
-/// decision. Recorded as plan.directive like every directive.
+/// Why a live decision may not be applied to the world as it is now (empty: it may), with each
+/// refusal's outcome code. The live path's counterpart of `freshness`, on the same helpers
+/// (`identities` here, `game_time` for `now_tick`): the game's clock must not be behind the
+/// snapshot the decision was made on (`snapshot_tick`), or the game is another world or an earlier
+/// save reloaded; and the company must be an AI company now.
+pub fn live_world(block: &Value, now_tick: i64, companies: &Value, company: i64) -> Vec<(&'static str, String)> {
+    let mut why = Vec::new();
+    match block.get("snapshot_tick").and_then(Value::as_i64) {
+        Some(t) if now_tick >= t => {}
+        Some(t) => why.push(("world_changed", format!("the game is at tick {now_tick}, behind the snapshot the decision was made on (tick {t}): another world, or an earlier save reloaded"))),
+        None => why.push(("world_changed", "the decision names no snapshot_tick, so the world it was made for cannot be checked".to_string())),
+    }
+    if !identities(companies).iter().any(|(id, ai)| *id == company && *ai) {
+        why.push(("not_an_ai_company", format!("company {company} is not an AI company now")));
+    }
+    why
+}
+
+/// Apply a live decision (I0117): after decision_gate, the world is checked first (`live_world`:
+/// not behind the decision's snapshot, the company an AI company now), then the stale date in game
+/// time, then that the game offers openttd.ai.set_settings; only then does every setting go under
+/// one approval that expires with the decision. Recorded as plan.directive like every directive.
 fn apply_live(g: &Arc<Game>, url: &str, raw: &Value, d: &Directive, ignored: &[String], key: Option<&str>) -> Result<(u16, Value), String> {
     let refuse = |status: u16, outcome: &str, why: String| -> Result<(u16, Value), String> {
         g.event("ai", &format!("Battlebrain's live decision ({url}) is not applied: {why}"));
@@ -715,19 +734,19 @@ fn apply_live(g: &Arc<Game>, url: &str, raw: &Value, d: &Directive, ignored: &[S
         Ok((status, json!({"error": why, "called_url": url, "raw_response": raw})))
     };
     let Some(company) = d.company_id else { return refuse(422, "invalid_decision_block", "a live decision names its company_id".into()) };
-    let companies = g.resource("openttd://companies")?;
-    let list = companies.get("companies").or_else(|| companies.get("data")).cloned().unwrap_or(companies.clone());
-    let is_ai = list.as_array().into_iter().flatten().any(|c| c["id"].as_i64() == Some(company) && c["is_ai"] == true);
-    if !is_ai {
-        return refuse(409, "not_an_ai_company", format!("company {company} is not an AI company now"));
-    }
-    if !g.tool_names().contains("openttd.ai.set_settings") {
-        return refuse(409, "no_atomic_apply", "this game offers no openttd.ai.set_settings, so the decision cannot be applied under one approval".into());
-    }
     let (now_tick, today) = game_time(g)?;
+    let companies = g.resource("openttd://companies")?;
+    let list = Value::Array(crate::battlebrain_contract::company_list(&companies));
+    let world = live_world(&raw["decision"], now_tick, &list, company);
+    if let Some((outcome, _)) = world.first() {
+        return refuse(409, outcome, world.iter().map(|w| w.1.clone()).collect::<Vec<_>>().join("; "));
+    }
     let Some(expires) = today.as_str().and_then(|t| live_expiry(now_tick, t, raw["decision"]["valid_until"].as_str().unwrap_or_default())) else {
         return refuse(409, "stale_decision", "the decision's stale date has passed or the game's date cannot be read".into());
     };
+    if !g.tool_names().contains("openttd.ai.set_settings") {
+        return refuse(409, "no_atomic_apply", "this game offers no openttd.ai.set_settings, so the decision cannot be applied under one approval".into());
+    }
     let settings: serde_json::Map<String, Value> = d.settings.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
     let steps = vec![step(format!("company {company}: {} setting(s) under one approval, expiring at tick {expires}", settings.len()),
         g.tool("openttd.ai.set_settings", json!({"company": company, "settings": settings, "expires_tick": expires})))];
@@ -854,13 +873,58 @@ mod tests {
         let s = "planned_freight_only=1,fr_from=41,fr_to=1,fr_cargo=1";
         let block = json!({"schema": "battlebrain-decision/v2", "decision": format!("bb:{}", "1".repeat(64)),
             "snapshot_digest": format!("sha256:{}", "2".repeat(64)), "idempotency_key": "k", "policy": "freight-margin@2",
-            "valid_until": "1963-03-24", "mode": "live", "settings_digest": crate::battlebrain_contract::settings_digest(s)});
+            "valid_until": "1963-03-24", "mode": "live", "settings_digest": crate::battlebrain_contract::settings_digest(s), "snapshot_tick": 74000});
         assert!(decision_gate(&json!({"company_id": 0, "settings": s, "decision": block}), Some("k"), Some("1963-03-01")).is_ok());
         let swapped = json!({"company_id": 0, "settings": "planned_freight_only=1,fr_from=29,fr_to=34,fr_cargo=1", "decision": block});
         assert_eq!(decision_gate(&swapped, Some("k"), Some("1963-03-01")).unwrap_err().1, "payload_mismatch");
         assert_eq!(decision_gate(&json!({"company_id": 0, "settings": "fr2_from=7,aggressiveness=50"}), None, None).unwrap_err().1, "fr_needs_decision");
         assert!(decision_gate(&json!({"company_id": 0, "settings": "aggressiveness=50,planned_freight_only=0"}), None, None).is_ok(), "rollback and other settings need no block");
         assert!(is_freight_slot_setting("fr16_cargo") && is_freight_slot_setting("fr_to") && !is_freight_slot_setting("freight") && !is_freight_slot_setting("frost"));
+    }
+
+    #[test]
+    fn a_live_decision_is_refused_in_a_world_behind_its_snapshot_or_without_its_ai_company() {
+        let block = json!({"snapshot_tick": 74000});
+        // apply_live reads the game's openttd://companies envelope through company_list.
+        let envelope = json!({"game_tick": 74000, "data": {"companies": [{"id": 1, "is_ai": true, "name": "A"}]}});
+        assert!(live_world(&block, 74000, &Value::Array(crate::battlebrain_contract::company_list(&envelope)), 1).is_empty());
+        assert_eq!(live_world(&block, 74000, &envelope, 1)[0].0, "not_an_ai_company", "the raw envelope is no company list");
+        let list = json!([{"id": 1, "is_ai": true, "name": "A"}, {"id": 0, "is_ai": false, "name": "Human"}]);
+        assert!(live_world(&block, 74000, &list, 1).is_empty(), "the snapshot's own tick");
+        assert!(live_world(&block, 80000, &list, 1).is_empty());
+        // An earlier save reloaded (its date may still be on or before valid_until).
+        let back = live_world(&block, 73999, &list, 1);
+        assert_eq!(back.iter().map(|w| w.0).collect::<Vec<_>>(), vec!["world_changed"]);
+        assert_eq!(live_world(&json!({}), 80000, &list, 1)[0].0, "world_changed", "no snapshot_tick, no world check, no apply");
+        assert_eq!(live_world(&block, 80000, &list, 0)[0].0, "not_an_ai_company");
+        assert_eq!(live_world(&block, 80000, &list, 7)[0].0, "not_an_ai_company");
+        assert_eq!(live_world(&block, 1, &list, 0).len(), 2, "every reason is reported");
+    }
+
+    #[test]
+    fn a_rollback_runs_the_live_path_end_to_end() {
+        // battlebrain rollback's directive passes the executor's gate with its own key and the
+        // world check, and parses as a directive; the blockless one it replaced would need an
+        // observation during the pull, which battlebrain serve never makes.
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain/valid/snapshot.json");
+        let snap: Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        let snap = snap["value"].clone();
+        let out = crate::battlebrain_contract::rollback_directive(&snap, 1, None, "test").unwrap();
+        let raw = &out["directive"];
+        let key = raw["decision"]["idempotency_key"].as_str().unwrap();
+        let today = snap["at"]["date"].as_str().unwrap();
+        assert!(decision_gate(raw, Some(key), Some(today)).is_ok(), "{:?}", decision_gate(raw, Some(key), Some(today)));
+        assert_eq!(decision_gate(raw, None, Some(today)).unwrap_err().1, "key_mismatch", "a rollback too runs once, by its key");
+        let tick = snap["at"]["tick"].as_i64().unwrap();
+        let list = json!([{"id": 1, "is_ai": true, "name": "A"}]);
+        assert!(live_world(&raw["decision"], tick + 10, &list, 1).is_empty());
+        assert_eq!(live_world(&raw["decision"], tick - 1, &list, 1)[0].0, "world_changed");
+        let (d, _) = directive(raw).unwrap();
+        assert_eq!(d.company_id, Some(1));
+        assert_eq!(d.settings[0], ("planned_freight_only".to_string(), 0));
+        assert!(d.settings[1..].iter().all(|(k, v)| is_freight_slot_setting(k) && *v == -1));
+        assert_eq!(d.settings.len(), 1 + crate::battlebrain_contract::FREIGHT_SLOTS, "every slot is cleared");
+        assert!(live_expiry(tick, today, raw["decision"]["valid_until"].as_str().unwrap()).is_some());
     }
 
     #[test]
@@ -879,7 +943,7 @@ mod tests {
         let block = |mode: &str| json!({"schema": "battlebrain-decision/v2", "decision": format!("bb:{}", "1".repeat(64)),
             "snapshot_digest": format!("sha256:{}", "2".repeat(64)), "idempotency_key": "i:3:1953-02-09:freight-line",
             "policy": "freight-margin@2", "valid_until": "1953-03-12", "mode": mode,
-            "settings_digest": crate::battlebrain_contract::settings_digest("")});
+            "settings_digest": crate::battlebrain_contract::settings_digest(""), "snapshot_tick": 85325});
         let shadow = decision_gate(&json!({"company_id": 3, "decision": block("shadow")}), k, today).unwrap_err();
         assert_eq!((shadow.0, shadow.1), (409, "shadow_refused"));
         assert!(decision_gate(&json!({"company_id": 3, "decision": block("live")}), k, today).is_ok());
