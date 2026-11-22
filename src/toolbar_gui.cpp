@@ -1350,27 +1350,25 @@ static CallBackFunction MenuClickNothing(int)
 	return CallBackFunction::None;
 }
 
-/* RESEARCH-ONLY: the fork's own menu (prismatic_mcp_menu.cpp). Only ever reached in a build with
- * OPTION_PRISMATIC_MCP_SERVER, the only one that has its button; the entries exist in every build
- * because these tables are indexed by widget. */
-static CallBackFunction MenuClickPrismatic([[maybe_unused]] int index)
-{
 #ifdef OTTD_PRISMATIC_MCP_SERVER
+/* RESEARCH-ONLY: the fork's own menu (prismatic_mcp_menu.cpp). Compiled only with
+ * OPTION_PRISMATIC_MCP_SERVER, like WID_TN_PRISMATIC, the last index of the tables below. */
+static CallBackFunction MenuClickPrismatic(int index)
+{
 	if (PrismaticMCP::Menu::Run(index)) {
 		Window *w = FindWindowById(WindowClass::MainToolbar, 0);
 		if (w != nullptr) ShowQueryString({}, STR_PRISMATIC_MCP_ASK_CAPTION, 256, w, CS_ALPHANUMERAL, {});
 	}
-#endif
 	return CallBackFunction::None;
 }
 
-static CallBackFunction ToolbarPrismaticClick([[maybe_unused]] Window *w)
+/* RESEARCH-ONLY: open the fork's own menu, see MenuClickPrismatic. */
+static CallBackFunction ToolbarPrismaticClick(Window *w)
 {
-#ifdef OTTD_PRISMATIC_MCP_SERVER
 	ShowDropDownList(w, PrismaticMCP::Menu::DropDown(), -1, WID_TN_PRISMATIC, 140, GetToolbarDropDownOptions());
-#endif
 	return CallBackFunction::None;
 }
+#endif /* OTTD_PRISMATIC_MCP_SERVER */
 
 static MenuClickedProc * const _menu_clicked_procs[] = {
 	nullptr,                 // 0
@@ -1404,8 +1402,11 @@ static MenuClickedProc * const _menu_clicked_procs[] = {
 	MenuClickNewspaper,   // 28
 	MenuClickHelp,        // 29
 	MenuClickNothing,     // 30 (the switch button has no menu)
+#ifdef OTTD_PRISMATIC_MCP_SERVER
 	MenuClickPrismatic,   // 31 (RESEARCH-ONLY)
+#endif
 };
+static_assert(std::size(_menu_clicked_procs) == WID_TN_END);
 
 /** Full blown container to make it behave exactly as we want :) */
 class NWidgetToolbarContainer : public NWidgetContainer {
@@ -2038,8 +2039,11 @@ static ToolbarButtonProc * const _toolbar_button_procs[] = {
 	ToolbarNewspaperClick,
 	ToolbarHelpClick,
 	ToolbarSwitchClick,
-	ToolbarPrismaticClick,
+#ifdef OTTD_PRISMATIC_MCP_SERVER
+	ToolbarPrismaticClick, // RESEARCH-ONLY
+#endif
 };
+static_assert(std::size(_toolbar_button_procs) == WID_TN_END);
 
 /** Main toolbar. */
 struct MainToolbarWindow : Window {
