@@ -1,0 +1,16 @@
+# RESEARCH-ONLY. The Research Atlas projection: research/results/*.json and the annotated Mermaid
+# flowcharts of the tracked Markdown, read into one deterministic data contract (research-atlas/v1)
+# that the site's Atlas page draws, plus the README's atlas region and its hero illustration.
+# It runs outside the game; nothing here is compiled into OpenTTD. See README.md beside this file.
+[package]
+name = "atlas"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "atlas"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"

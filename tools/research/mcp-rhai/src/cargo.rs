@@ -133,16 +133,44 @@ fn knapsack_builtin(weights: &[usize], values: &[f64], capacity: usize) -> (f64,
     (dp[n][capacity], items)
 }
 
+/// Why an AlgoGlyph kernel gave no answer: the runner is not configured, it ran and refused (its
+/// own `errors`), or it crashed (spawn, I/O or an answer that is not JSON).
+#[derive(Clone, Debug, PartialEq)]
+pub enum KernelFailure {
+    Unset,
+    Refused(Value),
+    Crashed(String),
+}
+
+impl KernelFailure {
+    /// The reason as `algoglyph` has always worded it.
+    fn message(&self, kernel: &str) -> String {
+        match self {
+            KernelFailure::Unset => "MCP_ALGOGLYPH_DIR is not set".to_string(),
+            KernelFailure::Refused(errors) => format!("{kernel} refused: {errors}"),
+            KernelFailure::Crashed(m) => m.clone(),
+        }
+    }
+}
+
 /// An AlgoGlyph kernel through its flow CLI (`npm run flow -- kernel <id> -`), when MCP_ALGOGLYPH_DIR
 /// names a checkout of it. Err says why there is no answer: no runner, a failed run, or a refusal.
 /// With `MCP_ALGOGLYPH_SERVE=1` every call of the process goes to one long-lived `flow serve`
 /// (src/flow_serve.rs), and to the per-call runner only if that serve cannot start or fails.
+#[allow(dead_code)] // mcp-intent includes cargo.rs and calls no kernel by name
 pub fn algoglyph(kernel: &str, input: &Value) -> Result<Value, String> {
-    let dir = std::env::var("MCP_ALGOGLYPH_DIR").map_err(|_| "MCP_ALGOGLYPH_DIR is not set".to_string())?;
+    algoglyph_run(kernel, input).map_err(|f| f.message(kernel))
+}
+
+/// `algoglyph` with the reason kept as a kind, for a caller that records why it fell back.
+pub fn algoglyph_run(kernel: &str, input: &Value) -> Result<Value, KernelFailure> {
+    let crashed = |e: &dyn std::fmt::Display| KernelFailure::Crashed(format!("{kernel}: {e}"));
+    let refused = |v: &Value| KernelFailure::Refused(v.get("errors").cloned().unwrap_or(v.clone()));
+    let dir = std::env::var("MCP_ALGOGLYPH_DIR").map_err(|_| KernelFailure::Unset)?;
     if flow_serve::wanted() {
         match flow_serve::kernel(std::path::Path::new(&dir), kernel, input) {
             Ok(v) if v["ok"] == true => return Ok(v),
-            Ok(v) => return Err(format!("{kernel} refused: {}", v.get("errors").cloned().unwrap_or(v.clone()))),
+            Ok(v) => return Err(refused(&v)),
             Err(_) => flow_serve::fell_back(),
         }
     }
@@ -150,31 +178,62 @@ pub fn algoglyph(kernel: &str, input: &Value) -> Result<Value, String> {
     // a pipe has not taken yet, so an answer above 64 KiB arrived cut off (2026-11-16).
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let path = std::env::temp_dir().join(format!("mcp-algoglyph-{}-{nanos}.json", std::process::id()));
-    let file = std::fs::File::create(&path).map_err(|e| format!("{kernel}: {e}"))?;
+    let file = std::fs::File::create(&path).map_err(|e| crashed(&e))?;
     let mut child = std::process::Command::new("npm")
         .args(["run", "--silent", "flow", "--", "kernel", kernel, "-"])
         .current_dir(&dir).stdin(std::process::Stdio::piped()).stdout(file)
-        .stderr(std::process::Stdio::null()).spawn().map_err(|e| format!("{kernel}: {e}"))?;
+        .stderr(std::process::Stdio::null()).spawn().map_err(|e| crashed(&e))?;
     use std::io::Write;
-    child.stdin.take().ok_or("no stdin")?.write_all(input.to_string().as_bytes()).map_err(|e| format!("{kernel}: {e}"))?;
-    child.wait().map_err(|e| format!("{kernel}: {e}"))?;
-    let text = std::fs::read(&path).map_err(|e| format!("{kernel}: {e}"));
+    child.stdin.take().ok_or_else(|| KernelFailure::Crashed("no stdin".into()))?
+        .write_all(input.to_string().as_bytes()).map_err(|e| crashed(&e))?;
+    child.wait().map_err(|e| crashed(&e))?;
+    let text = std::fs::read(&path).map_err(|e| crashed(&e));
     let _ = std::fs::remove_file(&path);
-    let v: Value = serde_json::from_slice(&text?).map_err(|e| format!("{kernel}: not JSON ({e})"))?;
-    if v["ok"] == true { Ok(v) } else { Err(format!("{kernel} refused: {}", v.get("errors").cloned().unwrap_or(v.clone()))) }
+    let v: Value = serde_json::from_slice(&text?).map_err(|e| crashed(&format!("not JSON ({e})")))?;
+    if v["ok"] == true { Ok(v) } else { Err(refused(&v)) }
 }
 
-fn knapsack_algoglyph(input: &Value) -> Option<Value> { algoglyph("knapsack-dp", input).ok() }
+/// How many candidates enter the knapsack at most, unless the caller names another cap.
+pub const PORTFOLIO_CAP: usize = 40;
+
+/// A knapsack-dp runner: AlgoGlyph's (`algoglyph_run`) in production, a fake one in tests.
+pub type KernelRunner<'a> = &'a dyn Fn(&str, &Value) -> Result<Value, KernelFailure>;
+
+/// The kernel's answer, or why the built-in solver decides instead. An answer the runner gives is
+/// accepted only when it passes knapsack-dp's domain check (battlebrain_contract.rs, the adapter
+/// registry): indices in range and unique, the capacity held, best equal to the chosen items' sum.
+fn knapsack_algoglyph(input: &Value, run: KernelRunner) -> Result<Value, Value> {
+    const KERNEL: &str = "knapsack-dp";
+    match run(KERNEL, input) {
+        Err(f) => {
+            let message = f.message(KERNEL);
+            Err(match f {
+                KernelFailure::Unset => json!({"reason": "unset_dir", "message": message}),
+                KernelFailure::Refused(errors) => json!({"reason": "runner_refused", "errors": errors, "message": message}),
+                KernelFailure::Crashed(_) => json!({"reason": "crashed", "message": message}),
+            })
+        }
+        Ok(v) => match crate::battlebrain_contract::domain_check(KERNEL, input, &v) {
+            Ok(()) => Ok(v),
+            Err(r) => Err(json!({"reason": "domain_check_failed", "code": r.code, "path": r.path, "message": r.message,
+                                 "refused_answer": {"kernel": v.get("kernel"), "result": v.get("result")}})),
+        },
+    }
+}
 
 /// The label of a portfolio the AlgoGlyph kernel answered.
 const KERNEL_SOLVER: &str = "algoglyph knapsack-dp";
 /// The label of the built-in fallback: a separately named solver that never passes as the kernel
 /// (ADR 0037; rule project.decision-authority-boundaries, B7). battlebrain reports a solver whose
 /// label starts with "builtin" as `fallback_solver` (src/bin/battlebrain.rs).
-const BUILTIN_SOLVER: &str = "builtin knapsack (MCP_ALGOGLYPH_DIR not set or the runner refused)";
+/// Why it decided (no runner, a refusal, a crash, an answer that failed its domain check) is the
+/// portfolio's `fallback`, never a variant of this label.
+const BUILTIN_SOLVER: &str = "builtin knapsack (no checked kernel answer; the reason is in fallback)";
 
 /// Which solver answered the portfolio, and its answer: the kernel's when it answered, else the
 /// built-in copy, labelled as itself and with no kernel. (solver, best, chosen items, kernel)
+/// `kernel_answer` is one that passed its domain check (`knapsack_algoglyph`): its indices are
+/// in range and unique, so the portfolio may index the items by them.
 fn solve(kernel_answer: Option<Value>, weights: &[usize], values: &[f64], capacity: usize) -> (&'static str, f64, Vec<usize>, Value) {
     match kernel_answer {
         Some(v) => {
@@ -191,6 +250,11 @@ fn solve(kernel_answer: Option<Value>, weights: &[usize], values: &[f64], capaci
 /// The portfolio: from the candidates (each with its best option's investment and score), the set
 /// with the highest total score within the budget. Money is counted in thousands for the solver.
 pub fn portfolio(candidates: &[Value], budget: Option<f64>) -> Value {
+    portfolio_with(candidates, budget, PORTFOLIO_CAP, &algoglyph_run)
+}
+
+/// `portfolio` with the candidate cap and the knapsack-dp runner named by the caller.
+pub fn portfolio_with(candidates: &[Value], budget: Option<f64>, cap: usize, run: KernelRunner) -> Value {
     // A producer's cargo is counted once: each freight candidate assumes it carries the producer's
     // whole production, so two lines from one mine would each count all of it. Only the best-scoring
     // candidate of each (cargo, producer) enters the knapsack; the others are reported as shadowed.
@@ -204,26 +268,40 @@ pub fn portfolio(candidates: &[Value], budget: Option<f64>) -> Value {
     }
     let mut shadowed = Vec::new();
     let mut taken = std::collections::HashSet::new();
-    let items: Vec<&Value> = candidates.iter().filter(|c| num(c, "score") > 0.0).filter(|c| match source(c) {
+    let mut items: Vec<&Value> = candidates.iter().filter(|c| num(c, "score") > 0.0).filter(|c| match source(c) {
         Some(k) if num(c, "score") < best_of[&k] || !taken.insert(k.clone()) => { shadowed.push(k); false }
         _ => true,
-    }).take(40).collect();
+    }).collect();
+    // The cap is explicit: what it leaves out is counted, never dropped in silence.
+    let eligible = items.len();
+    items.truncate(cap);
+    let truncation = json!({"cap": cap, "eligible": eligible, "entered": items.len(), "dropped": eligible - items.len()});
     let invest = |c: &Value| -> f64 {
         let mode = c["mode"].as_str().unwrap_or("");
         c["options"].as_array().into_iter().flatten().find(|o| o["mode"] == mode).map_or(0.0, |o| num(o, "investment"))
     };
     let Some(budget) = budget else {
         return json!({"solver": "none", "note": "no budget given: every positive candidate is affordable", "chosen": items,
-                      "shadowed": shadowed});
+                      "shadowed": shadowed, "truncation": truncation});
     };
     let weights: Vec<usize> = items.iter().map(|c| (invest(c) / 1000.0).ceil() as usize).collect();
     let values: Vec<f64> = items.iter().map(|c| num(c, "score").round()).collect();
     let capacity = (budget / 1000.0).floor().max(0.0) as usize;
     let input = json!({"weights": weights, "values": values, "capacity": capacity});
-    let (solver, best, chosen, kernel) = solve(knapsack_algoglyph(&input), &weights, &values, capacity);
+    let (answer, fallback) = match knapsack_algoglyph(&input, run) {
+        Ok(v) => (Some(v), Value::Null),
+        Err(why) => (None, why),
+    };
+    let check = match fallback["reason"].as_str() {
+        None => json!({"status": "passed"}),
+        Some("domain_check_failed") => json!({"status": "failed", "code": fallback["code"], "path": fallback["path"], "message": fallback["message"]}),
+        Some(_) => json!({"status": "not_run"}),
+    };
+    let (solver, best, chosen, kernel) = solve(answer, &weights, &values, capacity);
     json!({"solver": solver, "kernel": kernel, "input": input, "total_score": best, "shadowed": shadowed,
            "investment_k": chosen.iter().map(|&i| weights[i]).sum::<usize>(), "budget_k": capacity,
-           "chosen": chosen.iter().map(|&i| items[i].clone()).collect::<Vec<_>>()})
+           "chosen": chosen.iter().map(|&i| items[i].clone()).collect::<Vec<_>>(),
+           "fallback": fallback, "domain_check": check, "truncation": truncation})
 }
 
 #[cfg(test)]
@@ -310,5 +388,93 @@ mod tests {
         let (best, items) = knapsack_builtin(&[135, 46, 20, 5], &[196159.0, 64387.0, 16633.0, 1000.0], 150);
         assert_eq!(best, 197159.0);
         assert_eq!(items, vec![0, 3]);
+    }
+
+    // The portfolio's knapsack-dp answer and its fallbacks, against a fake runner. The four items
+    // are the AlgoGlyph case below: weights 135, 46, 20, 5 (thousands), capacity 150, best 197159.
+    use super::{portfolio_with, KernelFailure, PORTFOLIO_CAP};
+    use serde_json::{json, Value};
+
+    fn line(producer: usize, investment: f64, score: f64) -> Value {
+        json!({"cargo": "Coal", "producer": {"id": producer}, "mode": "freight_rail", "score": score,
+               "options": [{"mode": "freight_rail", "investment": investment}]})
+    }
+    fn four() -> Vec<Value> {
+        vec![line(1, 135000.0, 196159.0), line(2, 46000.0, 64387.0), line(3, 20000.0, 16633.0), line(4, 5000.0, 1000.0)]
+    }
+    fn answer(best: f64, items: Value) -> Value {
+        json!({"ok": true, "kernel": {"id": "knapsack-dp", "plate": "knapsack"}, "work": {"cells": 600},
+               "result": {"best": best, "items": items}})
+    }
+    fn producers(p: &Value) -> Vec<Value> {
+        p["chosen"].as_array().unwrap().iter().map(|c| c["producer"]["id"].clone()).collect()
+    }
+    /// Every fallback keeps the old keys, names the built-in solver and decides as it does.
+    fn fell_back(p: &Value, reason: &str) {
+        assert!(p["solver"].as_str().unwrap().starts_with("builtin knapsack"), "{}", p["solver"]);
+        assert_eq!(p["kernel"], Value::Null);
+        assert_eq!(p["fallback"]["reason"], reason);
+        assert_eq!(p["total_score"], json!(197159.0));
+        assert_eq!(producers(p), vec![json!(1), json!(4)]);
+        assert_eq!(p["investment_k"], json!(140));
+        for k in ["input", "shadowed", "budget_k"] { assert!(p.get(k).is_some(), "{k}"); }
+    }
+
+    #[test]
+    fn a_checked_kernel_answer_decides() {
+        let p = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &|_, _| Ok(answer(197159.0, json!([0, 3]))));
+        assert_eq!(p["solver"], super::KERNEL_SOLVER);
+        assert_eq!(p["kernel"]["id"], "knapsack-dp");
+        assert_eq!(p["domain_check"]["status"], "passed");
+        assert_eq!(p["fallback"], Value::Null);
+        assert_eq!(producers(&p), vec![json!(1), json!(4)]);
+    }
+
+    #[test]
+    fn a_kernel_answer_that_fails_its_domain_check_is_refused() {
+        for (why, best, items) in [("out of range", 1000.0, json!([9])), ("repeated", 2000.0, json!([3, 3])),
+                                   ("over capacity", 260546.0, json!([0, 1])), ("wrong best", 999999.0, json!([0, 3]))] {
+            let bad = answer(best, items.clone());
+            let p = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &|_, _| Ok(bad.clone()));
+            fell_back(&p, "domain_check_failed");
+            assert_eq!(p["solver"], super::BUILTIN_SOLVER, "{why}");
+            assert_eq!(p["fallback"]["code"], "invalid_output", "{why}");
+            assert_eq!(p["domain_check"]["status"], "failed", "{why}");
+            assert!(p["fallback"]["message"].as_str().is_some_and(|m| !m.is_empty()), "{why}");
+            assert_eq!(p["fallback"]["refused_answer"]["result"]["items"], items, "{why}");
+        }
+    }
+
+    #[test]
+    fn every_fallback_reason_is_kept() {
+        let unset = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &|_, _| Err(KernelFailure::Unset));
+        fell_back(&unset, "unset_dir");
+        assert_eq!(unset["solver"], super::BUILTIN_SOLVER);
+        assert_eq!(unset["fallback"]["message"], "MCP_ALGOGLYPH_DIR is not set");
+        assert_eq!(unset["domain_check"]["status"], "not_run");
+
+        let errors = json!([{"path": "capacity", "message": "must be an integer"}]);
+        let refused = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &|_, _| Err(KernelFailure::Refused(errors.clone())));
+        fell_back(&refused, "runner_refused");
+        assert_eq!(refused["solver"], super::BUILTIN_SOLVER);
+        assert_eq!(refused["fallback"]["errors"], errors);
+
+        let crashed = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP,
+                                     &|k, _| Err(KernelFailure::Crashed(format!("{k}: not JSON (EOF while parsing)"))));
+        fell_back(&crashed, "crashed");
+        assert_eq!(crashed["solver"], super::BUILTIN_SOLVER);
+        assert_eq!(crashed["fallback"]["message"], "knapsack-dp: not JSON (EOF while parsing)");
+    }
+
+    #[test]
+    fn the_candidate_cap_is_recorded_never_silent() {
+        let many: Vec<Value> = (0..45).map(|i| line(i, 1000.0, 100.0 - i as f64)).collect();
+        let p = portfolio_with(&many, Some(1_000_000.0), PORTFOLIO_CAP, &|_, _| Err(KernelFailure::Unset));
+        assert_eq!(p["truncation"], json!({"cap": 40, "eligible": 45, "entered": 40, "dropped": 5}));
+        assert_eq!(p["chosen"].as_array().unwrap().len(), 40);
+        let p = portfolio_with(&many, None, 3, &|_, _| Err(KernelFailure::Unset));
+        assert_eq!(p["truncation"], json!({"cap": 3, "eligible": 45, "entered": 3, "dropped": 42}));
+        let p = portfolio_with(&four(), Some(150000.0), PORTFOLIO_CAP, &|_, _| Err(KernelFailure::Unset));
+        assert_eq!(p["truncation"]["dropped"], 0);
     }
 }
