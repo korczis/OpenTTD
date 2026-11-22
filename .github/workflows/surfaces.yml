@@ -81,6 +81,13 @@ jobs:
       - name: The web UI's own tests, one kit and no fetch past it (rule project.web-ui-is-covered-end-to-end)
         run: node --test tools/research/mcp-panel/test/*.test.mjs
 
+      # Every test_*.py of the repository under line tracing; a changed Python line no test ran
+      # fails the job, by file and line. C++, Rust and JavaScript are named as not judged yet.
+      - name: Every changed Python line runs under a test (rule project.new-code-tested)
+        env:
+          COVERAGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 -B tools/coverage/changed-lines
+
       - name: Every Mermaid diagram renders in Chrome (rule project.docs-are-derived-and-current)
         env:
           CHROME: /usr/bin/google-chrome
