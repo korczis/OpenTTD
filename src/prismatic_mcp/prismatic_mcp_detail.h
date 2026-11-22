@@ -345,6 +345,92 @@ inline nlohmann::json ReadManyTool()
 		{"annotations", {{"readOnlyHint", true}, {"idempotentHint", true}, {"openWorldHint", false}}}};
 }
 
+/**
+ * One way the server can change something, as openttd://mcp/status and `prismatic_mcp status` name
+ * it: the tools/list names that carry it (name prefixes) and whether it also needs this process to
+ * be armed (PRISMATIC_MCP_INPUT=1). A tool counts only when its readOnlyHint is not true, so a
+ * reader under the same prefix (openttd.ai.list, openttd.ui.windows) never makes a capability.
+ */
+struct CapabilityRule {
+	std::string_view field;                  ///< The status field.
+	std::array<std::string_view, 2> prefixes; ///< Tool-name prefixes; an empty one matches nothing.
+	bool needs_arming;                       ///< Present tools count only in an armed process.
+};
+
+/** Every mutating capability, in the order status reports them; a tool takes the first rule it
+ * matches, so the toolbar menu's openttd.ui.menu.* and openttd.ui.requests.* are not interface input.
+ * openttd.view.* moves only the local viewport and openttd.decision.submit runs only the action
+ * types the tools below carry, so neither is a capability of its own. */
+inline constexpr std::array<CapabilityRule, 6> MUTATING_CAPABILITIES = {{
+	{"approval_gated_commands", {"openttd.cmd.", ""}, false},
+	{"script_api", {"openttd.api.", ""}, false},
+	{"ai_tools", {"openttd.ai.", ""}, false},
+	{"pause", {"openttd.game.set_pause", ""}, false},
+	{"toolbar_menu", {"openttd.ui.menu.", "openttd.ui.requests."}, false},
+	{"interface_input", {"openttd.input.", "openttd.ui."}, true},
+}};
+
+/** What a server can do, derived from its tool registry and its process (CapabilitiesOf). */
+struct Capabilities {
+	bool reads = false;       ///< A resource or a read-only tool is served.
+	std::array<bool, MUTATING_CAPABILITIES.size()> mutating{}; ///< One per MUTATING_CAPABILITIES rule.
+	bool input_armed = false; ///< The process was started with PRISMATIC_MCP_INPUT=1.
+
+	/** @return Whether no mutating capability is present: the negation of every one of them. */
+	bool ReadOnly() const
+	{
+		return std::none_of(this->mutating.begin(), this->mutating.end(), [](bool b) { return b; });
+	}
+};
+
+/**
+ * Derive the capabilities from what the server registers.
+ * @param tools The tools/list "tools" array.
+ * @param resources How many resources resources/list serves.
+ * @param input_armed Whether this process is armed for interface input.
+ * @return Every capability, each true only when a tool that carries it is registered (and armed).
+ */
+inline Capabilities CapabilitiesOf(const nlohmann::json &tools, size_t resources, bool input_armed)
+{
+	Capabilities caps;
+	caps.input_armed = input_armed;
+	caps.reads = resources > 0;
+	for (const auto &t : tools) {
+		const std::string name = t.value("name", "");
+		bool read_only = t.contains("annotations") && t["annotations"].value("readOnlyHint", false);
+		if (read_only) {
+			caps.reads = true;
+			continue;
+		}
+		for (size_t i = 0; i < MUTATING_CAPABILITIES.size(); i++) {
+			const CapabilityRule &r = MUTATING_CAPABILITIES[i];
+			bool match = std::any_of(r.prefixes.begin(), r.prefixes.end(), [&name](std::string_view p) { return !p.empty() && name.starts_with(p); });
+			if (!match) continue;
+			if (!r.needs_arming || input_armed) caps.mutating[i] = true;
+			break;
+		}
+	}
+	return caps;
+}
+
+/** @return The status resource's `capabilities` object: reads, then every MUTATING_CAPABILITIES field. */
+inline nlohmann::json CapabilitiesJson(const Capabilities &caps)
+{
+	nlohmann::json j = {{"reads", caps.reads}};
+	for (size_t i = 0; i < MUTATING_CAPABILITIES.size(); i++) j[std::string(MUTATING_CAPABILITIES[i].field)] = caps.mutating[i];
+	return j;
+}
+
+/** @return The console's words for the same values: "read_only=<b> capabilities=<present, comma-separated, or none> input_armed=<b>". */
+inline std::string CapabilitiesLine(const Capabilities &caps)
+{
+	std::string present;
+	auto add = [&present](std::string_view f) { if (!present.empty()) present += ','; present += f; };
+	if (caps.reads) add("reads");
+	for (size_t i = 0; i < MUTATING_CAPABILITIES.size(); i++) if (caps.mutating[i]) add(MUTATING_CAPABILITIES[i].field);
+	return fmt::format("read_only={} capabilities={} input_armed={}", caps.ReadOnly(), present.empty() ? "none" : present, caps.input_armed);
+}
+
 } // namespace PrismaticMCP::detail
 
 #endif /* OTTD_PRISMATIC_MCP_SERVER */

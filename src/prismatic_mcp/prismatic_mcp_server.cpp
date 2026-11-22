@@ -165,6 +165,8 @@ json MakeEnvelope()
 	return env;
 }
 
+detail::Capabilities ServerCapabilities();
+
 json ResourceMcpStatus()
 {
 	json env = MakeEnvelope();
@@ -173,7 +175,12 @@ json ResourceMcpStatus()
 	d["endpoint"] = GetEndpoint();
 	d["bind"] = "127.0.0.1,::1";
 	d["port"] = _mcp.port;
-	d["read_only"] = true;
+	/* Derived from the registry and this process, never written: read_only is the negation of
+	 * every mutating capability (detail::MUTATING_CAPABILITIES). */
+	const detail::Capabilities caps = ServerCapabilities();
+	d["read_only"] = caps.ReadOnly();
+	d["capabilities"] = detail::CapabilitiesJson(caps);
+	d["input_armed"] = caps.input_armed;
 	d["requests_total"] = _mcp.requests_total;
 	d["requests_denied"] = _mcp.requests_denied;
 	d["active_connections"] = (uint64_t)_mcp.conns.size();
@@ -1137,6 +1144,13 @@ json ResourcesList()
 	return json{{"resources", arr}};
 }
 
+/** What this server can do: what it registers (tools/list, resources/list) and whether this
+ * process is armed for interface input. */
+detail::Capabilities ServerCapabilities()
+{
+	return detail::CapabilitiesOf(ToolsList()["tools"], ResourcesList()["resources"].size(), UI::InputArmed());
+}
+
 /** Dispatch a single JSON-RPC request object. Returns std::nullopt for notifications. */
 std::optional<json> DispatchOne(const json &req)
 {
@@ -1664,11 +1678,12 @@ std::string GetStatusLine()
 	s += _mcp.running ? " running" : " stopped";
 	if (_mcp.running) {
 		s += " endpoint=" + GetEndpoint();
-		s += " read_only=true";
 		s += " requests=" + fmt::format("{}", _mcp.requests_total);
 		s += " denied=" + fmt::format("{}", _mcp.requests_denied);
 		s += " conns=" + fmt::format("{}", _mcp.conns.size());
 	}
+	/* The same derived values as openttd://mcp/status: what this build and process can do, running or not. */
+	s += " " + detail::CapabilitiesLine(ServerCapabilities());
 	return s;
 }
 

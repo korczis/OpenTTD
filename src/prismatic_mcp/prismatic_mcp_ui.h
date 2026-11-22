@@ -25,6 +25,13 @@ namespace PrismaticMCP::UI {
 nlohmann::json Tools();
 
 /**
+ * Whether this process is armed for interface input: started with PRISMATIC_MCP_INPUT=1, the
+ * owner's switch. Read once; openttd://mcp/status reports it.
+ * @return True when the openttd.input.* and acting openttd.ui.* tools may run.
+ */
+bool InputArmed();
+
+/**
  * Run a UI tool. Main thread only (called from the MCP poll inside GameLoop()).
  *
  * openttd.ui.* reads what the process shows: every window with its widgets, their screen

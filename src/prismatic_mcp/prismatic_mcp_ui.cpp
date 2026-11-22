@@ -503,6 +503,11 @@ void Release(int x, int y)
 
 } // namespace
 
+bool InputArmed()
+{
+	return Armed();
+}
+
 json Tools()
 {
 	/* A process without an interface offers none of these: its catalogue is what it can do. */
