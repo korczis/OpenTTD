@@ -516,6 +516,7 @@ decides when a measurement may change a default.
 | [The main toolbar's click and menu tables and its tooltips are indexed by widget id, so a new WID_TN value must be added at the same position everywhere](.ai/repo/knowledge/curated/toolbar-dispatch-tables-are-indexed-by-widget-id.md) | When adding, removing or reordering a main or scenario-editor toolbar button. |
 | [Town-authority rules (ratings, gates, actions) are derived from src/ into one model; read it, do not copy numbers](.ai/repo/knowledge/curated/town-authority-rules-are-derived-from-the-engine.md) | Before writing bot, script or panel logic about town ratings: where the derived model is, what it holds, and the rules a company most often trips over. |
 | [A town's generated name is not saved; it is regenerated from townnameparts and the compiled name tables on every read](.ai/repo/knowledge/curated/town-names-are-regenerated-from-the-name-tables.md) | When editing src/table/townname.h or a town-name generator, or comparing town names across builds or saves. |
+| [AlgoGlyph track-planning refuses openttd://map/terrain read on other land than openttd://map; one terraform between the two reads leaves every rail line of a plan without a price](.ai/repo/knowledge/curated/track-planning-refuses-a-map-and-terrain-read-at-different-moments.md) | When building a track-planning input from a running game (mcp-plan --track, yards, algoglyph.track_plan), or reading why a planner round priced none of its rail lines. |
 | [On 2026-11-15 the fork moved from 317 commits behind upstream to a linear series on top of it](.ai/repo/knowledge/curated/upstream-rebase-2026-11-15.md) | When the next upstream sync needs a baseline, or when a hash from before 2026-11-15 does not resolve. |
 | [The widget enums in src/widgets/widget.h are generated into the ScriptWindow API, so widgets are appended, never inserted](.ai/repo/knowledge/curated/widget-enums-are-part-of-the-script-api.md) | Before adding, renaming or reordering a widget. |
 <!-- surfaces:end docs-index -->
@@ -794,7 +795,7 @@ from the code. The right-hand column says what was counted.
 | **20** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **38** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **209** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
-| **98** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
+| **99** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->

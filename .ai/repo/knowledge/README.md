@@ -35,7 +35,7 @@ value.
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by status
     %% links: README.md?col=Status&filter=verified#records-generated | README.md?col=Status&filter=candidate#records-generated | README.md?col=Status&filter=superseded#records-generated | README.md?col=Status&filter=active#records-generated
-    "verified" : 84
+    "verified" : 85
     "candidate" : 9
     "superseded" : 3
     "active" : 2
@@ -47,7 +47,7 @@ pie showData title Documents under .ai/repo/knowledge/ by status
 pie showData title Documents under .ai/repo/knowledge/ by route
     %% links: README.md?col=Route&filter=platform#records-generated | README.md?col=Route&filter=project#records-generated | README.md?col=Route&filter=#records-generated | README.md?col=Route&filter=enforcement#records-generated | README.md?col=Route&filter=documentation#records-generated | README.md?col=Route&filter=generator#records-generated
     "platform" : 64
-    "project" : 22
+    "project" : 23
     "unknown" : 4
     "enforcement" : 3
     "documentation" : 3
@@ -59,7 +59,7 @@ pie showData title Documents under .ai/repo/knowledge/ by route
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by epistemics
     %% links: README.md?col=Epistemics&filter=observed#records-generated | README.md?col=Epistemics&filter=inferred#records-generated | README.md?col=Epistemics&filter=decided#records-generated | README.md?col=Epistemics&filter=#records-generated
-    "observed" : 90
+    "observed" : 91
     "inferred" : 3
     "decided" : 3
     "unknown" : 2
@@ -167,6 +167,7 @@ pie showData title Documents under .ai/repo/knowledge/ by epistemics
 | [The main toolbar's click and menu tables and its tooltips are indexed by widget id, so a new WID_TN value must be added at the same position everywhere](curated/toolbar-dispatch-tables-are-indexed-by-widget-id.md) | verified | platform | observed | When adding, removing or reordering a main or scenario-editor toolbar button. |
 | [Town-authority rules (ratings, gates, actions) are derived from src/ into one model; read it, do not copy numbers](curated/town-authority-rules-are-derived-from-the-engine.md) | verified | project | observed | Before writing bot, script or panel logic about town ratings: where the derived model is, what it holds, and the rules a company most often trips over. |
 | [A town's generated name is not saved; it is regenerated from townnameparts and the compiled name tables on every read](curated/town-names-are-regenerated-from-the-name-tables.md) | verified | platform | observed | When editing src/table/townname.h or a town-name generator, or comparing town names across builds or saves. |
+| [AlgoGlyph track-planning refuses openttd://map/terrain read on other land than openttd://map; one terraform between the two reads leaves every rail line of a plan without a price](curated/track-planning-refuses-a-map-and-terrain-read-at-different-moments.md) | verified | project | observed | When building a track-planning input from a running game (mcp-plan --track, yards, algoglyph.track_plan), or reading why a planner round priced none of its rail lines. |
 | [On 2026-11-15 the fork moved from 317 commits behind upstream to a linear series on top of it](curated/upstream-rebase-2026-11-15.md) | verified |  | observed | When the next upstream sync needs a baseline, or when a hash from before 2026-11-15 does not resolve. |
 | [The widget enums in src/widgets/widget.h are generated into the ScriptWindow API, so widgets are appended, never inserted](curated/widget-enums-are-part-of-the-script-api.md) | verified | platform | observed | Before adding, renaming or reordering a widget. |
 <!-- surfaces:end docs-index -->

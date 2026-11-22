@@ -126,6 +126,21 @@ settings. <!-- open-finding kind=failed -->In that round track-planning found a 
 no line went to the bot unpriced and the round held.<!-- /open-finding --> <!-- open-finding kind=not-run -->Mesh records: NOT RUN, because the panel had
 no `$MAJORDOMUS_URL`.
 
+Why none of the 21 had a route. OBSERVED: the 30 rounds of that game in the :8800 store that
+priced lines on the map include only this one that found nothing; the others found 10 to 20. The
+same round's `knapsack-dp` call to AlgoGlyph succeeded, so the runner worked. OBSERVED on a copy of
+the game's save with its 8 AIs running: track-planning refuses an input whose openttd://map/terrain
+slopes differ from openttd://map's heights ("read map and terrain at the same moment"). 3 of 400
+back-to-back reads of the input from the panel had such a difference, after a terraform between the
+map read and the terrain read. mcp-plan read that input once and gave it to every line, so one
+refusal meant 21 refused lines. INFERRED: this is what happened in January 1954. The panel logged
+only the count, so that round's refusal text was never recorded. Since then linecost.rs
+`coherent_input` reads the map again after the other resources and reads the whole input again while
+the heights change, up to three times. It then leaves the terrain out rather than send an input that
+will be refused, and records how it read in `line_costs.input`. The panel names the reason for each
+line without a route. Details are in
+[`track-planning-refuses-a-map-and-terrain-read-at-different-moments`](../../.ai/repo/knowledge/curated/track-planning-refuses-a-map-and-terrain-read-at-different-moments.md).
+
 On 2026-11-22 the first version proposed again every round. The plan's `fr*` slots changed
 from round to round, so the proposals did not collapse onto earlier ones, and about 130 waited unanswered.
 That is why a round now holds while anything waits.
