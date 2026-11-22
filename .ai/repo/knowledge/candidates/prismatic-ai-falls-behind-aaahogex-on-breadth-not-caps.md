@@ -49,6 +49,8 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 | `rich_air=1` with `air_add_waiting=150` or `300` vs `rich_air=0` (both thresholds byte-identical: the planes come from new air routes, not from more planes per route) | 6 | -10.2% | 2 |
 | master `c5bf32182a` (#46 with #68) vs `c86fbd1ccb` (before #46) | 24 | -1.8% | 14 |
 | master `5cc9cdbf8d` (#213 rail search fail-fast, #163 ships off, #217 depot guard) vs `c5bf32182a` | 24 | +11.8% | 19 |
+| #213 alone (`3e4ec154ff`) vs `c5bf32182a` | 24 | +14.4% | 17 |
+| #163 (off) and #217 depot guard (`5cc9cdbf8d`) vs `3e4ec154ff` | 24 | -2.3% | 14 |
 
 # How to apply it
 
@@ -64,5 +66,7 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
   (road or rail) from producers further away, not catchment joins.
 - Two lines that share both stations must tell their trains apart by shared orders. Otherwise each
   sells the other's trains.
+- Keep every search bounded: a rail search that ran most of a game year before giving up cost 14.4%
+  of value (#213). Time the bot spends searching is time its money sits idle.
 - A single replay is chaotic: `07472abe/m-0006` moved by up to 15% with no behavioural change.
   Use 8 or more matches.
