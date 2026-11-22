@@ -14,5 +14,5 @@ RESEARCH-ONLY. Mode **shadow**: the decision was never submitted; its directive 
 | planner v4 (baseline) | 41 → 1 (cargo 1) | 127,603 | 19,431 | 1.8273 | 6.567 | 338,752 | found |
 | battlebrain | 0 → 1 (cargo 1) | 100,483 | 14,499 | 1.7315 | 6.9303 | 247,490 | found |
 
-**Divergence:** `input_model_discrepancy`. the planner's line fails freight-margin@1 on the same snapshot: investment 127603 exceeds what the company can spend and keep the reserve (125011).
+**Divergence:** `input_model_discrepancy`. the planner's line fails freight-margin@2 on the same snapshot: investment 127603 exceeds what the company can spend and keep the reserve (125011).
 

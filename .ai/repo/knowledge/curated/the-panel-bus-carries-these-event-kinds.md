@@ -168,9 +168,10 @@ reading (`choice.reading.lines`, each with `mode` and `ratio`) and the game it c
 (`inputs.live.game`: `{seed, map: "WxH"}`); its `inputs.stored` is the query that read the earlier
 readings, so `choice.factors` are those of every stored reading with this one. A planned bot start
 with `PRISMATIC_PLAN_CALIBRATION` `all` or `seed` (the duel form's *Calibrated plan* sets `all`) reads
-them back with `calibrate.rs:readings_sql` across every store of the store directory
-(`panel_store.rs:query_every_store`: its own through the code of `/api/db/query`, a stopped panel's
-file read-only, a running panel's through its `/api/db/query`), and `plan.portfolio` and
+them back with `calibrate.rs:readings_query` (the named query `sql/queries/calibration_readings.sql`)
+across every store of the store directory (`panel_store.rs:every_store`: its own through the code of
+`/api/db/named`, a stopped panel's file read-only, a running panel's through its `/api/db/named`), and
+`plan.portfolio` and
 `plan.bot_settings` name that query with its rows (`inputs.stored`) and the readings used
 (`inputs.live.calibration.readings`). Off (the default), with the store off, or with no reading, both
 carry `{fallback: "uncalibrated: <why>"}` and the plan runs on the model alone. The one reading of
@@ -179,7 +180,7 @@ the retired file research/calibration.json was imported once as a run of its own
 
 **The bot's settings read the stored duels (I0087).** With `PRISMATIC_BOT_FROM_DUELS=1`, a planned
 bot start reads every store's `plan.duel` verdicts of at least 60 months, with the `plan.bot_settings`
-of the same instance (`duel_outcomes.rs:outcomes_sql`, across stores as above). Each verdict is joined
+of the same instance (`duel_outcomes.rs:outcomes_query`, `sql/queries/duel_outcomes.sql`, across stores as above). Each verdict is joined
 with the settings its own run published before it, and `own_lines` and `rail_after` are derived by the
 rule `own-lines-by-handed-v1`. `plan.bot_settings` then names that query with its rows (`inputs.stored`)
 and the rule, outcomes, pairs and reasons (`inputs.live.from_duels`), and its `version.params` gains
@@ -213,9 +214,9 @@ it). The socket binds `tcp://127.0.0.1:<--bus-port, default ephemeral>`, the sto
 hub and null ports. `GET /api/bus`, `GET /api/db/tables` and `GET /api/db/query` of the hub are rows
 of its method table (`hub.bus`, `hub.db_tables`, `hub.db_query`), so they are in its OpenAPI,
 GraphQL and Rhai (`hub_db_query(#{sql: ...})`). The hub's store is a file of the store directory, so
-the calibration's `query_every_store` reads it with the panels' stores: it holds no
+the calibration's `every_store` reads it with the panels' stores: it holds no
 `plan.calibration`, and while the hub runs it is listed with an error, since the hub has no registry
-record whose `/api/db/query` could answer for it.
+record whose `/api/db/named` could answer for it.
 
 ## Not on any bus
 

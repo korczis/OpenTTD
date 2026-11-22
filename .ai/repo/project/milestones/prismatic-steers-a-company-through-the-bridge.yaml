@@ -3,7 +3,7 @@ title: "Prismatic steers a company in a live game through the standalone bridge"
 slug: prismatic-steers-a-company-through-the-bridge
 order: 40
 priority: p1
-problem: "Prismatic's decision models have no way to act in, or observe, a running simulation. Proposed in ADR 0007 (status: proposed; accepting them is the owner's act)."
+problem: "Prismatic's decision models have no way to act in, or observe, a running simulation. Decided in ADR 0007, accepted by the owner with ADRs 0001-0030 (ff4b687c53, merged in PR #22)."
 outcome: "A standalone bridge drives a Company AI over the admin network, a real strategy builds routes, and a defined decision contract lets prismatic-platform answer /decision/pull."
 acceptance_criteria:
 - "research/prismatic-bridge/ARCHITECTURE.md describes the built system consistently in its status line, section 3 and the phase table"
@@ -12,6 +12,41 @@ acceptance_criteria:
 - "The bridge client's placement and language are decided in an ADR"
 validation:
 - "majordomus plan show prismatic-steers-a-company-through-the-bridge"
-evidence_required: []
+- "python3 -m jsonschema -i research/prismatic-bridge/decision-contract.example.json research/prismatic-bridge/decision-contract.schema.json"
+- "majordomus adr check"
+evidence_required:
+- architecture_consistent
+- live_check_builds_vehicles
+- decision_contract_schema
+- client_placement_adr
 created_at: '2026-11-15'
-updated_at: '2026-11-15'
+updated_at: 2026-11-22T16:29:36Z
+evidence:
+  - covers: "architecture_consistent"
+    type: artifact
+    command: "git show ab4b31a0bc:research/prismatic-bridge/ARCHITECTURE.md (status line, section 3, section 5 phase table)"
+    result: "met. On origin/master ab4b31a0bc the three agree: the status line says Phases 1 and 2 are built and reproduced on this tree by tools/research/bridge-live-check, and that Phase 3 has reached prismatic-platform; section 3 (as actually built) has ai/PrismaticAI building real routes from its settings string; the phase table has Phase 1 Done, Phase 2 Done (reproduced by bridge-live-check), Phase 3 Partial. Delivered by I0009 (1e5ad23af9, 68d15d4ee3), I0010 (868b5d9269) and I0025 (f5ffdf3b17), all DONE; later revisions up to 82a90d58a0 kept them in agreement. Residual, outside this criterion: the status line still calls ADR 0034 proposed, accepted since 800b6aa0c2 (PR #22)."
+    artifact: "research/prismatic-bridge/ARCHITECTURE.md@ab4b31a0bcfc88e5ca4166befd7cd01259dd914b"
+    commit: ab4b31a0bcfc88e5ca4166befd7cd01259dd914b
+    recorded_at: 2026-11-22T16:28:39Z
+  - covers: "live_check_builds_vehicles"
+    type: artifact
+    command: "git show -s f5ffdf3b17 && majordomus plan show I0025"
+    result: "met by recorded evidence, not re-run on 2026-11-22. I0025 (DONE) recorded tools/research/bridge-live-check PASS, exit 0, on 2026-11-16: a dedicated server of the tree rebased by I0021 (build-research-baseline-release, fixed seed 1, OpenGFX), the standalone bridge on a throwaway admin port, POST /ai/start PrismaticAI, and /companies polled until company 0 (is_ai) had busses=1 within ~20-40 s. The script was added in c2342424c3 (committed under an unrelated subject) and fixed to detect the first vehicle in f5ffdf3b17 (I0025). It uses its own throwaway server, never :8800, and does not depend on I0117."
+    artifact: "commit:f5ffdf3b1701c58373a9494a6f351a7e8e8db018"
+    commit: ab4b31a0bcfc88e5ca4166befd7cd01259dd914b
+    recorded_at: 2026-11-22T16:28:56Z
+  - covers: "decision_contract_schema"
+    type: test
+    command: "uv run --no-project --with jsonschema python3 -m jsonschema -i research/prismatic-bridge/decision-contract.example.json research/prismatic-bridge/decision-contract.schema.json"
+    result: "PASS, exit 0 (jsonschema 4.26.0, run 2026-11-22 on ab4b31a0bc; the schema also passes Draft202012Validator.check_schema). decision-contract.schema.json defines the directive (request) and DecisionPullResult (response); decision-contract.example.json holds the fixtures. Added in 1bacb607ce (I0011, DONE), extended in 01c6d578bc and 82a90d58a0; ARCHITECTURE.md section 7 points to both."
+    artifact: "commit:1bacb607ceef89849cead198fe42d8d44d2a212c"
+    commit: ab4b31a0bcfc88e5ca4166befd7cd01259dd914b
+    recorded_at: 2026-11-22T16:29:15Z
+  - covers: "client_placement_adr"
+    type: test
+    command: "majordomus adr check"
+    result: "PASS, exit 0 on 2026-11-22: 37 decisions, every identity unique, every status known, every reference resolves. ADR 0032 decides the bridge's admin-protocol client is a standalone native Rust service (axum + tokio), with the three rejected options and their costs; written in 323413189f (I0012, DONE), status accepted since 800b6aa0c2 (PR #22). ARCHITECTURE.md section 3.1 records the decision."
+    artifact: ".ai/repo/adrs/0032-the-bridge-s-admin-protocol-client-is-a-native-rust-service-.md"
+    commit: ab4b31a0bcfc88e5ca4166befd7cd01259dd914b
+    recorded_at: 2026-11-22T16:29:36Z
