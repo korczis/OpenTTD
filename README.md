@@ -177,6 +177,7 @@ Examples from [`tools/research/mcp-panel/rhai/`](tools/research/mcp-panel/rhai/)
 | [`build_plan.rhai`](tools/research/mcp-panel/rhai/build_plan.rhai) | carries a plain-language plan out: sends its settings to the bot, each waiting for approval |
 | [`rail_steward.rhai`](tools/research/mcp-panel/rhai/rail_steward.rhai) | keeps every rail line paying: reads the game each round, decides per line and hands the bot a target to reconcile |
 | [`rail_monitor.rhai`](tools/research/mcp-panel/rhai/rail_monitor.rhai) | watches the bot's railway in the background and posts what is wrong to the Majordomus board |
+| [`build_audit.rhai`](tools/research/mcp-panel/rhai/build_audit.rhai) | once a game month judges what every company built (depots one cannot drive out of, duplicate depots and stations, bay against drive-through stops), keeps it per company for every agent, and says in chat when the owner's company has a new defect |
 | [`demo.rhai`](tools/research/mcp-panel/rhai/demo.rhai) | a game driven entirely from outside, from a new world to a final report |
 | [`arena.rhai`](tools/research/mcp-panel/rhai/arena.rhai) | keeps a lineup of company AIs playing as desired state and reports the standings in chat and as a newspaper |
 
@@ -652,7 +653,7 @@ from the code. The right-hand column says what was counted.
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
 | **46** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **12** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
-| **18** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
+| **19** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **37** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **205** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **98** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
@@ -664,7 +665,7 @@ from the code. The right-hand column says what was counted.
 pie showData title Counted from the sources: tooling
     "research tools and checks (tools/research/, shell and Python)" : 46
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 12
-    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 18
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 19
 ```
 <!-- surfaces:end facts -->
 
