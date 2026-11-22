@@ -1,0 +1,19 @@
+id: every-changed-line-is-tested
+title: "Every changed line is run by a test, and a coverage gate refuses a change whose new lines no test ran"
+slug: every-changed-line-is-tested
+order: 107
+priority: p0
+problem: "The owner ordered on 2026-11-22 that every change ship tests that run every line it adds or modifies, with UI code covered by real Playwright end-to-end tests in a real browser, and that a supervised repository enforce this as a blocking project rule plus a coverage gate in verify/CI that refuses any changed line no test ran, by file and line. The fork has no such rule and no changed-line gate: the web-ui-is-covered-end-to-end rule checks that pages are declared, tools/research Python scripts and tools/plan-github are tested only where someone wrote a test, the Rust crates measure coverage in places (cargo llvm-cov on mcp-rhai for M9) but nothing refuses an uncovered new line, and the C++ research code under src/prismatic_mcp has unit tests without line coverage."
+outcome: "A blocking project rule `project.new-code-tested` states the order; one changed-line coverage gate runs locally (tools/gate.sh) and on every pull request, maps coverage from Python (sys.monitoring), JavaScript (V8 coverage from the Playwright suite), Rust (cargo llvm-cov) and the gated C++ research code (llvm-cov) onto the diff, and fails naming file and line for any changed line no test ran; exemptions carry a written reason and are listed in every run; and the gate is proven against a build it must refuse."
+acceptance_criteria:
+- ".ai/repo/rules/project/new-code-tested.v1.md exists as a blocking rule with a validator that runs the gate"
+- "tools/coverage/changed-lines (or one equivalent entry point) reads a diff base and per-language coverage files and fails with file:line for every uncovered changed line"
+- "The gate runs in tools/gate.sh change and as a required check on pull requests (consistent with the I0116 decision)"
+- "A committed fixture change with an untested line makes the gate fail, and adding the test makes it pass (the proof against a build it must refuse)"
+- "Exemptions live in one file with a reason per entry, and every gate run prints them"
+validation:
+- "tools/gate.sh change"
+- "majordomus rules"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

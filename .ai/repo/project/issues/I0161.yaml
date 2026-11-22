@@ -1,0 +1,37 @@
+id: I0161
+milestone: evaluations-are-fair-pre-registered-and-paired
+title: "A comparison is pre-registered before its first run, and one paired report gives each metric's effect with an interval and lists every failed or excluded run"
+slug: preregistered-paired-reports
+priority: p1
+profile: implementation
+parallel_safe: false
+objective: "Each comparison gets a protocol file, research/experiments/<id>.yaml, committed before its first run. The protocol fixes: the arms; the frozen inputs (tree, bot tree, game binary digest, panel digest, planner checkout); the paired seeds and at least one held-out seed for any generalisation; the horizon, the held start and the repeats per seed; the metrics; and the exclusion rule. `mcp-duel --protocol <file>` writes the protocol id and the digest of its frozen inputs into the record. The record carries each company's operating profit and cargo delivered per month next to value, money and loan, read from the game; a metric the game does not offer is listed as missing, never estimated. tools/research/paired-report turns a protocol and its records into one report: for each metric, the paired difference per seed, the mean over pairs with a bootstrap interval, the within-seed spread from repeats, and every run that failed, was excluded or departed from the frozen inputs. tools/research/preregistration check refuses three things: a protocol committed after its first record started, a record whose frozen inputs differ from its protocol, and a report that leaves out a run."
+why: "External review 2026-11-22 (digest A-14). research/duel-evidence-audit.md:31 says the scoreboard's tally of wins counts separate experiments. Rule .ai/repo/rules/project/a-tuning-claim-needs-held-start-pairs.v1.md:6 is 'Enforced by review, not by a tool'. `git grep -i preregist` on origin/master finds only research/prismatic-mcp/02-threat-model.md:67. research/experiment-template.md:5 asks for a goal or hypothesis but fixes no seeds, metrics or exclusions. A duel record's `final` holds money, loan, value, net and vehicle counts only (research/results/duel-20261120T062525-seed4242.json), so no comparison can read profit or cargo."
+scope:
+  - "research/experiments/**"
+  - "research/experiment-template.md"
+  - "tools/research/preregistration"
+  - "tools/research/paired-report"
+  - "tools/research/test_preregistration.py"
+  - "tools/research/mcp-duel"
+  - "tools/research/test_mcp_duel.py"
+non_scope:
+  - "Running any experiment; I0162-I0166 run them under this protocol"
+  - "Raising the rule to a blocking class; that is a later rule version once the checker has run on real protocols"
+  - "Re-writing past records; they stay as written, and a report that reads them labels them unregistered"
+depends_on: []
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#evaluations-are-pre-registered-and-paired"
+acceptance_criteria:
+  - "A protocol schema with a valid and three invalid fixtures; preregistration check refuses each invalid one, giving a reason per refusal"
+  - "mcp-duel --protocol writes the protocol id and frozen-input digest into the record, and the record carries operating profit and cargo delivered per company and month, or names them missing"
+  - "paired-report run retrospectively on the frozen duel set of research/duel-evidence-audit.md (labelled unregistered) reproduces its per-seed differences and adds the interval"
+  - "research/experiment-template.md points to the protocol file and the checker"
+validation:
+  - "python3 -m unittest tools/research/test_preregistration.py tools/research/test_mcp_duel.py"
+  - "tools/research/preregistration check research/experiments"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

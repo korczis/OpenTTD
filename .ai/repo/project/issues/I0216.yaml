@@ -1,0 +1,36 @@
+id: I0216
+milestone: algoglyph-is-accountable
+title: "The planner, its AlgoGlyph pricing and the bot play the Brno real-world scenario, and the run's record reports what was planned, built and earned against the prediction"
+slug: brno-scenario-runs-the-loop
+priority: p3
+profile: deep-work
+parallel_safe: false
+objective: "Run the fork's own loop on the compiled Brno scenario instead of a generated map: compile and load-check the committed snapshot (rw-scenario compile, load-check, which saves the placed game), start a disposable stack from that save (mcp-e2e --load), take a coherent capture and an mcp-plan --track answer with its plan receipts (I0214), let the planned bot play for 24 game months with the Rhai services the real-game page runs, and write a record: the scenario's content hash, which towns and industries were OBSERVED, DERIVED or INFERRED, the lines planned, priced and built, and predicted against real profit per line from calibration. The same commands, with no place-specific branch, are then run on a second place the pipeline already compiles."
+why: "External review 2026-11-22 (digest B-32, the remainder). The scenario half is done on master: 2e7c376c64 (Brno from OpenStreetMap and Copernicus GLO-30, every entity labelled with its evidence), 4efed41a82 (independent JSON Schema validation), bff597063c (the gate and a live second place, Olomouc, on a Linux host) and 7eabf7b585 (load-check on macOS); licences and attribution are in research/real-world-scenario.md:136-154 and determinism in its commands (:20-36). What is missing is the loop on it: the page names no planner or bot run, and the save that load-check writes (research/real-world-scenario.md:84-86) is never played; mcp-e2e can start from a save since PR #38 (tools/research/mcp-e2e:39, :73-74). Rivers, roads, railways and buildings are not represented (:204-206), which the record must state as a limit of the result."
+scope:
+  - "research/real-world-scenario.md"
+  - "tools/research/real-world/src/loadcheck.rs"
+  - "tools/research/mcp-e2e"
+  - "research/results/**"
+non_scope:
+  - "Representing rivers, roads, railways or buildings in the scenario"
+  - "Tuning the bot or the planner for Brno; the run uses the defaults of master and says so"
+  - "Fetching new data online; the committed snapshot is the input"
+depends_on:
+  - I0214
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#algoglyph-plans-are-accountable"
+acceptance_criteria:
+  - "A committed record under research/results/ names the scenario hash, the build id, the bot settings, the plan receipts and 24 game months of company samples on the Brno save"
+  - "Each planned line lists its predicted cost and profit and the real ones, or why a line was not built; INFERRED industries are flagged in the line's evidence"
+  - "The same command lines run on the second place with no place-specific code, and both runs are compared in research/real-world-scenario.md"
+  - "research/real-world-scenario.md's limits section states what the run cannot show (no rivers, roads or railways from the source)"
+validation:
+  - "(cd tools/research/real-world && cargo test --offline)"
+  - "tools/research/real-world/rw-scenario replay --snapshot tools/research/real-world/fixtures/brno/snapshot.json --expect tools/research/real-world/fixtures/brno/SHA256SUMS"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

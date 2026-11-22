@@ -1,0 +1,39 @@
+id: I0196
+milestone: the-live-agent-workbench
+title: "An AlgoGlyph flow editor in the panel: a D3 graph and CodeMirror text of one versioned flow, kept in sync both ways, with typed ports, cycle refusal and runs pinned to a revision"
+slug: algoglyph-flow-editor
+priority: p2
+profile: deep-work
+parallel_safe: false
+objective: "Add a Flow page to the panel (registered in static/shell.js like every other page) that edits one FlowArtifact: nodes from the projected kernel palette, typed input and output ports from each kernel's schema, edges that connect only compatible ports. The graph (D3) and the text (CodeMirror 6) are two views of the same document, so an edit in either updates the other and graph to text to graph is byte-identical. Parameters are edited live; a cycle or a port mismatch is refused with the place it is in. A flow is saved as an immutable revision through the same store as Rhai revisions, staged, activated and run pinned to its revision."
+why: "External review 2026-11-22 (digest A-34). The panel's only graph of actions is the read-only 'Plan (DAG)' card that renders POST /api/actionplan (tools/research/mcp-panel/static/index.html:118-133); git grep on origin/master finds no flow editor, node editor or FlowArtifact under tools/research or research. D3 and CodeMirror 6 are already in the panel's node_modules (tools/research/mcp-panel/package.json)."
+scope:
+  - "tools/research/mcp-panel/static/flow.html"
+  - "tools/research/mcp-panel/static/flow.js"
+  - "tools/research/mcp-panel/static/shell.js"
+  - "tools/research/mcp-panel/test/"
+  - "tools/research/mcp-rhai/src/panel.rs"
+  - "tools/research/mcp-rhai/src/panel_scripts.rs"
+  - "tools/research/schema/flow-artifact.v1.schema.json"
+  - "research/rhai-ide.md"
+non_scope:
+  - "Monaco; ECharts or Cytoscape for the editor (D3 is the bespoke-layout library)"
+  - "Changing AlgoGlyph's own flow format; the artifact maps onto what 'flow' runs"
+depends_on:
+  - I0194
+  - I0195
+serves:
+  - "openttd-validates-agent-driven-engineering#the-workbench-drives-the-game-end-to-end"
+acceptance_criteria:
+  - "The FlowArtifact schema validates committed fixtures; a node test proves graph to text to graph is identical and refuses a cycle and a port mismatch"
+  - "The palette is the live kernel catalogue; a fixture kernel appears in it with no hand edit"
+  - "A browser check (e2e-covers: panel /flow) edits a flow in the graph and in the text, saves a revision, activates it and runs it pinned to that revision; the page is maximizable and its state is in the URL"
+  - "mcp-ui-crawl-check passes on the new page"
+validation:
+  - "node --test tools/research/mcp-panel/test/"
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/e2e-coverage"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

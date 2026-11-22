@@ -1,0 +1,36 @@
+id: I0184
+milestone: governed-access-is-authenticated-and-every-capability-reaches-every-surface
+title: "A parity matrix generated from the live registries shows every capability on every surface, a fixture registration reaches all of them, and a removed projection fails the check"
+slug: surface-parity-matrix
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Write one check that reads the live registries (the game's tools/list and resources/list, the attached client's tools/list, the panel's routes() and derive_routes, its OpenAPI, the hub method table and its GraphQL schema, the Rhai function catalogue, the console's list_cmds) and generates a matrix: rows are capabilities, columns are console, panel page, REST/Swagger, MCP, hub WebSocket, GraphQL and Rhai, each cell a machine-tested state (derived and answered, derived only, not applicable with its reason, missing). A test registers one harmless fixture capability and proves it appears in every applicable column with no hand edit; a negative test removes one projection and the check fails naming the cell. The generated matrix is published on the site through surfaces.toml."
+why: "External review 2026-11-22 (digest A-23, A-36). Each projection is derived and tested on its own: OpenAPI from the table and the live catalogue (tools/research/mcp-rhai/src/panel.rs:2491 derive_routes, test at panel.rs:3382), Rhai from the engine (tools/research/mcp-rhai/src/rhai_catalogue.rs:1-8), the hub from each panel's OpenAPI and each server's tools/list (.ai/repo/rules/project/mcp-surfaces-are-derived.v1.md:30-37), page coverage with negative fixtures (tools/research/mcp-panel/test/e2e-coverage.test.mjs:15-27). No test spans every surface for one capability, and no single generated artifact states a capability's state per surface. research/prismatic-mcp/exposure-coverage-matrix.md is a hand-written domain table, and I0114's capability matrix is a forensic per-capability record, not a surface projection."
+scope:
+  - "tools/research/mcp-parity-check"
+  - "tools/research/mcp-rhai/src/parity.rs"
+  - "tools/research/mcp-rhai/src/bin/mcp-panel.rs"
+  - "research/surface-parity.md"
+  - "surfaces.toml"
+  - ".ai/repo/rules/project/mcp-surfaces-are-derived.v1.md"
+non_scope:
+  - "Adding a missing projection; a missing cell is reported, and the MCP column of host-owned operations is I0185"
+  - "research/capability-matrix.md (I0114), which may link this matrix but is not generated from it"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#governed-access-is-authenticated-and-exercised"
+acceptance_criteria:
+  - "tools/research/mcp-parity-check <panel-url> [--hub <hub-url>] writes research/surface-parity.md (and JSON) from the live registries; nothing in it is listed by hand"
+  - "A cargo test registers a fixture tool and route and asserts it in the OpenAPI document, the Rhai catalogue, the hub method table and the console derivation"
+  - "A negative test drops one projection and the check exits non-zero naming the capability and the surface"
+  - "The rule project.mcp-surfaces-are-derived names the check as its proof; tools/surfaces/surfaces check passes"
+validation:
+  - "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+  - "node --test tools/research/mcp-panel/test/"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
