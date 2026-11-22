@@ -209,6 +209,13 @@ elsewhere, which are fixed where they come from.
 - **Data.** `data/site.json` holds the chart inputs: weekly commits, the documentation map,
   per-document age at `HEAD` and plan progress. `data/search.json` holds the search index.
   Both are computed at build time from git, so the same commit always builds the same site.
+- **AI layer page.** `ai.html` opens with charts counted from the `.ai/` records it lists:
+  features, decisions and issues by status, rules by class and by origin (project or vendored),
+  and issues per milestone. `Site.ai_chart` builds each one from the same column a table shows
+  and draws it through `chart_figure`, the card the Markdown charts use. A slice or a bar links to
+  `ai.html?col=<column>&filter=<value>#ai-<table>`, so a click filters that table to the rows it
+  counted (`assets/app.js` `linkedFilter`, with a badge that clears it). The features table is in
+  a collapsed block that opens when a filter targets it.
 
 Every page ends with where it is linked from and what it links to, and the "All documents" page
 draws every link between published documents as a force graph (drag, zoom, hover, click; a

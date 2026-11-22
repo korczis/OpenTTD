@@ -751,6 +751,20 @@ def mermaid_chart_spec(src: str) -> dict | None:
     return None
 
 
+def chart_figure(cid: str, spec: dict, after: str = "", cls: str = "my-6") -> str:
+    """A chart app.js builders.inline draws from a mermaid_chart_spec-shaped spec, in a card that
+    maximizes; `after` is markup under the chart (a fence's Mermaid source), `cls` places the card."""
+    return (
+        f'<figure class="diagram not-format relative {cls} rounded-lg border border-gray-200 '
+        'bg-white p-4 dark:border-gray-700 dark:bg-gray-800">'
+        '<button type="button" class="maximize absolute right-2 top-2 z-10 rounded-lg p-1.5 '
+        'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700" '
+        'aria-label="Maximize">&#x26F6;</button>'
+        f'<div id="{cid}" class="chart" style="height:380px" data-chart="inline" '
+        f'data-option="{html.escape(json.dumps(spec), quote=True)}"></div>{after}</figure>'
+    )
+
+
 def render_html(md: MarkdownIt, links: Links, doc: Doc, tokens) -> str:
     for tok, attr, _ in walk_links(tokens):
         if attr:
@@ -771,17 +785,11 @@ def render_html(md: MarkdownIt, links: Links, doc: Doc, tokens) -> str:
         if tok.info.strip().split(" ")[0] == "mermaid" and (spec := mermaid_chart_spec(tok.content)):
             if spec.get("links"):
                 spec["links"] = [links.site(doc, t.strip()) for t in spec["links"]]
-            return (
-                '<figure class="diagram not-format relative my-6 rounded-lg border border-gray-200 '
-                'bg-white p-4 dark:border-gray-700 dark:bg-gray-800">'
-                '<button type="button" class="maximize absolute right-2 top-2 z-10 rounded-lg p-1.5 '
-                'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700" '
-                'aria-label="Maximize">&#x26F6;</button>'
-                f'<div id="chart-{idx}" class="chart" style="height:380px" data-chart="inline" '
-                f'data-option="{html.escape(json.dumps(spec), quote=True)}"></div>'
+            return chart_figure(
+                f"chart-{idx}", spec,
                 '<details class="mt-2 text-sm text-gray-500 dark:text-gray-400"><summary>Source '
                 f'(generated Mermaid, as GitHub shows it)</summary><pre class="chart-source">{html.escape(tok.content)}</pre>'
-                '</details></figure>'
+                '</details>',
             )
         if tok.info.strip().split(" ")[0] == "mermaid":
             src = html.escape(tok.content)
@@ -1660,24 +1668,88 @@ class Site:
         d = self.docs.get(path)
         return self.link(here, d.page) if d else self.repo.blob(path)
 
+    def ai_chart(self, section: str, header: list[str], column: str, values: list[str], title: str,
+                 order: list[str] | None = None, span: str = "") -> str:
+        """How many rows of the table at #ai-<section> hold each value of its <column>, as a pie (or,
+        given an order, bars in that order); a click on a mark filters that table to those rows
+        (app.js linkedFilter reads ?col=&filter=#ai-<section>)."""
+        if column not in header:
+            raise ValueError(f"ai chart {title!r}: no column {column!r} in {header}")
+        counts: dict[str, int] = {}
+        for v in values:
+            counts[v] = counts.get(v, 0) + 1
+        keys = ([k for k in order if k in counts] + sorted(k for k in counts if k not in order)
+                if order is not None else sorted(counts, key=lambda k: (-counts[k], k)))
+        links = [f"ai.html?{urllib.parse.urlencode({'col': column, 'filter': k})}#ai-{section}" for k in keys]
+        if order is not None:
+            spec = {"kind": "xy", "title": title, "labels": [k or "(none)" for k in keys], "y": section,
+                    "series": [{"type": "bar", "data": [counts[k] for k in keys], "name": section}], "links": links}
+        else:
+            spec = {"kind": "pie", "title": title, "items": [[k or "(none)", counts[k]] for k in keys], "links": links}
+        cid = "ai-chart-" + re.sub(r"[^a-z0-9]+", "-", f"{section} {column}".lower())
+        return chart_figure(cid, spec, cls=span)
+
     def ai_page(self) -> str:
         lay, here = self.layer, "ai.html"
         a = lambda path, text: (  # noqa: E731
             f'<a class="font-medium text-primary-600 hover:underline dark:text-primary-500" '
             f'href="{esc(self.page_of(path, here))}">{esc(text)}</a>'
         )
+        val = lambda x, key: str(x.get(key) or "").strip()  # noqa: E731  # a cell's text, as filtered
+        heads = {"features": ["Feature", "Status", "Rules", "Decisions", "Documents"],
+                 "issues": ["Issue", "Status", "Title", "Milestone"],
+                 "decisions": ["Decision", "Status", "Title", "Date"],
+                 "rules": ["Rule", "Class", "Origin", "Statement"]}
+        charts = []
+        if lay.features:
+            charts.append(self.ai_chart("features", heads["features"], "Status",
+                                        [val(f, "status") for f in lay.features], "Features by status",
+                                        span="xl:col-span-2"))
+        if lay.adrs:
+            charts.append(self.ai_chart("decisions", heads["decisions"], "Status",
+                                        [val(x, "status") for x in lay.adrs], "Decisions by status",
+                                        span="xl:col-span-2"))
+        if lay.issues:
+            charts.append(self.ai_chart("issues", heads["issues"], "Status",
+                                        [val(i, "status") for i in lay.issues], "Issues by status",
+                                        span="md:col-span-2 xl:col-span-2"))
+        if lay.rules:
+            charts.append(self.ai_chart("rules", heads["rules"], "Class",
+                                        [val(r, "class") for r in lay.rules], "Rules by class",
+                                        span="xl:col-span-3"))
+            charts.append(self.ai_chart("rules", heads["rules"], "Origin",
+                                        [val(r, "origin") for r in lay.rules], "Rules by origin",
+                                        span="xl:col-span-3"))
+        if lay.issues and lay.milestones:
+            charts.append(self.ai_chart("issues", heads["issues"], "Milestone",
+                                        [val(i, "milestone") for i in lay.issues], "Issues per milestone",
+                                        order=[val(m, "id") for m in lay.milestones],
+                                        span="md:col-span-2 xl:col-span-6"))
         parts = []
+        if charts:
+            parts.append('<h2 class="mb-1 mt-2 text-lg font-semibold text-gray-900 dark:text-white">At a glance</h2>'
+                         '<p class="mb-4 text-sm text-gray-500 dark:text-gray-400">Counted from the <code>.ai/</code> '
+                         'records when the site is built; click a slice or a bar to filter its table below.</p>'
+                         '<div class="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">'
+                         + "".join(charts) + "</div>")
         if lay.features:
             parts.append('<h2 class="mb-4 mt-2 text-lg font-semibold text-gray-900 dark:text-white">Features</h2>'
-                         '<div class="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">')
+                         '<div class="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">')
             for f in lay.features:
                 parts.append(
                     f'<div class="{CARD}"><div class="mb-2 flex items-center justify-between">'
                     f'<h3 class="text-lg font-bold text-gray-900 dark:text-white">'
-                    f'{a(f["path"], f.get("short_title") or f.get("title", ""))}</h3>{badge(f.get("status", ""))}</div>'
+                    f'{a(f["path"], f.get("short_title") or f.get("title", ""))}</h3>{badge(val(f, "status"))}</div>'
                     f'<p class="text-sm text-gray-500 dark:text-gray-400">{esc(f.get("headline") or f.get("summary", ""))}</p></div>'
                 )
             parts.append("</div>")
+            rows = [[a(f["path"], f.get("short_title") or f.get("title", "")), badge(val(f, "status")),
+                     str(len(f.get("rules") or [])), str(len(f.get("adrs") or [])), str(len(f.get("docs") or []))]
+                    for f in lay.features]
+            parts.append(f'<details id="ai-features" class="{CARD} mb-6"><summary class="cursor-pointer text-sm '
+                         'font-medium text-gray-900 dark:text-white">The features as a table, with how many rules, '
+                         'decisions and documents each names</summary><div class="mt-4">'
+                         + html_table(heads["features"], rows) + "</div></details>")
         if lay.milestones:
             parts.append('<h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">Plan</h2>'
                          '<div class="mb-4 grid grid-cols-1 gap-4">'
@@ -1711,19 +1783,20 @@ class Site:
                 f'dark:hover:bg-gray-700" aria-label="Maximize">&#x26F6;</button></div>'
                 f'<pre class="mermaid overflow-x-auto" data-src="{src}">{src}</pre></figure>'
             )
-            rows = [[a(i["path"], i["id"]), badge(i["status"]), esc(i.get("title", "")), esc(i.get("milestone", ""))]
+        if lay.issues:
+            rows = [[a(i["path"], i["id"]), badge(val(i, "status")), esc(i.get("title", "")), esc(val(i, "milestone"))]
                     for i in lay.issues]
-            parts.append(f'<div class="{CARD} mb-6">' + html_table(["Issue", "Status", "Title", "Milestone"], rows) + "</div>")
+            parts.append(f'<div id="ai-issues" class="{CARD} mb-6">' + html_table(heads["issues"], rows) + "</div>")
         if lay.adrs:
-            rows = [[a(x["path"], x.get("id", "")), badge(x.get("status", "")), esc(x.get("title", "")),
+            rows = [[a(x["path"], x.get("id", "")), badge(val(x, "status")), esc(x.get("title", "")),
                      esc(x.get("date", ""))] for x in lay.adrs]
             parts.append('<h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">Architecture decisions</h2>'
-                         f'<div class="{CARD} mb-6">' + html_table(["Decision", "Status", "Title", "Date"], rows) + "</div>")
+                         f'<div id="ai-decisions" class="{CARD} mb-6">' + html_table(heads["decisions"], rows) + "</div>")
         if lay.rules:
-            rows = [[a(r["path"], r.get("id", "")), badge(r.get("class", "")), badge(r["origin"]),
+            rows = [[a(r["path"], r.get("id", "")), badge(val(r, "class")), badge(val(r, "origin")),
                      esc(r.get("statement") or r.get("title", ""))] for r in lay.rules]
             parts.append('<h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">Rules</h2>'
-                         f'<div class="{CARD} mb-6">' + html_table(["Rule", "Class", "Origin", "Statement"], rows) + "</div>")
+                         f'<div id="ai-rules" class="{CARD} mb-6">' + html_table(heads["rules"], rows) + "</div>")
         return self.shell(here, "AI layer", "".join(parts), crumbs=[("AI layer", "")], charts=True)
 
     # -- data ---------------------------------------------------------------
