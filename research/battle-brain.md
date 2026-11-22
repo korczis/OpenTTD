@@ -10,10 +10,11 @@
    UCB = mean + κ · spread of the ensemble. With little data the spread dominates, so the brain
    explores; with more data the mean dominates. The proposals are input for the battle's genetic
    algorithm, which adds them as offspring: evolution guided by a model as well as by mutation.
-2. **During a game (the live tuner):** `rhai/prismatic_tune.rhai` keeps the live PrismaticAI on the
-   best measured settings. It reads the genetic algorithm's standings (`/api/tuning`), takes the best
-   variant with enough matches, and changes each knob that differs, one at a time. Every change goes
-   through `openttd.ai.set_setting`, approval-gated like every MCP change.
+2. **During a game (the live tuner):** `rhai/prismatic_tune.rhai` tunes the owner's live PrismaticAI
+   every 10 minutes. While the company trails the leader and its money is idle, it raises the
+   growth knobs. Otherwise it follows the genetic algorithm's best measured variant (`/api/tuning`)
+   and the brain's safe proposal. Every change goes through `openttd.ai.set_setting`,
+   approval-gated like every MCP change.
 
 Neither loop changes a default or a contestant by itself. The brain's proposals become contestants
 only when the battle's owner (the genetic algorithm, ADR 0036) takes them. The tuner's changes wait
@@ -27,7 +28,9 @@ flowchart LR
   brain --> json["brain.json<br/>UCB proposals"]
   json --> ga["battle GA<br/>next generation"]
   ga --> store
-  tuning --> tune["prismatic_tune.rhai<br/>panel service"]
+  tuning --> tune["prismatic_tune.rhai<br/>panel service, every 10 min"]
+  json -.->|"$TUNE_BRAIN_URL"| tune
+  comps["openttd://companies<br/>gap to the leader"] --> tune
   tune -->|"set_bot: approval-gated"| live["live PrismaticAI<br/>(mcp-e2e game)"]
 ```
 
@@ -219,12 +222,97 @@ culls an explorer that ends last.
 
 ## The live tuner in detail (`tools/research/mcp-panel/rhai/prismatic_tune.rhai`)
 
-- Every `ROUND_S` (300 s) it calls `loopback_get("http://127.0.0.1:8765/api/tuning")` and picks the
-  variant with the highest fitness score among those with at least `MIN_MATCHES` (4) matches.
-- It compares that variant's settings with `api_bots().running` for `COMPANY` (0), only for genes in
-  the GA's space and settings the bot has.
-- For each difference it calls `ttd::set_bot` (`openttd.ai.set_setting`) and says the change in chat.
-- Its constants can be edited while it runs, and the service reloads within a second.
+The tuner is a runner of a **chain of policy stages**. Each stage is a Rhai module
+`rhai/policy/<stage>.rhai` that exports one pure function, `propose(ctx, params)`. It returns
+proposals `#{name, value, why, stage}`, vetoes `#{name, veto: true, why}` and notes `#{note}`, and
+calls no host function, so any stage can be tested offline. The chain is data: the stage order,
+the merge rule and every threshold a stage uses live in `policy/chain.rhai`, never in a stage's
+logic. A genetic algorithm, the hub or the owner can change them at run time through the Rhai
+shared store, without editing a file.
+
+```mermaid
+flowchart LR
+  def["policy/chain.rhai<br/>chain(): defaults"] --> chain["chain in force"]
+  shared["shared store key<br/>policy.chain"] -->|"merged over, every round"| chain
+  env["TUNE_EVERY_S, TUNE_MAX_REQUESTS,<br/>TUNE_IDLE_BUDGETS"] -->|"win over both"| chain
+  reads["api_bots, /api/status, openttd://companies,<br/>engines, railtypes, vehicles,<br/>/api/tuning, $TUNE_BRAIN_URL"] --> ctx["ctx<br/>built once a round"]
+  chain --> rich["rich"]
+  ctx --> rich
+  rich --> pressure["pressure"] --> modernize["modernize"] --> ga["ga"] --> brain["brain"]
+  brain --> merge["merge<br/>first or priority, veto"]
+  merge --> filter["drop undeclared, fit to min/max/step,<br/>skip pending, max_requests"]
+  filter -->|"ttd::set_bot: approval-gated"| live["live PrismaticAI"]
+```
+
+**A round** runs every `every_s` wall-clock seconds (600 by default), not every game tick:
+
+1. **Chain.** `chain()` from `policy/chain.rhai`. When the shared-store key `policy.chain` holds a
+   map, the runner merges it over the defaults: `stages`, `merge`, `max_requests` and `every_s`
+   replace the default, `sources` and each stage's `params` merge key by key. The
+   environment wins over both. The round's log names the source, for example
+   `policy/chain.rhai + shared policy.chain rev 3 by ga`. The runner only reads the key.
+2. **ctx**, built once from host reads: `company` (`$TUNE_COMPANY`, else the first running company
+   of the panel's AI, as `narrator.rhai` finds it), `bot`, `date`, `companies`, `standing` (value,
+   vehicles and money against the leader, the other company of the highest value; `gap` is the
+   larger of the value and vehicle ratios), `settings` (every in-game setting of the running bot
+   with its `value`, `min`, `max` and `step` from `api_bots()`, so every bound comes from the
+   running bot's info.nut), `pending` (the company's pending `openttd.ai.set_setting` requests),
+   `tuning` (the GA's `/api/tuning`), `brain` (brain.json from `$TUNE_BRAIN_URL`, loopback only;
+   the script host reads no files) and `tech` (for each engine type, the slowest and fastest
+   engine the company runs and the fastest it may buy now; the rail types open to it, the ones its
+   trains use, and the fastest buildable locomotive for each).
+3. **Stages** run in chain order. Each gets `params.common` merged under its own params. It sees
+   every earlier proposal in `ctx.proposed`, so it can refine one or veto it. A stage that fails,
+   is missing, or has a name that is not letters, digits and `_` is noted, and the chain goes on.
+   Stages are resolved by name (`import "policy/" + name`), so a new file in `policy/` can be used
+   from the chain without changing the runner.
+4. **Merge.** `first`: the earliest stage to propose a setting sets it. `priority` (the default):
+   the highest `params.<stage>.priority` sets it, and a tie goes to the later stage. A veto from any
+   stage drops the setting for the round.
+5. **Requests.** A setting that the running bot does not declare as in-game is dropped, with a log
+   line. Each value is fitted to the setting's bounds and step. A setting already at that value, or
+   with a request already pending for the company, is skipped (no stacking). At most
+   `max_requests` (3) go out through `ttd::set_bot`; each one is said in the game's chat and waits
+   for the owner's Approve, or for auto-approve when the owner switches it on. The tuner never
+   approves. `$TUNE_DRY=1` logs the proposals and sends none.
+
+**Stages and their params** (defaults in `policy/chain.rhai`; `common` holds `idle_budgets` 3 and
+`growth`, each knob's direction, +1 up or −1 down; `policy/lib.rhai` holds the shared pure
+helpers):
+
+| Stage | Proposes | Params (default) |
+|---|---|---|
+| `rich` | Money above `cash_reserve` + `idle_budgets` × `line_budget` is idle: it sets `switches` and moves each of `knobs` 1 step towards growth, plus 1 per doubling of the idle money past `budgets_per_step` budgets | `priority` 1, `budgets_per_step` 10, `steps_max` 3, `switches` {rich_growth: 1}, `knobs` invest_air_cap, invest_road_cap, max_routes, air_routes_max, air_reuse, own_lines, invest_ppv_div |
+| `pressure` | More than `min_gap` × behind the leader, with idle money when `require_idle` is set: it sets `switches` and moves `knobs` 1 step, plus 1 per `gap_per_step`-fold of the gap. An earlier, larger move is kept | `priority` 2, `min_gap` 1.2, `gap_per_step` 2, `steps_max` 4, `require_idle` true, `switches` {compete: 1}, `knobs` as `rich` plus rail_twin_max |
+| `modernize` | `engine` (modernize on) when a buildable engine is `speed_gain` × faster than the slowest the company runs; `track` (upgrade_track on) when an open rail type that its trains do not use carries a locomotive `speed_gain` × faster than its fastest train | `priority` 3, `speed_gain` 1.2, `engine` {modernize: 1}, `track` {upgrade_track: 1} |
+| `ga` | The genes (`genes_only`) of the best variant with at least `min_matches` matches. With `hold`, while a `hold_for` stage proposed this round, a move against `growth` is noted and not proposed | `priority` 0, `min_matches` 4, `genes_only` true, `hold` true, `hold_for` [rich, pressure] |
+| `brain` | The first proposal of `kind`, else the first proposal when `any_kind` is set. With `need_data`, a brain without enough data is skipped. `hold` works as in `ga` | `priority` −1, `kind` safe, `any_kind` true, `need_data` false, `hold` true, `hold_for` [rich, pressure] |
+
+Example: a GA retunes the tuner without a file edit (`POST /api/rhai/shared`, or `shared_set` from
+any script):
+
+```json
+{"key": "policy.chain", "writer": "ga",
+ "value": {"stages": ["modernize", "rich", "ga"], "merge": "first", "max_requests": 2,
+           "params": {"rich": {"steps_max": 1}, "common": {"idle_budgets": 5}}}}
+```
+
+**Hot reload and its limit.** The panel restarts a service within a second
+(`/api/services` `reload_every_ms`) when its own file or a top-level library it imports changes. It
+does not watch `policy/` today: the watcher stamps only import names without a `/`
+(`panel_scripts.rs` `stamps` → `path_of`), and the host's module resolver caches each module for
+the run. So an edit under `policy/` takes effect at the service's next start (stop and start it, or
+save `prismatic_tune.rhai`). A change to `policy.chain` takes effect at the next round. The
+library's parse test, `every_script_of_the_library_parses`, reads only the top-level folder, so it
+does not cover `policy/` either.
+
+Verified offline on 2026-11-22: every file parsed (`mcp-rhai --panel http://127.0.0.1:9`), and a
+harness ran the runner's pure ctx builder, chain and merge on live GET data (company 0, 15.9× behind
+AAAHogEx, 5.2 M idle). It passed 17 checks: settings the running bot does not declare yet
+(`rich_growth`, `compete`, `modernize`) are dropped with a log line; a setting with a pending
+request is not asked again; values stay on the bot's grid; the GA's counter-growth gene is held; a
+shared override merges, and the environment wins over it; `priority`, `first` and veto work; bad
+and missing stages are noted; `modernize` fires on the 473 vs 947 km/h aircraft gap.
 
 First run on 2026-11-19: from `PrismaticAI GA g0.1` (score 0.618 over 6 matches) it submitted
 `aggressiveness 50 -> 80`, `air_planes 2 -> 1`, `cash_reserve 20000 -> 10000` and

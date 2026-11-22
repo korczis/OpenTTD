@@ -85,6 +85,8 @@ function PrismaticAI::InvestSurplus(b) {
 	local best = null, best_ppv = 0;
 	foreach (k, r in routes) {
 		if (r.judged == 0 || r.count >= ((r.type == AIVehicle.VT_AIR) ? b.invest_air_cap : b.invest_road_cap)) continue;
+		/* A rich cap (rich.nut) above what the airports hold would only jam them. */
+		if (r.type == AIVehicle.VT_AIR && !PrismaticAI.RouteHasAirRoom(r.sample)) continue;
 		/* At most as many unjudged vehicles (under a year old) as judged ones: the profit per vehicle
 		 * counts only the judged, so it does not fall as vehicles are added, and without this GA
 		 * g276.brainSafe1 (OpenTTD seed 1878134858, slot 0) put 50 buses on one route at 1810 a year
@@ -143,6 +145,7 @@ function PrismaticAI::ManageFleet(reserve) {
 			if (AIVehicle.SendVehicleToDepot(v)) {
 				if (air) flying[PrismaticAI.RouteKey(v)]--;
 				this.selling[v] <- true;
+				PrismaticAI.ProtectFromReplace(v); /* autoreplace would give it a new id there (modernize.nut) */
 				AILog.Info("PrismaticAI: fleet: vehicle " + v + " lost money two years running; sending it to be sold");
 			}
 			continue;
@@ -200,6 +203,7 @@ function PrismaticAI::ManageFleet(reserve) {
 			if (flow > 0 && r.count > needed) {
 				if (AIVehicle.SendVehicleToDepot(r.newest)) {
 					this.selling[r.newest] <- true;
+					PrismaticAI.ProtectFromReplace(r.newest); /* autoreplace would give it a new id there (modernize.nut) */
 					AILog.Info("PrismaticAI: fleet: link flow " + flow + "/month needs " + needed + " vehicle(s) of " + monthly +
 						"/month, route has " + r.count + "; selling vehicle " + r.newest);
 				}
@@ -220,6 +224,7 @@ function PrismaticAI::ManageFleet(reserve) {
 				}
 				if (newest != -1 && AIVehicle.SendVehicleToDepot(newest)) {
 					this.selling[newest] <- true;
+					PrismaticAI.ProtectFromReplace(newest); /* autoreplace would give it a new id there (modernize.nut) */
 					AILog.Info("PrismaticAI: fleet: " + r.count + " vehicles on a route where " + waiting + " wait (capacity " + cap + "); selling vehicle " + newest);
 				}
 			}
@@ -243,6 +248,7 @@ function PrismaticAI::ManageFleet(reserve) {
 			local monthly = max(1, cap * 30 / max(1, 2 * tiles * 1000 / (kmh * 36) + 4));
 			if (flow > 0 && r.count >= (flow + monthly - 1) / monthly + 1) continue;
 		}
+		if (type == AIVehicle.VT_AIR && !PrismaticAI.RouteHasAirRoom(v)) continue;
 		/* Never a vehicle more on a route whose year-old vehicles lost money last year, whatever the
 		 * waiting cargo says. With air_full_load and a low air_add_waiting, GA g276.brainSafe1 (OpenTTD
 		 * seed 1878134858, slot 0) put 17 planes on 3 routes that lost 42.7k a year between them, and

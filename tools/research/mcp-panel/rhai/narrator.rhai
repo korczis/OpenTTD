@@ -7,6 +7,14 @@
 // What is said is derived from the events (ai.log, company.*, decision.*, game.*), not scripted:
 // a route the bot opens, a town it fails in, its knobs, companies founded or renamed, every MCP
 // decision, a pause or resume, and a summary at every new month.
+//
+// Only the owner's company is the owner's bot: ai.log lines (and their newspapers) of every other
+// company, other PrismaticAI instances in an arena included, are not relayed. The company is
+// $NARRATOR_COMPANY when set (0-based, as ai.log's data.company), else the first running company of
+// the panel's AI (/api/status `ai`, /api/bots `running`), the one `mcp-e2e --coplay` joins.
+// Once a game quarter, and when the narrator starts, it reminds the owner of the bot's requests
+// that wait for an Approve in the panel (/api/status `pending`, those whose args.company is the
+// owner's), with the oldest one's time.
 import "ttd" as ttd;
 
 // Rhai's String.replace changes the string in place and returns (), so it never chains: each
@@ -64,6 +72,67 @@ fn fleet(c) {
     if !known { "vehicles not reported" } else if text == "" { "no vehicles" } else { text }
 }
 
+fn as_int(x) { if type_of(x) == "f64" { x.to_int() } else { x } }
+
+// The owner's company: $NARRATOR_COMPANY, else the first running company of the panel's AI; ()
+// while no such bot runs yet.
+fn owner_company() {
+    let fixed = env("NARRATOR_COMPANY");
+    if fixed != "" { return parse_int(fixed); }
+    let ai = status().ai ?? "";
+    for r in api_bots().running ?? [] {
+        if ai == "" || r.ai == ai { return as_int(r.id); }
+    }
+    ()
+}
+
+// Whether an event is the owner's: an ai.log line is only when its company is the owner's.
+fn mine(e, company) {
+    if e.kind != "ai.log" { return true; }
+    company != () && type_of(e.data.company) != "()" && as_int(e.data.company) == company
+}
+
+// Unix seconds -> "YYYY-MM-DD HH:MM UTC" (days to the civil date as in H. Hinnant's algorithm).
+fn utc_of(secs) {
+    let s = as_int(secs);
+    let z = s / 86400 + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400;
+    if month <= 2 { year += 1; }
+    let tod = s % 86400;
+    let two = |n| if n < 10 { `0${n}` } else { `${n}` };
+    `${year}-${two.call(month)}-${two.call(day)} ${two.call(tod / 3600)}:${two.call(tod % 3600 / 60)} UTC`
+}
+
+// The owner's bot's requests waiting for an Approve, as one line, or () when none waits.
+fn pending_reminder(company, panel) {
+    if company == () { return (); }
+    let n = 0;
+    let oldest = ();
+    for r in status().pending ?? [] {
+        let c = r.args?.company;
+        if c == () || as_int(c) != company { continue; }
+        n += 1;
+        if oldest == () || r.created < oldest.created { oldest = r; }
+    }
+    if n == 0 { return (); }
+    let what = `${oldest.tool} ${oldest.args?.name ?? ""}=${oldest.args?.value ?? ""}`;
+    let at = if panel == "" { "the control panel" } else { `${panel}/` };
+    `${n} change${if n == 1 { "" } else { "s" }} for your bot wait for your Approve at ${at} (oldest #${oldest.id} from ${utc_of(oldest.created)}: ${what})`
+}
+
+// A game quarter starts: "1961-04-01" -> true.
+fn quarter_start(date) {
+    let p = `${date}`.split("-");
+    p.len() >= 2 && (parse_int(p[1]) - 1) % 3 == 0
+}
+
 fn narrate(e) {
     let k = e.kind;
     let d = e.data;
@@ -95,15 +164,25 @@ con_setting("network.client_name owner-bot");
 let panel = env("MCP_PANEL_URL");
 say(if panel == "" { "narrator online: I report what your bot does. Steer it in the control panel." }
     else { `narrator online: I report what your bot does. Steer it at ${panel}/` });
+let company = owner_company();
+print(if company == () { "owner company: none running yet" } else { `owner company: ${company}` });
+let reminder = pending_reminder(company, panel);
+if reminder != () { say(reminder); print(`pending: ${reminder}`); }
 let since = status().event_seq;
 loop {
+    if company == () { company = owner_company(); }
     let feed = events(since, "ai.log,company,decision,game");
     for e in feed.events {
+        if !mine(e, company) { continue; }
         let text = narrate(e);
         if text != () { say(text); print(`${e.kind}: ${text}`); }
         let news = headline(e);
         if news != () {
             try { api_newsShow(news); print(`news: ${news.text}`); } catch (err) { print(`news not shown: ${err}`); }
+        }
+        if e.kind == "game.month" && quarter_start(e.data.date) {
+            let reminder = pending_reminder(company, panel);
+            if reminder != () { say(reminder); print(`pending: ${reminder}`); }
         }
     }
     since = feed.last_seq;
