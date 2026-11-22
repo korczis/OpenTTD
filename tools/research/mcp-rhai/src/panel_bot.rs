@@ -535,6 +535,22 @@ pub fn settings_json(s: &Settings) -> (Value, String) {
     (Value::Object(s.iter().cloned().collect()), s.iter().map(|(k, v)| format!("{k}={}", py_str(Some(v)))).collect::<Vec<_>>().join(","))
 }
 
+/// Why the priced lines without a route have none: each track-planning status other than found (a
+/// refusal's text cut to 160 characters) with how many lines answered it, the most frequent first.
+/// The January 1954 round of seed 20261122 said only "0 with a route", and its cause had to be inferred.
+fn why_unpriced(priced: &[Value]) -> String {
+    let mut seen: Vec<(String, usize)> = Vec::new();
+    for p in priced.iter().filter(|p| p["status"] != json!("found")) {
+        let why: String = p["status"].as_str().unwrap_or("no status").chars().take(160).collect();
+        match seen.iter_mut().find(|(w, _)| *w == why) {
+            Some((_, n)) => *n += 1,
+            None => seen.push((why, 1)),
+        }
+    }
+    seen.sort_by(|a, b| b.1.cmp(&a.1));
+    seen.iter().map(|(w, n)| format!("{n}x {w}")).collect::<Vec<_>>().join("; ")
+}
+
 /// The bot's routes from the planner's portfolio within the budget, chosen from mcp-plan's answer:
 /// up to sixteen freight rail lines (fr_*, fr2_* .. fr16_*), one passenger rail pair (rail_a,
 /// rail_b) and one air pair (air_a, air_b, air_planes), with the events that explain each choice and
@@ -554,7 +570,7 @@ pub fn settings_from_plan(out: &Value, event: &mut dyn FnMut(String)) -> Planned
         event(format!("planner: {} rail line(s) priced on the map by track-planning, {} with a route: {}{}", priced.len(), found.len(),
                       found.iter().map(|p| format!("{} pieces {}", py_str(p.get("pieces")), p["money"].as_f64().unwrap_or(0.0).round() as i64))
                           .collect::<Vec<_>>().join(", "),
-                      if found.len() == priced.len() { String::new() } else { format!("; {} without a route dropped their rail option", priced.len() - found.len()) }));
+                      if found.len() == priced.len() { String::new() } else { format!("; {} without a route dropped their rail option ({})", priced.len() - found.len(), why_unpriced(&priced)) }));
     }
     let priced_any = !priced.is_empty();
     let portfolio = json!({"solver": pf.get("solver"), "chosen": chosen.iter().map(line_of).collect::<Vec<_>>(),
@@ -1093,6 +1109,16 @@ mod tests {
     }
 
     #[test]
+    fn lines_without_a_route_say_why_the_most_frequent_reason_first() {
+        let refused = format!("error: track-planning refused: [\"terrain.slopes[0] says tile (1, 0) has Slope 0, its heights give 2: {}\"]", "x".repeat(200));
+        let priced = vec![json!({"status": "unreachable"}), json!({"status": refused}), json!({"status": "found"}), json!({"status": refused}), json!({})];
+        let why = why_unpriced(&priced);
+        let cut: String = refused.chars().take(160).collect();
+        assert_eq!(why, format!("2x {cut}; 1x unreachable; 1x no status"));
+        assert_eq!(why_unpriced(&[json!({"status": "found"})]), "");
+    }
+
+    #[test]
     fn a_loop_survives_comments_escapes_nesting_and_huge_bounds() {
         let text = r#"
 		for (local i = 1; i <= 2; i++) { // a comment with a } and a " in it
@@ -1149,7 +1175,7 @@ mod tests {
         assert_eq!(get("fr2_from").as_deref(), Some("7"));
         assert_eq!(get("rail_after").as_deref(), Some("1"), "only the line scoring 6 is above the pair's 4");
         assert_eq!(events[0], "planner portfolio by knapsack-dp: 3 investment(s), total score 20, 250k of 300k");
-        assert_eq!(events[1], "planner: 2 rail line(s) priced on the map by track-planning, 1 with a route: 30 pieces 12346; 1 without a route dropped their rail option");
+        assert_eq!(events[1], "planner: 2 rail line(s) priced on the map by track-planning, 1 with a route: 30 pieces 12346; 1 without a route dropped their rail option (1x no_route)");
         assert!(events[2].starts_with("planner: the rail line T1 - B has no route on the map (no_route)"));
         assert!(events.iter().any(|e| e.ends_with("(line 2, built when the money allows)")));
         let none = settings_from_plan(&json!({}), &mut |_| {});

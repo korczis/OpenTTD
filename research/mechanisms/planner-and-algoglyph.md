@@ -89,6 +89,11 @@ flowchart TB
   `flow_serve.rs` keeps one long-lived `flow serve` per process when `MCP_ALGOGLYPH_SERVE` is on.
   `kernel_feed.rs` and `mcp-kernel-feed` complete a kernel's input from the store's trailing
   samples (only `action-plan` has a feed today).
+- **Kept current in the background** ([Strategist and blackboard](strategist-and-blackboard.md)).
+  The panel's strategist runs the same planner in process (`plan_pipeline.rs`, shared with
+  `mcp-plan`) once per game month and at least every few minutes, with transport-investment,
+  track-planning and town advice on a small pool of workers and one `flow serve` for the panel.
+  It writes the result to the panel's blackboard (`strategy.*`) and publishes `plan.strategy`.
 
 The planner's model, its versions, measurements and every route are in
 [`../mcp-control.md`](../mcp-control.md) (from "A route planner with modes of transport" on), and
@@ -126,6 +131,21 @@ settings. <!-- open-finding kind=failed -->In that round track-planning found a 
 no line went to the bot unpriced and the round held.<!-- /open-finding --> <!-- open-finding kind=not-run -->Mesh records: NOT RUN, because the panel had
 no `$MAJORDOMUS_URL`.
 
+Why none of the 21 had a route. OBSERVED: the 30 rounds of that game in the :8800 store that
+priced lines on the map include only this one that found nothing; the others found 10 to 20. The
+same round's `knapsack-dp` call to AlgoGlyph succeeded, so the runner worked. OBSERVED on a copy of
+the game's save with its 8 AIs running: track-planning refuses an input whose openttd://map/terrain
+slopes differ from openttd://map's heights ("read map and terrain at the same moment"). 3 of 400
+back-to-back reads of the input from the panel had such a difference, after a terraform between the
+map read and the terrain read. mcp-plan read that input once and gave it to every line, so one
+refusal meant 21 refused lines. INFERRED: this is what happened in January 1954. The panel logged
+only the count, so that round's refusal text was never recorded. Since then linecost.rs
+`coherent_input` reads the map again after the other resources and reads the whole input again while
+the heights change, up to three times. It then leaves the terrain out rather than send an input that
+will be refused, and records how it read in `line_costs.input`. The panel names the reason for each
+line without a route. Details are in
+[`track-planning-refuses-a-map-and-terrain-read-at-different-moments`](../../.ai/repo/knowledge/curated/track-planning-refuses-a-map-and-terrain-read-at-different-moments.md).
+
 On 2026-11-22 the first version proposed again every round. The plan's `fr*` slots changed
 from round to round, so the proposals did not collapse onto earlier ones, and about 130 waited unanswered.
 That is why a round now holds while anything waits.
@@ -149,6 +169,7 @@ The record-based lower bound is what discounts it.
 | [`tools/research/mcp-rhai/src/graph.rs`](../../tools/research/mcp-rhai/src/graph.rs) | the road network as a graph |
 | [`tools/research/mcp-rhai/src/hub_algoglyph.rs`](../../tools/research/mcp-rhai/src/hub_algoglyph.rs), [`flow_serve.rs`](../../tools/research/mcp-rhai/src/flow_serve.rs), [`kernel_feed.rs`](../../tools/research/mcp-rhai/src/kernel_feed.rs) | how kernels are called and fed |
 | [`tools/research/mcp-rhai/src/panel_bot.rs`](../../tools/research/mcp-rhai/src/panel_bot.rs) | the planned bot start: portfolio to settings |
+| [`tools/research/mcp-rhai/src/plan_pipeline.rs`](../../tools/research/mcp-rhai/src/plan_pipeline.rs) | one planner run, shared by `mcp-plan` and the panel's strategist |
 | [`tools/research/mcp-rhai/src/bin/mcp-plan.rs`](../../tools/research/mcp-rhai/src/bin/mcp-plan.rs), [`mcp-intent.rs`](../../tools/research/mcp-rhai/src/bin/mcp-intent.rs), [`mcp-kernel-feed.rs`](../../tools/research/mcp-rhai/src/bin/mcp-kernel-feed.rs) | the command-line front ends |
 
 ## How it is tested
@@ -166,7 +187,7 @@ The record-based lower bound is what discounts it.
 
 ## Related
 
-- [PrismaticAI](prismatic-ai.md), [Duels](duels.md), [Event bus and store](event-bus-and-store.md),
+- [Strategist and blackboard](strategist-and-blackboard.md), [PrismaticAI](prismatic-ai.md), [Duels](duels.md), [Event bus and store](event-bus-and-store.md),
   [Hub](hub.md), [Rail steward and monitor](rail-steward-and-monitor.md)
 - [Portfolio under a budget](../concepts/portfolio-under-a-budget.md),
   [Calibration against reality](../concepts/calibration-against-reality.md),

@@ -76,6 +76,40 @@ fn reverse(dir: &str) -> &'static str {
     match dir { "NE" => "SW", "SW" => "NE", "SE" => "NW", _ => "SE" }
 }
 
+/// How many times `coherent_input` reads the track input before it leaves the terrain out.
+pub const READ_TRIES: usize = 3;
+
+/// The track input every line is priced on (hub_algoglyph `track_input`, without from/to), read so
+/// that its map and its terrain describe the same land, and how it was read. track-planning checks
+/// every tile's slope in openttd://map/terrain against openttd://map's heights and refuses the whole
+/// input when one differs ("read map and terrain at the same moment"). The resources are read one
+/// after another while the game runs, so one terraform between the map and the terrain read (a
+/// town's road, any company's) left every line of the round without a price: seed 20261122, January
+/// 1954, 0 of 21 (research/mechanisms/planner-and-algoglyph.md). The map is read once more after the
+/// rest: when its heights are the first read's, the terrain was read on that land. Otherwise the
+/// whole input is read again, up to `tries` times, and then the terrain is left out (the kernel
+/// prices on the map's own types) rather than refused, which the record says.
+pub fn coherent_input(read: &dyn Fn(&str) -> Result<Option<Value>, String>, tries: usize) -> Result<(Value, Value), String> {
+    let ends = json!({"from": {}, "to": {}});
+    let tries = tries.max(1);
+    let mut last = Value::Null;
+    for reads in 1..=tries {
+        let mut input = crate::hub_algoglyph::track_input(&ends, read)?;
+        if let Some(o) = input.as_object_mut() { o.remove("from"); o.remove("to"); }
+        if input.get("terrain").is_none() {
+            return Ok((input, json!({"reads": reads, "coherent": "no openttd://map/terrain to check against the map"})));
+        }
+        let again = read("map")?;
+        if again.as_ref().and_then(|m| m.get("heights")) == input["map"].get("heights") {
+            return Ok((input, json!({"reads": reads, "coherent": true})));
+        }
+        last = input;
+    }
+    if let Some(o) = last.as_object_mut() { o.remove("terrain"); }
+    Ok((last, json!({"reads": tries, "coherent": false,
+                     "terrain": format!("left out: the map's heights changed during each of {tries} reads, and track-planning refuses a terrain read on other land")})))
+}
+
 /// The track-planning endpoints between two station sites (src/sites.rs), as the executor uses them.
 pub fn endpoints(a: &Value, b: &Value) -> Option<(Value, Value)> {
     let dir_a = a.pointer("/exit/dir")?.as_str()?;
@@ -145,9 +179,93 @@ pub fn price(candidates: &mut [Value], base: &Value, station_cost: f64, rail_til
 
 #[cfg(test)]
 mod tests {
-    use super::{endpoints, price, route, track, RAIL_LINE_PRICE};
+    use super::{coherent_input, endpoints, price, route, track, RAIL_LINE_PRICE};
     use crate::cargo::{testing, KernelFailure};
     use serde_json::{json, Value};
+    use std::cell::Cell;
+
+    /// A 6 x 4 tile map, flat at height 1, and its terrain: the input track-planning prices on.
+    fn land() -> (Value, Value) {
+        (json!({"width": 6, "height": 4, "heights": ["010101010101", "010101010101", "010101010101", "010101010101"],
+                "types": ["CCCCCC", "CCCCCC", "CCCCCC", "CCCCCC"]}),
+         json!({"slopes": ["0000000000", "0000000000", "0000000000"], "buildable": [".....", ".....", "....."]}))
+    }
+
+    /// The same map one terraform later: tile (2, 1)'s north corner one level up. With `land`'s
+    /// terrain the kernel refuses it: "terrain.slopes[0] says tile (1, 0) has Slope 0, its heights
+    /// give 2: read map and terrain at the same moment" (AlgoGlyph 1b8e009, flow kernel track-planning).
+    fn terraformed() -> Value {
+        let (mut map, _) = land();
+        map["heights"][1] = json!("010102010101");
+        map
+    }
+
+    /// A game whose n-th read of openttd://map (from 0) answers `maps(n)`; the other resources are fixed.
+    fn game<'a>(maps: &'a dyn Fn(usize) -> Value, terrain: Option<Value>, n: &'a Cell<usize>)
+        -> impl Fn(&str) -> Result<Option<Value>, String> + 'a {
+        move |r: &str| Ok(match r {
+            "map" => { let i = n.get(); n.set(i + 1); Some(maps(i)) }
+            "map/terrain" => terrain.clone(),
+            "economy/prices" => Some(json!({"prices": {"build_rail": 75}})),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn a_map_unchanged_across_the_reads_is_priced_with_its_terrain_after_one_read() {
+        let (map, terrain) = land();
+        let n = Cell::new(0);
+        let (input, how) = coherent_input(&game(&|_| map.clone(), Some(terrain.clone()), &n), 3).unwrap();
+        assert_eq!(how, json!({"reads": 1, "coherent": true}));
+        assert_eq!(n.get(), 2, "the map is read once more after the terrain");
+        assert_eq!((input["map"].clone(), input["terrain"].clone()), (map, terrain));
+        assert!(input.get("from").is_none() && input.get("to").is_none(), "every line adds its own ends");
+        assert_eq!(input["prices"]["prices"]["build_rail"], 75);
+    }
+
+    #[test]
+    fn a_terraform_between_the_map_and_the_terrain_read_reads_the_input_again() {
+        // January 1954 on seed 20261122: the first map read is the land before a terraform, the
+        // terrain and every later read the land after it. What is compared is the map's heights
+        // before and after the terrain read, not the terrain itself.
+        let (_, terrain) = land();
+        let n = Cell::new(0);
+        let maps = |i: usize| if i == 0 { land().0 } else { terraformed() };
+        let (input, how) = coherent_input(&game(&maps, Some(terrain.clone()), &n), 3).unwrap();
+        assert_eq!(how, json!({"reads": 2, "coherent": true}));
+        assert_eq!(n.get(), 4);
+        assert_eq!((input["map"].clone(), input["terrain"].clone()), (terraformed(), terrain));
+    }
+
+    #[test]
+    fn land_that_changes_during_every_read_is_priced_without_its_terrain_and_says_so() {
+        let (_, terrain) = land();
+        let n = Cell::new(0);
+        let maps = |i: usize| if i % 2 == 0 { land().0 } else { terraformed() };
+        let (input, how) = coherent_input(&game(&maps, Some(terrain), &n), 2).unwrap();
+        assert_eq!((how["reads"].clone(), how["coherent"].clone()), (json!(2), json!(false)));
+        assert!(how["terrain"].as_str().unwrap().starts_with("left out: the map's heights changed during each of 2 reads"));
+        assert_eq!(n.get(), 4);
+        assert!(input.get("terrain").is_none(), "the kernel would refuse it");
+        assert_eq!(input["map"], land().0, "the map of the last input read (each check read after it differed)");
+        // Zero tries still reads once.
+        let n = Cell::new(0);
+        let (_, how) = coherent_input(&game(&maps, Some(land().1), &n), 0).unwrap();
+        assert_eq!(how["reads"], 1);
+    }
+
+    #[test]
+    fn without_a_terrain_there_is_nothing_to_check_and_without_a_map_nothing_to_price() {
+        let n = Cell::new(0);
+        let (input, how) = coherent_input(&game(&|_| land().0, None, &n), 3).unwrap();
+        assert_eq!((how["reads"].clone(), how["coherent"].clone()), (json!(1), json!("no openttd://map/terrain to check against the map")));
+        assert_eq!(n.get(), 1, "no second map read");
+        assert!(input.get("terrain").is_none());
+        let none = |_: &str| -> Result<Option<Value>, String> { Ok(None) };
+        assert!(coherent_input(&none, 3).unwrap_err().contains("openttd://map"));
+        let broken = |r: &str| -> Result<Option<Value>, String> { if r == "map" { Err("HTTP 503".into()) } else { Ok(None) } };
+        assert_eq!(coherent_input(&broken, 3).unwrap_err(), "HTTP 503");
+    }
 
     fn site(x: i64, dir: &str) -> Value {
         json!({"end": {"x": x, "y": 10}, "exit": {"x": x + 1, "y": 10, "dir": dir}})

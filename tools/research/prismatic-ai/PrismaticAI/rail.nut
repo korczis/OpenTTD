@@ -340,6 +340,36 @@ function PrismaticAI::OwnRailStationNear(origin, reach) {
 	return list.IsEmpty() ? null : list.Begin();
 }
 
+/* Another company that already holds a rail station catching the production of industry `p`, or
+ * null. A source station is the claim on a producer: two lines at one mine split its output by
+ * station rating, so the second line pays its full cost for about half the cargo. In the owner's
+ * live game of 2026-11-22 four PrismaticAI companies of one map chose their lines with the same
+ * deterministic score, and companies 0 and 1, 6 and 7, 1 and 6 each built a line from the same
+ * mine or forest: all four stopped growing in 1952 while AAAHogEx reached 2.2M
+ * (research/incident-2026-11-22-sibling-industries.md). The older filters missed it: the bot's own
+ * stations only (OwnRailStationNear), and cargo transported last month, which stays 0 for the
+ * months a rival lays its track. Any owner counts here, a sibling of the same AI or a rival.
+ * Raw industries only (mines, forests, farms, wells): they accept nothing, so a station catching
+ * one picks up from it. A processing industry (sawmill, factory, steel mill) also has the stations
+ * that deliver to it, and an AI cannot read another company's station ratings to tell them apart;
+ * for those the transported filter of NextOwnFreightLine stays the only test, and null is
+ * answered. */
+function PrismaticAI::ForeignRailStationAt(p) {
+	if (!AIIndustryType.IsRawIndustry(AIIndustry.GetIndustryType(p))) return null;
+	local me = AICompany.ResolveCompanyID(AICompany.COMPANY_SELF);
+	local tiles = AITileList_IndustryProducing(p, AIStation.GetCoverageRadius(AIStation.STATION_TRAIN));
+	tiles.Valuate(AIRail.IsRailStationTile);
+	tiles.KeepValue(1);
+	/* The lowest such company id, so two companies that claim one producer at once settle it the
+	 * same way (BuildFreightRailRoute: the higher id yields). */
+	local holder = null;
+	foreach (t, _ in tiles) {
+		local o = AITile.GetOwner(t);
+		if (o != me && (holder == null || o < holder)) holder = o;
+	}
+	return holder;
+}
+
 /* The bounding box of a station's rail tiles: [x0, y0, x1, y1]. */
 function PrismaticAI::RailStationBox(st) {
 	local b = [AIMap.GetMapSizeX(), AIMap.GetMapSizeY(), 0, 0];
@@ -1218,6 +1248,15 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
 	local label = AICargo.GetCargoLabel(cargo) + " " + AIIndustry.GetName(p) + " - " + AIIndustry.GetName(q);
 	local dist = AIMap.DistanceManhattan(pl, ql);
 	AILog.Info("PrismaticAI: planner freight by rail: " + label + " (" + dist + " tiles)");
+	/* Checked here, right before the source station is built, so it holds for the planner's lines
+	 * (fr_*), the bot's own and the steward's alike, and for a rival that claimed the producer
+	 * after the line was chosen. */
+	local holder = PrismaticAI.ForeignRailStationAt(p);
+	if (holder != null) {
+		AILog.Warning("PrismaticAI: freight line " + label + " skipped: company " + (holder + 1) +
+			" already has a rail station at " + AIIndustry.GetName(p));
+		return 0;
+	}
 	/* What a served station gets of the production: the station rating, about 70% once trains call
 	 * regularly. */
 	local supply = AIIndustry.GetLastMonthProduction(p, cargo) * 70 / 100;
@@ -1228,6 +1267,17 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
 	AILog.Info("PrismaticAI: rail plan " + label + ": " + plan.why + (double ? ", double track" : ""));
 	local sa = PrismaticAI.BuildRailStationAt(pl, ql, plan.len, cargo, "produce", "at " + AIIndustry.GetName(p), platforms, double ? 1 : 0);
 	if (sa == null) return 0;
+	/* Two companies that chose one producer in the same days both passed the check above: in the
+	 * fitness check's sibling match (seed 930967890) both PrismaticAI companies picked Wontford Coal
+	 * Mine in their first heartbeat, the second's track ran into the first's and its line failed.
+	 * With both source stations standing, the company of the higher id yields, before any track. */
+	local rival = PrismaticAI.ForeignRailStationAt(p);
+	if (rival != null && rival < AICompany.ResolveCompanyID(AICompany.COMPANY_SELF)) {
+		AILog.Warning("PrismaticAI: freight line " + label + " given up: company " + (rival + 1) +
+			" built a rail station at " + AIIndustry.GetName(p) + " in the same days");
+		PrismaticAI.RemoveRailStation(sa, plan.len);
+		return 0;
+	}
 	local sb = PrismaticAI.BuildRailStationAt(ql, pl, plan.len, cargo, "accept", "at " + AIIndustry.GetName(q), platforms, double ? -1 : 0);
 	if (sb == null) { PrismaticAI.RemoveRailStation(sa, plan.len); return 0; }
 	local built = double ? PrismaticAI.BuildDoubleRailLineAndTrain(sa, sb, plan.len, cargo, AIOrder.OF_FULL_LOAD_ANY, label)
@@ -1267,6 +1317,8 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 	foreach (p, _ in AIIndustryList()) {
 		if (AIIndustry.IsBuiltOnWater(p)) continue;
 		if (PrismaticAI.OwnRailStationNear(AIIndustry.GetLocation(p), 8) != null) continue;
+		/* Another company's rail station already claims it, in every mode (ForeignRailStationAt). */
+		if (PrismaticAI.ForeignRailStationAt(p) != null) continue;
 		foreach (c, _ in AICargoList_IndustryProducing(p)) {
 			if (!AICargo.IsFreight(c)) continue;
 			local prod = AIIndustry.GetLastMonthProduction(p, c);
