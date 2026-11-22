@@ -96,16 +96,20 @@ pub const KINDS: &[Kind] = &[
     k("panel.view", By::Panel, "panel.rs:Game::event", "`{text}`", "a GUI client attached"),
     k("panel.ai", By::Panel, "panel.rs:Game::event", "`{text}`", "the bot's `planner:` lines, its start, the held start, calibration, Prismatic's directive"),
     k("panel.mesh", By::Panel, "panel.rs:Game::event", "`{text}`", "a plan.directive or plan.directive_outcome was mirrored to the Majordomus mesh as a typed record, or not (src/panel_mesh.rs; only with $MAJORDOMUS_URL and $MAJORDOMUS_SESSION)"),
-    k("panel.plan", By::Panel, "panel.rs:Game::event", "`{text}`", "an action plan or an investment was decided"),
+    k("panel.plan", By::Panel, "panel.rs:Game::event, panel_strategy.rs:cycle", "`{text}`", "an action plan or an investment was decided; the strategist finished a cycle"),
     k("panel.intent", By::Panel, "panel.rs:Game::event", "`{text}`", "a sentence was answered (`POST /api/intent`, `~ plan` in the console)"),
     k("panel.duel", By::Panel, "panel_results.rs", "`{text}`", "a duel started from the panel; the README scoreboard was regenerated"),
     // The memory Rhai scripts and services share (rhai_shared.rs, I0091): the audit trail of every write.
     k("rhai.shared", By::Panel, "rhai_shared.rs:h_shared_set, h_shared_delete", "`{op: set|delete, key, rev, writer, value}`", "a script, a service or the operator wrote or deleted a shared key"),
+    // The panel's blackboard (panel_strategy.rs): the audit trail of a script's write; the strategist's
+    // own writes are summed up by its plan.strategy.
+    k("blackboard.write", By::Panel, "panel_strategy.rs:h_blackboard_write", "`{key, revision, by}`", "a script or the operator wrote a blackboard key (`POST /api/blackboard`)"),
     // Planning decisions as data (ADR 0034 point 3), each beside its panel.* sentence.
     k("plan.portfolio", By::Panel, "panel_bot.rs:planned", PLAN, "the planner's portfolio for the bot was read (the bot start, `POST /api/bots/planned`)"),
     k("plan.bot_settings", By::Panel, "panel_bot.rs:planned", PLAN, "the bot's settings were chosen from that portfolio"),
     k("plan.calibration", By::Panel, "panel.rs:h_calibration_record", PLAN, "a calibration reading was measured (`POST /api/calibration`); the planned bot reads every stored one back (I0082)"),
     k("plan.investment", By::Panel, "panel.rs:h_investment", PLAN, "AlgoGlyph's transport-investment chose what to build (`GET /api/investment`)"),
+    k("plan.strategy", By::Panel, "panel_strategy.rs:cycle", PLAN, "the background strategist finished a cycle (a new game month, its interval, or `POST /api/strategy/run`): `choice` is the portfolio's solver, lines and score, investment lines, town warnings and tuning proposals; `inputs.live` names the reads, AlgoGlyph's runner and every fallback"),
     k("plan.action", By::Panel, "panel.rs:h_action_plan", PLAN, "AlgoGlyph's action-plan answered (`POST /api/actionplan`)"),
     k("plan.intent", By::Panel, "panel.rs:h_intent, answer_plan", PLAN, "a sentence was resolved to an intent and candidates"),
     k("plan.directive", By::Panel, "panel_decision.rs:pull", PLAN, "Prismatic's directive was pulled: refused by the contract, or each step with its state (applied, pending approval, refused, error) (`POST /api/decision/pull`); `inputs.stored` is the fit it sent (its samples query or bus, rows, model, I0085) or the fallback"),
@@ -259,6 +263,7 @@ mod tests {
         ("panel_scripts.rs", include_str!("panel_scripts.rs")),
         ("panel_store.rs", include_str!("panel_store.rs")),
         ("rhai_shared.rs", include_str!("rhai_shared.rs")),
+        ("panel_strategy.rs", include_str!("panel_strategy.rs")),
     ];
 
     /// The string literal at the start of `s` (after `"`), if `s` starts with one.

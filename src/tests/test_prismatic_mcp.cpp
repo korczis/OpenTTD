@@ -1256,6 +1256,51 @@ TEST_CASE("A chat line is capped at a UTF-8 boundary, and a newer AI settings pl
 	CHECK(SettingKeys("ai.set_settings", json::array()).empty());
 }
 
+TEST_CASE("An unanswered approval is settled at its deadline with the operator's standing verdict, keep by default", "[prismatic_mcp]")
+{
+	DeadlinePolicy keep;  /* the policy a server starts with */
+	CHECK(keep.ticks == 30 * DEADLINE_DAY_TICKS);
+	CHECK(keep.verdict == DeadlineVerdict::Keep);
+	CHECK(DeadlineTick(1000, keep.ticks) == std::optional<uint64_t>(1000 + 30 * 74));
+	CHECK_FALSE(DeadlineTick(1000, 0).has_value());
+
+	const uint64_t due = 1000 + keep.ticks;
+	CHECK(DeadlineDue(true, 1000, due - 1, keep, true) == DeadlineAction::None);
+	CHECK(DeadlineDue(true, 1000, due, keep, true) == DeadlineAction::Retire);
+	CHECK(DeadlineDue(true, 1000, due + 5000, keep, false) == DeadlineAction::Retire);
+	/* Decided already: the deadline has nothing to settle. */
+	CHECK(DeadlineDue(false, 1000, due + 1, keep, true) == DeadlineAction::None);
+
+	DeadlinePolicy approve{keep.ticks, DeadlineVerdict::Approve};
+	CHECK(DeadlineDue(true, 1000, due, approve, true) == DeadlineAction::Execute);
+	/* Wider than a chat approver may decide (a server setting, starting an AI): retired, never executed. */
+	CHECK(DeadlineDue(true, 1000, due, approve, false) == DeadlineAction::Retire);
+
+	DeadlinePolicy off{0, DeadlineVerdict::Approve};
+	CHECK(DeadlineDue(true, 1000, UINT64_MAX, off, true) == DeadlineAction::None);
+
+	CHECK(DeadlineVerdictName(DeadlineVerdict::Keep) == "keep");
+	CHECK(DeadlineVerdictName(DeadlineVerdict::Approve) == "approve");
+}
+
+TEST_CASE("The deadline policy is parsed from the console's game days and verdict, and a malformed line changes nothing", "[prismatic_mcp]")
+{
+	auto p = ParseDeadlinePolicy("7", "");
+	REQUIRE(p.has_value());
+	CHECK(p->ticks == 7 * DEADLINE_DAY_TICKS);
+	CHECK(p->verdict == DeadlineVerdict::Keep);
+	CHECK(ParseDeadlinePolicy("30", "keep")->verdict == DeadlineVerdict::Keep);
+	CHECK(ParseDeadlinePolicy("30", "approve")->verdict == DeadlineVerdict::Approve);
+	CHECK(ParseDeadlinePolicy("0", "keep")->ticks == 0);
+	CHECK(ParseDeadlinePolicy("3650", "")->ticks == 3650 * DEADLINE_DAY_TICKS);
+	CHECK_FALSE(ParseDeadlinePolicy("3651", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("-1", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("7d", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("99999", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("7", "yes").has_value());
+}
+
 TEST_CASE("Only an action on one company is decided in the game's chat, classified by the command's own flags and category", "[prismatic_mcp]")
 {
 	json none = json::array();
