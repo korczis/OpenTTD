@@ -89,6 +89,11 @@ flowchart TB
   `flow_serve.rs` keeps one long-lived `flow serve` per process when `MCP_ALGOGLYPH_SERVE` is on.
   `kernel_feed.rs` and `mcp-kernel-feed` complete a kernel's input from the store's trailing
   samples (only `action-plan` has a feed today).
+- **Kept current in the background** ([Strategist and blackboard](strategist-and-blackboard.md)).
+  The panel's strategist runs this planner as `mcp-plan` (`--invest`, and `--track N`) once per
+  game month and at least every few minutes, beside the town advice, on a small pool of workers.
+  It reports the solver and the kernels the planner's answer names, writes the result to the
+  panel's blackboard (`strategy.*`) and publishes `plan.strategy`.
 
 The planner's model, its versions, measurements and every route are in
 [`../mcp-control.md`](../mcp-control.md) (from "A route planner with modes of transport" on), and
@@ -181,7 +186,7 @@ The record-based lower bound is what discounts it.
 
 ## Related
 
-- [PrismaticAI](prismatic-ai.md), [Duels](duels.md), [Event bus and store](event-bus-and-store.md),
+- [Strategist and blackboard](strategist-and-blackboard.md), [PrismaticAI](prismatic-ai.md), [Duels](duels.md), [Event bus and store](event-bus-and-store.md),
   [Hub](hub.md), [Rail steward and monitor](rail-steward-and-monitor.md)
 - [Portfolio under a budget](../concepts/portfolio-under-a-budget.md),
   [Calibration against reality](../concepts/calibration-against-reality.md),

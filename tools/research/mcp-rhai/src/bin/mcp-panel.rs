@@ -76,6 +76,9 @@ mod store_sql;
 mod http_stub;
 #[path = "../panel_town.rs"]
 mod panel_town;
+// The background strategist and the blackboard; it runs the planner as the mcp-plan sibling binary.
+#[path = "../panel_strategy.rs"]
+mod panel_strategy;
 #[path = "../panel_battle.rs"]
 mod panel_battle;
 
@@ -197,6 +200,9 @@ fn main() {
     }
     let p = Arc::new(panel::Panel { game: game.clone(), routes: panel::routes() });
     std::thread::spawn(move || panel::serve(listener, p));
+    // The strategist recomputes the long-term plan in the background and keeps the blackboard
+    // (src/panel_strategy.rs); PRISMATIC_STRATEGIST=0 turns it off.
+    panel_strategy::start(game.clone());
     println!("mcp-panel: http://127.0.0.1:{}/  (game server 127.0.0.1:{}, MCP {})", args.panel_port, args.game_port, game.endpoint());
     let text = |v: serde_json::Value| v.as_str().unwrap_or("off").to_string();
     println!("mcp-panel: bus {}  store {}", text(panel_store::endpoint()), text(panel_store::store_status()));
@@ -213,6 +219,7 @@ fn main() {
     panel::registry_remove(&format!("client-{}", args.panel_port));
     // The panel's subprocesses (the bot's planner, an intent, a plan) stop with it, before the game:
     // a planner left running was re-parented to PID 1 and kept calling a panel that was gone.
+    panel_strategy::stop();
     let helpers = panel::stop_children(Duration::from_secs(3));
     if helpers > 0 {
         println!("mcp-panel: stopped {helpers} subprocess(es)");

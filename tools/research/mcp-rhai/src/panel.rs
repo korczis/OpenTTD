@@ -2601,6 +2601,15 @@ pub fn routes() -> Vec<Route> {
           None, h_instances),
         r("GET", "/api/mesh", "mesh", "The Majordomus mesh this repository's server cooperates with (src/panel_mesh_page.rs, read-only): `mesh` (identity, trust policy, providers, tallies), `peers` (machines, runtimes, sessions, claims) and `nodes` (every discovered node with trust, presence and endpoints), read from the Majordomus server ($MAJORDOMUS_URL, else the one `majordomus serve ensure` names for this checkout) /api/v1/mesh, /peers and /nodes unchanged; 200 also when Majordomus is down (`reachable` false, `errors` per part)", false,
           None, crate::panel_mesh_page::h_mesh),
+        // The strategist and the blackboard (src/panel_strategy.rs, research/mechanisms/strategist-and-blackboard.md).
+        r("GET", "/api/strategy", "strategy", "The background strategist: enabled, running, cycles, its configuration (PRISMATIC_STRATEGIST, PRISMATIC_STRATEGY_*), strategy.status, strategy.summary, the last cycle with each part's duration and error (plan, track, towns, tuning), the next run, and the current strategy from the blackboard: the planner's portfolio and transport-investment (mcp-plan --invest) and its rail lines priced on the map (mcp-plan --track N), each with the solver and the kernels the planner's answer names, town warnings per rated company, BattleBrain's tuning proposals, a bot settings suggestion (data only, never applied) and the mesh peers' plans. Reads and computes only; the game is never changed", false,
+          None, crate::panel_strategy::h_strategy),
+        r("POST", "/api/strategy/run", "strategyRun", "Run one strategist cycle now (also with PRISMATIC_STRATEGIST=0): with wait: true the answer is the cycle's record (parts, durations, errors, the plan.strategy event's sequence number), else 202 and the cycle runs in the background; 409 without a game", false,
+          s(json!({"wait": {"type": "boolean"}}), &[]), crate::panel_strategy::h_strategy_run),
+        r("GET", "/api/blackboard", "blackboard", "The panel's blackboard, the shared working state of this instance: one key (?key=, 404 when absent) or every key under ?prefix=, each with its value, writer (by), revision, wall time (written_at), game date and its last values (history; ?history=0 leaves them out). strategy.* is the strategist's, mesh.* what it read from the Majordomus mesh. In the panel's memory: a restarted panel starts empty", false,
+          None, crate::panel_strategy::h_blackboard),
+        r("POST", "/api/blackboard", "blackboardWrite", "Write a blackboard key for scripts, pages and services to share ({key, value, by?}); the reserved strategy.* and mesh.* keys are refused (403). Published as a blackboard.write event", false,
+          s(json!({"key": st(), "value": {}, "by": st()}), &["key", "value"]), crate::panel_strategy::h_blackboard_write),
         r("GET", "/api/battle/contestants", "battleContestants", "The LAN battle's contestants as tools/research/ai-battle/battle.json declares them (src/panel_battle.rs, read-only, read on every request): `file`, `count` and `contestants` in the file's order, each as the file has it (ai, label, source, group) with `settings` made explicit (\"\" for the AI's defaults); the live arena (rhai/arena.rhai) plays this lineup, so it is written in one place. 404 when the file is missing", false,
           None, crate::panel_battle::h_contestants),
         r("POST", "/api/instances/call", "instancesCall", "One MCP JSON-RPC call on a named instance of the cluster (a panel's server or a GUI client)", true,
@@ -3427,8 +3436,10 @@ mod tests {
         // And the observation a directive is bound to (GET /api/bridge/observation; agent loop step 1).
         // And evidence retrieval (GET /api/evidence; research/agent-loop.md, Retrieve).
         // And the store's named queries (GET and POST /api/db/named; sql/queries).
-        // And the LAN battle's contestants the live arena plays (GET /api/battle/contestants; panel_battle.rs).
-        assert_eq!(rs.len(), 77);
+        // And the strategist and its blackboard (GET /api/strategy, POST /api/strategy/run, GET and
+        // POST /api/blackboard; panel_strategy.rs), and the LAN battle's contestants the live arena
+        // plays (GET /api/battle/contestants; panel_battle.rs).
+        assert_eq!(rs.len(), 81);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -3443,7 +3454,7 @@ mod tests {
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
             "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
             "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh",
-            "/api/battle/contestants"].contains(&r.path)));
+            "/api/strategy", "/api/strategy/run", "/api/blackboard", "/api/battle/contestants"].contains(&r.path)));
     }
 
     /// A store with two runs of one instance: the older run's days must not feed the books.

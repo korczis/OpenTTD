@@ -35,6 +35,9 @@ flowchart TB
   STEW -->|"rail problems"| MAJ
   RW["Real-world scenario"] -->|"a real place as the map"| PLAN
   RW -->|"/realworld, its routes"| PANEL
+  STRAT["Strategist and blackboard"] -->|"runs in the panel, reads the game"| PANEL
+  STRAT -->|"runs mcp-plan"| PLAN
+  STRAT -->|"records, announce, peer plans"| MAJ
 ```
 
 ## The pages
@@ -48,6 +51,7 @@ flowchart TB
 | [Event bus and store](event-bus-and-store.md) | Every panel event on a ZeroMQ socket and in a DuckDB file, decisions published as data |
 | [Rhai scripting](rhai-scripting.md) | Scripts that drive a game, with functions derived from the live panel, run and hot-reloaded from the Scripts page |
 | [Planner and AlgoGlyph](planner-and-algoglyph.md) | Route candidates priced from the game's formulas, a portfolio within a budget, AlgoGlyph kernels for the hard parts |
+| [Strategist and blackboard](strategist-and-blackboard.md) | A panel thread that keeps the long-term plan current and posts it, with town warnings and tuning proposals, on a blackboard scripts and pages share |
 | [PrismaticAI](prismatic-ai.md) | The owner's company AI, steered by its settings, building rail lines a train can always run |
 | [Rail steward and monitor](rail-steward-and-monitor.md) | Rhai services that set each rail line's target and report what is wrong to the board |
 | [Duels](duels.md) | The planned bot against an unplanned one on the same map, from a held start, recorded as evidence |
