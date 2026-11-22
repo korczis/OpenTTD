@@ -238,10 +238,12 @@ def anchor_lines(repo: Repo, ref: Ref) -> list[int]:
 
 def declares(line: str, word: str) -> bool:
     """Does this line declare or define `word`: a keyword before it (`fn`, `def`, `function`,
-    `class`, `const`, ...), or a definition at column 0 such as `json ResourceMcpStatus()`?"""
+    `class`, `const`, ...), a typed constant (`const auto TABLE = ...`), or a definition at
+    column 0 such as `json ResourceMcpStatus()`? An `impl` block is not the declaration."""
     w = re.escape(word)
-    return bool(re.search(r"\b(?:fn|def|function|class|struct|enum|const|static|type|let|trait|impl|mod)\s+"
+    return bool(re.search(r"\b(?:fn|def|function|class|struct|enum|const|static|type|let|trait|mod)\s+"
                           r"(?:[A-Za-z_]\w*::)*" + w + r"\b", line)
+                or re.search(r"\b(?:const|static|constexpr)\s+[\w:<>,*& ]*?\b" + w + r"\s*=", line)
                 or re.match(r"^[A-Za-z_][\w:<>,*& ]*?\b" + w + r"\s*\([^;]*$", line))
 
 

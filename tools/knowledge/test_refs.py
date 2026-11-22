@@ -289,6 +289,10 @@ class RefsTest(unittest.TestCase):
         self.assertTrue(refs.declares("json ResourceMcpStatus()", "ResourceMcpStatus"))
         self.assertFalse(refs.declares("\tResourceMcpStatus();", "ResourceMcpStatus"))
         self.assertFalse(refs.declares("int x = Foo(1);", "Foo"))
+        self.assertTrue(refs.declares("const auto RESOURCES = std::to_array<Entry>({", "RESOURCES"))
+        self.assertFalse(refs.declares("for (const auto &r : RESOURCES) {", "RESOURCES"))
+        self.assertTrue(refs.declares("pub struct Sinks {", "Sinks"))
+        self.assertFalse(refs.declares("impl Sinks {", "Sinks"))
 
     def test_fix_lines_needs_records_not_files(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
