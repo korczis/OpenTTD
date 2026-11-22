@@ -100,32 +100,42 @@ protocol boundary because the runner's outputs carry no schema.
 Battlebrain declares what it needs computed as **capabilities**: a goal with typed inputs and
 outputs, and units on its amounts. `CAPABILITIES` in `battlebrain_contract.rs` is the only place
 they are declared. A **matcher** (`match_capability`) picks the kernel of the discovered catalogue
-that satisfies a capability. It reads only what the catalogue says (id, engine, the runner's
-input shape) and the **adapter registry** (`ADAPTERS`).
+that satisfies a capability. It reads three things: what the catalogue says (id, engine, the
+runner's input shape), the **derived kernel contracts** ([below](#derived-kernel-contracts-i0228)),
+and the **adapter registry** (`ADAPTERS`).
 
-An adapter states, for one kernel id:
+An adapter states, for one kernel id, only what no AlgoGlyph source states (`ADAPTER_HAND_KEPT`
+gives each field's reason, and every match record repeats it):
 
 - the capability it satisfies;
 - how each requirement field maps to the kernel's input and output, with the conversion;
-- whether the answer is exact, and why;
+- whether the answer is exact, and why, citing the AlgoGlyph test that holds it to a reference;
 - the domain check its output must pass (`domain_check` dispatches through the registry).
+
+The engine, the input keys and their JSON types, and the output keys come from the derived
+contract, so the adapter no longer restates the engine.
 
 It is the only explicit kernel list in the contract layer. **Owner:** battlebrain (this file and
 `battlebrain_contract.rs`). **Retirement:** when AlgoGlyph publishes a versioned input and output
-schema with units for each kernel ([proposal](algoglyph-contract-proposal.md)). The matcher then
-reads the mapping from the catalogue, and an adapter shrinks to its domain check or is deleted.
+schema with units and exactness for each kernel ([proposal](algoglyph-contract-proposal.md)). Its
+keys and types are already derived from the source, so an adapter then shrinks to its mapping and
+domain check, or is deleted.
 
 **Matcher rules.** Every kernel of the catalogue is considered. A kernel with no adapter for the
 capability is listed as `unadapted` and is never chosen. A kernel with an adapter is compatible
 only when all of these hold:
 
 - the kernel is in the catalogue;
-- the catalogue lists it with the adapter's engine;
+- the catalogue lists it with the engine its derived contract states;
 - the adapter maps every requirement field exactly once, and no field the requirement lacks;
-- the catalogue's input shape still declares every key the adapter maps. A shape the runner
-  writes as prose, such as `knapsack-dp`'s, counts as `opaque`, and that is recorded.
+- the derived contract of the catalogue's own commit declares every input key the adapter maps
+  (`input_shape_drift`) and every output key (`output_shape_drift`), and no key's derived JSON
+  type contradicts the requirement field's kind (`type_mismatch`). The shape is then `verified`.
+- without a contract of the catalogue's commit (a catalogue read from another AlgoGlyph
+  checkout), the catalogue's input shape must still declare every mapped key. A shape the runner
+  writes as prose counts as `opaque`, and that is recorded with `contract: null`.
 
-The catalogue states no units, so the record says that the adapter asserts them.
+The source states no units, so the record says that the adapter asserts them.
 
 **Ranking** among compatible kernels:
 
@@ -139,7 +149,7 @@ The catalogue states no units, so the record says that the adapter asserts them.
 | a capability nobody declared | `unknown_capability` |
 | a capability that no adapter serves | `no_adapter` |
 | every adapted kernel is absent from the catalogue (expired) | `kernel_expired` |
-| adapted kernels present but none compatible (`engine_mismatch`, `input_shape_drift`, `unmapped_field`, `unknown_field`) | `no_match` |
+| adapted kernels present but none compatible (`engine_mismatch`, `input_shape_drift`, `output_shape_drift`, `type_mismatch`, `unmapped_field`, `unknown_field`) | `no_match` |
 | a tie after the ranking | `ambiguous_capability` |
 
 **Records.** A match is written as an inference record: method `capability-match`, with params
@@ -200,12 +210,53 @@ Catalogue `sha256:97e08572418b44db62dd546959a396dceddb555aa5a49d12ad54a9bd7a455c
 
 | capability | kernel | engine | input shape | exact | verdict |
 |---|---|---|---|---|---|
-| `portfolio-within-budget` | `knapsack-dp` | grid | opaque | yes | **chosen**: the only compatible kernel |
+| `portfolio-within-budget` | `knapsack-dp` | grid | verified | yes | **chosen**: the only compatible kernel |
 | `rail-line-price` | `track-planning` | custom | verified | yes | **chosen**: the only compatible kernel |
 | `routes-by-return` | `transport-investment` | custom | verified | no | **chosen**: the only compatible kernel |
 
 Every other kernel of the catalogue was considered and has no adapter for that capability (`portfolio-within-budget`: 52, `rail-line-price`: 52, `routes-by-return`: 52).
 <!-- battlebrain capabilities:end -->
+
+## Derived kernel contracts (I0228)
+
+AlgoGlyph publishes no typed kernel schema yet, and this fork never edits it. What its source
+already states is derived instead, by `algoglyph-contracts`
+(`tools/research/mcp-rhai/src/algoglyph_contracts.rs`), into
+[`tools/research/schema/derived/algoglyph-contracts.json`](../../tools/research/schema/derived/algoglyph-contracts.json):
+one contract per kernel of the catalogue fixture, in the shape the
+[proposal](algoglyph-contract-proposal.md) defines (`algoglyph-kernel-contract/v1`). Each field
+names the source line or the test it comes from (`x-from`, `x-exercised`), and `absent` lists
+what no source states. The generator reads:
+
+- each kernel's own input text (a data form's `input`, or the graph form's doc comment in
+  `src/flow/cli.ts`), or the interface a grid kernel's `fromData` reads, for keys, required keys,
+  enums and descriptions;
+- the predicates its parser applies (`integer`, `finite`, `Array.isArray`, `record`, `typeof`,
+  `every`, `includes`, `length`), its local helpers and its destructuring defaults, for JSON
+  types and defaults. A predicate in a refusal (`if (...) return 'message'`) counts only when it
+  is negated, so `Array.isArray(params)` there says what params is not;
+- the result interface of a grid kernel, or the record a `solve` returns (literals,
+  `Number.isFinite(v) ? v : null`, a field of a typed call's result, a typed spread), for output
+  keys and types;
+- `test/flow-cli.test.ts`, which AlgoGlyph requires to run every data form, for the keys its tests
+  run each kernel on and read from the answer.
+
+The source is read from git at one commit, never from a working tree. Its root is a parameter:
+`--algoglyph DIR`, else `$ALGOGLYPH_ROOT`, else the submodule `.gitmodules` declares for
+AlgoGlyph, else the transitional checkout `~/dev/algoglyph-wt/main` until that submodule lands.
+The derivation refuses a catalogue of another commit than the source.
+
+```sh
+cargo run --release --offline --no-default-features --manifest-path tools/research/mcp-rhai/Cargo.toml --bin algoglyph-contracts            # regenerate
+cargo run --release --offline --no-default-features --manifest-path tools/research/mcp-rhai/Cargo.toml --bin algoglyph-contracts -- --check # exit 1 while stale
+```
+
+`tools/gate.sh change` runs the check. Without an AlgoGlyph checkout the tool reports NOT RUN and
+exits 3, and the tier is PARTIAL rather than PASS (`--source-optional` makes that exit 0 for a
+caller that only wants the NOT RUN line). Like the battle post-mortems, it needs cargo, which the Surfaces
+CI does not have, so it is not a `surfaces.toml` generator. `cargo test --bin algoglyph-contracts`
+also fails while the artifact differs from what the pinned source derives. `cargo test --bin
+battlebrain` fails while the artifact's commit is not the catalogue fixture's.
 
 ## Shadow mode (I0096)
 
