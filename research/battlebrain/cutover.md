@@ -82,16 +82,9 @@ What the rehearsal does not show:
 - the stand-in answers every `openttd.ai.set_settings` with a pending approval, so the refusal of
   a pull that left no approval pending runs as a line, never as a case; the same holds for the
   refusal while auto-approve is on, which the check does not switch on;
-- a real game: the stand-in answers `openttd://companies` with the companies at the top level,
-  while the game's MCP server answers them under `data.companies`
-  (`src/prismatic_mcp/prismatic_mcp_server.cpp`).
+- a real game: the stand-in answers in the game's envelope (`openttd://companies` under
+  `data.companies`, as `src/prismatic_mcp/prismatic_mcp_server.cpp` writes it, read by the one
+  helper `company_list` in `src/battlebrain_contract.rs`), but it is still a stand-in.
 
-## Open blocker: the live path reads the companies where the game does not put them
-
-Found by reading the code, not by a run. `apply_live` (`src/panel_decision.rs`) takes the
-company list as `companies.get("companies").or_else(|| companies.get("data"))`. Against the
-game's envelope that is the object `{"companies": [...]}`, not the list, so `live_world` finds no
-AI company and refuses every live decision with `not_an_ai_company` (409, nothing applied).
-`battlebrain live` and the other readers in the panel read `/data/companies` first. The stand-in
-answers the list at the top level, so neither the round-2 test nor this rehearsal sees it. Until
-it is fixed, step `serve-and-pull` on a real game ends in that refusal.
+The check runs in the Research Rust workflow (`.github/workflows/research-rust.yml`), after the
+crate's tests, on the same runner.
