@@ -19,6 +19,8 @@ docs/source/*
 /tools/research/mcp-human/target/
 # tools/research/real-world: its cargo target and the network cache of `acquire --live`
 /tools/research/real-world/target/
+# tools/research/atlas: its cargo target
+/tools/research/atlas/target/
 /tools/research/real-world/.cache/
 /tools/research/mcp-panel/__pycache__/
 

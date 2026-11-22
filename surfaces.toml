@@ -158,3 +158,21 @@ id = "ab-charts"
 outputs = ["research/results"]
 sync = ["tools/research/mcp-ab", "--render"]
 check = ["tools/research/mcp-ab", "--render", "--check"]
+
+[[generators.items]]
+id = "atlas"
+outputs = ["README.md", "docs/atlas/hero-light.svg", "docs/atlas/hero-dark.svg"]
+sync = ["tools/research/atlas/atlas", "render"]
+check = ["tools/research/atlas/atlas", "render", "--check"]
+
+# Pages of the site beyond the documents, each drawn by its own script from a JSON data contract
+# that a declared command prints when the site is built (tools/surfaces/README.md, "Declared pages").
+# The cards the data carries are rendered as plain HTML; the script draws the interactive views; the
+# scenario under `e2e` is what tools/surfaces/pages-check drives in Chrome.
+[[pages.items]]
+id = "atlas"
+title = "Research Atlas"
+summary = "Every recorded duel, A/B and LAN battle record, and the README's own diagrams, as views you drive: filter, compare, follow a seed through the bot's revisions, walk the architecture. Each record is classed by what it can support, and every mark opens its evidence."
+data = ["tools/research/atlas/atlas", "data"]
+script = "tools/research/atlas/atlas.js"
+e2e = "tools/research/atlas/atlas.e2e.mjs"
