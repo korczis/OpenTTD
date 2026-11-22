@@ -14,7 +14,7 @@
 use serde_json::{json, Value};
 
 use crate::cargo::{algoglyph, freight_vehicle, portfolio};
-use crate::plan::pick_vehicle;
+use crate::plan::{calibration, pick_vehicle};
 
 fn num(v: &Value, k: &str) -> f64 { v.get(k).and_then(Value::as_f64).unwrap_or(0.0) }
 
@@ -124,6 +124,27 @@ fn route_mode(route: &Value) -> String {
     route["legs"].as_array().into_iter().flatten().filter_map(|l| l["mode"].as_str()).collect::<Vec<_>>().join("+")
 }
 
+/// A kernel route with the planner's calibration applied: the kernel prices routes from the game's
+/// payment formula and knows nothing of `params.calibration` (what each mode really earned against
+/// what the planner predicted, calibrate.rs). Without this, a calibrated plan still ranked air at its
+/// uncalibrated ROI. The calibration is a ratio of net profit (plan.rs net_profit), so it scales
+/// `monthly_profit`; `score` and `roi` follow the kernel's own definitions (AlgoGlyph
+/// transport-investment invest.ts: score = profit x payback_months - investment, roi = 12 x profit /
+/// investment). A route of several legs takes the lowest calibration of its legs' modes.
+pub fn calibrated(route: &Value, p: &Value) -> Value {
+    let modes: Vec<&str> = route["legs"].as_array().into_iter().flatten().filter_map(|l| l["mode"].as_str()).collect();
+    let cal = modes.iter().map(|m| calibration(p, m)).fold(f64::INFINITY, f64::min);
+    if !cal.is_finite() || (cal - 1.0).abs() < 1e-12 { return route.clone(); }
+    let profit = num(route, "monthly_profit") * cal;
+    let investment = num(route, "investment");
+    let mut r = route.clone();
+    r["monthly_profit"] = json!(profit);
+    r["score"] = json!(profit * f(p, "/payback_months", 24.0) - investment);
+    r["roi"] = json!(if investment > 0.0 { 12.0 * profit / investment } else if profit > 0.0 { f64::INFINITY } else { 0.0 });
+    r["calibration"] = json!(cal);
+    r
+}
+
 /// Run the kernel once over every cargo and choose the portfolio over the routes it ranks.
 pub fn decide(plan: &Value, engines: &Value, towns: &Value) -> Value {
     let Some(input) = input(plan, engines, towns) else {
@@ -141,9 +162,11 @@ pub fn decide(plan: &Value, engines: &Value, towns: &Value) -> Value {
             // its highest-score route among all the kernel's options (each with its best-score
             // fleet), and the kernel's ROI pick stays in `why`.
             for c in r["chosen"].as_array().into_iter().flatten() {
-                let all: Vec<&Value> = r["options"].as_array().into_iter().flatten()
-                    .flat_map(|o| o.as_array().into_iter().flatten()).filter(|o| o["demand"] == c["demand"]).collect();
-                let route = all.iter().copied().max_by(|a, b| num(a, "score").total_cmp(&num(b, "score"))).unwrap_or(&c["option"]);
+                let all: Vec<Value> = r["options"].as_array().into_iter().flatten()
+                    .flat_map(|o| o.as_array().into_iter().flatten()).filter(|o| o["demand"] == c["demand"])
+                    .map(|o| calibrated(o, &plan["params"])).collect();
+                let fallback = calibrated(&c["option"], &plan["params"]);
+                let route = all.iter().max_by(|a, b| num(a, "score").total_cmp(&num(b, "score"))).unwrap_or(&fallback);
                 if num(route, "score") <= 0.0 { continue; }
                 let label = route_mode(route);
                 let mut why = r["why"].as_array().into_iter().flatten().find(|w| w["demand"] == c["demand"]).cloned().unwrap_or(Value::Null);
@@ -207,4 +230,18 @@ mod tests {
         assert!(truck["vehicles"].get("Passengers").is_none());
         assert_eq!(i["places"].as_array().unwrap().len(), 4);
     }
+    /// The kernel's routes get the planner's calibration: profit scaled, score and roi recomputed
+    /// by the kernel's own formulas, the lowest leg calibration for a route of several legs.
+    #[test]
+    fn kernel_routes_take_the_calibration() {
+        let p = json!({"calibration": {"air": 0.5, "bus": 0.8, "default": 1.0}, "payback_months": 24});
+        let air = json!({"legs": [{"mode": "air"}], "monthly_profit": 1000.0, "investment": 6000.0, "score": 18000.0, "roi": 2.0});
+        let a = super::calibrated(&air, &p);
+        assert_eq!((a["monthly_profit"].as_f64(), a["score"].as_f64(), a["roi"].as_f64()), (Some(500.0), Some(6000.0), Some(1.0)));
+        let two = json!({"legs": [{"mode": "bus"}, {"mode": "air"}], "monthly_profit": 100.0, "investment": 0.0});
+        assert_eq!(super::calibrated(&two, &p)["calibration"], json!(0.5));
+        let rail = json!({"legs": [{"mode": "rail"}], "monthly_profit": 100.0, "investment": 10.0, "score": 2390.0});
+        assert_eq!(super::calibrated(&rail, &p), rail);
+    }
+
 }

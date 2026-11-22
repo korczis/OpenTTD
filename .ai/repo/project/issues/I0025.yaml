@@ -23,7 +23,7 @@ validation:
 evidence_required:
 - validation_run
 created_at: '2026-11-15'
-updated_at: 2026-11-16T19:46:20Z
+updated_at: 2026-11-22T16:30:54Z
 started_at: 2026-11-16T19:45:50Z
 started_event: sha256:835fdf851924ad3bdc617726885f7a680773dcad9963612dd5c36ed5da0d515b
 verified_at: 2026-11-16T19:46:07Z
@@ -37,3 +37,10 @@ evidence:
     result: "PASS, exit 0. Boots a dedicated server of this tree (build-research-baseline-release/openttd, -D -g -x, fixed seed=1, -I OpenGFX), brings up the standalone openttd-prismatic-bridge (Python/FastAPI) against admin port 13977 with a throwaway secrets.cfg password, POSTs /ai/start {PrismaticAI, intercity=0,aggressiveness=75}, and polls /companies until the AI company owns a vehicle. Live result: company 0 'Slunton Transport' (is_ai) busses=1 within ~20-40s; full stack script->bridge(HTTP)->Admin Network(TCP)->OpenTTD->PrismaticAI exercised on today's binary. ARCHITECTURE.md status line + §3 + §4 brought in line with the phase table (Phase 2 Done), Phase 2 row now cites this on-this-tree reproduction instead of only the July sibling-repo figure. shellcheck clean; surfaces 340 docs 0 findings."
     commit: 65c041fe2b11e272e5559def0b10858941837273
     recorded_at: 2026-11-16T19:46:09Z
+  - covers: "validation_run"
+    type: artifact
+    command: "git show -s c2342424c3 f5ffdf3b17"
+    result: "Commit correction, no new run: tools/research/bridge-live-check was added in c2342424c3 (committed under the unrelated subject of a PrismaticMCP fix) and made to detect the AI's first vehicle, with ARCHITECTURE.md brought in line, in f5ffdf3b17 (Fix: Make bridge-live-check detect the AI's first vehicle and pin a reproducible run (I0025)). The earlier entry's commit 65c041fe2b is the HEAD of the shared checkout when it was recorded, an unrelated commit; that entry is kept as recorded."
+    artifact: "commit:f5ffdf3b1701c58373a9494a6f351a7e8e8db018"
+    commit: ab4b31a0bcfc88e5ca4166befd7cd01259dd914b
+    recorded_at: 2026-11-22T16:30:54Z
