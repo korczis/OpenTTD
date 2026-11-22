@@ -1,0 +1,48 @@
+{
+ "case": "a decision without an idempotency key",
+ "expect": "missing_field",
+ "value": {
+  "at": {
+   "date": "1961-01-02",
+   "tick": 74020
+  },
+  "body": {
+   "approval": "operator",
+   "goal": "next freight line or hold",
+   "policy": {
+    "id": "freight-margin",
+    "params": {
+     "margin": 0.2,
+     "reserve": 25000
+    },
+    "version": "1"
+   },
+   "rejected": [
+    {
+     "candidate": "bb:4d669370ab5dc49798c19315ceab4e2689390641a22eea67b562d46374fe3892",
+     "reason": "the line clears the margin and the reserve"
+    }
+   ],
+   "selected": "bb:bea7cfb6a74eb3eaf0b5b63756cd8b8ead231edfb65cce2ab872c61d01532cc2",
+   "snapshot": "bb:76337ad2a40c3a385fd670726b38b3e84db0389982678f2616ca1b4023c1f382",
+   "valid_until": "1961-02-01"
+  },
+  "derived_from": [
+   "bb:76337ad2a40c3a385fd670726b38b3e84db0389982678f2616ca1b4023c1f382",
+   "bb:bea7cfb6a74eb3eaf0b5b63756cd8b8ead231edfb65cce2ab872c61d01532cc2",
+   "bb:4d669370ab5dc49798c19315ceab4e2689390641a22eea67b562d46374fe3892"
+  ],
+  "id": "bb:6db8c97fc352bca7e68fb5cfb19f77d6af95aa30e5f44af897c201571d502112",
+  "producer": {
+   "id": "battlebrain",
+   "version": "0.1.0"
+  },
+  "schema": "battlebrain-record/v1",
+  "scope": {
+   "company": 1,
+   "instance": "research-fixture"
+  },
+  "status": "decided",
+  "type": "decision"
+ }
+}

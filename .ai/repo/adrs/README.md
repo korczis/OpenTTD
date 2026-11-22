@@ -29,7 +29,7 @@ themselves stay hand-written.
 ```mermaid
 pie showData title Decisions by status
     %% links: README.md?col=Status&filter=accepted#index | README.md?col=Status&filter=superseded#index
-    "accepted" : 35
+    "accepted" : 36
     "superseded" : 1
 ```
 <!-- surfaces:end ai-adrs -->
@@ -72,5 +72,6 @@ pie showData title Decisions by status
 | [adr-0034](0034-planning-decisions-read-recorded-history-and-emit-structured.md) | accepted | Planning decisions read recorded history from the store and publish each choice as a structured event |
 | [adr-0035](0035-company-ais-are-ranked-in-headless-null-driver-matches-on-ever.md) | accepted | Company AIs are ranked in headless null-driver matches on every reachable LAN machine, and the ranking is a derived record |
 | [adr-0036](0036-prismatic-ai-settings-are-tuned-by-a-deterministic-genetic-algorith.md) | accepted | PrismaticAI's settings are tuned by a deterministic genetic algorithm over the LAN battle, and a tuned setting reaches a default only through held-start duels |
-| [adr-0037](0037-one-approval-core-plans-not-settings-every-channel-an-adapter.md) | accepted | One approval core on the game server: a plan is approved as a whole and executes on approval, and every channel (web, console, game command, chat) is an adapter to it |
+| [adr-0037](0037-battlebrain-in-this-fork-is-the-one-authority-for-the-freigh.md) | accepted | Battlebrain in this fork is the one authority for the freight-line decision; planner and AlgoGlyph only produce candidates, the executor only applies |
+| [adr-0038](0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md) | accepted | One approval core on the game server: a plan is approved as a whole and executes on approval, and every channel (web, console, game command, chat) is an adapter to it |
 <!-- surfaces:end ai-adrs -->

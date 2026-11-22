@@ -1,0 +1,104 @@
+{
+  "note": "RESEARCH-ONLY (I0096). Resource bodies only, no token. A name read twice replays its first answer.",
+  "resources": [
+    {
+      "digest": "sha256:5db5cc66679499ac123c83187bbcb9d36c347d7d950ea5e81796d16b87e9c546",
+      "file": "companies.json",
+      "game_date": "1963-02-22",
+      "game_tick": 356549,
+      "ok": true,
+      "reads": 1,
+      "uri": "openttd://companies"
+    },
+    {
+      "digest": "sha256:788961d9de0df5384593e143db5356f0994bf192ceedf272f27e25fc6a3d2d88",
+      "file": "towns.json",
+      "game_date": "1963-02-22",
+      "game_tick": 356550,
+      "ok": true,
+      "reads": 1,
+      "uri": "openttd://towns"
+    },
+    {
+      "digest": "sha256:6e4b9683b02ffa6ff5baeaf809d004c7c728242cd17f7ae524e38478d85df220",
+      "file": "map.json",
+      "game_date": "1963-02-22",
+      "game_tick": 356551,
+      "ok": true,
+      "reads": 3,
+      "uri": "openttd://map"
+    },
+    {
+      "digest": "sha256:0039e616b416b24f4b6017b651f21cbe422175d0233f10868cbdabf0217cc7c8",
+      "file": "stations.json",
+      "game_date": "1963-02-22",
+      "game_tick": 356553,
+      "ok": true,
+      "reads": 1,
+      "uri": "openttd://stations"
+    },
+    {
+      "digest": "sha256:50292133b8cbb828b179ef66f9237759d7a9b3fd5dc49308c9a365fbf6c36690",
+      "file": "map__ways.json",
+      "game_date": "1963-02-23",
+      "game_tick": 356555,
+      "ok": true,
+      "reads": 2,
+      "uri": "openttd://map/ways"
+    },
+    {
+      "digest": "sha256:c4320fb6f30cb8e28ca53dc7f8363f9becea095b5023ba052254e71068aa5240",
+      "file": "engines.json",
+      "game_date": "1963-02-23",
+      "game_tick": 356559,
+      "ok": true,
+      "reads": 1,
+      "uri": "openttd://engines"
+    },
+    {
+      "digest": "sha256:330cabb3a696183c0cd8e16f69c8339fc8060f959276bce8d8a7d3af479d291e",
+      "file": "economy__prices.json",
+      "game_date": "1963-02-23",
+      "game_tick": 356560,
+      "ok": true,
+      "reads": 2,
+      "uri": "openttd://economy/prices"
+    },
+    {
+      "digest": "sha256:b57d0e5152daf55110e387500f49b32469fcd6a8e228084ae05c7bad2fa3b6b7",
+      "file": "world__graph.json",
+      "game_date": "1963-02-23",
+      "game_tick": 356564,
+      "ok": true,
+      "reads": 1,
+      "uri": "openttd://world/graph"
+    },
+    {
+      "digest": "sha256:83fa037111775653985fa535661f79d9953181161c520a03aeedda61b42057d9",
+      "file": "map__terrain.json",
+      "game_date": "1963-02-23",
+      "game_tick": 356582,
+      "ok": true,
+      "reads": 1,
+      "uri": "openttd://map/terrain"
+    },
+    {
+      "digest": "sha256:e482bc909935b6bf9c1b21d4f6395804abc635470624f0d1275829d89199bcbc",
+      "file": "bridges.json",
+      "game_date": "1963-02-23",
+      "game_tick": 356588,
+      "ok": true,
+      "reads": 1,
+      "uri": "openttd://bridges"
+    }
+  ],
+  "schema": "mcp-plan-capture/v1",
+  "source": "panel",
+  "window": {
+    "coherent": false,
+    "date_from": "1963-02-22",
+    "date_to": "1963-02-23",
+    "tick_from": 356549,
+    "tick_to": 356588
+  }
+}

@@ -75,7 +75,7 @@ be the panel's and the hub's both (`game.month`), as two rows with their own pro
 | `game.sample` | panel | `panel.rs:record_sample` | `{t, date, vehicles, fleet, towns, paused, companies: [{id, name, is_ai, money, value, loan, net, fleet}]}` | once per new game day (fills the store's `samples`) |
 | `ai.log` | panel | `panel.rs:read_log` | `{company, level, text}` | a console line `[script:N] [C] [L] text`, as the server prints it |
 | `console.line` | panel | `panel.rs:read_log` | `{line}` | every other console line |
-| `news.shown` | panel | `panel.rs:watch_news` | the news item object | each news item once, read every 2 s from the GUI client |
+| `news.shown` | panel | `panel.rs:watch_news` | the news item object: text, type, style, date; advice and refs (vehicle, station, tile, industry, town, engine) when the game has them | each news item once, read every 2 s from the GUI client |
 | `ask.answered` | panel | `panel.rs:ask_answers` | the question with its answer | once per answer |
 | `panel.server` | panel | `panel.rs:Game::event` | `{text}` | the server starts, exits, reports its script budget |
 | `panel.mcp` | panel | `panel.rs:Game::event` | `{text}` | the MCP server comes up; a tool call waits for approval |

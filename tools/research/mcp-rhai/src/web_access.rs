@@ -1,5 +1,5 @@
 //! RESEARCH-ONLY. Who may use the web surface of the panel and the hub: one policy, one function
-//! (ADR 0037). The panel's POST guard, its game WebSocket bridge, the hub's HTTP and the hub's
+//! (ADR 0038). The panel's POST guard, its game WebSocket bridge, the hub's HTTP and the hub's
 //! WebSocket all call [`judge`]; nothing else decides it. A second, narrower copy of the origin
 //! check once refused every button of a panel opened as `localhost` (owner, 2026-11-22).
 //!

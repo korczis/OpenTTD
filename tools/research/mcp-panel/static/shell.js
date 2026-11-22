@@ -56,7 +56,7 @@
   }
 
   /* ---- the one page kit: every page script takes these from here (PanelKit, components.js), never
-     a copy of its own (rule project.web-ui-is-covered-end-to-end, ADR 0037) ------------------------- */
+     a copy of its own (rule project.web-ui-is-covered-end-to-end, ADR 0038) ------------------------- */
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const $ = (id) => document.getElementById(id);
   /** A Flowbite toast in the corner (#toasts, made on the first one): what a control did, or why it failed. Errors

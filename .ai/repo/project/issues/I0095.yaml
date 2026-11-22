@@ -1,0 +1,58 @@
+id: I0095
+milestone: prismatic-steers-a-company-through-the-bridge
+title: "Typed contracts make Battlebrain the one authority for the freight-line decision: a record envelope on the mesh kinds, an AlgoGlyph invocation envelope with discovery, and a decision block in the bridge contract"
+slug: battlebrain-contracts
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Define, in this fork, the smallest versioned contracts the freight-line decision needs (every ~90 game days: next freight line or HOLD): the records it writes to the Majordomus mesh blackboard (observation, hypothesis, plan, decision, outcome) with their legal transitions, the envelope of every AlgoGlyph kernel call with kernels discovered from the runner's own catalogue, and a decision block in the directive that names the policy, the snapshot, the chosen and rejected candidates and an idempotency key. Fixtures and tests make unknown versions, unknown kernels, malformed output, missing provenance and illegal transitions fail closed."
+why: "The 2026-11-22 audit found eleven places that choose an investment, no snapshot or idempotency on the planned start, kernels called by hard-coded name with no version, and a silent knapsack fallback labelled as the kernel. The owner chose the freight-line hybrid as the first decision type and wants prismatic-platform and algoglyph used from outside only, so every contract lives here."
+scope:
+  - "research/battlebrain/**"
+  - "tools/research/schema/**"
+  - "research/prismatic-bridge/decision-contract.schema.json"
+  - "research/prismatic-bridge/decision-contract.example.json"
+  - "tools/research/mcp-rhai/Cargo.toml"
+  - "tools/research/mcp-rhai/Cargo.lock"
+  - "tools/research/mcp-rhai/src/battlebrain_contract.rs"
+  - "tools/research/mcp-rhai/src/bin/battlebrain.rs"
+non_scope:
+  - "Any change in prismatic-platform or algoglyph (owner, 2026-11-22: used from outside only)"
+  - "Shadow mode, cutover and any game mutation (Phase 03 and later)"
+  - "Wiring the planner, the panel or PrismaticAI to the contracts"
+depends_on: []
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#a-decision-contract-is-defined"
+acceptance_criteria:
+  - "tools/research/schema/battlebrain-record.v1.schema.json and algoglyph-invocation.v1.schema.json exist, with valid and invalid fixtures"
+  - "decision-contract.schema.json carries an optional, version-gated decision block (battlebrain-decision/v1), and its example still validates"
+  - "cargo test --offline --bin battlebrain proves: every valid fixture is accepted, every invalid one is refused with a structured reason; illegal status transitions are refused; a kernel absent from the discovered catalogue, an unknown schema version and an output that fails its domain check are refused"
+  - "research/battlebrain/README.md holds the dataflow and the authority matrix, and points to the transitions generated into the record schema (x-transitions) instead of copying them"
+validation:
+  - "cargo test --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain"
+  - "majordomus plan validate"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+started_at: 2026-11-22T08:25:07Z
+started_event: sha256:4fe94ca850d4e982cf634f51d5edad95003b5d88bffdec3111eb17294d3e2700
+updated_at: 2026-11-22T08:32:03Z
+verified_at: 2026-11-22T08:25:11Z
+verified_event: sha256:3f56a050c76b5152842578a487f2834461fc72f54f0764ae1c2ade228e75860d
+completed_at: 2026-11-22T08:32:03Z
+completed_event: sha256:5bb5c824f522fe6c72d4cfdf081347c7a1ce665be9d54007c195f1a529ee0e5f
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "cargo test --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain; majordomus plan validate; tools/gate.sh change"
+    result: "battlebrain 11/11 tests PASS (8 valid fixtures accepted, 20 invalid refused with their codes, committed schemas equal the generated ones, transitions closed, only battlebrain writes a decision, knapsack/track-plan domain checks); plan validate 0 failures; gate change PASS (build + ctest + surfaces + refs). NOT RUN: decision-contract.example.json against the edited schema with a JSON Schema validator (none installed); the edit only adds an optional property, so validity is DERIVED, not proven."
+    artifact: "worktree OpenTTD-wt/feature/battlebrain-contracts at f7b71d8, uncommitted"
+    commit: f7b71d8b3d3bf3dc192eaa19f98ba1006dd11ecb
+    recorded_at: 2026-11-22T08:25:14Z
+  - covers: "validation_run"
+    type: test
+    command: "python -m jsonschema (4.26.0, scratchpad venv) -i research/prismatic-bridge/decision-contract.example.json research/prismatic-bridge/decision-contract.schema.json; Draft202012Validator.check_schema on the three schemas; every fixture against its schema"
+    result: "example PASS; the record, invocation and contract schemas are valid draft 2020-12; 8/8 valid fixtures PASS their JSON Schema; 13/20 invalid fixtures are refused by the JSON Schema alone, the other 7 (writer, provenance link, id digest, catalogue membership) only by the Rust validator, which refuses all 20 (cargo test)"
+    artifact: "worktree OpenTTD-wt/feature/battlebrain-contracts, uncommitted"
+    commit: f7b71d8b3d3bf3dc192eaa19f98ba1006dd11ecb
+    recorded_at: 2026-11-22T08:31:56Z

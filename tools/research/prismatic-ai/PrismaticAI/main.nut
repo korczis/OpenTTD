@@ -103,6 +103,7 @@ require("steward.nut");
 require("autopilot.nut");
 require("catchment.nut");
 require("statues.nut");
+require("growth.nut");
 
 /* Cheapest buildable road engine that carries a passenger-class cargo. */
 function PrismaticAI::PickPassengerEngine() {
@@ -298,6 +299,7 @@ function PrismaticAI::Behaviour() {
 		freight = PrismaticAI.FreightLines(),
 		line_budget = AIController.GetSetting("line_budget"),
 		own_lines = AIController.GetSetting("own_lines"),
+		planned_freight_only = AIController.GetSetting("planned_freight_only"),
 		self_steward = AIController.GetSetting("self_steward"),
 		autopilot = AIController.GetSetting("autopilot"),
 		/* Strategy knobs: every one is an AI setting, so the tilde console (`bot set`), MCP
@@ -327,6 +329,8 @@ function PrismaticAI::Behaviour() {
 		invest_borrow = AIController.GetSetting("invest_borrow"),
 		air_add_waiting = AIController.GetSetting("air_add_waiting"),
 		rail_twin_max = AIController.GetSetting("rail_twin_max"),
+		rail_grow_max = AIController.GetSetting("rail_grow_max"),
+		rail_feed = AIController.GetSetting("rail_feed"),
 		rail_double = AIController.GetSetting("rail_double"),
 	};
 	/* Autopilot (default on): a bot nobody gave a plan (no planner line, air or rail pair) grows on
@@ -404,7 +408,8 @@ function PrismaticAI::Start() {
 		AIR_LEVEL_STEP = b.air_level_step;
 		local knobs = "aggressiveness=" + b.aggressiveness + " max_routes=" + b.max_routes + " cash_reserve=" + b.cash_reserve +
 			" intercity=" + b.intercity + " self_steward=" + b.self_steward + " own_lines=" + b.own_lines +
-			(b.autopiloted ? " autopilot=engaged" : (b.grows ? " autopilot=growth-on-plan" : ""));
+			(b.autopiloted ? " autopilot=engaged" : (b.grows ? " autopilot=growth-on-plan" : "")) +
+			(b.planned_freight_only == 1 ? " planned_freight_only=1" : "");
 		if (knobs != last) {
 			AILog.Info("PrismaticAI behaviour: " + knobs);
 			last = knobs;
@@ -491,9 +496,11 @@ function PrismaticAI::Start() {
 		 * after line on a map whose stations had no way out, held the whole loan and ended at value 1. */
 		local year_now = AIDate.GetYear(AIDate.GetCurrentDate());
 		if (year_now != this.own_failed_year) { this.own_failed_year = year_now; this.own_failed = 0; }
-		if (!frozen && handed_done && !pair_open && this.own_built < own_cap && (b.own_fail_pause == 0 || this.own_failed < b.own_fail_pause) &&
+		/* planned_freight_only (RESEARCH-ONLY): one authority outside the bot decides every freight
+		 * line, so the bot plans none of its own; the handed-over lines above still get built. */
+		if (!frozen && b.planned_freight_only == 0 && handed_done && !pair_open && this.own_built < own_cap && (b.own_fail_pause == 0 || this.own_failed < b.own_fail_pause) &&
 				money + headroom_own >= b.line_budget) {
-			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried);
+			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried, b.rail_feed);
 			if (own != null) {
 				this.freight_tried[own.from + "-" + own.to + "-" + own.cargo] <- true;
 				this.own_built++;
@@ -505,6 +512,8 @@ function PrismaticAI::Start() {
 				if (PrismaticAI.BuildFreightRailRoute(own.from, own.to, own.cargo, PrismaticAI.RailShape(b, true)) > 0) {
 					this.routes++;
 					this.own_failed = 0;
+					/* Multi-source: the cluster the planner scored joins the new source station (growth.nut). */
+					if (b.rail_feed > 0) this.FeedNewLine(RAIL_LINES.len(), b.rail_feed);
 				} else {
 					this.own_failed++;
 					AICompany.SetLoanAmount(loan_before);
@@ -562,6 +571,8 @@ function PrismaticAI::Start() {
 		if (b.self_steward == 1 && PrismaticAI.MonthKey() != this.month) {
 			this.SelfSteward();
 			if (!frozen) this.TwinLines(b);
+			if (!frozen) this.GrowPlatforms(b);
+			if (!frozen) this.FeedStations(b);
 		}
 		this.ReconcileLines(b.cash_reserve);
 		if (PrismaticAI.MonthKey() != this.month) { this.month = PrismaticAI.MonthKey(); PrismaticAI.LogLines(); }

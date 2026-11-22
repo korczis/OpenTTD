@@ -1,0 +1,69 @@
+{
+  "at": {
+    "date": "1963-02-22",
+    "tick": 356549
+  },
+  "body": {
+    "digest": "sha256:2e948007679fedab97218d4f0d69a0e8b4a3db7aceba5ceb9784781c4ae56e2c",
+    "max_age_days": 31,
+    "sources": [
+      {
+        "digest": "sha256:e482bc909935b6bf9c1b21d4f6395804abc635470624f0d1275829d89199bcbc",
+        "uri": "openttd://bridges"
+      },
+      {
+        "digest": "sha256:5db5cc66679499ac123c83187bbcb9d36c347d7d950ea5e81796d16b87e9c546",
+        "uri": "openttd://companies"
+      },
+      {
+        "digest": "sha256:330cabb3a696183c0cd8e16f69c8339fc8060f959276bce8d8a7d3af479d291e",
+        "uri": "openttd://economy/prices"
+      },
+      {
+        "digest": "sha256:c4320fb6f30cb8e28ca53dc7f8363f9becea095b5023ba052254e71068aa5240",
+        "uri": "openttd://engines"
+      },
+      {
+        "digest": "sha256:6e4b9683b02ffa6ff5baeaf809d004c7c728242cd17f7ae524e38478d85df220",
+        "uri": "openttd://map"
+      },
+      {
+        "digest": "sha256:83fa037111775653985fa535661f79d9953181161c520a03aeedda61b42057d9",
+        "uri": "openttd://map/terrain"
+      },
+      {
+        "digest": "sha256:50292133b8cbb828b179ef66f9237759d7a9b3fd5dc49308c9a365fbf6c36690",
+        "uri": "openttd://map/ways"
+      },
+      {
+        "digest": "sha256:0039e616b416b24f4b6017b651f21cbe422175d0233f10868cbdabf0217cc7c8",
+        "uri": "openttd://stations"
+      },
+      {
+        "digest": "sha256:788961d9de0df5384593e143db5356f0994bf192ceedf272f27e25fc6a3d2d88",
+        "uri": "openttd://towns"
+      },
+      {
+        "digest": "sha256:b57d0e5152daf55110e387500f49b32469fcd6a8e228084ae05c7bad2fa3b6b7",
+        "uri": "openttd://world/graph"
+      }
+    ],
+    "window": {
+      "coherent": false,
+      "tick_from": 356549,
+      "tick_to": 356588
+    }
+  },
+  "id": "bb:4ad83bc20036020b056a88384db4f3c7b063e7032d8c0cbbbceb7b02d59a79dc",
+  "producer": {
+    "id": "mcp-plan",
+    "version": "capture/v1"
+  },
+  "schema": "battlebrain-record/v1",
+  "scope": {
+    "company": 3,
+    "instance": "coplay-8800"
+  },
+  "status": "current",
+  "type": "snapshot"
+}

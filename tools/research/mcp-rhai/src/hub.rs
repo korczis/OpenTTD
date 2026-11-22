@@ -1115,7 +1115,7 @@ fn serve_http(state: Shared, mut stream: TcpStream, statics: &Path) {
     }
     let body = &buf[header_end..buf.len().min(header_end + length)];
     let json_ct = "application/json";
-    // Who may ask, from where (src/web_access.rs, ADR 0037), before anything is served.
+    // Who may ask, from where (src/web_access.rs, ADR 0038), before anything is served.
     let headers: Vec<(String, String)> = head.lines().skip(1)
         .filter_map(|l| l.split_once(':').map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))).collect();
     let token = target.split_once('?').and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("token=")));

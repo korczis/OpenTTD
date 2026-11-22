@@ -26,7 +26,7 @@ enforced; the existing debt removed and new debt prevented; no duplicate impleme
 
 Every page check passed while every button of a page opened as `localhost` was dead. The server
 refused their POSTs with 403. A second, narrower copy of the origin check caused the refusal, and
-each page's own copy of `api()` swallowed it (ADR 0037).
+each page's own copy of `api()` swallowed it (ADR 0038).
 
 # Required behaviour
 
@@ -85,4 +85,4 @@ stack is a validation claim without evidence.
 # Related
 
 Rules `project.panel-items-are-routable-pages`, `project.never-report-unrun-validation-as-pass` and
-`project.extend-and-integrate-before-adding`; ADR 0037; `research/mcp-control.md`.
+`project.extend-and-integrate-before-adding`; ADR 0038; `research/mcp-control.md`.

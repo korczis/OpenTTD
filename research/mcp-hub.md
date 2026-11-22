@@ -28,7 +28,7 @@ tools/research/mcp-rhai/target/release/mcp-hub --bus-port 8791 --no-store       
 ```
 
 Beyond loopback the hub takes the panel's access flags and policy (`--bind`, `--allow-origin`,
-`--token`; [mcp-control.md](mcp-control.md#who-may-use-it-locally-on-the-lan-on-the-web-adr-0037)).
+`--token`; [mcp-control.md](mcp-control.md#who-may-use-it-locally-on-the-lan-on-the-web-adr-0038)).
 
 ## The surface
 

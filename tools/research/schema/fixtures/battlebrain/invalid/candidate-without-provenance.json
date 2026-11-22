@@ -1,0 +1,50 @@
+{
+ "case": "a candidate naming no input",
+ "expect": "missing_provenance",
+ "value": {
+  "at": {
+   "date": "1961-01-01",
+   "tick": 74010
+  },
+  "body": {
+   "action": {
+    "kind": "freight_line",
+    "settings": {
+     "fr_cargo": 1,
+     "fr_from": 12,
+     "fr_to": 31
+    }
+   },
+   "assumptions": [
+    "load factor 0.7",
+    "no competitor at the producer"
+   ],
+   "estimate": {
+    "cost": {
+     "unit": "money",
+     "value": 61500
+    },
+    "profit": {
+     "unit": "money_per_year",
+     "value": 52000
+    }
+   },
+   "inputs_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+   "invocations": [
+    "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+   ]
+  },
+  "id": "bb:743acec58d2474021b4c214ed541a312b0f6926d270b3ab94b6c3771a0c43284",
+  "producer": {
+   "id": "mcp-plan",
+   "version": "v4"
+  },
+  "schema": "battlebrain-record/v1",
+  "scope": {
+   "company": 1,
+   "instance": "research-fixture"
+  },
+  "status": "proposed",
+  "type": "candidate"
+ }
+}

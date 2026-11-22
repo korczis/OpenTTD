@@ -1,0 +1,177 @@
+{
+  "availability": "available",
+  "data": {
+    "companies": [
+      {
+        "company_value": 5647102,
+        "custom_name": "korCZis Transport",
+        "fleet": {
+          "aircraft": 19,
+          "road": 0,
+          "ship": 0,
+          "total": 37,
+          "train": 18
+        },
+        "id": 0,
+        "inaugurated_year": 1950,
+        "is_ai": true,
+        "loan": 0,
+        "loan_step": 10000,
+        "max_loan": 300000,
+        "money": 5133732,
+        "money_unit": "internal_currency",
+        "name": "korCZis Transport"
+      },
+      {
+        "company_value": 19315218,
+        "custom_name": "AAAHogEx",
+        "fleet": {
+          "aircraft": 41,
+          "road": 432,
+          "ship": 1,
+          "total": 594,
+          "train": 120
+        },
+        "id": 1,
+        "inaugurated_year": 1950,
+        "is_ai": true,
+        "loan": 0,
+        "loan_step": 10000,
+        "max_loan": 300000,
+        "money": 12516370,
+        "money_unit": "internal_currency",
+        "name": "AAAHogEx"
+      },
+      {
+        "company_value": 260725,
+        "custom_name": "LuDiAI AfterFix",
+        "fleet": {
+          "aircraft": 0,
+          "road": 50,
+          "ship": 0,
+          "total": 50,
+          "train": 0
+        },
+        "id": 2,
+        "inaugurated_year": 1950,
+        "is_ai": true,
+        "loan": 10000,
+        "loan_step": 10000,
+        "max_loan": 300000,
+        "money": 8514,
+        "money_unit": "internal_currency",
+        "name": "LuDiAI AfterFix"
+      },
+      {
+        "company_value": 1,
+        "custom_name": "Branwell City Engineering",
+        "fleet": {
+          "aircraft": 0,
+          "road": 0,
+          "ship": 0,
+          "total": 1,
+          "train": 1
+        },
+        "id": 3,
+        "inaugurated_year": 1950,
+        "is_ai": true,
+        "loan": 300000,
+        "loan_step": 10000,
+        "max_loan": 300000,
+        "money": 155297,
+        "money_unit": "internal_currency",
+        "name": "Branwell City Engineering"
+      },
+      {
+        "company_value": 301842,
+        "custom_name": "AdmiralAI Transport",
+        "fleet": {
+          "aircraft": 0,
+          "road": 72,
+          "ship": 0,
+          "total": 78,
+          "train": 6
+        },
+        "id": 4,
+        "inaugurated_year": 1950,
+        "is_ai": true,
+        "loan": 300000,
+        "loan_step": 10000,
+        "max_loan": 300000,
+        "money": 57127,
+        "money_unit": "internal_currency",
+        "name": "AdmiralAI Transport"
+      },
+      {
+        "company_value": 981035,
+        "custom_name": "",
+        "fleet": {
+          "aircraft": 3,
+          "road": 17,
+          "ship": 0,
+          "total": 25,
+          "train": 5
+        },
+        "id": 5,
+        "inaugurated_year": 1950,
+        "is_ai": true,
+        "loan": 0,
+        "loan_step": 10000,
+        "max_loan": 300000,
+        "money": 711965,
+        "money_unit": "internal_currency",
+        "name": "Renfingbourne Bridge Transport"
+      },
+      {
+        "company_value": 1914489,
+        "custom_name": "",
+        "fleet": {
+          "aircraft": 8,
+          "road": 9,
+          "ship": 0,
+          "total": 22,
+          "train": 5
+        },
+        "id": 6,
+        "inaugurated_year": 1950,
+        "is_ai": true,
+        "loan": 0,
+        "loan_step": 10000,
+        "max_loan": 300000,
+        "money": 1594913,
+        "money_unit": "internal_currency",
+        "name": "Sindingbury Transport"
+      },
+      {
+        "company_value": 2980027,
+        "custom_name": "",
+        "fleet": {
+          "aircraft": 12,
+          "road": 18,
+          "ship": 0,
+          "total": 47,
+          "train": 17
+        },
+        "id": 7,
+        "inaugurated_year": 1950,
+        "is_ai": true,
+        "loan": 0,
+        "loan_step": 10000,
+        "max_loan": 300000,
+        "money": 2342640,
+        "money_unit": "internal_currency",
+        "name": "Wunnington Transport"
+      }
+    ]
+  },
+  "game_date": "1962-05-29",
+  "game_mode": "normal",
+  "game_tick": 336603,
+  "next_cursor": null,
+  "protocol_version": "2025-11-25",
+  "redactions": [],
+  "schema_version": "1.0",
+  "source": "OpenTTD",
+  "source_revision": "20261122-research-coplay-mf7b71d8b3d",
+  "truncated": false
+}

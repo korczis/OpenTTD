@@ -84,7 +84,7 @@ its own:
 | The chance that a new line pays | AlgoGlyph `bayes-update` on this company's own lines a year old: earned or lost |
 | The months to pay back the portfolio's investment | AlgoGlyph `pert-monte-carlo`, optimistic, likely and pessimistic at the posterior's upper end, mean and lower end |
 | The verdict | a switch only when the lower end is at least `MIN_PAYS` (0.5) and 80 % of the draws pay back within `HORIZON_MONTHS` (24) |
-| The changes | `build_plan::apply`: only settings that differ from the bot's live ones, each approval-gated |
+| The changes | `build_plan::apply`: only settings that differ from the bot's live ones, each approval-gated. Nothing new is proposed while an earlier change for the company still waits for the owner, or while another planner holds the company: the shared key `planner.<company>` names it (unset or `replan`: this service) |
 | The record | the shared blackboard `replan.<company>` (a `rhai.shared` event, so on the bus and in the store), and a `plan` record on the Majordomus mesh when the panel has a mesh session |
 
 The planner's call prices up to 16 rail lines with AlgoGlyph and took 3 min 10 s at load 50, so the
@@ -99,6 +99,10 @@ proposed, each waiting for approval. The round in January 1954 found the plan eq
 settings. In that round track-planning found a route on the map for none of the 21 rail lines, so
 no line went to the bot unpriced and the round held. Mesh records: NOT RUN, because the panel had
 no `$MAJORDOMUS_URL`.
+
+On 2026-11-22 the first version proposed again every round. The plan's `fr*` slots changed
+from round to round, so the proposals did not collapse onto earlier ones, and about 130 waited unanswered.
+That is why a round now holds while anything waits.
 
 The payback is only as good as the planner's monthly profit, and the planner over-predicts
 ([`the-planner-overpredicts-what-a-line-earns`](../../.ai/repo/knowledge/curated/the-planner-overpredicts-what-a-line-earns.md)).
