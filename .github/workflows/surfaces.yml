@@ -60,8 +60,8 @@ jobs:
       - name: Check regions, links and anchors
         run: tools/surfaces/surfaces check
 
-      - name: refresh-branch keeps a branch current with master (every path, scratch repositories)
-        run: python3 -m unittest tools/surfaces/test_refresh_branch.py
+      - name: The generator's own tests (refresh-branch, site-only facts; scratch repositories)
+        run: python3 -B -m unittest discover -s tools/surfaces -p 'test_*.py'
 
       - name: Check the README scoreboard against research/results
         run: tools/research/readme-scoreboard --check
@@ -82,6 +82,11 @@ jobs:
         env:
           CHROME: /usr/bin/google-chrome
         run: tools/surfaces/diagrams-check
+
+      - name: Every declared page works in Chrome, light and dark, desktop and phone (tools/surfaces/README.md)
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: tools/surfaces/pages-check
 
       - name: Build the wiki
         run: tools/surfaces/surfaces wiki
@@ -105,8 +110,9 @@ jobs:
 
   # Keeps every same-repository pull request current with master: merges master into its branch,
   # regenerates the derived regions, pushes the result as a fast-forward (never a force), and
-  # dispatches this workflow on the branch, because a push made with GITHUB_TOKEN starts no
-  # workflow; the dispatched run reports "Check and build" on the new head. On a pull request it
+  # dispatches this workflow and Research Rust on the branch, because a push made with GITHUB_TOKEN
+  # starts no workflow; the dispatched runs report "Check and build" and "Research Rust tests" on
+  # the new head. On a pull request it
   # refreshes that branch; on a push to the default branch, every open pull request with auto-merge.
   refresh:
     name: Refresh branches against master
@@ -152,6 +158,8 @@ jobs:
             set -e
             if [ $rc -eq 3 ]; then
               gh workflow run surfaces.yml -R "$GITHUB_REPOSITORY" --ref "$b"
+              # The other check a pull request's new head needs (.github/workflows/research-rust.yml).
+              gh workflow run research-rust.yml -R "$GITHUB_REPOSITORY" --ref "$b"
             fi
           done
 

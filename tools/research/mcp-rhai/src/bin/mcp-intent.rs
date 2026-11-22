@@ -10,6 +10,9 @@ mod graph;
 mod plan;
 #[path = "../cargo.rs"]
 mod cargo;
+#[allow(dead_code)]
+#[path = "../battlebrain_contract.rs"]
+mod battlebrain_contract;
 #[path = "../intent.rs"]
 mod intent;
 
@@ -37,6 +40,15 @@ fn read(base: &str, token: &Option<(String, String)>, name: &str) -> Result<serd
         }
     };
     Ok(v.get("data").cloned().unwrap_or(v))
+}
+
+/// The value of a key of the panel's shared memory (src/rhai_shared.rs), None when it is unset.
+fn shared_value(base: &str, key: &str) -> Result<Option<serde_json::Value>, String> {
+    match ureq::get(&format!("{base}/api/rhai/shared?key={key}")).timeout(Duration::from_secs(30)).call() {
+        Ok(r) => Ok(r.into_json::<serde_json::Value>().map_err(|e| format!("{key}: {e}"))?.get("value").cloned()),
+        Err(ureq::Error::Status(404, _)) => Ok(None),
+        Err(e) => Err(format!("{key}: {e}")),
+    }
 }
 
 fn main() {
@@ -110,7 +122,14 @@ fn main() {
         } else {
             serde_json::Value::Null
         };
-        let ans = intent::answer(&parsed, &world, &p, &bot);
+        // One author per freight-line slot: the value of the company's planner key in the panel's
+        // shared memory (unset: None, and the answer is as before). Over --token there is no panel
+        // to ask, so the key cannot be read and the answer is as before as well.
+        let holder = match (&token, intent::bot_company(&bot)) {
+            (None, Some(c)) => shared_value(&panel, &intent::fr_author::planner_key(c))?,
+            _ => None,
+        };
+        let ans = intent::answer_held(&parsed, &world, &p, &bot, holder.as_ref());
         let reads = reads::json();
         Ok(serde_json::json!({"intent": parsed, "answer": ans, "vocabulary_size": vocab.len(), "vocabulary_from": lang_dir, "reads": reads}))
     })();

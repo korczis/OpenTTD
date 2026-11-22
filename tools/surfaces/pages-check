@@ -1,0 +1,122 @@
+#!/usr/bin/env node
+// Every declared page of the published site works in a real Chrome (playwright-core): each page
+// surfaces.toml declares under [[pages.items]] (listed by the built site in data/pages.json) is
+// opened in four contexts, desktop and phone width, light and dark, and must
+//   - reach data-state="ready" on its mount (#page-app), never "error", without a fixed wait;
+//   - throw no page error and log no console error;
+//   - not scroll sideways at 390 px;
+//   - link only to files the site holds (relative links) or to the forge.
+// Then the page's own scenario (its `e2e` module) drives what the page offers: filters, selection,
+// deep links, maximize and Escape, reduced motion, empty and error states, evidence links.
+//
+// Usage: tools/surfaces/pages-check [SITE_DIR] [--shots DIR]
+//   SITE_DIR  a built site (tools/surfaces/surfaces site; default target/web/site)
+//   --shots   a full-page screenshot per page and context, taken once the page reports ready
+// Exit 0 when every page passes, 1 when one does not (each failure named), 2 on bad usage.
+// Pages are served from SITE_DIR over a loopback HTTP server the check starts and stops itself.
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+
+const here = path.dirname(new URL(import.meta.url).pathname);
+const root = path.resolve(here, '..', '..');
+const req = createRequire(path.join(root, 'tools', 'research', 'mcp-panel', 'package.json'));
+const { chromium } = req('playwright-core');
+const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+const argv = process.argv.slice(2);
+if (argv.includes('-h') || argv.includes('--help')) {
+  console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1).filter((l) => l.startsWith('//')).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+  process.exit(0);
+}
+const shotsAt = argv.indexOf('--shots');
+const shots = shotsAt >= 0 ? argv[shotsAt + 1] : '';
+if (shotsAt >= 0 && !shots) { console.error('pages-check: --shots needs a directory'); process.exit(2); }
+const unknown = argv.filter((a, i) => a.startsWith('-') && a !== '--shots' && i !== shotsAt + 1);
+if (unknown.length) { console.error('pages-check: unknown flag ' + unknown.join(' ')); process.exit(2); }
+const site = path.resolve(argv.find((a, i) => !a.startsWith('-') && !(shotsAt >= 0 && i === shotsAt + 1)) || path.join(root, 'target', 'web', 'site'));
+const listing = path.join(site, 'data', 'pages.json');
+if (!fs.existsSync(listing)) { console.error(`pages-check: no ${listing} (run tools/surfaces/surfaces site)`); process.exit(2); }
+const pages = JSON.parse(fs.readFileSync(listing, 'utf8'));
+if (shots) fs.mkdirSync(shots, { recursive: true });
+
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' };
+const server = http.createServer((q, r) => {
+  const p = path.join(site, decodeURIComponent(new URL(q.url, 'http://x').pathname));
+  const f = fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, 'index.html') : p;
+  if (!f.startsWith(site) || !fs.existsSync(f)) { r.writeHead(404); r.end(); return; }
+  r.writeHead(200, { 'Content-Type': TYPES[path.extname(f)] || 'application/octet-stream' });
+  fs.createReadStream(f).pipe(r);
+});
+await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+const base = `http://127.0.0.1:${server.address().port}/`;
+
+const CONTEXTS = [
+  { name: 'desktop-light', viewport: { width: 1440, height: 900 }, colorScheme: 'light' },
+  { name: 'desktop-dark', viewport: { width: 1440, height: 900 }, colorScheme: 'dark' },
+  { name: 'mobile-light', viewport: { width: 390, height: 844 }, colorScheme: 'light', isMobile: true, hasTouch: true },
+  { name: 'mobile-dark', viewport: { width: 390, height: 844 }, colorScheme: 'dark', isMobile: true, hasTouch: true },
+];
+
+const failures = [];
+const results = [];
+const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox'] });
+
+/** Open `url` in a fresh context; resolve once the mount reports ready or error. */
+async function open(url, opts = {}) {
+  const ctx = await browser.newContext(opts);
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text() + (m.location().url ? ' (' + m.location().url + ')' : '')); });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#page-app[data-state="ready"], #page-app[data-state="error"]', { timeout: 60000 });
+  return { ctx, page, errors };
+}
+
+function check(name, ok, detail = '') {
+  results.push({ name, ok, detail });
+  if (!ok) failures.push(name + (detail ? ': ' + detail : ''));
+  console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail ? ' — ' + detail : ''));
+}
+
+for (const p of pages) {
+  const url = base + p.page;
+  for (const c of CONTEXTS) {
+    const tag = `${p.id} ${c.name}`;
+    try {
+      const { ctx, page, errors } = await open(url, c);
+      const state = await page.getAttribute('#page-app', 'data-state');
+      check(`${tag}: ready`, state === 'ready', state === 'ready' ? '' : 'state ' + state);
+      const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      check(`${tag}: no sideways scroll`, wide <= 1, wide > 1 ? `${wide}px too wide` : '');
+      const dark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
+      check(`${tag}: theme`, dark === (c.colorScheme === 'dark'));
+      if (c.name === 'desktop-light') {
+        const links = await page.$$eval('main a[href]', (as) => as.map((a) => a.getAttribute('href')));
+        const bad = links.filter((h) => h && !/^(https?:|mailto:|#|\?)/.test(h)).map((h) => h.split(/[?#]/)[0]).filter(Boolean)
+          .filter((h) => !fs.existsSync(path.join(site, path.normalize(h))));
+        check(`${tag}: relative links resolve`, !bad.length, bad.slice(0, 5).join(', '));
+      }
+      if (shots) await page.screenshot({ path: path.join(shots, `${p.id}-${c.name}.png`), fullPage: true });
+      check(`${tag}: no page or console error`, !errors.length, errors.slice(0, 3).join(' | '));
+      await ctx.close();
+    } catch (e) {
+      check(`${tag}: opens`, false, e.message.split('\n')[0]);
+    }
+  }
+  if (!p.e2e) { check(`${p.id}: has a scenario`, false, 'no e2e module declared'); continue; }
+  try {
+    const mod = await import(pathToFileURL(path.join(root, p.e2e)).href);
+    await mod.default({ browser, base, url, site, root, open, check: (n, ok, d) => check(`${p.id}: ${n}`, ok, d) });
+  } catch (e) {
+    check(`${p.id}: scenario`, false, e.stack ? e.stack.split('\n').slice(0, 2).join(' ') : String(e));
+  }
+}
+
+await browser.close();
+server.close();
+console.log(`pages-check: ${pages.length} page(s), ${results.length} check(s), ${failures.length} failed`);
+process.exit(failures.length ? 1 : 0);

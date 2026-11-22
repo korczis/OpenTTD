@@ -751,6 +751,14 @@ enum class WindowClass : uint16_t {
 	 */
 	PrismaticAsk,
 
+	/**
+	 * RESEARCH-ONLY: the Prismatic control window (prismatic_mcp_panel.cpp): the MCP server's
+	 * status, approvals waiting for the owner, decisions, questions and switches; opened only with
+	 * OPTION_PRISMATIC_MCP_SERVER, appended last so no upstream value moves. %Window numbers:
+	 *   - 0 = the list and its buttons
+	 */
+	PrismaticControl,
+
 	Invalid = 0xFFFF, ///< Invalid window.
 };
 
