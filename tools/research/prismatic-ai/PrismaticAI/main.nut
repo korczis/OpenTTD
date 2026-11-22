@@ -329,6 +329,7 @@ function PrismaticAI::Behaviour() {
 		air_add_waiting = AIController.GetSetting("air_add_waiting"),
 		rail_twin_max = AIController.GetSetting("rail_twin_max"),
 		rail_grow_max = AIController.GetSetting("rail_grow_max"),
+		rail_feed = AIController.GetSetting("rail_feed"),
 		rail_double = AIController.GetSetting("rail_double"),
 	};
 	/* Autopilot (default on): a bot nobody gave a plan (no planner line, air or rail pair) grows on
@@ -565,6 +566,7 @@ function PrismaticAI::Start() {
 			this.SelfSteward();
 			if (!frozen) this.TwinLines(b);
 			if (!frozen) this.GrowPlatforms(b);
+			if (!frozen) this.FeedStations(b);
 		}
 		this.ReconcileLines(b.cash_reserve);
 		if (PrismaticAI.MonthKey() != this.month) { this.month = PrismaticAI.MonthKey(); PrismaticAI.LogLines(); }

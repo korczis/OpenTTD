@@ -162,3 +162,76 @@ function PrismaticAI::GrowPlatforms(b) {
 		line.len_cap <- line.len;
 	}
 }
+
+/*
+ * Feeding a station from more sources (setting rail_feed): one station serves several industries.
+ *
+ * A producing industry of a line's cargo that nobody serves and that lies within reach of the line's
+ * source station gets a single rail station tile beside it, joined to that station
+ * (AIRail.BuildRailStation with the station's id; station.distant_join_stations). The tile carries no
+ * track: it only puts the industry into the station's catchment, so its cargo waits at the line's
+ * platforms and the line's trains take it, after AAAHogEx's catchment ring around airports
+ * (catchment.nut). Only a line that earns grows its sources, one industry a game month, at most
+ * rail_feed per line. It is the station side of multi-source lines: the planner (rail.nut) decides
+ * which line a cluster feeds; JoinSourceToStation does the building.
+ */
+
+/* Joins `industry` into the catchment of the station at `st_tile` with one station tile, and returns
+ * that tile or null. */
+function PrismaticAI::JoinSourceToStation(st_tile, industry, cargo) {
+	local id = AIStation.GetStationID(st_tile);
+	if (!AIStation.IsValidStation(id) || !AIIndustry.IsValidIndustry(industry)) return null;
+	if (AIGameSettings.IsValid("station.distant_join_stations") && AIGameSettings.GetValue("station.distant_join_stations") == 0) return null;
+	local spread = AIGameSettings.IsValid("station.station_spread") ? AIGameSettings.GetValue("station.station_spread") : 12;
+	local box = PrismaticAI.RailStationBox(id);
+	local tiles = AITileList_IndustryProducing(industry, AIStation.GetCoverageRadius(AIStation.STATION_TRAIN));
+	tiles.Valuate(AITile.IsBuildable);
+	tiles.KeepValue(1);
+	tiles.Valuate(PrismaticAI.FitsSpread, 1, 1, box, spread);
+	tiles.KeepValue(1);
+	/* Nearest to the station first, so the station's sign stays where its platforms are. */
+	tiles.Valuate(AITile.GetDistanceManhattanToTile, st_tile);
+	tiles.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
+	local tried = 0;
+	foreach (t, _ in tiles) {
+		if (tried++ >= 12) break;
+		if (AITile.GetSlope(t) != AITile.SLOPE_FLAT) continue;
+		if (AITile.GetCargoProduction(t, cargo, 1, 1, AIStation.GetCoverageRadius(AIStation.STATION_TRAIN)) <= 0) continue;
+		foreach (axis in [AIRail.RAILTRACK_NE_SW, AIRail.RAILTRACK_NW_SE]) {
+			if (AIRail.BuildRailStation(t, axis, 1, 1, id)) return t;
+		}
+	}
+	return null;
+}
+
+function PrismaticAI::FeedStations(b) {
+	if (!("rail_feed" in b) || b.rail_feed <= 0) return;
+	if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) < b.cash_reserve + 10000) return;
+	local reach = AIGameSettings.IsValid("station.station_spread") ? AIGameSettings.GetValue("station.station_spread") : 12;
+	reach += AIStation.GetCoverageRadius(AIStation.STATION_TRAIN);
+	foreach (i, line in RAIL_LINES) {
+		if (line.closed || !("from" in line)) continue;
+		if (!("fed" in line)) line.fed <- [];
+		if (line.fed.len() >= b.rail_feed) continue;
+		local s = this.LineStats(line);
+		if (s.trains == 0 || s.profit_last <= 0) continue;
+		local best = null, best_prod = 0;
+		foreach (p, _ in AIIndustryList_CargoProducing(line.cargo)) {
+			if (p == line.from || line.fed.find(p) != null || AIIndustry.IsBuiltOnWater(p)) continue;
+			if (AIIndustry.GetDistanceManhattanToTile(p, line.a) > reach) continue;
+			if (AIIndustry.GetLastMonthTransported(p, line.cargo) > 0) continue;
+			local prod = AIIndustry.GetLastMonthProduction(p, line.cargo);
+			if (prod > best_prod) { best_prod = prod; best = p; }
+		}
+		if (best == null) continue;
+		line.fed.push(best);
+		local t = PrismaticAI.JoinSourceToStation(line.a, best, line.cargo);
+		if (t != null) {
+			AILog.Info("PrismaticAI: rail line " + (i + 1) + " (" + line.label + ") now also takes " + AICargo.GetCargoLabel(line.cargo) +
+				" from " + AIIndustry.GetName(best) + " (" + best_prod + " a month) through a station tile at " + t);
+		} else {
+			AILog.Info("PrismaticAI: rail line " + (i + 1) + " (" + line.label + "): no station tile reaches " + AIIndustry.GetName(best));
+		}
+		return;
+	}
+}

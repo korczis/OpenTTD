@@ -402,6 +402,13 @@ class PrismaticAI extends AIInfo {
 			flags = CONFIG_INGAME,
 		});
 		AddSetting({
+			name = "rail_feed",
+			description = "Multi-source stations (growth.nut FeedStations): a rail line that earns joins up to this many more producers of its cargo, unserved and within the station spread of its source station, into that station's catchment with one station tile each, once a game month (0: off).",
+			min_value = 0, max_value = 6,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
 			name = "rail_double",
 			description = "1: the bot's own new freight lines are double track (after AAAHogEx): one one-way track each way with path signals, so a line runs many trains and the in-bot steward adds one while half a trainload waits and no train loads at the source (rail.nut BuildDoubleRailLine); 0 (default): single track, two trains a line. Default 1 since 2026-11-19: in the battle, 20 years, paired on 74 common seeds, +14.8% mean value and better in 56 of 74; 0: single track.",
 			min_value = 0, max_value = 1,
