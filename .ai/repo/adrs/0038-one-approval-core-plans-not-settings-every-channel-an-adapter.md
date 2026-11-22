@@ -124,6 +124,23 @@ peers to be consulted. Each one needs a test that proves it.
 6. **A full queue refuses.** At the cap, a new plan is refused with a reason and an event on the
    bus. A pending plan is never evicted silently.
 
+## How the channels were reduced (slice 2)
+
+The owner asked for every channel (a game command, chat and the web UI), "but rock solid … not
+several parallel implementations … reduce". A client reaches the server through chat, which is
+the protocol's existing client-to-server message. One server-side adapter
+(`PrismaticMCP::ChatApproval`) therefore serves two channels:
+
+- the chat lines `!approvals`, `!approve <id>` and `!deny <id>`;
+- the client console's `prismatic_mcp approvals|approve|deny`, which a network client sends as
+  that same private line. The toolbar's "MCP approvals waiting" item runs this console line, so
+  it comes through here too.
+
+A dedicated command type would have changed the research build's network protocol and added a
+second path to the same decision, so it was not added. A client may decide only approvals whose
+arguments name its own company; anything else is the server operator's. The answer goes to the
+asker alone, and the line is never broadcast.
+
 ## Alternatives rejected
 
 - **Keep resubmit-to-execute and teach every channel to resubmit.** This adds a resubmitter per

@@ -78,8 +78,16 @@ struct PendingApprovalInfo {
  * there is deliberately no bulk approval anywhere in this build.
  */
 std::vector<PendingApprovalInfo> PendingApprovals();
-/** Approve a pending mutation by id; returns false if not found/expired. */
+/** Approve a pending mutation by id and carry it out at once; false if not found, expired or not executed. */
 bool ApproveById(uint64_t id, std::string &message);
+/**
+ * The approval channel from inside the game (ADR 0038): a chat line from a client playing company
+ * `company` (its index; a spectator's is not a company). '!approvals' lists what waits for that
+ * company; '!approve <id> [<id> ...]' and '!deny <id> [...]' decide through ApproveById/DenyById, for
+ * approvals whose arguments name that company only. `reply` is the answer for the asker alone.
+ * @return false when the line is not one of these (it is chat as usual).
+ */
+bool ChatApproval(int company, std::string_view line, std::string &reply);
 /** Deny a pending mutation by id. */
 bool DenyById(uint64_t id, std::string &message);
 /** Machine-readable summary of the decision/provenance trace for the console. */

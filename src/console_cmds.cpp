@@ -1992,6 +1992,16 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 		IConsolePrint(CC_INFO, "Bearer token rotated (existing sessions invalidated).");
 		return true;
 	}
+	/* On a network client the approvals live on the server, not in this game's own MCP server:
+	 * 'approvals', 'approve' and 'deny' go to it as one private chat line, the approval channel from
+	 * inside the game (ADR 0038), and its answer comes back as a private message. */
+	if ((sub == "approvals" || sub == "approve" || sub == "deny") && _networking && !_network_server) {
+		std::string line = "!" + std::string(sub);
+		for (size_t i = 2; i < argv.size(); i++) line += " " + std::string(argv[i]);
+		NetworkClientSendChat(NetworkAction::ChatClient, NetworkChatDestinationType::Client, to_underlying(ClientID::Server), line);
+		IConsolePrint(CC_INFO, "Sent to the server: '{}'. Its answer arrives as a private message.", line);
+		return true;
+	}
 	if (sub == "approvals") {
 		/* One row per decision: ListApprovals() ends every row with a newline, and IConsolePrint
 		 * does not split on one, so the rows are printed line by line here. Splitting in the

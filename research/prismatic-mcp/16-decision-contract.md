@@ -39,6 +39,14 @@ tools"). Snapshot-staleness checks are staged.
   operator approves in the OpenTTD console.
 - **Argument binding**: an approval for `pause:true` does NOT authorize `pause:false` (different digest)
   — verified live. Defends the "change args after approval" abuse case.
+- **Executes on approval** (ADR 0038): `ApproveById` carries the action out at once, on the main
+  thread, through `ExecuteApproval`, the one execution path for every channel: the server console,
+  the panel's Approve (which gives that console line), and a client's chat `!approve <id>` (which
+  the client console's `prismatic_mcp approve` sends). Nothing has to resubmit the call. The queue
+  is `openttd://approvals`, which the panel reads instead of keeping its own copy.
+- **A full queue refuses**: at `MAX_APPROVALS`, decided and expired approvals are dropped. A new
+  request that still does not fit is refused with `status: refused` and the reason. A pending
+  approval is never pushed out.
 - **One-time**: on execute the approval is `Consumed`; a replay of the same approved call returns a new
   `pending_approval` — verified live. Defends replay.
 - **TTL**: approvals expire (`APPROVAL_TTL_TICKS`), bounded store (`MAX_APPROVALS`).

@@ -35,10 +35,10 @@ H="Authorization: Bearer $TOKEN"; U=http://127.0.0.1:8731/mcp
 curl -s $U -H "$H" -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"openttd.decision.validate","arguments":{"action":{"type":"game.set_pause","arguments":{"pause":true}}}}}'
 # 2. submit -> pending_approval (note approval_id)
 curl -s $U -H "$H" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"openttd.decision.submit","arguments":{"action":{"type":"game.set_pause","arguments":{"pause":true}}}}}'
-# 3. operator approves in the OpenTTD console
+# 3. the operator approves in the OpenTTD console: the server executes it at once (ADR 0038);
+#    the queue is openttd://approvals
 echo "prismatic_mcp approve 1" > /tmp/mcp_fifo
-# 4. resubmit -> executed
-curl -s $U -H "$H" -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"openttd.decision.submit","arguments":{"action":{"type":"game.set_pause","arguments":{"pause":true}}}}}'
+# 4. (no resubmit: a second submit of the same call asks for a fresh approval)
 # 5. observe the delta
 curl -s $U -H "$H" -d '{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"openttd://game/state"}}'   # data.paused: true
 # 6. provenance

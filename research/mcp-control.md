@@ -61,7 +61,7 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/rpc` | `{"method", "params"}` | raw MCP JSON-RPC with the panel's token |
 | `POST /api/console` | `{"command"}` | one OpenTTD console line and its output |
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
-| `POST /api/approve` | `{"id"}` | the operator's approval, then the resubmission; 404 for an id the panel does not hold, 409 when the game server no longer holds it, 422 when the game rejected it |
+| `POST /api/approve` | `{"id"}` | the operator's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it |
 | `POST /api/auto-approve` | `{"on": bool}` | |
 | `POST /api/rhai` | `{"script"}` | a Rhai script's output |
 | `POST /api/rhai/stream` | `{"script"}` | the same, streamed line by line (SSE `out`, `err`, `exit`) |

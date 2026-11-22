@@ -1,0 +1,92 @@
+#!/usr/bin/env node
+// RESEARCH-ONLY. The approval flow end to end (ADR 0038), against a running, disposable stack:
+//
+// 1. The web channel, through the page's own controls in Chrome. Pause on the panel's home asks
+//    for an approval. It appears under the approvals with its Approve button, read from the game
+//    server's queue (openttd://approvals), not a copy. Pressing Approve executes it on the server:
+//    the toast says "executed" and the game is paused. Resume and Approve run it back.
+// 2. A full queue refuses. The check asks for more distinct settings than the queue holds. Every
+//    pending approval stays, and the request that does not fit answers status "refused" with its
+//    reason, never by pushing one out.
+// 3. Every approval the check left pending is denied again, so the stack is left as it was found.
+//
+// The chat channel ('!approve <id>' from a client, and the client console that sends it) needs a
+// second client process: tools/research/mcp-e2e --null-client, see research/prismatic-mcp/
+// 16-decision-contract.md. It is not driven here.
+//
+// e2e-covers: panel /
+//
+// Usage: tools/research/mcp-approval-check <panel-url>   (a disposable stack: it pauses the game
+//        and fills the approval queue; tools/research/mcp-e2e --no-gui on free ports)
+// Exit 0 when every check passes, 1 otherwise, 2 on bad usage. Drives the installed Chrome through
+// playwright-core (npm ci in tools/research/mcp-panel); CHROME overrides its path.
+import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const here = path.dirname(new URL(import.meta.url).pathname);
+const { chromium } = createRequire(path.join(here, 'mcp-panel', 'package.json'))('playwright-core');
+const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const base = (process.argv[2] || '').replace(/\/$/, '');
+if (!base || base.startsWith('--')) { console.error('usage: mcp-approval-check <panel-url>'); process.exit(2); }
+
+const results = [];
+const check = (name, ok, detail = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); };
+const post = (p, body) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify(body) })
+  .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+const get = (p) => fetch(base + p).then((r) => r.json());
+const queue = async () => ((await get('/api/resources/approvals')).data || {}).approvals || [];
+const paused = async () => !!((await get('/api/resources/game/state')).data || {}).paused;
+const waitFor = async (pred, ms = 15000) => { for (let t = 0; t < ms; t += 250) { if (await pred()) return true; await new Promise((r) => setTimeout(r, 250)); } return false; };
+
+const browser = await chromium.launch({ executablePath: CHROME, headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(base + '/', { waitUntil: 'load' });
+  check('the server holds the one queue (openttd://approvals)', Array.isArray(await queue()));
+
+  // 1. Pause -> Approve -> paused, then Resume -> Approve -> running, through the page's controls.
+  for (const [button, want] of [['#btn-pause', true], ['#btn-resume', false]]) {
+    const before = new Set((await queue()).map((a) => a.id));
+    await page.click(button);
+    const row = page.locator('#pending [data-approve]').first();
+    const shown = await row.waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
+    const id = Number(await row.getAttribute('data-approve').catch(() => NaN));
+    check(`${button}: its approval waits on the page, from the server's queue`, shown && !before.has(id) && (await queue()).some((a) => a.id === id && a.state === 'pending'), `#${id}`);
+    await row.click();
+    const toast = await page.locator('[data-toast="green"]').filter({ hasText: `#${id} approved` }).first()
+      .waitFor({ timeout: 15000 }).then(() => page.locator('[data-toast="green"]').last().textContent()).catch(() => '');
+    check(`${button}: Approve executes it on the server (no resubmit)`, /executed/.test(toast), toast.trim());
+    check(`${button}: the game is ${want ? 'paused' : 'running'}`, await waitFor(async () => (await paused()) === want));
+    check(`${button}: the approval is consumed, not pending`, (await queue()).some((a) => a.id === id && a.state === 'consumed'));
+    await page.evaluate(() => document.querySelectorAll('[data-toast]').forEach((t) => t.remove()));
+  }
+  check('the page threw no error', errors.length === 0, errors.join('; '));
+
+  // 2. A full queue refuses and keeps every pending approval.
+  const ai = ((await get('/api/resources/ai')).data || {}).companies || [];
+  const bot = ai.find((c) => (c.settings || []).some((s) => s.name === 'aggressiveness'));
+  if (!bot) {
+    console.log('NOT RUN a full queue refuses: no running AI with an "aggressiveness" setting to ask for');
+  } else {
+    const cap = ((await get('/api/resources/approvals')).data || {}).capacity || 64;
+    const mine = [];
+    let refused = null;
+    for (let v = 1; v <= cap + 2 && !refused; v++) {
+      const r = await post('/api/tools/openttd.ai.set_setting', { company: bot.company ?? bot.id, name: 'aggressiveness', value: v });
+      if (r.body.status === 'pending_approval') mine.push(r.body.approval_id);
+      else if (r.body.status === 'refused') refused = r.body;
+    }
+    const pending = (await queue()).filter((a) => a.state === 'pending').map((a) => a.id);
+    check('a full queue refuses the request that does not fit', !!refused, refused ? refused.error : `${mine.length} asked, none refused`);
+    check('and keeps every pending approval', mine.every((id) => pending.includes(id)), `${mine.length} kept`);
+    for (const id of mine) await post('/api/console', { command: `prismatic_mcp deny ${id}` });
+    check('denied again, the queue holds none of them', await waitFor(async () => !(await queue()).some((a) => mine.includes(a.id) && a.state === 'pending')));
+  }
+} finally {
+  await browser.close();
+}
+const failed = results.filter((r) => !r).length;
+console.log(`${failed ? 'FAIL' : 'PASS'} mcp-approval-check: ${results.length - failed}/${results.length}`);
+process.exit(failed ? 1 : 0);

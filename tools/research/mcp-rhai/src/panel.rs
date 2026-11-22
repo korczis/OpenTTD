@@ -387,16 +387,6 @@ pub fn redact(line: &str, token: Option<&str>) -> (String, Option<String>) {
 }
 
 /// "denied #<n>" at the start of a line: an approval withdrawn or refused in the game.
-pub fn denied_id(line: &str) -> Option<i64> {
-    let rest = line.strip_prefix("denied #")?;
-    let n = rest.chars().take_while(char::is_ascii_digit).count();
-    let next = rest[n..].chars().next();
-    if n == 0 || next.map_or(false, |c| c.is_alphanumeric() || c == '_') {
-        return None;
-    }
-    rest[..n].parse().ok()
-}
-
 /// The ~ console's plan verb: "[prismatic-plan] <n> <text>".
 pub fn plan_request(line: &str) -> Option<(i64, String)> {
     let mut from = 0;
@@ -692,7 +682,8 @@ pub struct Game {
     log: Mutex<Log>,
     events: Mutex<VecDeque<Value>>,
     pub bus: Bus,
-    pending: Mutex<BTreeMap<i64, Value>>,
+    /// The approvals already announced as an event (the queue itself is the game server's, ADR 0038).
+    announced: Mutex<HashSet<i64>>,
     pub auto_approve: AtomicBool,
     pub mcp_up: AtomicBool,
     pub ai_started: AtomicBool,
@@ -721,7 +712,7 @@ impl Game {
             child: Mutex::new(None), running: AtomicBool::new(false),
             console_w: Mutex::new(Console { stdin: None, last: None }),
             token: Mutex::new(None), log: Mutex::new(Log::default()), events: Mutex::new(VecDeque::new()),
-            bus: Bus::new(), pending: Mutex::new(BTreeMap::new()),
+            bus: Bus::new(), announced: Mutex::new(HashSet::new()),
             mcp_up: AtomicBool::new(false), ai_started: AtomicBool::new(false), rpc_id: AtomicU64::new(0),
             server_tools: Mutex::new((vec![], None)), client_tools: Mutex::new((vec![], None)),
             owner_q: Mutex::new(None), plans_seen: Mutex::new(HashSet::new()), history: Mutex::new(VecDeque::new()),
@@ -797,10 +788,6 @@ impl Game {
                 let seq = log.seq;
                 log.lines.push_back((seq, line.clone()));
                 while log.lines.len() > 5000 { log.lines.pop_front(); }
-            }
-            if let Some(id) = denied_id(&line) {
-                // Withdrawn or refused in the game: no longer pending here either.
-                self.pending.lock().unwrap().remove(&id);
             }
             if let Some((n, text)) = plan_request(&line) {
                 if self.plans_seen.lock().unwrap().insert(n) {
@@ -1059,18 +1046,11 @@ impl Game {
     pub fn tool(&self, name: &str, arguments: Value) -> Result<Value, String> {
         let r = self.rpc("tools/call", Some(json!({"name": name, "arguments": arguments})))?;
         let Some(out) = content_json(&r, "/result/content/0/text") else { return Ok(json!({"error": r})) };
-        // Any tool that answers pending_approval is tracked, so the operator sees it with an Approve
-        // button and the panel can resubmit the same call once it is approved.
+        // A request that waits for the operator is announced once; the queue it waits in is the game
+        // server's (openttd://approvals), which the panel reads and never copies (ADR 0038).
         if out.get("status").and_then(Value::as_str) == Some("pending_approval") {
             if let Some(aid) = out.get("approval_id").filter(|v| !v.is_null()).and_then(|v| py_int(v).ok()) {
-                let fresh = {
-                    let mut p = self.pending.lock().unwrap();
-                    if p.contains_key(&aid) { false } else {
-                        p.insert(aid, json!({"tool": name, "args": arguments, "created": unix_now()}));
-                        true
-                    }
-                };
-                if fresh {
+                if self.announced.lock().unwrap().insert(aid) {
                     self.event("mcp", &format!("{name}({}) -> pending approval #{aid}", py_json(&arguments)));
                 }
             }
@@ -1134,40 +1114,61 @@ impl Game {
         Ok(out)
     }
 
-    /// Approve pending request `id` in the game's console and resubmit it. `by` is the channel it
-    /// came through (`api`: POST /api/approve, with the approver it declares, if any;
-    /// `auto-approve`: the panel's switch, no person), recorded so every directive step can say
-    /// how its approval was given (research/agent-loop.md, Authorize). It is provenance, not
-    /// authentication: the loopback API checks no identity.
-    pub fn approve(&self, id: i64, by: Value) -> Result<Value, String> {
-        let Some(info) = self.pending.lock().unwrap().remove(&id) else {
-            return Ok(json!({"error": format!("no pending approval #{id} known to the panel")}));
-        };
-        self.console(&format!("prismatic_mcp approve {id}"))?;
-        panel_decision::record_approval(id, by.clone());
-        self.event("operator", &format!("approved #{id} in the OpenTTD console ({})", panel_decision::approval_label(&by)));
-        thread::sleep(Duration::from_millis(500));
-        let tool = info["tool"].as_str().unwrap_or("");
-        let out = self.tool(tool, info["args"].clone())?;
-        let opt = |k: &str| out.get(k).map_or(String::new(), |v| py_str(Some(v)));
-        self.event("mcp", &format!("#{id} {tool} resubmitted -> {} {} verdict={}", py_str(out.get("status")), opt("command_result"), opt("verdict")));
-        Ok(out)
+    /// The game server's approval queue (openttd://approvals, ADR 0038): every approval it holds,
+    /// pending first; [] while the server does not answer.
+    pub fn approvals(&self) -> Vec<Value> {
+        if !self.mcp_up.load(Ordering::SeqCst) { return vec![]; }
+        self.resource("openttd://approvals").ok()
+            .and_then(|r| r.pointer("/data/approvals").and_then(Value::as_array).cloned()).unwrap_or_default()
     }
 
+    /// Approve `id` through the game's console, the operator's channel. The game server carries it
+    /// out the moment it is approved (ADR 0038): nothing is resubmitted; the panel reads back the
+    /// decision the server recorded for it. `by` is the channel it came through (`api`: POST
+    /// /api/approve, with the approver it declares, if any; `auto-approve`: the panel's switch, no
+    /// person), recorded so every directive step can say how its approval was given
+    /// (research/agent-loop.md, Authorize). It is provenance, not authentication.
+    pub fn approve(&self, id: i64, by: Value) -> Result<Value, String> {
+        let Some(a) = self.approvals().into_iter().find(|a| a["id"] == json!(id)) else {
+            return Ok(json!({"error": format!("the game server holds no approval #{id}")}));
+        };
+        if a["state"] != json!("pending") || a["expired"] == json!(true) {
+            let st = if a["expired"] == json!(true) { "expired".to_string() } else { py_str(a.get("state")) };
+            return Ok(json!({"error": format!("approval #{id} is {st}, not pending"), "approval": a}));
+        }
+        panel_decision::record_approval(id, by.clone());
+        self.console(&format!("prismatic_mcp approve {id}"))?;
+        self.event("operator", &format!("approved #{id} in the OpenTTD console ({})", panel_decision::approval_label(&by)));
+        // The decision the server recorded when it carried the approval out.
+        for _ in 0..20 {
+            thread::sleep(Duration::from_millis(150));
+            let decisions = self.resource("openttd://decisions").ok()
+                .and_then(|r| r.pointer("/data/decisions").and_then(Value::as_array).cloned()).unwrap_or_default();
+            if let Some(d) = decisions.into_iter().find(|d| d["approval_id"] == json!(id)) {
+                let mut out = d.clone();
+                let rejected = d["command_result"] == json!("rejected");
+                out["status"] = json!(if rejected { "rejected" } else { "executed" });
+                self.event("mcp", &format!("#{id} {} -> {} {} verdict={}", py_str(a.get("tool")), py_str(out.get("status")),
+                    py_str(d.get("command_result")), py_str(d.get("verdict"))));
+                return Ok(out);
+            }
+        }
+        Ok(json!({"error": format!("approved #{id} in the console, but the game server recorded no decision for it within 3 s"), "approval_id": id, "pending_decision": true}))
+    }
+
+    /// The approvals that wait for the operator, as /api/status and the scripts read them
+    /// (`status().pending`): {id, tool, args, created_tick, expires_tick}, from the server's queue.
     pub fn pending_json(&self) -> Vec<Value> {
-        self.pending.lock().unwrap().iter().map(|(k, v)| {
-            let mut m = Map::new();
-            m.insert("id".into(), json!(k));
-            if let Some(o) = v.as_object() { m.extend(o.clone()); }
-            Value::Object(m)
-        }).collect()
+        self.approvals().into_iter().filter(|a| a["state"] == json!("pending") && a["expired"] != json!(true))
+            .map(|a| json!({"id": a["id"], "tool": a["tool"], "args": a["args"], "created_tick": a["created_tick"], "expires_tick": a["expires_tick"]}))
+            .collect()
     }
 
     fn auto_loop(self: Arc<Self>) {
         loop {
             thread::sleep(Duration::from_secs(1));
             if self.auto_approve.load(Ordering::SeqCst) {
-                let ids: Vec<i64> = self.pending.lock().unwrap().keys().copied().collect();
+                let ids: Vec<i64> = self.pending_json().iter().filter_map(|a| a["id"].as_i64()).collect();
                 for id in ids {
                     let _ = self.approve(id, json!({"channel": "auto-approve"}));
                 }
@@ -2187,13 +2188,11 @@ fn h_approve(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     let id = py_int(&i.body["id"])?;
     let out = g.approve(id, json!({"channel": "api", "declared": declared}))?;
     // An approval that did not take is an error the owner sees (the page's one API client shows a
-    // non-2xx answer), never a 200 with an error inside: unknown here, or forgotten by the game
-    // server so that the resubmission only asked again (ADR 0038 replaces resubmission altogether).
+    // non-2xx answer), never a 200 with an error inside.
     Ok(match out.get("status").and_then(Value::as_str) {
-        _ if out.get("error").is_some() && out.get("approval_id").is_none() => (404, out),
-        Some("pending_approval") => (409, json!({"error": format!(
-            "the game server no longer holds approval #{id} (it keeps only the newest); the same change waits again as #{}",
-            py_str(out.get("approval_id"))), "answer": out})),
+        _ if out.get("pending_decision").is_some() => (504, out),
+        _ if out.get("approval").is_some() => (409, out),
+        _ if out.get("error").is_some() => (404, out),
         Some("rejected") => (422, out),
         _ => (200, out),
     })
@@ -2379,7 +2378,7 @@ pub fn routes() -> Vec<Route> {
           s(json!({"ids": {"type": "array", "items": {"type": "integer"}}, "wait": {"type": "number"}}), &["ids"]), h_content_download),
         r("POST", "/api/pause", "pause", "Pause or resume through the approval-gated MCP tool", true,
           s(json!({"pause": {"type": "boolean"}}), &["pause"]), h_pause),
-        r("POST", "/api/approve", "approve", "The operator's approval of a pending decision, then its resubmission; `by` names the approver it declares (recorded as the approval's channel and declared name in plan.directive_outcome, not checked: the loopback API authenticates no one)", true,
+        r("POST", "/api/approve", "approve", "The operator's approval of a pending decision, which the game server carries out at once (ADR 0038): the decision it recorded, 404 for an approval it does not hold, 409 for one not pending, 422 when the game rejected it; `by` names the approver it declares (recorded as the approval's channel and declared name in plan.directive_outcome, not checked: the loopback API authenticates no one)", true,
           s(json!({"id": {"type": "integer"}, "by": st()}), &["id"]), h_approve),
         r("POST", "/api/auto-approve", "autoApprove", "The owner's full-auto switch", false,
           s(json!({"on": {"type": "boolean"}}), &["on"]), h_auto),
@@ -3526,9 +3525,6 @@ mod tests {
         assert_eq!(found.as_deref(), Some(tok));
         assert_eq!(redact(&format!("echo {tok}"), Some(tok)).0, "echo <REDACTED>");
         assert!(find_token("Bearer token (x): abc").is_none(), "too short for a token");
-        assert_eq!(denied_id("denied #12 by the operator"), Some(12));
-        assert_eq!(denied_id("denied #12x"), None);
-        assert_eq!(denied_id("not denied #12"), None);
         assert_eq!(plan_request("dbg: [prismatic-plan] 61206 najdi les"), Some((61206, "najdi les".into())));
         assert_eq!(plan_request("[prismatic-plan] x [prismatic-plan] 7 b"), Some((7, "b".into())));
         assert_eq!(plan_request("[prismatic-plan] 7 "), None);

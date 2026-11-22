@@ -72,11 +72,11 @@ fn start_ai(name, settings) {
     if settings == "" { con_start_ai(name) } else { con_start_ai(`${name} ${settings}`) }
 }
 
-/// Pause or resume through MCP: submit, wait for the operator's approval, resubmit, and check the
-/// effect. Returns the executed answer, or throws when no approval arrives within `seconds`.
+/// Pause or resume through MCP: submit, wait for the operator's approval (the game server carries
+/// it out the moment it is given, ADR 0038), and check the effect. Returns the executed answer, or throws when no approval arrives within `seconds`.
 fn set_pause(on, seconds) {
     // Through the panel, so the request shows up under "Pending approvals" with an Approve
-    // button; the panel resubmits it once approved.
+    // button; approving it executes it on the game server.
     let first = pause(on);
     if first.status == "executed" { return first; }
     let id = first.approval_id;
