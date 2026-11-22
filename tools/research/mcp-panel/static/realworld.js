@@ -6,7 +6,7 @@
    click (POST /api/realworld/compile). The map goes through the one door (components.js ecInit), is
    a row of CHARTS, keeps its filters and selection in the address and maximizes (Escape restores). */
 
-import { ecInit, maximizable, UI, CLS, $, esc, whole, INK, AXIS as axis, patchAddress, badge } from './components.js';
+import { ecInit, maximizable, UI, CLS, $, esc, api, whole, INK, AXIS as axis, patchAddress, badge } from './components.js';
 
 /** The page's echarts, read when the map is drawn (a test installs its fake after importing). */
 const echartsNow = () => globalThis.echarts;
@@ -124,11 +124,11 @@ export function filterEntities(entities, q) {
 const stat = (label, v, sub, href) => `<div class="${CLS.card} mb-0"><p class="text-sm text-gray-500 dark:text-gray-400">${esc(label)}</p>
   <p class="mt-1 ${UI.cardTitle} sm:text-2xl">${href ? `<a class="hover:underline" href="${esc(href)}">${esc(v)}</a>` : esc(v)}</p><p class="text-xs text-gray-500 dark:text-gray-400">${esc(sub)}</p></div>`;
 const evBadge = (ev) => badge(ev, EV_TONE[ev] || 'gray');
-const api = (op) => `<a href="/docs#/default/${op}" class="text-sm text-primary-600 hover:underline dark:text-primary-500">API</a>`;
+const apiLink = (op) => `<a href="/docs#/default/${op}" class="text-sm text-primary-600 hover:underline dark:text-primary-500">API</a>`;
 
 /** /realworld; exported so a test can mount it in a fresh document (test/realworld.test.mjs). */
 export async function listPage() {
-  const d = await (await fetch('/api/realworld')).json();
+  const d = await api('/api/realworld');
   const rows = (d.scenarios || []).map((s) => {
     const ent = Object.entries(s.compiled?.entities || {}).map(([k, v]) => `${v} ${k}`).join(', ');
     return `<tr class="border-b dark:border-gray-700">
@@ -139,7 +139,7 @@ export async function listPage() {
       <td class="px-3 py-2">${esc(s.compiled?.error || ent)}</td></tr>`;
   }).join('') || '<tr><td class="px-3 py-2" colspan="5">no place snapshot yet</td></tr>';
   $('page').innerHTML = `<div class="${CLS.card}">
-    <div class="${UI.cardHead} mb-3"><h2 class="${UI.cardHeadTitle} ${UI.cardTitle}">Places <span class="${UI.cardSub}">(${esc(d.count ?? 0)})</span></h2>${api('realWorld')}</div>
+    <div class="${UI.cardHead} mb-3"><h2 class="${UI.cardHeadTitle} ${UI.cardTitle}">Places <span class="${UI.cardSub}">(${esc(d.count ?? 0)})</span></h2>${apiLink('realWorld')}</div>
     <p class="mb-3 text-sm text-gray-500 dark:text-gray-400">Each is a snapshot under tools/research/real-world/fixtures, compiled offline with ${esc(d.rules || 'the rules')}. A new place: <code>tools/research/real-world/rw-scenario acquire --live --query "…" --out …</code></p>
     <div class="${UI.tableWrap}"><table class="${UI.table}"><thead class="${UI.thead}"><tr><th class="px-3 py-2">Query</th><th class="px-3 py-2">Resolved to</th><th class="px-3 py-2">Map</th><th class="px-3 py-2">Features</th><th class="px-3 py-2">Game entities by evidence</th></tr></thead>
     <tbody id="rw-rows">${rows}</tbody></table></div></div>`;
@@ -180,9 +180,8 @@ function detailHtml(d, id) {
 /** /realworld/<name>; exported for the same reason. */
 export async function placePage(name) {
   const state = getState();
-  const r = await fetch('/api/realworld/scenario?name=' + encodeURIComponent(name));
-  if (!r.ok) { $('page').innerHTML = `<div class="${CLS.card}">No such place. <a class="underline" href="/realworld">All places</a>.</div>`; return; }
-  const d = await r.json();
+  const d = await api('/api/realworld/scenario?name=' + encodeURIComponent(name));
+  if (!d.ok) { $('page').innerHTML = `<div class="${CLS.card}">No such place. <a class="underline" href="/realworld">All places</a>.</div>`; return; }
   const sc = d.scenario;
   $('crumbs')?.insertAdjacentHTML('beforeend', `<li class="text-gray-400">/</li><li class="text-gray-500 dark:text-gray-400">${esc(name)}</li>`);
   const cand = d.resolution.candidates.find((c) => c.id === d.resolution.chosen);
@@ -197,14 +196,14 @@ export async function placePage(name) {
     <div id="rw-map-card" data-maximize="rw-map" data-chart="rw-map" class="${CLS.card} flex flex-col">
       <div class="${UI.cardHead} mb-3">
         <div class="${UI.cardHeadTitle}"><h2 class="${UI.cardTitle}">Terrain, features, entities and links</h2><p class="mt-2 ${UI.cardSub}">Source elevation as the ground; grey dots are source features, marks are game entities (circle town, square industry, triangle landmark), lines economy edges; the legend filters by evidence class; Ctrl+wheel zooms</p></div>
-        <div data-toolbar class="flex flex-wrap items-center gap-2">${api('realWorldScenario')}</div>
+        <div data-toolbar class="flex flex-wrap items-center gap-2">${apiLink('realWorldScenario')}</div>
       </div>
       <div id="rw-map" role="img" aria-label="The place's terrain with its source features, game entities and economy edges, coloured by evidence class" class="w-full h-96 sm:h-[32rem] grow"></div>
     </div>
     <div class="grid gap-4 xl:grid-cols-2">
       <div class="${CLS.card}"><h2 class="mb-3 ${UI.cardTitle}">Selected</h2><div id="rw-detail" aria-live="polite"></div></div>
       <div class="${CLS.card}">
-        <div class="${UI.cardHead} mb-3"><h2 class="${UI.cardHeadTitle} ${UI.cardTitle}">Artifacts</h2>${api('realWorldCompile')}</div>
+        <div class="${UI.cardHead} mb-3"><h2 class="${UI.cardHeadTitle} ${UI.cardTitle}">Artifacts</h2>${apiLink('realWorldCompile')}</div>
         <p class="mb-3 text-sm text-gray-500 dark:text-gray-400">heightmap.png, towns.json, the RealWorldScenario GameScript, openttd.cfg, preview.svg, scenario.json and SHA256SUMS, written to build-real-world/${esc(name)}/. Offline and deterministic.</p>
         <button id="rw-compile" type="button" class="${UI.primary}">Write the artifacts</button>
         <pre id="rw-compile-out" class="mt-3 p-3 max-h-64 overflow-auto text-xs whitespace-pre-wrap bg-gray-50 rounded-lg dark:bg-gray-900 text-gray-800 dark:text-gray-200"></pre>
@@ -260,9 +259,8 @@ export async function placePage(name) {
   $('rw-compile').onclick = async () => {
     const b = $('rw-compile');
     b.disabled = true;
-    const r2 = await fetch('/api/realworld/compile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-    const o = await r2.json();
-    $('rw-compile-out').textContent = r2.ok ? `${o.out}\n${o.sha256sums}\nmatches the recorded hashes: ${o.matches_recorded}\n${o.next}` : (o.error || `HTTP ${r2.status}`);
+    const o = await api('/api/realworld/compile', { name });
+    $('rw-compile-out').textContent = o.ok ? `${o.out}\n${o.sha256sums}\nmatches the recorded hashes: ${o.matches_recorded}\n${o.next}` : (o.error || `HTTP ${o.status}`);
     b.disabled = false;
   };
   const box = $('rw-map-card');
