@@ -1,0 +1,37 @@
+id: I0132
+milestone: prismatic-ai-grows-its-fleet-and-survives-its-own-failures
+title: "The PrismaticAI self-steward lineup spends its money instead of hoarding, rejoins fitness.must_not_hoard, and its fleet economics are measured against its no-steward control"
+slug: prismatic-ai-self-steward-spends
+priority: p1
+profile: deep-work
+parallel_safe: false
+objective: "Find why the self-steward lineup's route builds fail and InvestSurplus finds nothing to buy on the fitness seed, fix it so the lineup passes the hoard check, put it back into fitness.must_not_hoard, and record held-start pairs of self_steward=1 against self_steward=0 so its renewals, line closures and train lengthening are shown to pay or reported as inconclusive."
+why: "External review 2026-11-22 (digests B-28, C-25, C-29). PR #46 (4c1dc9c355) recorded that `PrismaticAI self-steward` held 27 vehicles and built nothing while its money rose from 485k to 1.1M (1963-65): its air routes were `not built`, own lines found `no freight route`, and more purchases per heartbeat changed nothing (research/ai-battle/README.md:329-336). It was therefore left out of must_not_hoard (tools/research/ai-battle/battle.json:86-89) while still in must_be_healthy (battle.json:81-85). The steward's fleet economics (close a losing line, lengthen trains, renew; tools/research/mcp-panel/rhai/rail_steward.rhai:9-16, applied in-bot by steward.nut) have no controlled before/after against a company that does not re-optimise."
+scope:
+  - "tools/research/prismatic-ai/PrismaticAI/steward.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/autopilot.nut"
+  - "tools/research/prismatic-ai/PrismaticAI/main.nut"
+  - "tools/research/ai-battle/battle.json"
+  - "research/ai-battle/README.md"
+  - "research/results/**"
+non_scope:
+  - "Narrowing the hoard rules (hoard_floor, hoard_window) to make the lineup pass"
+  - "The panel's live rail_steward.rhai service and its approval flow"
+depends_on:
+  - I0126
+  - I0130
+serves:
+  - "the-research-bot-competes-and-its-losses-are-explained#prismatic-ai-grows-and-recovers"
+acceptance_criteria:
+  - "The cause of the failing builds is named in research/ai-battle/README.md with the log lines that show it (I0125's gate lines and I0130's cleanup lines)"
+  - "`PrismaticAI self-steward` is in fitness.must_not_hoard and `battle.py fitness` passes"
+  - "Held-start pairs on three seeds compare self_steward=1 with self_steward=0 (same field, same seed) and are recorded under research/results/; the README states the result, or inconclusive when it lies inside the opponent's spread"
+validation:
+  - "python3 -c \"import json;f=json.load(open('tools/research/ai-battle/battle.json'))['fitness'];assert 'PrismaticAI self-steward' in f['must_not_hoard']\""
+  - "python3 tools/research/ai-battle/battle.py fitness"
+  - "python3 tools/research/ai-battle/battle.py check"
+evidence_required:
+  - validation_run
+  - artifact
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

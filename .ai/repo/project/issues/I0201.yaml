@@ -1,0 +1,29 @@
+id: I0201
+milestone: the-live-agent-workbench
+title: "The /ui page is checked to render the client's windows, and an owner-armed reversible widget click from the browser is read back from the client"
+slug: ui-armed-click-journey
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Close what I0052's evidence left unchecked: add a journey to mcp-journey-check that opens /ui against a disposable stack with a GUI client, asserts the windows and widgets drawn match openttd.ui.windows (input off), and, only when the stack was started armed (mcp-e2e --arm-input), clicks one reversible widget (open and close a window) from the browser and reads the result back from the client's own openttd.ui.windows. Unarmed, the click must be refused and the window list unchanged."
+why: "External review 2026-11-22 (digest A-22). .ai/repo/project/issues/I0052.yaml:43 records '/ui opened in the browser but its rendering and an armed click were not checked'. tools/research/mcp-view-check:241-249 checks the armed pointer through the API with curl and only that /ui answers 200; no browser drives a /ui widget."
+scope:
+  - "tools/research/mcp-journey-check"
+  - "tools/research/mcp-panel/static/ui.js"
+  - "tools/research/mcp-panel/test/ui.test.mjs"
+non_scope:
+  - "Arming input on a game the owner plays; arming stays the owner's switch and the journey runs only on a stack it started"
+depends_on:
+  - I0199
+serves:
+  - "openttd-validates-agent-driven-engineering#the-workbench-drives-the-game-end-to-end"
+acceptance_criteria:
+  - "Unarmed: /ui draws every window openttd.ui.windows lists, a click is refused, and the list is unchanged"
+  - "Armed: a click opens a window, the client's openttd.ui.windows lists it, a second click closes it, and the list returns to its start"
+validation:
+  - "node --test tools/research/mcp-panel/test/"
+  - "tools/research/mcp-view-check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

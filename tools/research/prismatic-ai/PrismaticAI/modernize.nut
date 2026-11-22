@@ -253,16 +253,14 @@ function PrismaticAI::Modernize(b) {
 }
 
 /* Accept every engine preview the game offers: a year of a new engine before anyone else, which
- * PickRailEngines, PickPlane and SuccessorEngine then find buildable. This is the bot's only event
- * consumer (no other file reads AIEventController); every other event is dropped unread. */
+ * PickRailEngines, PickPlane and SuccessorEngine then find buildable. The previews come from
+ * events.nut HandleEvents, the bot's one reader of AIEventController, which keeps them here. */
 function PrismaticAI::AcceptPreviews() {
-	while (AIEventController.IsEventWaiting()) {
-		local e = AIEventController.GetNextEvent();
-		if (e == null || e.GetEventType() != AIEvent.ET_ENGINE_PREVIEW) continue;
-		local p = AIEventEnginePreview.Convert(e);
+	foreach (p in PENDING_PREVIEWS) {
 		local name = p.GetName();
 		if (p.AcceptPreview()) AILog.Info("PrismaticAI: modernize: accepted the preview of " + (name == null ? "an engine" : name));
 	}
+	PENDING_PREVIEWS.clear();
 }
 
 /* Not rich (rich.nut): the bot's own replacement rules are lifted, so money that is not idle

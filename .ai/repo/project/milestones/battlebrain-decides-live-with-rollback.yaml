@@ -1,0 +1,21 @@
+id: battlebrain-decides-live-with-rollback
+title: "Battlebrain owns the freight-line decision live, behind gates and a rollback switch"
+slug: battlebrain-decides-live-with-rollback
+order: 140
+priority: p1
+problem: "Battlebrain's contracts (I0095), shadow mode (I0096) and live gates with a rollback command (I0097, PR #43) are on master, but nothing has reached a game (research/battlebrain/README.md:7). None of the three real captures is coherent (README:152-154), so the Phase 04 gate (README:169-182) cannot pass; the live decision is not yet applied through the atomic, expiring openttd.ai.set_settings approval (cd63f1ca1d, PR #57) that exists for it; the legacy freight-slot writers (tools/research/mcp-rhai/src/panel_bot.rs:482-587, intent.rs) still hand fr_* slots and the executor still applies a directive without a decision block (named as gap B2 by open PR #55); shadow runs only when someone invokes it and the panel shows no Battlebrain decision; the authority matrix (README:50-58) omits mcp-human's own town-pair/bus/loan heuristics (tools/research/mcp-human/src/economy.rs:1-5); cargo.rs adopts a knapsack-dp answer without its domain check (PR #55 gap B7), transport-investment has no domain check at all (tools/research/mcp-rhai/src/battlebrain_contract.rs:529, :807); the AlgoGlyph serve blocks every caller on a hung kernel and is never restarted (tools/research/mcp-rhai/src/flow_serve.rs:59-71, :90-91, :104-117); and no metric, baseline duel or red-team review of Battlebrain exists (research/results holds only battlebrain-shadow records)."
+outcome: "Three coherent captures have every divergence classified and none is a defect. For a company Battlebrain owns, the only freight-slot write is one expiring openttd.ai.set_settings approval carrying its live decision. One live decision is applied on the owner's game, its outcome recorded, and the rollback switch returns the bot to the baseline, read back from the game. Battlebrain runs continuously in shadow as a read-only Director shown on the panel; every investment selector is in the authority matrix; every kernel output Battlebrain or the planner consumes passes a domain check; the serve has a deadline and restarts; Battlebrain is measured against a fixed baseline on held-start pairs and passes a red-team review; and only then does it choose computations by typed capability."
+acceptance_criteria:
+- "Three coherent captures (window one tick) with classified divergences, none defect, are recorded under research/results/"
+- "A live Battlebrain decision is applied through one openttd.ai.set_settings approval whose expires_tick is the decision's stale date, and no other writer sets an fr_* slot for that company"
+- "One live decision on the owner's game is recorded with its outcome, and battlebrain rollback is exercised and verified from the game's own setting values"
+- "Battlebrain shadow runs as a service on coherent captures and the panel shows its latest decision"
+- "Provenance share, stale-plan rejections, shadow agreement and held-start duel pairs on three seeds against a fixed baseline are recorded"
+- "A red-team review record lists every attack tried on the live path and its result"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain --bin mcp-panel --bin mcp-plan"
+- "tools/gate.sh change"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

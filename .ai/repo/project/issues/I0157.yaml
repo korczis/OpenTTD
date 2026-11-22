@@ -1,0 +1,29 @@
+id: I0157
+milestone: battlebrain-decides-live-with-rollback
+title: "The authority matrix lists every investment selector the ADR 0037 audit found, mcp-human's town-pair, bus and loan heuristics included, each as an executor of a Battlebrain decision or as its own named decision type with an owner"
+slug: every-selector-in-the-authority-matrix
+priority: p2
+profile: implementation
+parallel_safe: false
+objective: "Complete the authority matrix of research/battlebrain/README.md from ADR 0037's eleven selectors: add rows for mcp-human economy.rs (new town pairs, buses, loan), the intent build path, the Rhai steward and replan.rhai, each with the component that decides today and its target owner. Where the target is 'executor of a Battlebrain decision', name the decision type and the issue that moves it; where it stays separate, say why. The authority_boundaries tests (PR #55) read the matrix so a selector missing from it fails."
+why: "External review 2026-11-22 (digest B-10). ADR 0037 (.ai/repo/adrs/0037-battlebrain-in-this-fork-is-the-one-authority-for-the-freigh.md:22-27) lists eleven selectors, but the matrix in research/battlebrain/README.md:50-58 has seven rows and none for tools/research/mcp-human/src/economy.rs:1-5 ('serve new town pairs while money allows, add buses..., borrow...'), the intent build or the Rhai steward. Open PR #55 encodes the freight-line boundaries only; this issue extends coverage, it does not duplicate them."
+scope:
+  - "research/battlebrain/README.md"
+  - "tools/research/mcp-rhai/src/authority_boundaries.rs"
+non_scope:
+  - "Moving mcp-human's decisions under Battlebrain (a later decision type)"
+  - "Editing ADR 0037 (accepted)"
+depends_on:
+  - I0151
+serves:
+  - "an-agent-plays-the-game-through-governed-channels#battlebrain-decides-live-with-rollback"
+acceptance_criteria:
+  - "Every selector of ADR 0037's context has a matrix row with today's owner and target owner"
+  - "A planted selector file not in the matrix fails the authority_boundaries tests"
+validation:
+  - "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin battlebrain"
+  - "tools/surfaces/surfaces check"
+evidence_required:
+  - validation_run
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

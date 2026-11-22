@@ -6,7 +6,8 @@
   "idempotency_key": "research-fixture:1:1961-01-02:freight",
   "mode": "shadow",
   "policy": "freight-margin@1",
-  "schema": "battlebrain-decision/v2",
+  "schema": "battlebrain-decision/v3",
+  "settings_digest": "sha256:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
   "snapshot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "valid_until": "1961-02-01"
  }

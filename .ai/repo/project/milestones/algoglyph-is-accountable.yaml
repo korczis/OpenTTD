@@ -1,0 +1,22 @@
+id: algoglyph-is-accountable
+title: "AlgoGlyph is accountable: cost fixtures, plan receipts, predicted versus actual, fault injection"
+slug: algoglyph-is-accountable
+order: 200
+priority: p2
+problem: "AlgoGlyph's track-planning prices the planner's best rail lines on the game's own map and prices (tools/research/mcp-rhai/src/linecost.rs:1-10, research/mcp-control.md:999-1021), and mcp-human lays a kernel plan's pieces, bridges and tunnels through the game window (tools/research/mcp-human/src/rail.rs:445-500). Nothing holds those prices to account: linecost.rs has one test (:104) and hub_algoglyph.rs six (:151-208), none comparing a kernel price with what the game charges for the same pieces, which `openttd.decision.validate` already answers in test mode without an approval (src/prismatic_mcp/prismatic_mcp_server.cpp:750-754); a built tunnel has never been seen (research/mcp-control.md:1021). No record reports the estimate of a built line against the money it took; calibration compares profit only (tools/research/mcp-rhai/src/calibrate.rs:7-8). The caller-side envelope of a kernel call exists (tools/research/schema/algoglyph-invocation.v1.schema.json, I0095), but linecost.rs and the hub's algoglyph.track_plan do not emit it, and no receipt ties a track plan to its observed build or lets it be replayed. The hub's kernel timeout (hub_algoglyph.rs:23, :78-80) and the answer parser (:87-90) are the only failure paths with code, and no test injects a fault on the plan-to-build path. The Brno real-world scenario is compiled, licensed and load-checked (research/real-world-scenario.md:20-36), but no planner or bot has played it."
+outcome: "Every track plan the fork uses is accountable: a fixture matrix (straight, bend, slope, bridge, tunnel, blocked, level crossing, each rail type) holds the kernel's route and price to the game's own test-mode price, with track cost apart from stations, vehicles and inflation. A line planned by track-planning and laid by mcp-human reports its estimate, the money actually spent and the delta, or REFUTED or NOT VERIFIED with the reason. Each plan leaves a receipt (kernel, catalogue, input and resource digests, game tick, plan digest, step receipts, expected and observed effects, measurement quality) that replays to the same plan digest. Injected faults on the plan-to-build path each end in an explicit refusal or mismatch. The same loop runs on the Brno scenario, and the Director page charts forecast against actual."
+acceptance_criteria:
+- "A committed fixture matrix of at least eight cases passes offline against the pinned AlgoGlyph checkout, each comparing the kernel's money with the game's recorded test-mode cost within a stated tolerance; without AlgoGlyph the tests report NOT RUN"
+- "One built line has a committed record with estimate, actual, delta and verdict, and its measurement window states what else could have moved the money"
+- "A plan-receipt/v1 record validates with `battlebrain validate`, links its algoglyph-invocation/v1 envelopes and the execution's step receipts, and a replay reproduces its plan digest"
+- "A fault suite covers AlgoGlyph missing, timeout, malformed output, a tick change between plan and build, a partial build and a command accepted but never confirmed, each with an explicit refusal or mismatch"
+- "The planner and the bot have played the Brno scenario for a stated period, and its record reports predicted against actual"
+- "The Director page charts forecast against actual per line, each mark linked to its receipt"
+validation:
+- "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+- "cargo test --release -q --manifest-path tools/research/mcp-human/Cargo.toml"
+- "node --test tools/research/mcp-panel/test/*.test.mjs"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

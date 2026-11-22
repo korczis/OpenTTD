@@ -1,0 +1,22 @@
+id: the-planner-reads-one-coherent-priced-world
+title: "The planner reads one coherent world and prices it from the game"
+slug: the-planner-reads-one-coherent-priced-world
+order: 130
+priority: p1
+problem: "Only `mcp-plan --capture` takes its world at one game tick (PR #44, tools/research/mcp-rhai/src/bin/mcp-plan.rs:483); every live plan, every `mcp-intent` answer (tools/research/mcp-rhai/src/bin/mcp-intent.rs:20-24) and the hub's `algoglyph.track_plan` (tools/research/mcp-rhai/src/hub_algoglyph.rs:116, research/mcp-hub.md:91-93) still read their resources one after another while the game runs, and a plan carries no snapshot identity that an executor could re-check before a setting applies. The world the planner sees is also thinner than the game: openttd://vehicles orders carry only type and destination (src/prismatic_mcp/prismatic_mcp_entities.cpp:62-68), openttd://stations has no platforms (src/prismatic_mcp/prismatic_mcp_world.cpp:319-343), and there is no subsidies resource (src/prismatic_mcp/prismatic_mcp_server.cpp:329-350). Revenue is priced from a hand copy of the payment formula (tools/research/mcp-rhai/src/plan.rs:84-100, :195) instead of the game's own quote; profit is calibrated per station pair (tools/research/mcp-rhai/src/calibrate.rs:5-6), which cannot measure a two-leg service; no transfer service has been proven to deliver; and transport-investment and knapsack-dp still decide on live input only (tools/research/mcp-rhai/src/kernel_feed.rs:142, panel.rs:2123)."
+outcome: "Every planner path reads its world at one game tick or refuses and says why, and every plan names the snapshot it was made on; a plan-derived setting change is re-checked against the game before it applies. Vehicles expose their order load/unload/transfer flags, stations their platforms, and subsidies are a read-only resource the investment model values as a time-bounded candidate. Revenue is priced from the game's own income quote, a transport service is a typed contract with ordered legs, profit is calibrated per service, and one two-leg transfer service is proven on a server to pay at its final acceptor. Transport-investment and knapsack-dp read stored history, and a sentence asking for the two largest towns is ranked by population, priced per mode and built after approval."
+acceptance_criteria:
+- "mcp-plan (live), mcp-intent and algoglyph.track_plan each take their reads from one openttd.resources.read_many call or refuse with a stated reason, and their answer carries {game_tick, digest, coherent}"
+- "A plan-derived setting change whose snapshot no longer matches the game is refused before any setting applies"
+- "openttd://vehicles orders carry load, unload and transfer flags; openttd://stations carries platforms per station; openttd://subsidies exists and is read-only"
+- "Planner revenue comes from the game's own income quote, and a test fails when the copied formula and the quote differ"
+- "transport-service/v1 is a committed schema with fixtures; calibration reads services, not station pairs"
+- "A two-leg transfer service through one shared station is verified on a server: cargo unloaded as transfer, carried on, paid once at the final acceptor"
+- "kernel_feed.rs FEEDS has rows for transport-investment and knapsack-dp, and their plan.* events cite a store query"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan --bin mcp-intent --bin mcp-hub --bin mcp-panel --bin mcp-kernel-feed"
+- "tools/gate.sh change"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'

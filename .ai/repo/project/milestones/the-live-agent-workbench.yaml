@@ -1,0 +1,24 @@
+id: the-live-agent-workbench
+title: "The live agent workbench: in-game commands, Rhai revisions with rollback, AlgoGlyph flows"
+slug: the-live-agent-workbench
+order: 180
+priority: p2
+problem: "The in-game console reaches the agent only through the intent resolver: `plan` queues an 'ask' in openttd://ui/requests or prints a [prismatic-plan] line (src/console_cmds.cpp:2158-2185), and only mcp, bot and plan (aliases ask, do, ai) are registered (src/console_cmds.cpp:3500-3506); there is no generic route to a panel or hub operation and no /chat, /cancel, /rhai or /flow. A Rhai service hot-reloads from validated text and a failed reload keeps the old run (tools/research/mcp-rhai/src/panel_scripts.rs:256-295), but there is no revision to pin, activate or roll back to. AlgoGlyph kernels reach the hub and Rhai only through one generic call (tools/research/mcp-rhai/src/hub_algoglyph.rs:45-55, tools/research/mcp-rhai/src/main.rs:293-297), and the panel's 'Plan (DAG)' card is read-only (tools/research/mcp-panel/static/index.html:118-133). The monthly replan (tools/research/mcp-panel/rhai/replan.rhai) gates on payback but has no cooldown or hysteresis. A duel can be started but not cancelled (panel.rs:2346, :2361), research profile runs are not on the panel, and no browser check drives pause, a bot-settings change or an armed /ui click through to an independent readback."
+outcome: "The operator works the game from one workbench. The ~ console takes /ask, /chat, /plan, /do, /bot, /status, /cancel, /rhai and /flow through one non-blocking bridge to any panel or hub operation, without shadowing an upstream command. A Rhai service runs a pinned immutable revision, a new one activates atomically, a bad one is refused without losing the running one, and a rollback restores the previous. AlgoGlyph kernels appear one by one on every surface, and a CodeMirror-and-D3 flow editor edits a versioned flow both as graph and as text and runs it pinned to a revision. The replan loop holds a cooldown and a hysteresis band and records a typed HOLD. Research runs are launched, followed, cancelled and reloaded from the browser. Browser journeys prove pause/resume, a bot-settings change and an armed /ui click, each confirmed by a fresh read from the game."
+acceptance_criteria:
+- "Every listed console command reaches its canonical operation through one bridge, the game loop never waits on it, and upstream console commands (status, say, ...) keep their behaviour; a console test covers each"
+- "A Rhai service's revisions are immutable and addressable; activate, reject and rollback are proven while a run is in flight, from the panel API, Rhai and the console"
+- "A throwaway fixture kernel appears in the hub catalogue, OpenAPI, Rhai completion and the flow palette with no hand edit"
+- "The flow editor round-trips graph to text to graph identically, refuses a cycle and a port type mismatch, and runs a flow pinned to its revision; a browser check drives it"
+- "A replan that would switch within its cooldown or inside its hysteresis band publishes a typed hold with its reason instead of a proposal"
+- "A duel and a research profile run are launched with typed parameters, followed, cancelled and found again after a page reload"
+- "A browser journey check drives pause, approve, readback and resume; a bot-settings change under one approval with a reread; and an armed reversible /ui click read back from the client"
+validation:
+- "cargo test --release -q --manifest-path tools/research/mcp-rhai/Cargo.toml"
+- "node --test tools/research/mcp-panel/test/"
+- "tools/gate.sh research"
+- "tools/research/mcp-scripts-check"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-22'
+updated_at: '2026-11-22'
