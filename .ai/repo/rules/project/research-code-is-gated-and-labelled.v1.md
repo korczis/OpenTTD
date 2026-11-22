@@ -28,6 +28,11 @@ baseline-release binary), and a runtime flag cannot.
 - Verify: a change to gated code is built with the gate ON, because a default build does not
   compile it: `tools/gate.sh research` (I0022). `tools/gate.sh change` names that tier when the
   change touches a file carrying a research guard.
+- Prove absence: `tools/gate.sh change` runs `strings` on the default binary it built and fails
+  on `research_status` or `RESEARCH-ONLY` in it (NOT RUN, so PARTIAL, when `build/` is
+  configured with a research option ON). `cargo test --bin battlebrain` checks that both
+  options default OFF in `cmake/Options.cmake` (rule `project.decision-authority-boundaries`,
+  B8).
 
 # Failure behaviour
 
