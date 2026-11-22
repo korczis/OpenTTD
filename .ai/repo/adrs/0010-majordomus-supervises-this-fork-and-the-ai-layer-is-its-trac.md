@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0010
 kind: adr
 title: Majordomus supervises this fork and the .ai/ layer is its tracked governance record
-status: proposed
+status: accepted
 date: 2026-11-15
 tags:
   - majordomus
@@ -16,7 +16,7 @@ related:
   - file:CLAUDE.md
   - file:GEMINI.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:81b26a6497a8f547a5f4358fa74d4e667a06560b
     - file:.ai/repo/policy.yaml
@@ -33,6 +33,8 @@ lived in commit bodies and README prose, its plan in nobody's file, and its cont
 conversations that were discarded.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 Majordomus supervises the checkout. The `.ai/` layer is tracked (a plain `majordomus init`,
 not a personal one): policy, profiles, the vendored rule baseline plus project rules, ADRs,

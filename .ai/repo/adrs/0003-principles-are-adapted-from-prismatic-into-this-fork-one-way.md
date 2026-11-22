@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0003
 kind: adr
 title: Principles are adapted from Prismatic into this fork one way, and nothing flows back automatically
-status: proposed
+status: accepted
 date: 2026-07-23
 tags:
   - prismatic
@@ -14,7 +14,7 @@ related:
   - file:AGENTS.md
   - file:tools/gate.sh
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:6b102e510a9d5ffabc0dcfe0a03473d6ebec8054
     - commit:5f9db99f0e1d738ffdc164f5e6755dae5f13cdaf
@@ -33,6 +33,8 @@ it. A validation target is only useful if it is independent of what it validates
 shaped by the tooling under test would confirm the tooling's own assumptions.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 The relationship is one-directional and at arm's length:
 

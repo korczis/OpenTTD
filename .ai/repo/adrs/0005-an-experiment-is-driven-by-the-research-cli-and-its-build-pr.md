@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0005
 kind: adr
 title: An experiment is driven by the research CLI and its build profile, runtime flags and evidence are recorded in a versioned manifest
-status: proposed
+status: accepted
 date: 2026-07-24
 tags:
   - research
@@ -16,7 +16,7 @@ related:
   - file:tools/research/test/research_test.sh
   - file:.ai/repo/adrs/0002-validation-runs-in-three-cost-tiers-behind-one-gate-script-a.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:8c4cc4fc322f036c032aa6241073f5f0e20a3b5e
     - commit:19b32cafd6c8742b0eeb266017541b07403fc75e
@@ -36,6 +36,8 @@ produce comparable records, and the comparison between an instrumented and a pla
 be part of the record, not a memory.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 An explicit experiment runs through `tools/research/research`:
 

@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0012
 kind: adr
 title: Every published surface is derived from tracked Markdown, git and the .ai layer by one generic generator
-status: proposed
+status: accepted
 date: 2026-11-15
 tags:
   - site
@@ -12,7 +12,7 @@ tags:
 supersedes:
   - adr-0009
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:tools/surfaces/surfaces.py
     - file:.github/workflows/surfaces.yml
@@ -37,6 +37,8 @@ The owner also asked for a wiki, for Markdown that stays in step with the record
 summarises, and for all of it to be enforced from the `.ai/` layer and to stay generic.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 One repository-agnostic generator, `tools/surfaces/surfaces`, derives every published
 surface from what git tracks:

@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0011
 kind: adr
 title: The fork follows upstream by rebasing its commits onto upstream master, and upstream is a fetch-only remote
-status: proposed
+status: accepted
 date: 2026-11-15
 tags:
   - upstream
@@ -15,7 +15,7 @@ related:
   - file:.ai/repo/adrs/0001-this-fork-is-a-private-research-target-and-never-interacts-w.md
   - file:.ai/repo/workflows/upstream-sync.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:81b26a6497a8f547a5f4358fa74d4e667a06560b
     - file:AGENTS.md
@@ -31,6 +31,8 @@ history would interleave 24 fork commits with hundreds of upstream ones and hide
 commits are the fork's.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 The fork follows upstream by rebasing its commits onto `upstream/master`, keeping them
 as one linear series on top of upstream.

@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0006
 kind: adr
 title: The research CLI keeps the system compiler when it supports source_location and falls back to Homebrew LLVM only when it does not
-status: proposed
+status: accepted
 date: 2026-07-24
 tags:
   - toolchain
@@ -15,7 +15,7 @@ related:
   - file:research/tooling.md
   - file:CLAUDE.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - commit:6f36288ff9cd5cd8e9a857c85575c6e75f87e350
     - commit:19b32cafd6c8742b0eeb266017541b07403fc75e
@@ -35,6 +35,8 @@ of `unknown type name 'size_t'` errors, while `tools/gate.sh` built fine with th
 compiler.
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 `configure` probes the system compiler first with a compile-only test
 (`cxx_supports_source_location`) and falls back to Homebrew LLVM only when the probe fails.

@@ -3,7 +3,7 @@ schema: adr/v1
 id: adr-0024
 kind: adr
 title: The cargodist link graph is computed in background threads and joined at a fixed economy date, pausing the game rather than joining late
-status: proposed
+status: accepted
 date: 2026-11-16
 tags:
   - upstream-architecture
@@ -16,7 +16,7 @@ related:
   - file:src/linkgraph/linkgraphschedule.cpp
   - file:docs/linkgraph.md
 provenance:
-  origin: extracted
+  origin: authored
   derived_from:
     - file:src/linkgraph/linkgraphschedule.cpp
     - file:src/linkgraph/linkgraphjob.cpp
@@ -35,6 +35,8 @@ large games; doing it in the game loop would stall it, and doing it asynchronous
 seeing results at different times (ADR 0016).
 
 ## Decision
+
+> Accepted by the owner on 2026-11-22 ("vse prijimam", then "vse xplicitne schvaluji, udelej to za me"). Majordomus extracted this record from the implementation (its provenance `derived_from`); the owner adopted it as their decision, so its origin is now `authored`.
 
 1. **Spawn and join on the economy calendar.** `src/linkgraph/linkgraphschedule.cpp:OnTick_LinkGraph`
    spawns the next job at one offset of `linkgraph.recalc_interval` and joins at the half-way
