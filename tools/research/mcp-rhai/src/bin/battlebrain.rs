@@ -43,6 +43,11 @@
 mod battlebrain_contract;
 #[path = "../battlebrain_policy.rs"]
 mod battlebrain_policy;
+// The architecture boundaries around this authority, as tests over the tree (rule
+// project.decision-authority-boundaries); compiled into this binary's tests only.
+#[cfg(test)]
+#[path = "../authority_boundaries.rs"]
+mod authority_boundaries;
 
 use battlebrain_contract as bb;
 use battlebrain_policy as policy;
@@ -88,36 +93,6 @@ fn validate(path: &str) -> Value {
     }
 }
 
-
-/// Days since 1970-01-01 of a civil date, and back (Howard Hinnant's algorithm): the game calendar
-/// is the proleptic Gregorian one.
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
-}
-
-fn civil_from_days(z: i64) -> (i64, i64, i64) {
-    let z = z + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (yoe + era * 400 + i64::from(m <= 2), m, d)
-}
-
-fn add_days(date: &str, days: i64) -> Option<String> {
-    let mut it = date.split('-').map(|p| p.parse::<i64>().ok());
-    let (y, m, d) = (it.next()??, it.next()??, it.next()??);
-    let (y, m, d) = civil_from_days(days_from_civil(y, m, d) + days);
-    Some(format!("{y:04}-{m:02}-{d:02}"))
-}
 
 /// A snapshot record from a capture `mcp-plan --capture` wrote: every captured file is read back
 /// and must still have its digest; the record's sources are those digests, its time the first read.
@@ -302,15 +277,25 @@ pub fn run(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &
     }
     let max_age = snapshot.pointer("/body/max_age_days").and_then(Value::as_i64).unwrap_or(1);
     let date = at["date"].as_str().unwrap_or_default();
-    let valid_until = add_days(date, max_age).ok_or_else(|| refuse("invalid_input", format!("the snapshot date {date:?} is not a date")))?;
+    let valid_until = bb::add_days(date, max_age).ok_or_else(|| refuse("invalid_input", format!("the snapshot date {date:?} is not a date")))?;
     let key = format!("{}:{}:{}:freight-line", scope["instance"].as_str().unwrap_or_default(), company, date);
     let decision = bb::record("decision", "decided", &scope, &at, (bb::AUTHORITY, env!("CARGO_PKG_VERSION")), &derived, json!({
         "policy": {"id": policy::POLICY_ID, "version": policy::POLICY_VERSION, "params": p.to_json()},
         "goal": "next freight rail line (one fr_* slot) or HOLD", "snapshot": snap_id, "selected": ours_rec["id"],
         "rejected": rejected, "idempotency_key": key, "approval": "operator", "valid_until": valid_until}));
+    // The exact settings this decision authorises: the chosen line in slot 1, every other slot
+    // cleared (-1), and planned_freight_only=1 so the bot builds this line and plans none itself.
+    // The block names their digest; the executor recomputes it (I0117).
+    let settings = choice.selected.as_ref().map_or(String::new(), |l| {
+        let mut s = format!("planned_freight_only=1,{p}from={},{p}to={},{p}cargo={}", l.producer, l.acceptor, l.cargo_id, p = bb::freight_slot_prefix(1));
+        for i in 2..=bb::FREIGHT_SLOTS {
+            s.push_str(&format!(",{}from=-1", bb::freight_slot_prefix(i)));
+        }
+        s
+    });
     let block = json!({"schema": bb::DECISION_SCHEMA, "decision": decision["id"], "snapshot_digest": snapshot["body"]["digest"],
         "idempotency_key": key, "policy": format!("{}@{}", policy::POLICY_ID, policy::POLICY_VERSION), "valid_until": valid_until,
-        "mode": if gate.is_some() { "live" } else { "shadow" }});
+        "settings_digest": bb::settings_digest(&settings), "mode": if gate.is_some() { "live" } else { "shadow" }});
     let mut records: Vec<Value> = base_rec.iter().cloned().collect();
     if base_rec.as_ref().map(|b| &b["id"]) != Some(&ours_rec["id"]) {
         records.push(ours_rec.clone());
@@ -339,8 +324,20 @@ pub fn run(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &
                 (Some(f), Some(t)) => why.push(bb::Refusal::new("incoherent_snapshot", "body.window", format!("the snapshot spans {} ticks, more than the {} this run accepts", t - f, g.max_window_ticks))),
                 _ => why.push(bb::Refusal::new("incoherent_snapshot", "body.window", "the snapshot does not say which ticks it was read between")),
             }
+            if fallback {
+                why.push(bb::Refusal::new("fallback_solver", "metrics.portfolio_solver", format!("the planner's portfolio came from {solver:?}, not an AlgoGlyph kernel")));
+            }
+            if plan.pointer("/portfolio/kernel").map_or(true, Value::is_null) {
+                why.push(bb::Refusal::new("missing_kernel", "portfolio.kernel", "the planner names no kernel for its portfolio"));
+            }
             if !p.require_priced {
                 why.push(bb::Refusal::new("unpriced_policy", "params.require_priced", "a live decision needs require_priced: only a line track-planning priced may go live"));
+            }
+            // The snapshot is at most its own max_age_days old in game time, counted to the fresh read.
+            let age = companies.get("game_date").and_then(Value::as_str).and_then(|now| bb::days_between(snapshot["at"]["date"].as_str().unwrap_or_default(), now));
+            let max_age = snapshot.pointer("/body/max_age_days").and_then(Value::as_i64).unwrap_or(0);
+            if age.map_or(true, |a| a > max_age) {
+                why.push(bb::Refusal::new("stale_snapshot", "at.date", format!("the snapshot is {age:?} game days old at the fresh read, more than its {max_age}")));
             }
             let fresh = companies.get("game_tick").and_then(Value::as_u64);
             if fresh.map_or(true, |t| t < w["tick_to"].as_u64().unwrap_or(u64::MAX)) {
@@ -353,7 +350,7 @@ pub fn run(snapshot: &Value, plan: &Value, companies: &Value, company: i64, p: &
                 None => Value::Null,
                 // planned_freight_only=1 with the slot: the bot builds this line and plans none itself,
                 // so the line has one author (one approval batch for the operator).
-                Some(l) => json!({"company_id": company, "settings": format!("planned_freight_only=1,fr_from={},fr_to={},fr_cargo={}", l.producer, l.acceptor, l.cargo_id), "decision": block}),
+                Some(_) => json!({"company_id": company, "settings": settings, "decision": block}),
             }
         }
     };
@@ -441,6 +438,32 @@ pub fn report(rec: &Value) -> String {
 
 /// Answer exactly one GET on a loopback port with `body`, then return (`serve --once`): the
 /// directive leaves this process once, whoever asks.
+/// The ledger of idempotency keys `serve` has handed out, one per line, kept across runs so the
+/// same live decision is never served twice (`$BATTLEBRAIN_STATE_DIR`, else
+/// ~/.local/state/battlebrain/served-keys).
+fn served_ledger() -> std::path::PathBuf {
+    let dir = std::env::var_os("BATTLEBRAIN_STATE_DIR").map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state/battlebrain"));
+    dir.join("served-keys")
+}
+
+/// Refuse a key already served; otherwise record it first, then serve.
+fn claim_key(ledger: &std::path::Path, key: &str) -> Result<(), String> {
+    use std::io::Write;
+    if key.is_empty() || key.contains('\n') {
+        return Err("a live directive needs a one-line idempotency key".into());
+    }
+    let seen = std::fs::read_to_string(ledger).unwrap_or_default();
+    if seen.lines().any(|l| l == key) {
+        return Err(format!("key {key:?} was served before ({}); a decision is served once", ledger.display()));
+    }
+    if let Some(d) = ledger.parent() {
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(ledger).map_err(|e| e.to_string())?;
+    writeln!(f, "{key}").map_err(|e| e.to_string())
+}
+
 fn serve_once(port: u16, body: &str) -> Result<String, String> {
     use std::io::{BufRead, BufReader, Write};
     let listener = std::net::TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind 127.0.0.1:{port}: {e}"))?;
@@ -575,7 +598,8 @@ fn main() {
         Some("serve") => {
             let flag = |name: &str| flag(&args, name);
             match (flag("--directive").map(|f| read_json(&f)), flag("--port").and_then(|p| p.parse::<u16>().ok())) {
-                (Some(Ok(d)), Some(port)) if d.get("company_id").is_some() => match serve_once(port, &d.to_string()) {
+                (Some(Ok(d)), Some(port)) if d.get("company_id").is_some() => match claim_key(&served_ledger(), d.pointer("/decision/idempotency_key").and_then(Value::as_str).unwrap_or_default())
+                    .and_then(|_| serve_once(port, &d.to_string())) {
                     Ok(req) => {
                         println!("{}", json!({"ok": true, "served": req, "port": port}));
                         0
@@ -673,7 +697,7 @@ fn main() {
                     if let Err(rs) = bb::validate_record(&snap).and_then(|k| if k == "snapshot" { Ok(()) } else { Err(vec![bb::Refusal::new("not_a_snapshot", "type", format!("--snapshot is a {k} record"))]) }) {
                         std::process::exit(refused(&rs));
                     }
-                    let until = add_days(snap["at"]["date"].as_str().unwrap_or_default(), snap["body"]["max_age_days"].as_i64().unwrap_or(1)).unwrap_or_default();
+                    let until = bb::add_days(snap["at"]["date"].as_str().unwrap_or_default(), snap["body"]["max_age_days"].as_i64().unwrap_or(1)).unwrap_or_default();
                     let recs: Vec<Value> = matches.iter().map(|m| bb::match_record(m, &snap["scope"], &snap["at"], &[snap["id"].clone()], &until)).collect();
                     let errs: Vec<bb::Refusal> = recs.iter().filter_map(|r| bb::validate_record(r).err()).flatten().collect();
                     if !errs.is_empty() {
@@ -801,11 +825,19 @@ mod tests {
         snap["id"] = json!(bb::record_id(&snap));
         let mut fresh = fx("shadow/companies.json");
         fresh["game_tick"] = json!(74100);
+        fresh["game_date"] = json!("1961-01-02");
+        let mut old = fresh.clone();
+        old["game_date"] = json!("1961-03-01");
+        let e = run(&snap, &fx("shadow/plan.json"), &old, 1, &p, Some(&LiveGate { max_window_ticks: 0 })).unwrap_err();
+        assert!(e.iter().any(|r| r.code == "stale_snapshot"), "{e:?}");
         let out = run(&snap, &fx("shadow/plan.json"), &fresh, 1, &p, Some(&LiveGate { max_window_ticks: 0 })).unwrap();
         assert_eq!(out["mode"], "live");
         assert_eq!(out["directive_block"]["mode"], "live");
         assert_eq!(out["directive"]["company_id"], 1);
-        assert_eq!(out["directive"]["settings"], "planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1");
+        let settings = out["directive"]["settings"].as_str().unwrap();
+        assert!(settings.starts_with("planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1,fr2_from=-1,"), "{settings}");
+        assert!(settings.ends_with(",fr16_from=-1"));
+        assert_eq!(out["directive"]["decision"]["settings_digest"], json!(bb::settings_digest(settings)));
         assert_eq!(out["directive"]["decision"], out["directive_block"]);
         assert!(bb::validate_decision_block(&out["directive"]["decision"]).is_ok());
         // Each gate refuses on its own.
@@ -818,6 +850,35 @@ mod tests {
         assert!(unpriced.iter().any(|r| r.code == "unpriced_policy"));
         // Shadow mode never writes a directive.
         assert!(run(&snap, &fx("shadow/plan.json"), &fresh, 1, &p, None).unwrap()["directive"].is_null());
+    }
+
+    #[test]
+    fn a_served_key_is_never_served_again() {
+        let dir = std::env::temp_dir().join(format!("battlebrain-ledger-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ledger = dir.join("served-keys");
+        assert!(claim_key(&ledger, "coplay:0:1963-03-01:freight-line").is_ok());
+        assert!(claim_key(&ledger, "coplay:0:1963-03-01:freight-line").unwrap_err().contains("served before"));
+        assert!(claim_key(&ledger, "another").is_ok());
+        assert!(claim_key(&ledger, "").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_live_decision_refuses_a_fallback_solver_or_no_kernel() {
+        let p = policy::Params { margin: 0.2, reserve: 25_000, require_priced: true };
+        let mut snap = fx("valid/snapshot.json");
+        snap["body"]["window"] = json!({"tick_from": 74000, "tick_to": 74000, "coherent": true});
+        snap.as_object_mut().unwrap().remove("id");
+        snap["id"] = json!(bb::record_id(&snap));
+        let mut fresh = fx("shadow/companies.json");
+        fresh["game_tick"] = json!(74100);
+        fresh["game_date"] = json!("1961-01-02");
+        let mut plan = fx("shadow/plan.json");
+        plan["portfolio"]["solver"] = json!("builtin knapsack (MCP_ALGOGLYPH_DIR not set or the runner refused)");
+        plan["portfolio"]["kernel"] = Value::Null;
+        let e = run(&snap, &plan, &fresh, 1, &p, Some(&LiveGate { max_window_ticks: 0 })).unwrap_err();
+        assert!(e.iter().any(|r| r.code == "fallback_solver") && e.iter().any(|r| r.code == "missing_kernel"), "{e:?}");
     }
 
     #[test]
@@ -861,6 +922,8 @@ mod tests {
         snap["id"] = json!(bb::record_id(&snap));
         let mut fresh = fx("shadow/companies.json");
         fresh["game_tick"] = json!(74100);
+        // A live run measures the snapshot's age against the fresh read's game date.
+        fresh["game_date"] = json!("1961-01-02");
         (snap, fresh)
     }
 
@@ -897,7 +960,9 @@ mod tests {
         let live = || run(&snap, &plan, &fresh, 1, &p, Some(&gate)).unwrap();
         let mut ok = live();
         attach_capabilities(&mut ok, &plan, &real_catalogue()).unwrap();
-        assert_eq!(ok["directive"]["settings"], "planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1");
+        // A live directive sets its one line and clears every other freight slot.
+        let settings = ok["directive"]["settings"].as_str().unwrap();
+        assert!(settings.starts_with("planned_freight_only=1,fr_from=13,fr_to=32,fr_cargo=1,fr2_from=-1,"), "{settings}");
         // The runner no longer lists track-planning: nothing may price the line.
         let (k, commit) = {
             let v: Value = serde_json::from_str(&std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain/catalogue.json")).unwrap()).unwrap();
@@ -907,11 +972,16 @@ mod tests {
         let e = attach_capabilities(&mut live(), &plan, &expired).unwrap_err();
         assert_eq!((e[0].code, e[0].path.as_str()), ("capability_unmatched", "rail-line-price"));
         assert!(e[0].message.starts_with("kernel_expired"));
-        // The planner fell back to its built-in knapsack: not the catalogue's kernel.
+        // The planner fell back to its built-in knapsack: a live run refuses it before any match.
         let mut builtin = plan.clone();
         builtin["portfolio"]["kernel"] = Value::Null;
-        let out = run(&snap, &builtin, &fresh, 1, &p, Some(&gate)).unwrap();
-        let e = attach_capabilities(&mut out.clone(), &builtin, &real_catalogue()).unwrap_err();
+        let e = run(&snap, &builtin, &fresh, 1, &p, Some(&gate)).unwrap_err();
+        assert!(e.iter().any(|r| r.code == "missing_kernel"), "{e:?}");
+        // The planner named another kernel than the catalogue's match.
+        let mut other = plan.clone();
+        other["portfolio"]["kernel"]["id"] = json!("simplex-method");
+        let out = run(&snap, &other, &fresh, 1, &p, Some(&gate)).unwrap();
+        let e = attach_capabilities(&mut out.clone(), &other, &real_catalogue()).unwrap_err();
         assert_eq!(e[0].code, "capability_mismatch");
         // In shadow the same disagreement is recorded, not refused.
         let mut sh = shadow_on(&builtin).unwrap();
@@ -947,9 +1017,9 @@ mod tests {
 
     #[test]
     fn game_dates_add_days_on_the_gregorian_calendar() {
-        assert_eq!(add_days("1961-01-01", 31).as_deref(), Some("1961-02-01"));
-        assert_eq!(add_days("1960-02-28", 1).as_deref(), Some("1960-02-29"));
-        assert_eq!(add_days("1961-12-31", 1).as_deref(), Some("1962-01-01"));
-        assert_eq!(add_days("x", 1), None);
+        assert_eq!(bb::add_days("1961-01-01", 31).as_deref(), Some("1961-02-01"));
+        assert_eq!(bb::add_days("1960-02-28", 1).as_deref(), Some("1960-02-29"));
+        assert_eq!(bb::add_days("1961-12-31", 1).as_deref(), Some("1962-01-01"));
+        assert_eq!(bb::add_days("x", 1), None);
     }
 }
