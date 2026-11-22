@@ -574,8 +574,8 @@ mod tests {
     }
 
     /// A ways payload: `rows` of hex digits, one per tile (NW=1, SW=2, SE=4, NE=8).
-    fn ways(rows: &[&str]) -> hub::Roads {
-        hub::Roads::from_ways(&json!({"data": {"width": rows[0].len(), "roads": rows}})).unwrap()
+    fn ways(rows: &[&str]) -> hub::Ways {
+        hub::Ways::from_ways(&json!({"data": {"width": rows[0].len(), "roads": rows}})).unwrap()
     }
 
     #[test]

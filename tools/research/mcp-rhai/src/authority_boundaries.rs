@@ -334,8 +334,31 @@ fn b4_the_adapter_registry_is_the_named_domain_checks() {
         .filter(|id| bb::domain_check(id, &json!({}), &json!({})).map_or_else(|r| r.code != "no_domain_check", |_| true))
         .map(str::to_string)
         .collect();
-    assert_eq!(adapted, vec!["knapsack-dp", "track-planning"],
+    assert_eq!(adapted, vec!["knapsack-dp", "track-planning", "transport-investment"],
         "the domain-check registry changed: name the adapters in .ai/repo/rules/project/decision-authority-boundaries.v1.md (B4) and research/battlebrain/README.md");
+}
+
+/// B4. The planner names capabilities, never kernels: every kernel it calls is the matcher's
+/// choice from the discovered catalogue (cargo.rs `Kernels`, I0221). No code line of a planner
+/// file holds a string that is a kernel id of the catalogue, or labels one as `algoglyph <id>`.
+#[test]
+fn b4_the_planner_calls_kernels_by_capability_only() {
+    const PLANNER: &[&str] = &["cargo.rs", "linecost.rs", "yards.rs", "invest.rs", "bin/mcp-plan.rs", "bin/mcp-intent.rs"];
+    let cat: Value = serde_json::from_str(&read("tools/research/schema/fixtures/battlebrain/catalogue.json")).unwrap();
+    let kernels: Vec<String> = cat["kernels"].as_array().unwrap().iter().filter_map(|k| k["id"].as_str().map(str::to_string)).collect();
+    let mut bad = Vec::new();
+    for f in PLANNER {
+        let path = format!("{CRATE}/{f}");
+        for (n, l) in code_lines(&path, &read(&path)) {
+            let named = l.split('"').skip(1).step_by(2).any(|q| kernels.iter().any(|k| q == k || q.contains(&format!("algoglyph {k}"))));
+            if named {
+                bad.push((path.clone(), n, l.trim().to_string()));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "B4: the planner names a kernel; name its capability and let cargo.rs Kernels choose:{}", show(&bad));
+    // Not vacuous: each file is read, and the portfolio does call through the matcher.
+    assert!(read(&format!("{CRATE}/cargo.rs")).contains("bb::match_capability(cap, cat, bb::ADAPTERS)"));
 }
 
 // ------------------------------------------------------------------- B5: provenance and identity

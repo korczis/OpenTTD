@@ -44,6 +44,11 @@ flowchart TB
   cannot succeed stops instead of trying every tile it can reach. The laid line is walked (`VerifyRailLine`) before a
   train is bought. The depot stands
   behind a platform. Platform length and wagons follow demand (`PlatformPlan`).
+- **Road stops and depots a bus can always use** (`roadstop.nut`). A stop is drive-through on a
+  straight road first, and a bay only where no such road is near. A road depot is reused when it
+  lies on the road network of the stop it serves. A new depot faces only a road piece reachable
+  from that stop (one `RoadReach` walk answers every candidate) and never stands beside another
+  depot (`DepotBeside`), so its exit leads onto the route.
 - **Lines as desired state** (`lines.nut`). Each line has a slot and logs a record
   (`PrismaticAI: rail line <slot>: label=...|a=...|...|state=...`) when built and every game month.
   The settings `line<N>_trains` and `line<N>_wagons` are targets; the bot clones, resizes, sells, or
@@ -75,10 +80,75 @@ flowchart TB
   month a vehicle stopped in a depot with no orders gets a line's orders or is sold.
 - **Every build step checks the game's answer.** A step that fails is logged and skipped; the
   API's return values are the source of truth (header of `main.nut`).
+- **Air yield per plane** (`fleet.nut` `AirReport`, `AirRouteHasDemand`; `autopilot.nut`
+  `BestAirPair`). Once a game year the bot logs each air route's planes, distance, airport types
+  with the routes at each, engines and last year's profit per plane, then the company's total
+  (`PrismaticAI: air report`), with how full the flying planes are, so a match log measures air
+  income per aircraft. The setting `air_add_full` lets one more plane call at an airport of ours
+  only while the planes flying from it are that full. The reason and the measurements are in
+  [Air yield per aircraft](#air-yield-per-aircraft) below.
 
 Install, the settings table and the rail rules in full are in
 [`tools/research/prismatic-ai/README.md`](../../tools/research/prismatic-ai/README.md); the rail
 reasoning is in [`../rail-steward.md`](../rail-steward.md).
+
+## Air yield per aircraft
+
+Measured on 2026-11-22 in the owner's co-play game (seed 20261122, the 1979 save
+`coplay-deploy-1626.sav`, read through `GET /api/resources/vehicles` and `/stations` of the panel
+on :8800), aircraft a year old or more, profit last year:
+
+| Company | Planes | Airports | Routes per airport | Planes per airport | Mean distance | Flying full | Broken down now | Profit a plane |
+|---|---|---|---|---|---|---|---|---|
+| PrismaticAI (company 0) | 50 | 9 | 7-8 | 7-13 | 171 tiles | 56% | 9 | 22,507 |
+| AAAHogEx (company 1) | 42 | 22 | 1 | 1-8 | 217 tiles | 89% | 0 | 85,094 |
+
+Both fly the Bakewell Luckett LB-9 (38 of AAAHogEx's 39 judged planes, all 48 of ours), so the
+engine is not the gap. The bot's 50 planes fly 35 routes, a full mesh between 9 airports. The
+other PrismaticAI companies in that game show the same shape (5, 6 and 7: 4-6 airports, 18-32
+planes, 21-29k a plane). Under the default manual cargo distribution a passenger at a hub boards
+whichever plane comes first. A new route from a hub therefore adds a plane that shares that
+airport's passengers with every route already there, and it is paid for a shorter trip. Planes
+came from three places that never asked whether the existing planes were full:
+`InvestSurplus` (the route's average profit per plane), fleet growth (20 passengers waiting,
+`air_add_waiting`), and new autopilot routes from airports we already had (`air_reuse`, which
+rich growth switches on).
+
+A headless match shows the same thing over time (`battle.py ablate`, OpenTTD seed 31337,
+1960-1970, against AAAHogEx and AdmiralAI, default settings, from the bot's air report). Air
+profit was 389k a year with 10 planes in 1963. By 1968 it was 250k with 49 planes on 19 routes,
+5.6k a plane. The planes added after 1963 lowered the total.
+
+The first measure tried was waiting passengers (`air_add_loads`, a full plane load waiting at
+every airport of the route). On the same seed it held the bot at 4 planes, flying 47k a plane in
+1970 against the default's 7.6k, but cost 39.8% of company value (3.88M against 6.43M). On seed
+930967890 both variants flew one plane and ended within 1.8%. A station's rating keeps fewer
+passengers waiting than one 200-seat plane takes, so the gate shut too early, and that measure was
+dropped. `air_add_full` asks instead how full the planes flying from the airport are now
+(`AirLoadPercent`, running planes only). Ablation on 2026-11-22, 10 years from 1960, against
+AAAHogEx and AdmiralAI, one replay per seed (single replays are chaotic, knowledge
+`a-bot-change-that-moves-money-in-every-game-replays-as-chaos`):
+
+| Seed | Variant | Company value | Planes at the end | Profit a plane-year, last 3 reports |
+|---|---|---|---|---|
+| 31337 | default (`air_add_full=0`) | 6,753,676 | 51 | 7,228 |
+| 31337 | `air_add_full=60` | 5,129,113 (-24.1%) | 13 | 24,524 |
+| 31337 | `air_add_full=80` | 4,482,365 (-33.6%) | 9 | 24,979 |
+| 1383023900 | default | 6,265,670 | 32 | 6,168 |
+| 1383023900 | `air_add_full=60` | 3,905,034 (-37.7%) | 5 | -558 |
+| 1383023900 | `air_add_full=80` | 3,001,047 (-52.1%) | 6 | -1,494 |
+| 930967890 | default | 2,070,699 | 1 | 1,331 |
+| 930967890 | `air_add_full=60` and `=80` | 2,109,608 (+1.9%) | 0 | none flew a year |
+
+The gate raised profit per plane on seed 31337 by a factor of 3.4, but it lowered company value on
+both seeds where the bot flies. In these 1960s matches the planes flew 1-26% full at the yearly
+report. Every plane added still earned a few thousand a year. The money the gate kept back stayed
+in the bank, where it earns nothing, so cutting planes cut value. Profit per plane is therefore not
+the measure to optimise while money lies idle. The default stays 0 (off). `air_add_full` is a gene
+of the battle's GA (`battle.json` `tuning`) so that the GA can search it. Not measured: a later
+start year with bigger towns, like the 1979 co-play game, where planes fly 56% full; where the
+planes should go instead (fresh town pairs against more hub routes); and the 9 of 50 planes broken
+down in the co-play game.
 
 ## Where it lives
 

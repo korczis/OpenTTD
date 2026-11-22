@@ -5,10 +5,10 @@
 # the console, and drives it over loopback HTTP the way an MCP client would. It checks the
 # security defaults (bearer auth, Origin rejection), live reads, and the approval state
 # machine of the gated mutations (openttd.game.set_pause, and openttd.cmd.Pause from the derived
-# command catalogue): pending -> operator approval in
-# the console -> execution through the command system with the effect observed -> replay and
-# changed arguments refused; and the same through openttd.decision.submit with the operator
-# denying it: nothing changes, and the next submission asks again.
+# command catalogue): pending -> the operator's approval in the console executes it at once
+# (ADR 0038; nothing resubmits) -> approval consumed, decision recorded with its approval_id, effect
+# observed -> a replay or changed arguments ask for a fresh approval; and openttd.decision.submit
+# with the operator denying it: nothing changes, and the next submission asks again.
 #
 # The bearer token is read from the token file the server writes into a temporary directory that
 # is removed on exit; it is never printed or written anywhere else.
@@ -110,6 +110,27 @@ tool_field() {
   json_get "$1" "json.loads(d['result']['content'][0]['text']).get('$2')"
 }
 
+# Approving an approval executes it on the game server at once (ADR 0038); what it did is read
+# from the one queue (openttd://approvals) and the decision trace (openttd://decisions).
+READ_APPROVALS='{"jsonrpc":"2.0","id":20,"method":"resources/read","params":{"uri":"openttd://approvals"}}'
+READ_DECISIONS='{"jsonrpc":"2.0","id":21,"method":"resources/read","params":{"uri":"openttd://decisions"}}'
+# approval_state <id>: pending|approved|denied|consumed, empty when the server holds no such approval
+approval_state() {
+  local out; out="$(rpc "$TOKEN" "$READ_APPROVALS")"
+  json_get "${out#* }" "next((a['state'] for a in json.loads(d['result']['contents'][0]['text'])['data']['approvals'] if a['id'] == ${1:-None}), '')"
+}
+# decision_of <approval id>: the decision_id the server recorded when it executed that approval,
+# waiting up to 5 s; empty when there is none
+decision_of() {
+  local i out id
+  for ((i = 0; i < 20; i++)); do
+    out="$(rpc "$TOKEN" "$READ_DECISIONS")"
+    id="$(json_get "${out#* }" "next((x['decision_id'] for x in json.loads(d['result']['contents'][0]['text'])['data']['decisions'] if x['approval_id'] == ${1:-None}), '')")"
+    [[ -n "$id" ]] && { printf '%s' "$id"; return 0; }
+    sleep 0.25
+  done
+}
+
 echo "==> starting $BIN headless (dedicated, new random map)"
 mkfifo "$FIFO"
 "$BIN" -D -x -g -G 1 -c "$TMP/openttd.cfg" -d net=1 < "$FIFO" > "$LOG" 2>&1 &
@@ -187,34 +208,38 @@ check "a mutation first returns pending_approval (status=${status:-?}, approval 
 state_now="$(state_field "$(rpc "$TOKEN" "$READ_STATE" | cut -d' ' -f2-)" paused)"
 check "nothing changed before the approval (paused=${state_now:-?})" "$([[ "$state_now" == False ]] && echo 1 || echo 0)"
 
+# The approval is the execution (ADR 0038): the server carries the action out through the command
+# system the moment the operator approves it, consumes the approval and records the decision.
 console "prismatic_mcp approve $approval"
-sleep 2
-CHANGED='{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"openttd.game.set_pause","arguments":{"pause":false}}}'
-out="$(rpc "$TOKEN" "$CHANGED")"
-status="$(tool_field "${out#* }" status)"
-check "changed arguments do not ride on the approval (status=${status:-?})" \
-  "$([[ "$status" == pending_approval ]] && echo 1 || echo 0)"
-
-out="$(rpc "$TOKEN" "$PAUSE")"
-status="$(tool_field "${out#* }" status)"; result="$(tool_field "${out#* }" command_result)"
-decision="$(tool_field "${out#* }" decision_id)"
-# Posting is asynchronous: the command runs on a later tick, so the call answers "queued" (or
-# already "succeeded") and the result is read back with openttd.decision.get once it has run.
-check "the approved call is posted through the command system (status=${status:-?}, command_result=${result:-?})" \
-  "$([[ "$status" == executed && ( "$result" == queued || "$result" == succeeded ) && -n "$decision" ]] && echo 1 || echo 0)"
+decision="$(decision_of "$approval")"
+astate="$(approval_state "$approval")"
+check "approving executes it at once: approval consumed, decision recorded (approval=${astate:-?}, decision #${decision:-?})" \
+  "$([[ "$astate" == consumed && -n "$decision" ]] && echo 1 || echo 0)"
 sleep 1
 paused1="$(state_field "$(rpc "$TOKEN" "$READ_STATE" | cut -d' ' -f2-)" paused)"
 check "the effect is observed in the game (paused=${paused1:-?})" "$([[ "$paused1" == True ]] && echo 1 || echo 0)"
+# Posting is asynchronous: the command runs on a later tick, and its result is read back with
+# openttd.decision.get once it has run.
 GET="{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/call\",\"params\":{\"name\":\"openttd.decision.get\",\"arguments\":{\"decision_id\":${decision:-0}}}}"
 out="$(rpc "$TOKEN" "$GET")"
 result="$(tool_field "${out#* }" command_result)"; verdict="$(tool_field "${out#* }" verdict)"
-check "openttd.decision.get reads the command's result once it ran (command_result=${result:-?}, verdict=${verdict:-?})" \
-  "$([[ "$result" == succeeded && -n "$verdict" && "$verdict" != PENDING_OBSERVATION ]] && echo 1 || echo 0)"
+of="$(tool_field "${out#* }" approval_id)"
+check "openttd.decision.get reads the result of approval #${approval:-?} (approval_id=${of:-?}, command_result=${result:-?}, verdict=${verdict:-?})" \
+  "$([[ "$of" == "$approval" && "$result" == succeeded && -n "$verdict" && "$verdict" != PENDING_OBSERVATION ]] && echo 1 || echo 0)"
+
+CHANGED='{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"openttd.game.set_pause","arguments":{"pause":false}}}'
+out="$(rpc "$TOKEN" "$CHANGED")"
+status="$(tool_field "${out#* }" status)"; other="$(tool_field "${out#* }" approval_id)"
+check "changed arguments ask for their own approval (status=${status:-?}, approval #${other:-?})" \
+  "$([[ "$status" == pending_approval && -n "$other" && "$other" != "$approval" ]] && echo 1 || echo 0)"
+console "prismatic_mcp deny $other"
 
 out="$(rpc "$TOKEN" "$PAUSE")"
-status="$(tool_field "${out#* }" status)"
-check "replaying the approved call needs a fresh approval (status=${status:-?})" \
-  "$([[ "$status" == pending_approval ]] && echo 1 || echo 0)"
+status="$(tool_field "${out#* }" status)"; replay="$(tool_field "${out#* }" approval_id)"
+check "resubmitting the approved call asks for a fresh approval, it does not run again (status=${status:-?}, approval #${replay:-?})" \
+  "$([[ "$status" == pending_approval && -n "$replay" && "$replay" != "$approval" ]] && echo 1 || echo 0)"
+console "prismatic_mcp deny $replay"
+sleep 1
 
 # The same gate through a typed DecisionEnvelope, and the operator's other answer: denied, it
 # changes nothing, and the next submission asks again instead of riding on the refusal.
@@ -246,11 +271,10 @@ status="$(tool_field "${out#* }" status)"; approval="$(tool_field "${out#* }" ap
 check "a catalogue command first returns pending_approval (status=${status:-?}, approval #${approval:-?})" \
   "$([[ "$status" == pending_approval && -n "$approval" ]] && echo 1 || echo 0)"
 console "prismatic_mcp approve $approval"
-sleep 2
-out="$(rpc "$TOKEN" "$UNPAUSE")"
-status="$(tool_field "${out#* }" status)"; decision="$(tool_field "${out#* }" decision_id)"
-check "the approved catalogue command is posted (status=${status:-?}, decision #${decision:-?})" \
-  "$([[ "$status" == executed && -n "$decision" ]] && echo 1 || echo 0)"
+decision="$(decision_of "$approval")"
+astate="$(approval_state "$approval")"
+check "approving the catalogue command executes it (approval=${astate:-?}, decision #${decision:-?})" \
+  "$([[ "$astate" == consumed && -n "$decision" ]] && echo 1 || echo 0)"
 sleep 2
 paused3="$(state_field "$(rpc "$TOKEN" "$READ_STATE" | cut -d' ' -f2-)" paused)"
 check "its effect is observed in the game (paused=${paused3:-?})" "$([[ "$paused3" == False ]] && echo 1 || echo 0)"
@@ -268,9 +292,7 @@ status="$(tool_field "${out#* }" status)"; approval="$(tool_field "${out#* }" ap
 check "a command with a text parameter returns pending_approval (status=${status:-?}, approval #${approval:-?})" \
   "$([[ "$status" == pending_approval && -n "$approval" ]] && echo 1 || echo 0)"
 console "prismatic_mcp approve $approval"
-sleep 2
-out="$(rpc "$TOKEN" "$GOAL")"
-decision="$(tool_field "${out#* }" decision_id)"
+decision="$(decision_of "$approval")"
 sleep 2
 GET="{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"tools/call\",\"params\":{\"name\":\"openttd.decision.get\",\"arguments\":{\"decision_id\":${decision:-0}}}}"
 out="$(rpc "$TOKEN" "$GET")"
@@ -286,9 +308,7 @@ status="$(tool_field "${out#* }" status)"; approval="$(tool_field "${out#* }" ap
 check "a command with a choice-of-types parameter returns pending_approval (status=${status:-?})" \
   "$([[ "$status" == pending_approval && -n "$approval" ]] && echo 1 || echo 0)"
 console "prismatic_mcp approve $approval"
-sleep 2
-out="$(rpc "$TOKEN" "$NEWS")"
-decision="$(tool_field "${out#* }" decision_id)"
+decision="$(decision_of "$approval")"
 sleep 2
 GET="{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"tools/call\",\"params\":{\"name\":\"openttd.decision.get\",\"arguments\":{\"decision_id\":${decision:-0}}}}"
 out="$(rpc "$TOKEN" "$GET")"

@@ -34,6 +34,10 @@
 //!   loopback_get(url)                  -> map   GET a JSON document from a loopback URL only (127.0.0.1,
 //!                                               localhost, [::1]), e.g. the LAN battle's /api/leaderboard;
 //!                                               throws for any other host
+//!   build_audit(#{stations, depots, ways, map})  -> map  the construction audit per company (build_rules.rs,
+//!                                               the rules of hub.audit): depots without an exit, duplicate
+//!                                               depots and stations, drive-through against bay stops,
+//!                                               every defect with a stable key; pure, over read() answers
 //!   shared_get(key)                    -> any   a value the panel's scripts and services share, or () (rhai_shared.rs)
 //!   shared_entry(key)                  -> map   the same with its rev, writer and time, or ()
 //!   shared_set(key, value)             -> int   write it; answers the new revision
@@ -72,6 +76,8 @@ use std::time::Duration;
 mod algoglyph;
 #[allow(dead_code)]
 pub mod board;
+#[allow(dead_code)] // the hub's half of the rules (Ways::distance in duplicate_depots) is used through audit
+mod build_rules;
 mod graph;
 mod plan;
 pub mod mesh_records;
@@ -302,6 +308,7 @@ fn engine(panel: Panel) -> Engine {
         to_dyn(kernel_result(id, v)?)
     });
     e.register_fn("kernels", || -> R<Dynamic> { to_dyn(algoglyph::kernels()?) });
+    register_build_audit(&mut e);
     // The Majordomus board (board.rs): one session for the whole script, opened on the first post on
     // the server `majordomus serve ensure` names for this checkout ($MAJORDOMUS_URL overrides), or
     // printed only when $MCP_BOARD_DRY is set.
@@ -394,6 +401,13 @@ fn script_cannot_approve(call: &str) -> String {
 
 /// What a kernel answered, as a script reads it: the `result` of `{ok: true, result}`; a refusal
 /// (`ok: false` on the answer or on its result) is an error naming the kernel and its reasons.
+/// `build_audit(#{stations, depots, ways, map})`: the construction audit of build_rules.rs, the rules
+/// hub.audit judges by, over the four resources as `read()` answers them (any may be () when not
+/// published). Pure: no call to the game or the panel.
+fn register_build_audit(e: &mut Engine) {
+    e.register_fn("build_audit", |input: Map| -> R<Dynamic> { to_dyn(build_rules::audit(&from_dyn(Dynamic::from_map(input))?)) });
+}
+
 fn kernel_result(id: &str, v: Value) -> Result<Value, String> {
     let r = v.get("result").cloned().unwrap_or_else(|| v.clone());
     if v.get("ok") == Some(&Value::Bool(false)) || r.get("ok") == Some(&Value::Bool(false)) {
@@ -899,6 +913,77 @@ mod tests {
                            "OpenTTD panel-1 d rail: no problems"]);
     }
 
+    /// The advice the monitor reacts to (advice_lib.rhai), on the rail fixture: news.shown events
+    /// with an advice and refs as the panel publishes them, a lost train on the COAL line, an
+    /// unprofitable train, an order advice for a vehicle that is gone, and another company's lost
+    /// road vehicle.
+    const ADVICE_FIXTURE: &str = r#"
+        import "advice_lib" as al;
+        let news = [
+            #{ kind: "news.shown", seq: 10, data: #{ type: "advice", text: "Train 8 is lost", date: "1950-02-01", advice: "vehicle_lost", refs: [#{ vehicle: 5, unit: 8, owner: 0 }] } },
+            #{ kind: "news.shown", seq: 11, data: #{ type: "industry_other", text: "Grain production up", date: "1950-02-01" } },
+            #{ kind: "ai.log", seq: 12, data: #{ company: 0, text: "PrismaticAI heartbeat" } },
+            #{ kind: "news.shown", seq: 13, data: #{ type: "advice", text: "Train 8 is lost", date: "1950-02-03", advice: "vehicle_lost", refs: [#{ vehicle: 5, unit: 8, owner: 0 }] } },
+            #{ kind: "news.shown", seq: 14, data: #{ type: "advice", text: "Train 9 is unprofitable", date: "1950-02-03", advice: "vehicle_unprofitable", refs: [#{ vehicle: 6, unit: 9, owner: 0 }] } },
+            #{ kind: "news.shown", seq: 15, data: #{ type: "advice", text: "Train 4 has too few orders", date: "1950-02-04", advice: "order", refs: [#{ vehicle: 7, unit: 4, owner: 0 }] } },
+            #{ kind: "news.shown", seq: 16, data: #{ type: "advice", text: "Road Vehicle 3 is lost", date: "1950-02-04", advice: "vehicle_lost", refs: [#{ vehicle: 20, unit: 3, owner: 1 }] } },
+        ];
+        let lost = train(5, 10, 0, 0, 4, 90, 0); lost.unit = 8; lost.x = 2; lost.y = 7; lost.lost = true;
+        let poor = train(6, 500, -3000, -100, 4, 90, 0); poor.unit = 9; poor.orders = [];
+        let rv = train(20, 10, 0, 0, 1, 30, 0); rv.type = "road"; rv.owner = 1; rv.unit = 3; rv.x = 1; rv.y = 1; rv.lost = true;
+        let vehicles = [lost, poor, rv];
+        stations[0].name = "Mine";
+        let lines = rl::lines_of(0, rl::records_from_events(ev), vehicles, stations, 64);
+        let groups = al::group(al::items(news));
+        let en = []; for g in groups { en.push(al::enrich(g, vehicles, stations, lines)); }
+        fn group_keys(gs) { let k = []; for g in gs { k.push(g.key); } `${k}` }
+    "#;
+
+    fn advice(script: &str) -> Vec<String> {
+        rail(&format!("{ADVICE_FIXTURE}\n{script}"))
+    }
+
+    /// Only advice items count, one advice about one vehicle is one group however often it
+    /// repeats, and each is joined with its vehicle now: the bot's line label for a train on a
+    /// line, the stops' names for another vehicle, where it is, and whether it still holds.
+    #[test]
+    fn advice_is_grouped_by_vehicle_and_joined_with_its_line() {
+        let v = advice(r#"
+            [al::items(news).len(), group_keys(groups), en[0].count, en[0].line, en[0].actionable,
+             al::chat_line(en[0]), al::chat_line(en[1]), en[2].exists, en[2].actionable,
+             al::chat_line(en[3]), `${al::companies(en)}`, al::what("some_new_advice")]
+        "#);
+        assert_eq!(v, vec!["5", r#"["vehicle_lost:5", "vehicle_unprofitable:6", "order:7", "vehicle_lost:20"]"#, "2",
+                           "COAL A - B", "true",
+                           "train 8 lost on line COAL A - B: track broken near tile 500 (2, 7)? (2 times)",
+                           "train 9 unprofitable: lost 3000 last year, -100 this year",
+                           "false", "false",
+                           "road vehicle 3 lost on line Mine - station 2: road broken near tile 500 (1, 1)?",
+                           "[0, 1]", "some new advice"]);
+    }
+
+    /// The owner hears what still holds, of their company only, once within the repeat window; the
+    /// tally counts every item and keeps one entry per group; the mesh record names the company.
+    #[test]
+    fn advice_is_tallied_per_company_and_said_once_to_the_owner() {
+        let v = advice(r#"
+            let t = al::tally((), 0, en, "1950-02-04", 20);
+            let t2 = al::tally(t, 0, en, "1950-02-05", 20);
+            let small = al::tally((), 0, en, "1950-02-04", 2);
+            let obs = al::observation("panel-1", 0, en, "1950-02-04");
+            [group_keys(al::to_say(en, 0, #{}, 100, 600)), group_keys(al::to_say(en, 0, #{ "vehicle_lost:5": 90 }, 100, 600)),
+             group_keys(al::to_say(en, 0, #{ "vehicle_lost:5": 90 }, 700, 600)), al::to_say(en, (), #{}, 100, 600).len(),
+             t.total, `${t.by_advice.vehicle_lost} ${t.by_advice.vehicle_unprofitable} ${t.by_advice.order}`, t.recent.len(),
+             t2.total, t2.recent.len(), small.recent.len(), small.recent[1].key, obs.kind, obs.task, obs.title,
+             al::chat_lines(en, 3).len(), al::chat_lines(en, 3)[3]]
+        "#);
+        assert_eq!(v, vec![r#"["vehicle_lost:5", "vehicle_unprofitable:6"]"#, r#"["vehicle_unprofitable:6"]"#,
+                           r#"["vehicle_lost:5", "vehicle_unprofitable:6"]"#, "3",
+                           "4", "2 1 1", "3", "8", "3", "2", "order:7", "observation", "openttd:panel-1:advice:0",
+                           "OpenTTD panel-1 1950-02-04: company 1 advice: 2 vehicle_lost, 1 vehicle_unprofitable, 1 order",
+                           "4", "and 1 more advice: see the panel's advice view"]);
+    }
+
     #[test]
     fn every_hub_method_but_streams_is_a_rhai_function() {
         assert_eq!(hub_ident("hub.audit"), "hub_audit");
@@ -991,6 +1076,117 @@ mod tests {
              tl::months_until_above(-300, -200, 0, 2, 120)]
         "#);
         assert_eq!(v, vec!["230", "107", "-200", "-283", "470", "15", "-1", "21", "-1"]);
+    }
+
+    /// The build audit service, every line of it, against fakes of the panel: the first round is the
+    /// baseline (written, no chat) and deletes the key of a company that is gone, a look within the
+    /// same month audits nothing, a new month with four new defects in the owner's company writes
+    /// them and says one line naming three, and a failed read is reported and the service goes on
+    /// until BUILD_AUDIT_ROUNDS.
+    #[test]
+    fn build_audit_service_writes_every_company_and_chats_only_new_owner_defects() {
+        use std::sync::{Arc, Mutex};
+        use super::build_rules::tests::{depot, world};
+        use serde_json::{json, Value};
+        let mut e = lib_engine();
+        super::register_build_audit(&mut e);
+        let looks = Arc::new(Mutex::new(0i64));
+        let shared: Arc<Mutex<std::collections::BTreeMap<String, Value>>> = Arc::new(Mutex::new(
+            [("audit.7", json!({"keys": []})), ("audit.x", json!(1)), ("other", json!(2))].into_iter().map(|(k, v)| (k.to_string(), v)).collect()));
+        let (said, printed, sets) = (Arc::new(Mutex::new(Vec::<String>::new())), Arc::new(Mutex::new(Vec::<String>::new())), Arc::new(Mutex::new(0)));
+        e.register_fn("env", |name: &str| -> String { if name == "BUILD_AUDIT_ROUNDS" { "4".into() } else { String::new() } });
+        let l = looks.clone();
+        e.register_fn("sleep", move |_ms: i64| { *l.lock().unwrap() += 1; });
+        let l = looks.clone();
+        e.register_fn("read", move |uri: &str| -> super::R<rhai::Dynamic> {
+            let n = *l.lock().unwrap();
+            let mut w = world();
+            if n >= 2 {
+                let list = w["depots"]["data"]["depots"].as_array_mut().unwrap();
+                for (i, y) in [0, 1, 2, 3].iter().enumerate() { list.push(depot(20 + i as i64, 0, "road", (9, *y), Some((8, *y)))); }
+            }
+            match uri {
+                "openttd://game/state" if n == 3 => Err("game gone".into()),
+                "openttd://game/state" => { let date = ["1951-01-05", "1951-01-20", "1951-02-01"][n as usize]; super::to_dyn(json!({"game_date": date})) }
+                "openttd://stations" => super::to_dyn(w["stations"].clone()),
+                "openttd://depots" => super::to_dyn(w["depots"].clone()),
+                "openttd://map/ways" => super::to_dyn(w["ways"].clone()),
+                "openttd://map" => super::to_dyn(w["map"].clone()),
+                other => Err(format!("unexpected read {other}").into()),
+            }
+        });
+        let s = shared.clone();
+        e.register_fn("shared_get", move |k: &str| -> super::R<rhai::Dynamic> {
+            s.lock().unwrap().get(k).cloned().map_or(Ok(rhai::Dynamic::UNIT), super::to_dyn)
+        });
+        let (s, c) = (shared.clone(), sets.clone());
+        e.register_fn("shared_set", move |k: &str, v: rhai::Dynamic| -> super::R<i64> {
+            s.lock().unwrap().insert(k.to_string(), super::from_dyn(v)?);
+            *c.lock().unwrap() += 1;
+            Ok(1)
+        });
+        let s = shared.clone();
+        e.register_fn("shared_delete", move |k: &str| -> bool { s.lock().unwrap().remove(k).is_some() });
+        let s = shared.clone();
+        e.register_fn("shared_keys", move |p: &str| -> rhai::Array {
+            s.lock().unwrap().keys().filter(|k| k.starts_with(p)).cloned().map(rhai::Dynamic::from).collect()
+        });
+        let t = said.clone();
+        e.register_fn("con_say", move |text: &str| { t.lock().unwrap().push(text.to_string()); });
+        let p = printed.clone();
+        e.on_print(move |s| p.lock().unwrap().push(s.to_string()));
+        let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai/build_audit.rhai")).unwrap();
+        e.run(&script).unwrap();
+
+        assert_eq!(*looks.lock().unwrap(), 3, "four looks, a sleep between each");
+        assert_eq!(*sets.lock().unwrap(), 4, "two companies in each of the two months");
+        let shared = shared.lock().unwrap();
+        assert_eq!(shared.keys().cloned().collect::<Vec<_>>(), vec!["audit.0", "audit.1", "audit.x", "other"],
+                   "audit.7 (no such company now) deleted; keys that are not audit.<company> kept");
+        let a0 = &shared["audit.0"];
+        assert_eq!((a0["month"].clone(), a0["date"].clone(), a0["baseline"].clone(), a0["defects_total"].clone()),
+                   (json!("1951-02"), json!("1951-02-01"), json!(false), json!(8)));
+        assert_eq!(a0["new_keys"], json!(["no_exit:road:19", "no_exit:road:29", "no_exit:road:39", "no_exit:road:9"]));
+        assert_eq!(a0["keys"].as_array().unwrap().len(), 8);
+        assert_eq!((a0["exits"]["no_exit"].clone(), a0["stops"]["drive_through_share"].clone(), a0["network"].clone()), (json!(5), json!(0.5), json!(true)));
+        assert_eq!(shared["audit.1"]["new_keys"], json!([]));
+        let said = said.lock().unwrap();
+        assert_eq!(said.len(), 1, "one line, only for the owner's new defects: {said:?}");
+        assert!(said[0].starts_with("\"[build-audit] build audit, 4 new: road depot at 9,1: its entrance 8,1 does not lead into it; "), "{}", said[0]);
+        assert!(said[0].ends_with(" (+1 more)\""), "{}", said[0]);
+        let printed = printed.lock().unwrap();
+        assert_eq!(printed.len(), 4, "{printed:?}");
+        assert!(printed[0].starts_with("build audit: a look at the date every 20 s"));
+        assert_eq!(printed[1], "build audit 1951-01-05: company 1: 4 defect(s), 0 new; company 2: 3 defect(s), 0 new");
+        assert_eq!(printed[2], "build audit 1951-02-01: company 1: 8 defect(s), 4 new; company 2: 3 defect(s), 0 new");
+        assert!(printed[3].starts_with("build audit: ") && printed[3].contains("game gone"), "{}", printed[3]);
+    }
+
+    /// A round with nothing built says so and writes nothing; a key that held no keys list counts
+    /// all of its company's defects as new.
+    #[test]
+    fn build_audit_round_of_an_empty_game_and_of_a_foreign_key() {
+        let mut e = lib_engine();
+        super::register_build_audit(&mut e);
+        e.register_fn("env", |_: &str| String::new());
+        let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai/build_audit.rhai")).unwrap();
+        // The script's functions and its constants, not its loop.
+        let fns = e.compile(&script).unwrap().clone_functions_only();
+        let consts: String = script.lines().filter(|l| l.starts_with("const ")).map(|l| format!("{l}\n")).collect();
+        let w = super::to_dyn(super::build_rules::tests::world()).unwrap();
+        let mut scope = rhai::Scope::new();
+        scope.push("w", w);
+        let out: rhai::Array = e.eval_ast_with_scope(&mut scope, &e.compile(consts + r#"
+            let empty = round(build_audit(#{}), #{}, ["audit.3"], 0, "1950-01-01");
+            let a = build_audit(w);
+            let r = round(a, #{ "0": #{ stale: true } }, [], 0, "1950-02-01");
+            [empty.writes.len(), empty.deletes, empty.summary, type_of(empty.chat),
+             r.writes[0].value.new_keys.len(), r.chat.starts_with("build audit, 4 new:"), r.chat.ends_with("(+1 more)"),
+             is_audit_key("audit."), is_audit_key("audit.1x"), is_audit_key("audits.1"), key_of(4), every_s(), rounds()]
+        "#).unwrap().merge(&fns)).unwrap();
+        let v: Vec<String> = out.iter().map(|x| x.to_string()).collect();
+        assert_eq!(v, vec!["0", "[\"audit.3\"]", "build audit 1950-01-01: nothing built", "()", "4", "true", "true",
+                           "false", "false", "false", "audit.4", "20", "0"]);
     }
 
     /// Advice for a town that refuses stations names the remedies with their rules, and the likes

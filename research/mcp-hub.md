@@ -54,7 +54,7 @@ under, or null.
 | `hub.call` | `instance`, `id`, `body?`, `query?` | the operation's answer; a panel's HTTP error comes back as `{http_error, body}` |
 | `hub.subscribe` | `instances?`, `kinds?` | then `hub.event` notifications `{instance, event}`; a kind matches by prefix (`game` takes `game.month`) |
 | `hub.unsubscribe` | | |
-| `hub.audit` | | per instance: duplicate station pairs, and its depots with the duplicate depot pairs |
+| `hub.audit` | | per instance: duplicate station pairs, and its depots with the duplicate depot pairs and the depots without an exit (`without_exit`) |
 | `hub.bus` | | the hub's own bus (also `GET /api/bus`): endpoint, schema, `instance` (`hub-<port>`), topics seen, events published, the store, and `kinds`: the hub's rows of the kinds table |
 | `hub.db_tables` | | the hub's own store (also `GET /api/db/tables`): its file and every table with its columns |
 | `hub.db_query` | `sql?` | one read-only statement on the hub's store (also `GET /api/db/query?sql=`): `{columns, rows, count, capped}`; without `sql` the newest 20 events |
@@ -199,6 +199,21 @@ distance is measured along the road network of `openttd://map/ways` (two tiles a
 points at the other), so two depots on separate roads are not duplicates. Without ways, or for rail
 and ship depots, the straight distance is used and the report says so.
 
+It also names every **depot a vehicle cannot drive out of** (`depots.without_exit`), judged from the
+same `openttd://map/ways`: a road depot's entrance tile must have the road bit pointing back at the
+depot and one more bit joined to a neighbour, a rail depot's entrance must hold a track that a train
+leaving the depot reaches (the game's own `_exitdir_reaches_trackdirs`, `src/table/track_data.h`)
+and that track must run on into the next tile. `no_exit` means the entrance does not lead into the
+depot, `dead_end` that it leads nowhere else. Signals, one-way roads, rail and road types and the
+owner of the entrance tile are not judged.
+
+These rules are one implementation, `tools/research/mcp-rhai/src/build_rules.rs`, which the hub and
+the Rhai built-in `build_audit` share. The panel service
+[`build_audit.rhai`](../tools/research/mcp-panel/rhai/build_audit.rhai) runs them once a game month
+on its own panel, with no hub needed, adds the drive-through against bay share of each company's
+road stops, and keeps the result per company in the shared key `audit.<company>` and the store's
+view `build_audit` ([Rhai scripting](mechanisms/rhai-scripting.md)).
+
 It also reports **routes over capacity**, as an advisory warning that does not fail the check. The
 game's own link graph (`cargo_link` edges of `openttd://world/graph`) carries each link's measured
 capacity and usage; the vehicles' order lists say which vehicles run it, and their capacities what one
@@ -225,6 +240,7 @@ bot and the human-motion player to the same rule.
 | `node --test 'tools/research/mcp-panel/test/*.test.mjs'` | schema to fields, coercion, call parameters, URL state round trip, grouping, and the client's request matching, notifications and re-subscription |
 | `tools/research/mcp-hub-page-check <hub-url>` | the page in a real browser: the WebSocket goes live, every listed instance is a row, a click on an operation opens its form and the call answers, the filter is kept in the address and survives a reload, the audit card renders, a live event arrives, no console error |
 | `mcp-hub intent-check [--hub URL] ["<sentence>"]...` | the owner's requests in plain language through the hub: every instance with an `/intent` operation (openttd-80's `/api/intent`, I0069) answers each sentence (the owner's own examples by default, Czech with and without diacritics and English) with an action, its candidates, and a plan to build; a sentence whose subjects one instance resolves and another does not is a WARN on the second (a fallback answer, advisory; derived across the instances, I0078) |
+| `cargo test --offline --release --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel` | the shared rules (`build_rules.rs`) on a fixture world: open, dead-end and exitless road and rail depots, the track table read from `src/table/track_data.h`, drive-through and bay stops by owner, duplicates by road and by straight distance, and what is unknown without ways or the map; `build_audit.rhai` run line by line against fakes of the panel; the `build_audit` view |
 | `tools/research/mcp-dup-check` | against whatever runs: no instance holds a duplicate pair; each pair named with both stations and the distance |
 | `tools/research/mcp-cluster-check [--servers N]` | discovery for a cluster: N servers and N null-driver clients, each announcing its MCP; the hub lists all 2N, a SIGTERM withdraws a record, and a SIGKILL's stale record is dropped |
 | `tools/research/mcp-hub-check` | against whatever runs: every instance discovered, every read-only operation that needs no input (no required query parameter, no required body field, as the panel's `/openapi.json` declares them) called through the WebSocket, one event streamed; a 503 ("no GUI client attached") is counted as skipped |

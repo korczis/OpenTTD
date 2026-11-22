@@ -13,11 +13,17 @@
 #     `<!-- name:end ... -->`, any tool's markers) is resolved by taking master's side; the sync
 #     that follows rewrites the region from the merged sources either way.
 #   - Any other conflict is left to the branch's owner: the merge is aborted and the exit is 10.
-#   - A sync commit is made only when the sync changed something, titled
-#     "Doc: [Surfaces] Regenerate derived regions after merging master". A branch whose head
-#     already is such a commit, with master merged, has nothing to do.
+#   - The merge commit, "Merge origin/master into <branch>", already holds the regenerated
+#     regions, so a local pre-commit hook that runs surfaces check accepts it. A branch that holds
+#     master but has stale regions gets one commit, "Doc: [Surfaces] Regenerate derived regions
+#     after merging master". A branch current on both counts has nothing to do.
 #   - --push pushes the result as a fast-forward of the remote branch, never a force: when its
 #     owner pushed in the meantime the push is refused, and the next run retries.
+#   - It works in a temporary worktree of its own, detached on origin/<branch> and removed on
+#     every exit (success, failure, a signal), so the checkout it is run from keeps its branch,
+#     HEAD and files: running it from the shared primary checkout never detaches master. The
+#     result stays in refs/refresh/<branch> (printed), so a refresh without --push is kept and can
+#     be pushed later: git push origin refs/refresh/<branch>:refs/heads/<branch>.
 #
 # Exit: 0 nothing to do, 3 refreshed (and pushed with --push), 10 a conflict outside the derived
 # regions, 2 usage, 1 any other failure. It prints one line saying which.
@@ -41,14 +47,36 @@ cd "$ROOT"
 TITLE="Doc: [Surfaces] Regenerate derived regions after merging master"
 git config user.name >/dev/null || git config user.name "github-actions[bot]"
 git config user.email >/dev/null || git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+# One virtual environment for the generator, the caller's, not a fresh one per temporary worktree.
+export SURFACES_VENV="${SURFACES_VENV:-$ROOT/tools/surfaces/.venv}"
 
 git fetch -q origin master "$branch"
-# Detached on the remote head: the branch may be checked out in another worktree of this clone.
-git checkout -q --detach "origin/$branch"
+# A temporary worktree, detached on the remote head (the branch may be checked out in another
+# worktree of this clone): the caller's checkout is never switched, and the worktree goes on
+# every exit, a signal included.
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/refresh-branch.XXXXXX")"
+WT="$TMP/wt"
+cleanup() {
+  cd "$ROOT"
+  git worktree remove --force "$WT" >/dev/null 2>&1 || true
+  git worktree prune >/dev/null 2>&1 || true
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+git worktree add -q --detach "$WT" "origin/$branch"
+cd "$WT"
 start="$(git rev-parse HEAD)"
 
-# Detached, git would title the merge "into HEAD"; name the branch it lands on.
-if ! git merge -q --no-edit -m "Merge origin/master into $branch" origin/master >/dev/null 2>&1; then
+# The merge is not committed until the regions are regenerated: a commit with master's side of a
+# region still stale would be refused by a local pre-commit hook that runs surfaces check.
+merging=0
+if ! git merge-base --is-ancestor origin/master HEAD; then
+  merging=1
+fi
+if [[ $merging == 1 ]] && ! git merge -q --no-commit --no-ff origin/master >/dev/null 2>&1; then
   # Resolve the conflicts that sit inside generated regions; anything else stays the owner's.
   if ! python3 - "$(git diff --name-only --diff-filter=U)" <<'EOF'
 import re, sys
@@ -87,19 +115,26 @@ EOF
     exit 10
   fi
   git add -- $(git diff --name-only --diff-filter=U)
-  git commit -q --no-edit
 fi
 
 tools/surfaces/surfaces sync >/dev/null
-if ! git diff --quiet; then
+if [[ $merging == 1 ]]; then
+  # One merge commit that already holds the regenerated regions (detached, git would title it
+  # "into HEAD"; name the branch it lands on).
   git add -u
-  git commit -q -m "$TITLE" -m "tools/surfaces/refresh-branch: origin/master merged into $branch, then tools/surfaces/surfaces sync, so the derived regions count what the merge will hold."
+  git commit -q -m "Merge origin/master into $branch" \
+    -m "tools/surfaces/refresh-branch: the derived regions are regenerated in the merge itself."
+elif ! git diff --quiet; then
+  git add -u
+  git commit -q -m "$TITLE" -m "tools/surfaces/refresh-branch: tools/surfaces/surfaces sync on $branch, so the derived regions count what the branch holds."
 fi
 
 if [[ "$(git rev-parse HEAD)" == "$start" ]]; then
   echo "refresh-branch: $branch is current with master and its derived regions"
   exit 0
 fi
+# The result outlives the temporary worktree.
+git update-ref "refs/refresh/$branch" HEAD
 if [[ $push == 1 ]]; then
   # A plain push is a fast-forward of what was fetched: it fails when the owner pushed since.
   if ! git push -q origin "HEAD:refs/heads/$branch"; then
@@ -108,6 +143,6 @@ if [[ $push == 1 ]]; then
   fi
   echo "refresh-branch: $branch refreshed and pushed ($(git rev-parse --short HEAD))"
 else
-  echo "refresh-branch: $branch refreshed locally ($(git rev-parse --short HEAD)), not pushed"
+  echo "refresh-branch: $branch refreshed locally ($(git rev-parse --short HEAD), refs/refresh/$branch), not pushed"
 fi
 exit 3

@@ -65,6 +65,7 @@ flowchart LR
   | `advice` | the news of type advice: a lost or stuck vehicle, one that loses money, an old one, a failed order or renewal |
   | `plan_decisions` | every `plan.*` decision with its choice and version |
   | `kind_month` | how many events of each kind each game month raised |
+  | `build_audit` | each company's construction audit of each game month: depots by type and whether a vehicle can drive out, duplicate depots and stations, drive-through and bay stops, defects and new defects (from `build_audit.rhai`'s `audit.<company>` writes) |
   | `schema_doc` | the store describing itself: every table, view and column with its comment |
 
 - **The store documents itself.** Every table file comments its table and each column next to
