@@ -27,6 +27,9 @@ Commands:
              leaderboard is derived (the gate)
   fitness    one short local match of the working tree's PrismaticAI against a reference AI; fails
              on a Squirrel error, an unfinished match or a collapsing fleet (the gate, on change)
+  power      the recorded battle's noise (split-half Kendall tau of the GA score, the paired
+             deviation across seeds) and the held-start pairs a strategy comparison needs for a
+             margin (--margin 1.10); reads research/results only, starts nothing
 
 Guards (after an incident where `run` kept ~32 matches per host going for three days, drove targets
 to load 86 on 18 cores and 35 of 37 GB swap, and nobody on a target could tell whose they were):
@@ -2613,6 +2616,110 @@ def cmd_fitness(cfg: dict) -> int:
     return 10 if fails else 0
 
 
+def kendall_tau(x: list[float], y: list[float]) -> float:
+    """Kendall's tau-a of two equally long lists (ties count as neither concordant nor discordant)."""
+    n, s = len(x), 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = (x[i] - x[j]) * (y[i] - y[j])
+            s += (d > 0) - (d < 0)
+    return s / (n * (n - 1) / 2) if n > 1 else 0.0
+
+
+def recorded_prismatic_matches(records: list[dict]) -> dict[str, dict[tuple[str, int], tuple[float, int]]]:
+    """Every PrismaticAI configuration (ai|settings, pooled across labels as paired_vs pools them) of
+    the battle records: {configuration: {(edition, seed): (points, value)}}, the first finished match
+    of each edition and seed in record order (a replay is not counted)."""
+    out: dict[str, dict[tuple[str, int], tuple[float, int]]] = {}
+    for rec in records:
+        ident = {c["key"]: c.get("ai", c["key"]) + "|" + c.get("settings", "") for c in rec.get("contestants", [])}
+        for m in rec.get("matches", []):
+            if m.get("status") != "done" or m.get("replica_of"):
+                continue
+            st = m.get("standings") or []
+            for rank, f in enumerate(st):
+                cid = ident.get(f["key"], f["key"])
+                if cid.startswith("PrismaticAI"):
+                    out.setdefault(cid, {}).setdefault((rec.get("edition", ""), m["seed"]),
+                                                       ((len(st) - 1 - rank) / max(1, len(st) - 1), f["value"]))
+    return out
+
+
+def power(records: list[dict], margin: float = 1.10, alpha: float = 0.05, power_: float = 0.80,
+          min_pairs: int = 16, min_seeds: int = 8, base: str = "PrismaticAI|",
+          first_seeds: tuple[int, ...] = (4242, 31337, 20208)) -> dict:
+    """The noise of the recorded battle and the held-start pairs a strategy comparison needs
+    (research/battlebrain/experiment-freight-margin.md). Derived from the records alone:
+    - `split_half`: Kendall's tau between the mean points of each configuration (>= min_seeds seeds)
+      on its odd-ranked and its even-ranked seeds (seeds in ascending order), and the seeds a GA
+      score would need for a rank reliability of 0.8 (Greiner's r = sin(pi tau / 2), Spearman-Brown);
+    - `paired`: the standard deviation across seeds of ln(value / base value) for every configuration
+      with >= min_pairs (edition, seed) cells in common with `base` (paired_vs's pairs);
+    - `pairs`: the paired, one-sided non-inferiority sample size for a margin `margin` (a ratio) on
+      the median of those deviations: n = ((z_{1-alpha} + z_{power}) sigma / ln margin)^2 + z_{1-alpha}^2 / 2
+      (Guenther's correction for a t test), rounded up, never under three (rule
+      project.a-tuning-claim-needs-held-start-pairs), and the seeds of those pairs: `first_seeds`
+      (the rule's three), then the distinct seeds `base` played in the records, in record order."""
+    from statistics import NormalDist, median, quantiles, stdev
+    by_cfg = recorded_prismatic_matches(records)
+    halves = []
+    for cid, cells in by_cfg.items():
+        seeds: dict[int, float] = {}
+        for (_, s), (pts, _) in cells.items():
+            seeds.setdefault(s, pts)            # one score per seed: its first recorded match
+        if len(seeds) >= min_seeds:
+            pts = [seeds[s] for s in sorted(seeds)]
+            halves.append((sum(pts[0::2]) / len(pts[0::2]), sum(pts[1::2]) / len(pts[1::2]), len(pts)))
+    tau = kendall_tau([h[0] for h in halves], [h[1] for h in halves]) if len(halves) > 1 else None
+    reliability = None
+    if tau is not None and tau > 0:
+        r_half = math.sin(math.pi * tau / 2)
+        k_half = median(h[2] for h in halves) / 2
+        r_one = r_half / (k_half - (k_half - 1) * r_half)
+        reliability = {"r_half": round(r_half, 4), "seeds_per_half": k_half, "r_one_seed": round(r_one, 4),
+                       "seeds_for_r_0_8": math.ceil(0.8 * (1 - r_one) / (r_one * 0.2))}
+    base_cells = by_cfg.get(base, {})
+    sds = []
+    for cid, cells in by_cfg.items():
+        if cid == base:
+            continue
+        logs = [math.log(max(1, v) / max(1, base_cells[k][1])) for k, (_, v) in cells.items() if k in base_cells]
+        if len(logs) >= min_pairs:
+            sds.append(stdev(logs))
+    sigma = median(sds) if sds else None
+    z = NormalDist().inv_cdf
+    za, zb = z(1 - alpha), z(power_)
+
+    def n_for(m: float) -> int | None:
+        if sigma is None:
+            return None
+        return max(3, math.ceil(((za + zb) * sigma / math.log(m)) ** 2 + za ** 2 / 2))
+    n = n_for(margin)
+    seeds = list(first_seeds)
+    for (_, s) in base_cells:
+        if n is not None and len(seeds) >= n:
+            break
+        if s not in seeds:
+            seeds.append(s)
+    return {"schema": "battle-power/v1", "records": len(records),
+            "split_half": {"configurations": len(halves), "min_seeds": min_seeds,
+                           "kendall_tau": None if tau is None else round(tau, 4), "reliability": reliability},
+            "paired": {"base": base, "configurations": len(sds), "min_pairs": min_pairs,
+                       "sigma_median": None if sigma is None else round(sigma, 4),
+                       "sigma_quartiles": [round(q, 4) for q in quantiles(sds, n=4)] if len(sds) > 3 else None},
+            "pairs": {"margin": margin, "delta_log": round(math.log(margin), 4), "alpha_one_sided": alpha,
+                      "power": power_, "n": n, "seeds": seeds[:n] if n is not None else [],
+                      "sensitivity": {f"{m:.2f}": n_for(m) for m in (1.05, 1.10, 1.15, 1.20, 1.25)}}}
+
+
+def cmd_power(margin: float, alpha: float, power_: float) -> int:
+    records = [json.loads(p.read_text()) for p in sorted(RESULTS_DIR.glob(RECORD_GLOB))]
+    out = power(records, margin, alpha, power_)
+    out["source"] = f"research/results/{RECORD_GLOB} at {git('rev-parse', '--short', 'HEAD')}"
+    print(json.dumps(out, indent=1))
+    return 0 if out["pairs"]["n"] is not None else 12
+
+
 def cmd_ablate(cfg: dict, seed: int, years: int, variants: list[str], field: list[str],
                write: bool, log_dir: str | None = None, slot: int = 0) -> int:
     """Run one local match per variant of the working tree's PrismaticAI (settings "name=a=1,b=2"),
@@ -2707,7 +2814,7 @@ def cmd_status(cfg: dict) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("command", choices=["discover", "fetch", "prepare", "probe", "run", "status",
-                                        "report", "render", "check", "fitness", "ablate", "reap"])
+                                        "report", "render", "check", "fitness", "ablate", "reap", "power"])
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--allow-dirty", action="store_true",
@@ -2730,7 +2837,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--log-dir", help="ablate: keep each variant's full log (script debug level 4) here")
     ap.add_argument("--edition", help="report: a past edition (its arena bundle must still be the "
                                       "prepared one, for its provenance)")
+    ap.add_argument("--margin", type=float, default=1.10, help="power: the non-inferiority margin, a value ratio")
+    ap.add_argument("--alpha", type=float, default=0.05, help="power: the one-sided significance level")
+    ap.add_argument("--power", type=float, default=0.80, help="power: the power at no true difference")
     a = ap.parse_args(argv)
+    if a.command == "power":
+        return cmd_power(a.margin, a.alpha, a.power)
     if a.command == "check":
         return cmd_check()
     if a.command == "render":
