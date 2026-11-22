@@ -35,7 +35,8 @@
 #                                forced on every start, so no saved choice changes it; e.g. NoirGFX)]
 #                               [--coplay (the GUI client plays the bot's company together with the
 #                                bot instead of watching: the server opens it with `research_coplay
-#                                allow`, the client joins it, research/coplay.md)]
+#                                allow`, the client joins it, and the co-play services start:
+#                                $MCP_SERVICES, default "arena replan watchdog"; research/coplay.md)]
 #                               [--load FILE (start from a savegame instead of a new world: its AI
 #                                companies play on and no new bot is started; with --coplay the
 #                                client joins the bot company the game reports; research/coplay.md)]
@@ -396,6 +397,16 @@ if [[ "$GUI" == 0 && "$NULL_CLIENT" == 1 ]]; then
     done
   ) &
   GUI_PID=$!
+fi
+
+# The services a co-play game runs (research/coplay.md "Services"): the arena fills the other
+# companies, replan re-plans the bot every game month, the watchdog says when a company stalls and
+# why. Started here, never by hand; MCP_SERVICES names another list (empty: none).
+if [[ "$COPLAY" == 1 ]]; then
+  for svc in ${MCP_SERVICES-arena replan watchdog}; do
+    out="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"name\":\"$svc\"}" "$URL/api/services/start" || true)"
+    if grep -q '"running": true' <<<"$out"; then echo "==> service $svc started"; else echo "mcp-e2e: service $svc did not start: ${out:-no answer}" >&2; fi
+  done
 fi
 
 echo "==> running. Ctrl-C stops everything."

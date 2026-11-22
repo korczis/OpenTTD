@@ -699,6 +699,43 @@ inline std::string CapabilitiesLine(const Capabilities &caps)
 	return fmt::format("read_only={} capabilities={} input_armed={}", caps.ReadOnly(), present.empty() ? "none" : present, caps.input_armed);
 }
 
+/**
+ * The server's approval queue as a network client hears it (ADR 0038): the server answers
+ * '!approvals' with one private line per pending approval, "[approvals] {json}" with an "id", and a
+ * last line "[approvals] {"count": n, ...}". Feed() reads each line; the count line ends a reply,
+ * and the rows of that reply become the queue (`rows`, and `count`, the server's total, which may be
+ * more than one page). A line that is not "[approvals] " followed by a JSON object is not one.
+ * The control window of a network client shows this queue (Panel::Snapshot), since the client's
+ * own MCP server holds none of the server's approvals.
+ */
+struct ServerApprovalsReader {
+	nlohmann::json rows = nlohmann::json::array(); ///< the approvals of the last whole reply
+	uint64_t count = 0;                            ///< how many the server holds for the company
+	uint64_t replies = 0;                          ///< whole replies read
+	nlohmann::json page = nlohmann::json::array(); ///< the rows of the reply being read
+
+	/** Read one chat line; true when it is an "[approvals]" line (and then it is consumed here). */
+	bool Feed(std::string_view line)
+	{
+		constexpr std::string_view PREFIX = "[approvals] ";
+		if (!line.starts_with(PREFIX)) return false;
+		nlohmann::json j = nlohmann::json::parse(line.substr(PREFIX.size()), nullptr, false);
+		if (!j.is_object()) return false;
+		if (j.contains("id")) {
+			this->page.push_back(std::move(j));
+			return true;
+		}
+		if (j.contains("count") && j["count"].is_number_unsigned()) {
+			this->rows = std::move(this->page);
+			this->page = nlohmann::json::array();
+			this->count = j["count"].get<uint64_t>();
+			this->replies++;
+			return true;
+		}
+		return false;
+	}
+};
+
 } // namespace PrismaticMCP::detail
 
 #endif /* OTTD_PRISMATIC_MCP_SERVER */
