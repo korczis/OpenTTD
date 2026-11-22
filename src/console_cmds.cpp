@@ -56,6 +56,7 @@
 #include "prismatic_mcp/prismatic_mcp_registry.h"
 #include "prismatic_mcp/prismatic_mcp_console.h"
 #include "prismatic_mcp/prismatic_mcp_menu.h"
+#include "prismatic_mcp/prismatic_mcp_detail.h"
 #include "3rdparty/nlohmann/json.hpp"
 #include <filesystem>
 #include <fstream>
@@ -1911,12 +1912,44 @@ static bool PrismaticMcpConsoleIsRemote()
 	return _redirect_console_to_client != ClientID::Invalid || _redirect_console_to_admin != AdminID::Invalid();
 }
 
+/** The token file the running server's bearer token was last written to; empty when none. */
+static std::string _prismatic_mcp_token_file;
+
+/**
+ * Write the bearer token and endpoint to a token file, {"agent_token", "endpoint"}, readable and
+ * writable by its owner only. The file is created empty and restricted before the token goes in,
+ * so no other process can read it at any moment; a file whose permissions cannot be set is
+ * removed and never receives the token (RESEARCH-ONLY).
+ * @param path The file to (re)write.
+ * @return true when the file holds the current token with mode 0600.
+ */
+static bool PrismaticMcpWriteTokenFile(const std::string &path)
+{
+	std::error_code ec;
+	std::filesystem::remove(path, ec);
+	{
+		std::ofstream f(path, std::ios::out | std::ios::trunc);
+		if (!f) return false;
+	}
+	std::filesystem::permissions(path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+		std::filesystem::perm_options::replace, ec);
+	if (ec) {
+		std::filesystem::remove(path, ec);
+		return false;
+	}
+	std::ofstream f(path, std::ios::out | std::ios::trunc);
+	f << fmt::format("{{\"agent_token\":\"{}\",\"endpoint\":\"{}\"}}\n", PrismaticMCP::GetToken(), PrismaticMCP::GetEndpoint());
+	f.close();
+	return !f.fail();
+}
+
 /**
  * RESEARCH-ONLY / UNSTABLE: control and inspect the embedded loopback MCP server.
- * The server is off by default and binds 127.0.0.1/::1 only; the bearer token is
- * shown here for the local operator and is never written to openttd.cfg or normal
- * logs. Only compiled in when OPTION_PRISMATIC_MCP_SERVER=ON. See
- * research/prismatic-mcp/. @copydoc IConsoleCmdProc
+ * The server is off by default and binds 127.0.0.1/::1 only. The bearer token is never
+ * printed, to this console or any other, and never written to openttd.cfg or a log: it goes
+ * only into a 0600 token file (the one 'start' is given, else one per port in the personal
+ * directory), whose path the console prints. Only compiled in when
+ * OPTION_PRISMATIC_MCP_SERVER=ON. See research/prismatic-mcp/. @copydoc IConsoleCmdProc
  */
 static bool ConPrismaticMcp(std::span<std::string_view> argv)
 {
@@ -1941,26 +1974,19 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 		std::string error;
 		if (PrismaticMCP::Start(port, error)) {
 			IConsolePrint(CC_INFO, "MCP server started: {}", PrismaticMCP::GetEndpoint());
-			if (argv.size() >= 4) {
-				/* A GUI process prints its console to no stdout, so a launcher reads the token from
-				 * this file instead: {"agent_token", "endpoint"}, owner read/write only. */
-				std::string path{argv[3]};
-				std::error_code ec;
-				std::filesystem::remove(path, ec);
-				{
-					std::ofstream f(path, std::ios::out | std::ios::trunc);
-					f << fmt::format("{{\"agent_token\":\"{}\",\"endpoint\":\"{}\"}}\n", PrismaticMCP::GetToken(), PrismaticMCP::GetEndpoint());
-				}
-				std::filesystem::permissions(path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-					std::filesystem::perm_options::replace, ec);
-				IConsolePrint(ec ? CC_ERROR : CC_INFO, "Token written to {}{}", path, ec ? " (permissions not set)" : " (mode 0600)");
+			/* The token goes into a file only, never onto a console line: a launcher reads it from the
+			 * file it passes, the operator from the per-port file in the personal directory. */
+			std::string path = argv.size() >= 4 ? std::string{argv[3]}
+				: _personal_dir + PrismaticMCP::detail::DefaultTokenFileName(port == 0 ? PrismaticMCP::DEFAULT_PORT : port);
+			if (PrismaticMcpWriteTokenFile(path)) {
+				_prismatic_mcp_token_file = path;
+				IConsolePrint(CC_INFO, "Token written to {} (mode 0600)", path);
 				PrismaticMCP::Registry::AnnounceTokenFile(path); // the registry record names the file, never the token
 			} else {
-				if (PrismaticMcpConsoleIsRemote()) {
-				IConsolePrint(CC_ERROR, "Refused: the bearer token is not sent to a remote console; read it on the server or pass a token file.");
-			} else {
-				IConsolePrint(CC_WARNING, "Bearer token (this console, and the console log if one is open): {}", PrismaticMCP::GetToken());
-			}
+				/* Nobody could authenticate against a token held nowhere: fail fast. */
+				_prismatic_mcp_token_file.clear();
+				PrismaticMCP::Stop();
+				IConsolePrint(CC_ERROR, "MCP server stopped: the token file {} could not be written with mode 0600.", path);
 			}
 		} else {
 			IConsolePrint(CC_ERROR, "MCP server failed to start: {}", error);
@@ -1983,13 +2009,29 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 			IConsolePrint(CC_ERROR, "Refused: the bearer token is not sent to a remote console.");
 			return true;
 		}
+		/* The secret itself is never printed, here or anywhere: only where it is and which one it is. */
 		std::string t = PrismaticMCP::GetToken();
-		IConsolePrint(CC_WARNING, "{}", t.empty() ? "(server not running)" : t);
+		if (t.empty()) {
+			IConsolePrint(CC_INFO, "(server not running)");
+		} else if (_prismatic_mcp_token_file.empty()) {
+			IConsolePrint(CC_WARNING, "No token file (fingerprint {}): 'prismatic_mcp stop', then 'prismatic_mcp start' writes one.", PrismaticMCP::detail::TokenFingerprint(t));
+		} else {
+			IConsolePrint(CC_INFO, "Token file: {} (mode 0600, fingerprint {})", _prismatic_mcp_token_file, PrismaticMCP::detail::TokenFingerprint(t));
+		}
 		return true;
 	}
 	if (sub == "rotate") {
 		PrismaticMCP::RotateToken();
 		IConsolePrint(CC_INFO, "Bearer token rotated (existing sessions invalidated).");
+		/* The token file holds the token in force, so its readers pick up the new one. */
+		if (PrismaticMCP::IsRunning() && !_prismatic_mcp_token_file.empty()) {
+			if (PrismaticMcpWriteTokenFile(_prismatic_mcp_token_file)) {
+				IConsolePrint(CC_INFO, "Token written to {} (mode 0600)", _prismatic_mcp_token_file);
+			} else {
+				IConsolePrint(CC_ERROR, "The token file {} could not be rewritten; it holds no valid token.", _prismatic_mcp_token_file);
+				_prismatic_mcp_token_file.clear();
+			}
+		}
 		return true;
 	}
 	if (sub == "approvals") {

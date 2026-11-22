@@ -85,6 +85,7 @@
     ],
     "must_not_hoard": [
       "PrismaticAI",
+      "PrismaticAI self-steward",
       "PrismaticAI planned"
     ],
     "never_last": [
@@ -187,6 +188,7 @@
       "self_steward": 1,
       "air_keep_last": 1,
       "rich_growth": 1,
+      "rich_air": 0,
       "modernize": 1,
       "compete": 1,
       "upgrade_track": 1

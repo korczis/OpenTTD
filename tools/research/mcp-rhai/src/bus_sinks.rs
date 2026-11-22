@@ -168,23 +168,9 @@ pub fn read_only_sql(sql: &str) -> Result<(), String> {
 
 // ---------------------------------------------------------------------- the store's SQL
 
-/// The store's SQL, one file each under `sql/` (`sql/README.md`), embedded by build.rs from the
-/// directory: `TABLE_FILES`, `VIEW_FILES` and `QUERY_FILES`, each `(name, text)` in file order. No
-/// code here builds SQL from pieces: tables and views run as written, a query binds its parameters.
-pub mod sql {
-    include!(concat!(env!("OUT_DIR"), "/sql_files.rs"));
-
-    /// A named query's text, or None.
-    pub fn query(name: &str) -> Option<&'static str> {
-        QUERY_FILES.iter().find(|(n, _)| *n == name).map(|(_, t)| *t)
-    }
-
-    /// A file's description: its leading `--` lines, joined into one.
-    pub fn description(text: &str) -> String {
-        text.lines().take_while(|l| l.trim_start().starts_with("--"))
-            .map(|l| l.trim_start().trim_start_matches("--").trim()).collect::<Vec<_>>().join(" ")
-    }
-}
+/// The store's SQL, one file each under `sql/` (`sql/README.md`, src/store_sql.rs): tables and views
+/// run as written, a query and a row binds its named parameters. No code here builds SQL from pieces.
+pub(crate) use crate::store_sql as sql;
 
 /// What a GET without `?sql=` answers: `sql/queries/newest_events.sql`.
 pub fn default_query() -> &'static str {
@@ -195,12 +181,11 @@ pub fn default_query() -> &'static str {
 
 #[cfg(feature = "store")]
 pub mod db {
-    use super::{as_i64, SampleRow, QUERY_CAP};
+    use super::{as_i64, sql, SampleRow, QUERY_CAP};
     use duckdb::types::Value as Dv;
-    use duckdb::{params, Config, Connection};
-    use serde_json::{json, Value};
+    use duckdb::{named_params, Config, Connection};
+    use serde_json::{json, Map, Value};
     use std::path::Path;
-
 
     /// One connection to the publisher's database: the writer holds one, the query routes read
     /// through a clone of it (same database, its own transactions).
@@ -279,51 +264,65 @@ pub mod db {
             Ok(Store { conn: self.conn.try_clone().map_err(e)?, instance: self.instance.clone() })
         }
 
-        /// One `runs` row for this publisher; a seed or port it does not have is null (the hub, an
-        /// import with no game behind it).
+        /// One `runs` row for this publisher (`sql/inserts/runs.sql`); a seed or port it does not
+        /// have is null (the hub, an import with no game behind it).
         pub fn insert_run(&self, session: &Value, seed: Option<i64>, started_ms: i64,
                           ports: (Option<u16>, Option<u16>, Option<u16>)) -> Result<(), String> {
-            self.conn.execute("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?)",
-                              params![self.instance, session.as_str(), seed, started_ms, ports.0, ports.1, ports.2])
-                .map(|_| ()).map_err(e)
+            let text = sql::file(sql::INSERT_FILES, "inserts", "runs")?;
+            self.conn.execute(text, named_params! {
+                "instance": self.instance, "session": session.as_str(), "seed": seed, "started_ms": started_ms,
+                "panel_port": ports.0, "mcp_port": ports.1, "game_port": ports.2,
+            }).map(|_| ()).map_err(e)
         }
 
-        /// Envelopes (see `envelope`) as rows of `events`, in one transaction. The row's instance is
-        /// the envelope's (the instance the event is about), else this store's.
+        /// Envelopes (see `envelope`) as rows of `events` (`sql/inserts/events.sql`), in one
+        /// transaction. The row's instance is the envelope's (the instance the event is about), else
+        /// this store's.
         pub fn insert_events(&mut self, envs: &[Value]) -> Result<usize, String> {
+            let text = sql::file(sql::INSERT_FILES, "inserts", "events")?;
             let tx = self.conn.transaction().map_err(e)?;
             {
-                let mut st = tx.prepare("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?)").map_err(e)?;
+                let mut st = tx.prepare(text).map_err(e)?;
                 for env in envs {
-                    st.execute(params![env["instance"].as_str().unwrap_or(&self.instance), as_i64(env.get("seq")),
-                                       as_i64(env.get("ts_ms")), env["kind"].as_str(), as_i64(env.get("game_tick")),
-                                       env["game_date"].as_str(),
-                                       serde_json::to_string(&env["data"]).unwrap_or_else(|_| "null".into())]).map_err(e)?;
+                    st.execute(named_params! {
+                        "instance": env["instance"].as_str().unwrap_or(&self.instance), "seq": as_i64(env.get("seq")),
+                        "ts_ms": as_i64(env.get("ts_ms")), "kind": env["kind"].as_str(), "game_tick": as_i64(env.get("game_tick")),
+                        "game_date": env["game_date"].as_str(),
+                        "data": serde_json::to_string(&env["data"]).unwrap_or_else(|_| "null".into()),
+                    }).map_err(e)?;
                 }
             }
             tx.commit().map_err(e)?;
             Ok(envs.len())
         }
 
+        /// Sample rows as rows of `samples` (`sql/inserts/samples.sql`), in one transaction.
         pub fn insert_samples(&mut self, rows: &[SampleRow]) -> Result<usize, String> {
+            let text = sql::file(sql::INSERT_FILES, "inserts", "samples")?;
             let tx = self.conn.transaction().map_err(e)?;
             {
-                let mut st = tx.prepare("INSERT INTO samples VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").map_err(e)?;
+                let mut st = tx.prepare(text).map_err(e)?;
                 for r in rows {
-                    st.execute(params![self.instance, r.ts_ms, r.game_tick, r.game_date, r.company, r.name,
-                                       r.money, r.loan, r.value, r.net, r.vehicles]).map_err(e)?;
+                    st.execute(named_params! {
+                        "instance": self.instance, "ts_ms": r.ts_ms, "game_tick": r.game_tick, "game_date": r.game_date,
+                        "company": r.company, "name": r.name, "money": r.money, "loan": r.loan, "value": r.value,
+                        "net": r.net, "vehicles": r.vehicles,
+                    }).map_err(e)?;
                 }
             }
             tx.commit().map_err(e)?;
             Ok(rows.len())
         }
 
-        /// One statement (already passed `read_only_sql`): `{columns, rows, count, capped}`, each row
-        /// a list in column order, at most `QUERY_CAP` rows.
+        /// One statement without parameters (already passed `read_only_sql`): `{columns, rows,
+        /// count, capped}`, each row a list in column order, at most `QUERY_CAP` rows.
         pub fn query(&self, sql: &str) -> Result<Value, String> {
-            let mut st = self.conn.prepare(sql).map_err(e)?;
-            let rows = st.query([]).map_err(e)?;
-            collect(rows)
+            self.query_bound(sql, &Map::new())
+        }
+
+        /// A named query of `sql/queries` with its values bound (`query_bound` of its text).
+        pub fn run(&self, q: &sql::Named) -> Result<Value, String> {
+            self.query_bound(q.sql(), &q.params)
         }
 
         /// The names of a statement's parameters (`$company` is `company`), from DuckDB itself.
@@ -334,7 +333,7 @@ pub mod db {
 
         /// A statement with its named parameters bound from `params` (numbers, strings, booleans,
         /// null); a parameter `params` lacks is an error that names it.
-        pub fn query_bound(&self, sql: &str, params: &serde_json::Map<String, Value>) -> Result<Value, String> {
+        pub fn query_bound(&self, sql: &str, params: &Map<String, Value>) -> Result<Value, String> {
             let mut st = self.conn.prepare(sql).map_err(e)?;
             for i in 1..=st.parameter_count() {
                 let name = st.parameter_name(i).map_err(e)?;
@@ -597,16 +596,23 @@ pub fn other_stores(dir: &std::path::Path, own: &std::path::Path) -> Vec<PathBuf
 
 /// Run one read-only statement on a publisher's store: 400 for anything else, 503 without a store.
 pub fn query(sinks: Option<&Sinks>, sql: &str) -> (u16, Value) {
+    query_bound(sinks, sql, &serde_json::Map::new())
+}
+
+/// `query` with the statement's named parameters bound from `params` (POST /api/db/query
+/// `{sql, params}`): a parameter `params` lacks is a 400 that names it.
+pub fn query_bound(sinks: Option<&Sinks>, sql: &str, params: &serde_json::Map<String, Value>) -> (u16, Value) {
     if let Err(err) = read_only_sql(sql) {
         return (400, json!({"error": err}));
     }
     #[cfg(feature = "store")]
     if let Some(r) = sinks.and_then(|s| s.reader.as_ref()) {
-        return match r.lock().unwrap().query(sql) {
+        return match r.lock().unwrap().query_bound(sql, params) {
             Ok(v) => (200, v),
             Err(err) => (400, json!({"error": err})),
         };
     }
+    let _ = params;
     let why = sinks.and_then(|s| s.store_error.clone()).unwrap_or_else(|| "the store is not open".into());
     (503, json!({"error": format!("store off: {why}")}))
 }
@@ -775,16 +781,37 @@ mod tests {
         assert_eq!(q("SELECT count(*) FROM news"), json!([[2]]));
         assert_eq!(q("SELECT decision, choice->>'k' FROM plan_decisions"), json!([["bot.portfolio", "1"]]));
         assert_eq!(q("SELECT kind, n FROM kind_month ORDER BY kind"), json!([["news.shown", 2], ["plan.portfolio", 1]]));
-        // The store documents itself: every table, view and base-table column has its comment.
-        let undocumented = q("SELECT name, column_name FROM schema_doc WHERE (comment IS NULL OR comment = '')
-                              AND (kind <> 'column' OR name IN ('runs', 'events', 'samples'))");
+        // The store documents itself: every table, view and column, a view's columns too, has its comment.
+        let undocumented = q("SELECT name, column_name FROM schema_doc WHERE comment IS NULL OR comment = ''");
         assert_eq!(undocumented, json!([]), "schema_doc rows without a comment");
+        assert_eq!(q("SELECT comment FROM schema_doc WHERE kind = 'column' AND name = 'company_latest' AND column_name = 'rank'"),
+                   json!([["the company's rank by value among the run's companies, each at its latest month: 1 is the highest, ties share a rank"]]));
         assert_eq!(q("SELECT count(*) FROM schema_doc WHERE kind = 'view'"), json!([[sql::VIEW_FILES.len()]]));
         assert_eq!(q("SELECT comment FROM schema_doc WHERE kind = 'column' AND name = 'samples' AND column_name = 'company'"),
                    json!([["the company id, 0-based (company 1 in the game is 0)"]]));
         // Reopening recreates them: a changed definition reaches old files.
         assert!(r.query("SELECT comment FROM duckdb_views() WHERE view_name = 'company_latest'").unwrap()["rows"][0][0]
                 .as_str().is_some_and(|c| c.contains("rank")));
+    }
+
+    #[cfg(feature = "store")]
+    #[test]
+    fn every_view_file_comments_each_column_the_store_gives_its_view() {
+        // The columns come from the store, not from reading the SELECT: a view's columns are what
+        // DuckDB derives from its definition, `*` and joins included.
+        let st = db::Store::open_in_memory("panel-c").unwrap();
+        let cols = st.query("SELECT c.table_name, c.column_name FROM duckdb_columns() c
+                             JOIN duckdb_views() v ON v.schema_name = c.schema_name AND v.view_name = c.table_name
+                             WHERE c.schema_name = 'main' AND NOT c.internal ORDER BY c.table_name, c.column_index").unwrap();
+        let rows = cols["rows"].as_array().unwrap();
+        for (name, text) in sql::VIEW_FILES {
+            let mine: Vec<&str> = rows.iter().filter(|r| r[0] == *name).filter_map(|r| r[1].as_str()).collect();
+            assert!(!mine.is_empty(), "the store has no columns for the view {name}");
+            for column in mine {
+                assert!(text.contains(&format!("COMMENT ON COLUMN {name}.{column} IS '")), "views/*_{name}.sql must comment {column}");
+            }
+        }
+        assert!(rows.iter().all(|r| sql::VIEW_FILES.iter().any(|(n, _)| r[0] == *n)), "a view without its file: {rows:?}");
     }
 
     #[test]
@@ -804,11 +831,60 @@ mod tests {
                 assert!(text.contains(&format!("COMMENT ON COLUMN {name}.{column} IS '")), "tables/{name}.sql must comment {column}");
             }
         }
-        for (name, text) in sql::QUERY_FILES {
-            assert!(!sql::description(text).is_empty(), "queries/{name}.sql needs leading -- lines that say what it answers");
-            assert_eq!(read_only_sql(text), Ok(()), "queries/{name}.sql must be one read-only statement");
+        for (name, text) in sql::QUERY_FILES.iter().chain(sql::BATTLE_FILES) {
+            assert!(!sql::description(text).is_empty(), "{name}.sql needs leading -- lines that say what it answers");
+            assert_eq!(read_only_sql(text), Ok(()), "{name}.sql must be one read-only statement");
+        }
+        // A row file inserts into the table of its name, naming every column of that table in its
+        // order, each bound from the parameter of the column's name.
+        assert_eq!(sql::INSERT_FILES.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+                   sql::TABLE_FILES.iter().map(|(n, _)| *n).collect::<Vec<_>>(), "one inserts/<table>.sql per table");
+        for (name, text) in sql::INSERT_FILES {
+            assert!(!sql::description(text).is_empty(), "inserts/{name}.sql needs leading -- lines that say what it writes");
+            let table = sql::find(sql::TABLE_FILES, name).unwrap();
+            let head = format!("CREATE TABLE IF NOT EXISTS {name} (");
+            let at = table.find(&head).unwrap() + head.len();
+            let columns: Vec<&str> = table[at..at + table[at..].find(");").unwrap()].split(',')
+                .map(|c| c.split_whitespace().next().unwrap()).collect();
+            let into = format!("INSERT INTO {name} ({})", columns.join(", "));
+            let values = format!("VALUES ({});", columns.iter().map(|c| format!("${c}")).collect::<Vec<_>>().join(", "));
+            assert!(text.contains(&into) && text.contains(&values), "inserts/{name}.sql must be `{into} {values}`");
+            assert!(read_only_sql(text).is_err(), "a row file is no query");
+        }
+        // battle-postmortem's analytics: the schema, and per table one delete and one insert.
+        for (name, text) in sql::ANALYTICS_FILES {
+            assert!(!sql::description(text).is_empty(), "postmortem/analytics/{name}.sql needs leading -- lines");
+            if let Some(t) = name.strip_prefix("insert_").or_else(|| name.strip_prefix("delete_")) {
+                assert!(sql::find(sql::ANALYTICS_FILES, "schema").unwrap().contains(&format!("CREATE TABLE IF NOT EXISTS {t} (")),
+                        "postmortem/analytics/{name}.sql writes {t}, which schema.sql creates");
+                assert!(text.contains(&format!(" INTO {t} (")) || text.contains(&format!("DELETE FROM {t} WHERE edition = $edition")));
+            } else {
+                assert_eq!(*name, "schema");
+            }
         }
         assert!(sql::query("store_schema").is_some() && default_query().contains("FROM events"));
+    }
+
+    #[cfg(feature = "store")]
+    #[test]
+    fn a_statement_binds_the_values_it_is_given_and_names_one_it_lacks() {
+        let dir = std::env::temp_dir().join(format!("bus-bound-{}-{}", std::process::id(), now_ms()));
+        let s = Sinks::open("pub-b", json!("s"), 0, Some(dir.join("pub-b.duckdb")), Run { seed: Some(1), ports: (None, None, None) });
+        s.send(envelope(&json!({"seq": 1, "kind": "x.a", "data": {"n": 1}}), "pub-b", &json!("s"), Some(1), 1, None));
+        s.send(envelope(&json!({"seq": 2, "kind": "x.b", "data": {"n": 2}}), "pub-b", &json!("s"), Some(1), 2, None));
+        s.commit(true);
+        let p = |v: Value| v.as_object().unwrap().clone();
+        let q = "SELECT seq FROM events WHERE kind = $kind";
+        assert_eq!(query_bound(Some(&s), q, &p(json!({"kind": "x.b"}))).1["rows"], json!([[2]]));
+        let (code, out) = query_bound(Some(&s), q, &p(json!({})));
+        assert_eq!((code, out["error"].clone()), (400, json!("missing parameter: kind")));
+        assert_eq!(query_bound(Some(&s), "DROP TABLE events", &p(json!({}))).0, 400);
+        assert_eq!(query_bound(None, q, &p(json!({"kind": "x.b"}))).0, 503);
+        // The same values reach a named query, and a hostile value is only a value.
+        let field = |kind: &str| named(Some(&s), "event_field", &p(json!({"kind": kind, "path": "$.n"}))).1["rows"].clone();
+        assert_eq!(field("x.a"), json!([["1"]]));
+        assert_eq!(field("x.a' OR 1=1 --"), json!([]));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[cfg(feature = "store")]

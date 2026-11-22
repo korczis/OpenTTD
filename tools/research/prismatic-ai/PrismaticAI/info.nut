@@ -459,6 +459,13 @@ class PrismaticAI extends AIInfo {
 			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
 		});
 		AddSetting({
+			name = "rich_air",
+			description = "0 (default): idle money (rich_growth, compete) is not spent on aircraft: air_reuse, planes per air route, air_routes_max and air_add_waiting stay as set; six replays on 2026-11-22 lost 13-55% of company value with 53-79 planes against about 25; 1: rich growth and competitive pressure also lift the air caps (as first built).",
+			min_value = 0, max_value = 1,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
+		AddSetting({
 			name = "modernize",
 			description = "1 (default): once a game month the bot sets the game's autoreplace from every engine it runs to the better one its builders would buy now (same rail type with power, same plane class; modernize.nut); 0: engines are only renewed with the same model.",
 			min_value = 0, max_value = 1,

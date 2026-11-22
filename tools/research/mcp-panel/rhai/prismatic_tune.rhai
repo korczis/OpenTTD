@@ -21,18 +21,24 @@
 // Each change waits for the owner's Approve in the panel (or auto-approve when the owner switches
 // it on), and the chat says so. The tuner never approves. $TUNE_DRY=1 logs and sends nothing.
 //
-// Hot reload: the panel restarts this service when this file or a top-level library it imports
-// changes. policy/ files are imported by a path with a `/`, which the panel's watcher does not
-// stamp today (panel_scripts.rs path_of), and the host's module resolver caches a module per run,
-// so an edit under policy/ takes effect at the next start of the service; the shared key
+// Hot reload: the panel restarts this service when this file or a library it imports changes,
+// policy/lib and policy/chain included; run_stage's template import makes every script under
+// policy/ one it watches (panel_scripts.rs template_dirs_of), so an edit of a stage reloads it
+// too. A stage file added to policy/ is watched from the next start; the shared key
 // `policy.chain` takes effect at the next round. Run it on the Scripts page
 // (/scripts/prismatic_tune), or POST /api/services/start {"name":"prismatic_tune"}.
 import "ttd" as ttd;
 import "policy/lib" as lib;
 import "policy/chain" as defaults;
+import "fr_author" as fa;
 
 // The shared-store key whose value overrides the default chain each round.
 const CHAIN_KEY = "policy.chain";
+// This tuner's name for the planner key planner.<company> (fr_author.rhai): while the key names
+// another writer (Battlebrain during a cutover), it asks for nothing for that company, so no
+// freight-line slot either, whatever setting a stage or the GA's /api/tuning names. Every request
+// names it, so the panel checks the same key before it asks the game (POST /api/bots/setting).
+const WRITER = "prismatic_tune";
 
 fn dry() { env("TUNE_DRY") == "1" }
 
@@ -165,6 +171,18 @@ fn plan(c, ctx) {
     let r = run_chain(c, ctx);
     let m = merge_proposals(c, r.proposals, r.notes);
     requests(ctx, m.chosen, m.notes)
+}
+
+// A round's #{changes, notes} as this tuner may ask for them: with a refusal (fa::refusal, ()
+// when none) nothing, each change dropped named in notes with why.
+fn own_changes(p, held) {
+    let keep = [];
+    for x in p.changes {
+        if fa::holds(held) { p.notes.push(`${x.name} -> ${x.to} (${x.stage}): not asked, ${held.why}`); continue; }
+        keep.push(x);
+    }
+    p.changes = keep;
+    p
 }
 
 // ------------------------------------------------------------------------------ the ctx (pure)
@@ -325,7 +343,7 @@ fn tune_round() {
     for e in r.errors { print(`tune: ${e}`); }
     let ctx = build_ctx(r, env("TUNE_COMPANY"));
     if ctx.error != () { print(`tune: ${ctx.error}`); return c.every_s; }
-    let p = plan(c, ctx);
+    let p = own_changes(plan(c, ctx), fa::refusal(ctx.company, global::WRITER));
     print(`tune: ${ctx.date} company ${ctx.company} (${ctx.bot}), chain ${c.stages} (${c.merge}) from ${now.source}, ${ctx.pending.len()} request(s) pending`);
     for n in p.notes { print(`tune:   ${n}`); }
     let sent = 0;
@@ -333,7 +351,7 @@ fn tune_round() {
         if sent >= c.max_requests { print(`tune:   ${x.name} ${x.from} -> ${x.to}: next round (${c.max_requests} a round)`); continue; }
         if dry() { print(`tune:   ${x.name} ${x.from} -> ${x.to} (${x.why}), dry run`); sent += 1; continue; }
         try {
-            let a = ttd::set_bot(ctx.company, x.name, x.to);
+            let a = ttd::set_bot(ctx.company, x.name, x.to, global::WRITER);
             let id = a.approval_id ?? ();
             print(`tune:   ${x.name} ${x.from} -> ${x.to} (${x.why}): ${if id == () { `${a.status ?? a}` } else { `pending approval #${id}` }}`);
             say(`proposes ${x.name} ${x.from} -> ${x.to} (${x.why})`);

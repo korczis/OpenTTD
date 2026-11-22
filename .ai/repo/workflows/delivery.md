@@ -18,16 +18,48 @@ allows auto-merge since then (`allow_auto_merge: true`).
 | let it merge itself | `gh pr merge <n> -R korczis/OpenTTD --auto --merge` |
 | tell the peers | the board (`majordomus_announce`) and a message to the sessions working on the same paths |
 
-GitHub merges the pull request as soon as the required check is green; nothing waits on the
+## The checks a pull request runs
+
+| Check (job name) | Workflow | What it proves |
+|---|---|---|
+| Check and build | `.github/workflows/surfaces.yml` | derived regions current, links and anchors resolve, the site and wiki build, the web UI's own tests |
+| Research Rust tests | `.github/workflows/research-rust.yml` | `cargo test --release --locked` for `battlebrain`, `mcp-plan`, `mcp-intent` and `mcp-panel` with default features: the boundaries B1-B8 of rule `project.decision-authority-boundaries`, the decision contract and executor, the knapsack checks |
+
+Research Rust runs on every pull request, every push to master and on dispatch. Its one job
+always reports: its first step diffs the change (a pull request's merge commit against its first
+parent, a push against the commit before it, a dispatch against its merge base with master) and,
+when no path the four test binaries compile or read changed, succeeds without building. That
+keeps it safe to require without blocking unrelated pull requests. It links the system libduckdb
+of the `store` feature (`tools/research/mcp-rhai/build.rs`) from DuckDB's pinned release
+archive, verified by SHA-256, and refuses to run when the locked `libduckdb-sys` encodes another
+DuckDB version. Every action is pinned by commit SHA. It runs on the pull request's own pushes;
+no CI job pushes to a pull request's branch (below), so nothing dispatches it there.
+
+Only "Check and build" is required until the owner adds the second check:
+
+```bash
+gh api -X POST repos/korczis/OpenTTD/branches/master/protection/required_status_checks/contexts \
+  -f 'contexts[]=Research Rust tests'
+```
+
+Until then a red Research Rust run is visible on the pull request but does not stop auto-merge,
+so look at it before enabling auto-merge.
+
+GitHub merges the pull request as soon as the required checks are green; nothing waits on the
 session. When master moves first and the branch conflicts, the pull request stays open: merge
 master into the branch again, re-run the gate and push; auto-merge stays enabled.
 
-CI keeps the generated regions of an open pull request current: when master moves, the Surfaces
-`refresh` job merges master into every same-repository branch with auto-merge, regenerates the
-derived regions (counts, indexes, charts) and pushes a "Doc: [Surfaces] Regenerate derived
-regions after merging master" commit, so a stale count no longer blocks the merge
-(`tools/surfaces/README.md`, "Parallel merges"). Pull before pushing again: such a commit may
-have landed on the branch. A conflict outside the derived regions is still the owner's.
+No CI job pushes to a pull request's branch. A branch behind master still merges (`strict:
+false`); master regenerates its derived regions (counts, indexes, charts) on every push, so a
+count that two pull requests both wrote is corrected there. When a stale count turns the pull
+request's own "Check and build" red, its owner runs `tools/surfaces/refresh-branch <branch>`
+(merges master, resolves conflicts inside generated regions, runs `surfaces sync`) and pushes
+(`tools/surfaces/README.md`, "Parallel merges"). A conflict outside the derived regions is the
+owner's as before. A Surfaces `refresh` job used to do this as github-actions[bot] on every push to
+master, for every auto-merge branch; a bot-pushed head never merged (its `pull_request` workflows
+end `action_required`, and the pull request stayed BLOCKED until a human pushed, #70), so it was
+removed. Bringing it back needs a push that starts `pull_request` workflows, an App or PAT token:
+the owner's call.
 
 - The title follows the fork's commit-message form (`Add: [Component] ...`, CODINGSTYLE.md); the
   merge commit is a plain merge, so every commit of the branch is kept.

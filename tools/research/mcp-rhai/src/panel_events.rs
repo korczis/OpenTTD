@@ -13,10 +13,14 @@
 //! `{decision, version, inputs: {live, stored}, choice}` (`plan`): `version` is the code revision
 //! this binary was built from and the digest of the parameters the decision used, `inputs.live`
 //! names what was read live, `inputs.stored` the store query with its row count or the fallback taken
-//! instead, and `choice` is what was decided, as data. This module depends on nothing else of the
-//! panel, so other binaries (mcp-kernel-feed) build the same payload.
+//! instead, and `choice` is what was decided, as data. A store query is a named file of `sql/queries`
+//! (src/store_sql.rs): `inputs.stored` carries its text as `query`, with its `name` and the `params`
+//! bound to it. This module depends on nothing else of the panel but that, so other binaries
+//! (mcp-kernel-feed) build the same payload.
 
 use serde_json::{json, Value};
+
+use crate::store_sql::Named;
 
 /// Who puts a kind on the bus.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -192,18 +196,24 @@ pub fn version(params: Value) -> Value {
     json!({"revision": REVISION, "digest": digest(&params), "params": params})
 }
 
-/// What a decision read from recorded history: a store query with its row count, or the fallback it
-/// took instead (ADR 0034 point 2: never a silent default).
+/// What a decision read from recorded history: a named store query with the values bound to it and
+/// its row count, or the fallback it took instead (ADR 0034 point 2: never a silent default).
 pub enum Stored {
-    /// The calibration reads it (I0082); the decisions of I0083 to I0087 will.
-    Query { sql: String, rows: usize },
+    /// The calibration reads it (I0082), and the decisions of I0083 to I0087.
+    Query { query: Named, rows: usize },
     Fallback(String),
 }
 
 impl Stored {
+    /// `{query, name, params, rows}` (the statement's text, its file's name, the values bound) or
+    /// `{fallback}`.
     pub fn to_json(&self) -> Value {
         match self {
-            Stored::Query { sql, rows } => json!({"query": sql, "rows": rows}),
+            Stored::Query { query, rows } => {
+                let mut out = query.record();
+                out["rows"] = json!(rows);
+                out
+            }
             Stored::Fallback(why) => json!({"fallback": why}),
         }
     }
@@ -370,7 +380,9 @@ mod tests {
         assert_eq!(digest(&json!({"own_lines": 8, "b": 1})), "fnv1a64:846dbf03f70f43fa");
         assert_eq!(d["inputs"], json!({"live": {"planner": "mcp-plan"}, "stored": {"fallback": "store off"}}));
         assert_eq!(d["choice"], json!({"rail_after": 2}));
-        assert_eq!(Stored::Query { sql: "SELECT 1".into(), rows: 3 }.to_json(), json!({"query": "SELECT 1", "rows": 3}));
+        let q = Named::new("company_rank", json!({"company": 2}));
+        assert_eq!(Stored::Query { query: q.clone(), rows: 3 }.to_json(),
+                   json!({"query": q.sql(), "name": "company_rank", "params": {"company": 2}, "rows": 3}));
         assert!(live_only("I0082").to_json()["fallback"].as_str().unwrap().contains("I0082"));
     }
 

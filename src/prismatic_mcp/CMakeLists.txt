@@ -6,6 +6,9 @@ add_files(
     prismatic_mcp.h
     prismatic_mcp_ai.cpp
     prismatic_mcp_ai.h
+    prismatic_mcp_ai_control.h
+    prismatic_mcp_ai_status.cpp
+    prismatic_mcp_ai_status.h
     prismatic_mcp_api.cpp
     prismatic_mcp_api.h
     prismatic_mcp_commands.cpp
@@ -24,6 +27,8 @@ add_files(
     prismatic_mcp_hooks.h
     prismatic_mcp_menu.h
     prismatic_mcp_menu.cpp
+    prismatic_mcp_panel.h
+    prismatic_mcp_panel.cpp
     prismatic_mcp_registry.h
     prismatic_mcp_registry.cpp
     prismatic_mcp_ui.h

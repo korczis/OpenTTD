@@ -41,6 +41,10 @@ from pathlib import Path
 import yaml
 from markdown_it import MarkdownIt
 
+sys.dont_write_bytecode = True  # no __pycache__ beside the sources, which the next sync would read
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import findings  # noqa: E402 - the open-findings region's generator, a module of its own
+
 EXIT_OK, EXIT_USAGE, EXIT_FINDINGS, EXIT_DRIFT = 0, 2, 10, 11
 HERE = Path(__file__).resolve().parent
 CONFIG_FILE = "surfaces.toml"
@@ -56,6 +60,8 @@ DEFAULTS = {
     "regions": {"report": f"{GENERATED_ROOT}/markdown"},
     "facts": {"items": []},
     "generators": {"items": []},
+    "pages": {"items": []},
+    "findings": dict(findings.DEFAULTS),
 }
 # Set while a declared generator runs, so a generator that calls surfaces again does not recurse.
 NESTED_ENV = "SURFACES_GENERATING"
@@ -67,7 +73,8 @@ REGION_RE = re.compile(
     re.S,
 )
 SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
-HTML_ATTR_RE = re.compile(r'''(\s(?:href|src)=)(["'])(.*?)\2''', re.I)
+# `srcset` too, for a `<picture>` that offers a dark variant; one URL per attribute is supported.
+HTML_ATTR_RE = re.compile(r'''(\s(?:href|srcset|src)=)(["'])(.*?)\2''', re.I)
 HTML_ID_RE = re.compile(r'''\s(?:id|name)=["']([^"']+)["']''', re.I)
 
 
@@ -820,7 +827,7 @@ def rewrite_source_links(text: str, fn) -> str:
     out, in_fence, fence = [], False, ""
     links = re.compile(
         r"(?P<inl>(?P<open>!?\[[^\]]*\]\()(?P<target><[^>]*>|[^)\s]+))"
-        r"""|(?P<attr>\s(?:href|src)=)(?P<q>["'])(?P<url>.*?)(?P=q)""",
+        r"""|(?P<attr>\s(?:href|srcset|src)=)(?P<q>["'])(?P<url>.*?)(?P=q)""",
         re.I,
     )
     refdef = re.compile(r"^(\s{0,3}\[[^\]]+\]:\s*)(\S+)")
@@ -1195,8 +1202,11 @@ class Regions:
         raise ValueError(f"fact {item.get('id', '?')}: needs matches, files or docs")
 
     def gen_facts(self, args: dict, doc: Doc) -> str:
+        # A fact marked `site_only` changes with nearly every pull request (the document count):
+        # committed into a region it made every two open pull requests conflict on one line, so it
+        # is shown only where the site computes it at build time.
         items = [i for i in load_config(self.repo.root)["facts"]["items"]
-                 if not args.get("group") or i.get("group") == args["group"]]
+                 if (not args.get("group") or i.get("group") == args["group"]) and not i.get("site_only")]
         rows = []
         for item in items:
             n, how = self.fact_value(item)
@@ -1212,6 +1222,21 @@ class Regions:
         if args.get("as") == "line":
             return " · ".join(f"**{n:,}** {label}" for n, label, _, _ in rows)
         return table(["Count", "What", "Counted from"], [[f"**{n:,}**", label, how] for n, label, how, _ in rows])
+
+    def gen_open_findings(self, args: dict, doc: Doc) -> str:
+        """What the records say is missing, blocked, handed off, not run or failed
+        (tools/surfaces/findings.py, declared in [findings]); `as=pie` counts them by kind, each
+        slice opening the table filtered to that kind. A malformed marker or declaration fails."""
+        cfg = load_config(self.repo.root)["findings"]
+        if getattr(self, "_findings", None) is None:
+            self._findings = findings.collect(self.repo.root, sorted(self.repo.tracked), cfg)
+        result = self._findings
+        if result.errors:
+            raise ValueError("open findings: " + "; ".join(result.errors))
+        if args.get("as") == "pie":
+            return self.pie_by(doc, "Open findings by kind", "open-findings", {}, "Kind",
+                               [f.kind for f in result.findings])
+        return findings.render(result, cfg, lambda path: rel_md(doc, path))
 
     def gen_surfaces(self, args: dict, doc: Doc) -> str:
         r = self.repo
@@ -1307,6 +1332,7 @@ ICON = {
     "search": '<path fill-rule="evenodd" d="M8 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM2 8a6 6 0 1 1 10.89 3.476l4.817 4.817a1 1 0 0 1-1.414 1.414l-4.816-4.816A6 6 0 0 1 2 8Z" clip-rule="evenodd"/>',
     "moon": '<path d="M17.293 13.293A8 8 0 0 1 6.707 2.707a8.001 8.001 0 1 0 10.586 10.586Z"/>',
     "sun": '<path fill-rule="evenodd" d="M10 2a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1Zm4 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm-.464 4.95.707.707a1 1 0 0 0 1.414-1.414l-.707-.707a1 1 0 0 0-1.414 1.414Zm2.12-10.607a1 1 0 0 1 0 1.414l-.706.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0ZM17 11a1 1 0 1 0 0-2h-1a1 1 0 1 0 0 2h1Zm-7 4a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1ZM5.05 6.464A1 1 0 1 0 6.464 5.05l-.707-.707a1 1 0 0 0-1.414 1.414l.707.707Zm1.414 8.486-.707.707a1 1 0 0 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 1.414ZM4 11a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2h1Z" clip-rule="evenodd"/>',
+    "chart": '<path d="M2 11a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-5Zm6-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V7Zm6-3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V4Z"/>',
     "menu": '<path fill-rule="evenodd" d="M3 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm0 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Zm0 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1Z" clip-rule="evenodd"/>',
 }
 
@@ -1369,6 +1395,7 @@ class Site:
         self.graph = link_graph(self.links, docs)
         self.back = backlinks(self.graph)
         root_readme = docs.get("README.md")
+        self.pages: list[dict] = cfg["pages"]["items"]
         self.title = (root_readme.title if root_readme else repo.name) or repo.name
         self.summary = root_readme.summary if root_readme else ""
 
@@ -1382,6 +1409,7 @@ class Site:
         top = [("index.html", "Overview", "home"), ("docs.html", "All documents", "doc")]
         if self.layer.present:
             top.append(("ai.html", "AI layer", "layer"))
+        top += [(f"{p['id']}.html", p["title"], "chart") for p in self.pages]
         parts = ['<ul class="space-y-2 pb-2">']
         for target, label, ic in top:
             cls = item + (on if here == target and (active is None or target != "index.html") else "")
@@ -1419,7 +1447,7 @@ class Site:
 
     def shell(self, here: str, title: str, content: str, active: Doc | None = None,
               crumbs: list[tuple[str, str]] = (), actions: str = "", charts: bool = False,
-              description: str = "", absolute: bool = False) -> str:
+              description: str = "", absolute: bool = False, scripts: tuple[str, ...] = ()) -> str:
         root = posixpath.relpath(".", posixpath.dirname(here) or ".")
         root = "" if root == "." else root + "/"
         # A page served at any URL (404.html) resolves its links from the site's base path.
@@ -1444,9 +1472,10 @@ class Site:
 <meta name="description" content="{esc(description or self.summary)}">
 <meta name="generator" content="tools/surfaces/surfaces site @ {esc(sha)}">
 <script>(function(){{try{{var t=localStorage.getItem('color-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}}catch(e){{}}}})()</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231d4ed8'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="{root}css/app.css">
 </head>
-<body class="bg-gray-50 dark:bg-gray-900" data-root="{root}" data-charts="{str(charts).lower()}">
+<body class="bg-gray-50 dark:bg-gray-900" data-root="{root}" data-charts="{str(charts).lower()}" data-web="{esc(self.repo.web)}" data-sha="{esc(self.repo.sha)}">
 <nav class="fixed z-30 w-full border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
   <div class="px-3 py-3 lg:px-5 lg:ps-3"><div class="flex items-center justify-between">
     <div class="flex items-center justify-start">
@@ -1491,6 +1520,7 @@ class Site:
 </div>
 <script src="{root}js/flowbite.min.js"></script>
 <script src="{root}js/app.js"></script>
+{"".join(f'<script src="{root}js/{esc(src)}"></script>' for src in scripts)}
 </body>
 </html>
 """
@@ -1637,6 +1667,7 @@ class Site:
             f"{esc(self.summary)}</p><div class=\"flex flex-wrap gap-2\">"
             f'<a class="{BTN_PRIMARY}" href="docs.html">Browse {len(self.docs)} documents</a>'
             + (f'<a class="{BTN_SECONDARY}" href="ai.html">AI layer</a>' if self.layer.present else "")
+            + "".join(f'<a class="{BTN_SECONDARY}" href="{esc(p["id"])}.html">{esc(p["title"])}</a>' for p in self.pages)
             + f'<a class="{BTN_SECONDARY}" href="{esc(self.repo.web)}">Repository</a>'
             f'<a class="{BTN_SECONDARY}" href="{esc(self.repo.wiki_url)}">Wiki</a></div></div>'
         )
@@ -1819,6 +1850,62 @@ class Site:
 
     # -- data ---------------------------------------------------------------
 
+    # -- declared data pages -------------------------------------------------
+
+    def resolve(self, here: str, target: str) -> str:
+        """A repository path as a link from `here`: a published document's page, else the file or
+        directory at the built commit on the forge; `?...` and `#...` stay on this page."""
+        if not target or SCHEME_RE.match(target):
+            return target
+        if target.startswith(("?", "#")):
+            return target
+        path, _, frag = target.partition("#")
+        path = path.rstrip("/")
+        doc = self.docs.get(path) or (path in self.repo.dirs and self.docs.get(posixpath.join(path, "README.md")))
+        suffix = f"#{frag}" if frag else ""
+        if doc:
+            return self.link(here, doc.page) + suffix
+        if path in self.repo.dirs:
+            return self.repo.tree(path) + suffix
+        return self.repo.blob(path) + suffix
+
+    def declared_page(self, item: dict, data: dict) -> str:
+        """A page declared in surfaces.toml: its summary, the evidence cards its data carries, and the
+        mount its own script draws into. The cards are plain HTML, so the page says what it found
+        with no script at all; each opens the view that explores it and the chain that proves it."""
+        here = f"{item['id']}.html"
+        cards = []
+        for c in data.get("cards") or []:
+            chain = " ".join(
+                f'<a class="underline decoration-dotted hover:text-primary-700 dark:hover:text-primary-400" '
+                f'href="{esc(self.resolve(here, step.get("href", "")))}">{esc(step.get("label", ""))}</a>'
+                for step in c.get("chain") or [])
+            view = c.get("view") or ""
+            cards.append(
+                f'<div class="{CARD} flex flex-col" data-card="{esc(c.get("id", ""))}">'
+                f'<a href="{esc(view or "#")}" class="evidence-card-link block">'
+                f'<span class="font-mono text-2xl font-bold leading-none text-gray-900 sm:text-3xl dark:text-white">{esc(c.get("value", ""))}</span>'
+                f'<p class="mt-1 text-sm font-medium text-gray-900 dark:text-white">{esc(c.get("label", ""))}</p></a>'
+                f'<p class="mt-1 flex-1 text-xs text-gray-500 dark:text-gray-400">{esc(c.get("detail", ""))}</p>'
+                + (f'<p class="mt-2 font-mono text-[11px] text-gray-500 dark:text-gray-400">{chain}</p>' if chain else "")
+                + "</div>")
+        src = f"data/{item['id']}.json"
+        intro = (
+            f'<div class="{CARD} mb-4"><p class="text-base text-gray-600 dark:text-gray-300">{esc(item.get("summary", ""))}</p>'
+            f'<p class="mt-2 font-mono text-xs text-gray-500 dark:text-gray-400">Built from '
+            f'<a class="underline" href="{esc(self.repo.web)}/commit/{esc(self.repo.sha)}">{esc(self.repo.sha[:10])}</a>'
+            f' · data <a class="underline" href="{esc(src)}">{esc(src)}</a> ({esc(data.get("schema", ""))})'
+            f' · derived by <a class="underline" href="{esc(self.repo.blob(item["data"][0]))}">{esc(" ".join(item["data"]))}</a></p></div>'
+        )
+        grid = ('<div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">' + "".join(cards) + "</div>"
+                if cards else "")
+        mount = (f'<div id="page-app" data-page="{esc(item["id"])}" data-src="{esc(src)}" data-state="loading" aria-live="polite">'
+                 f'<div class="{CARD} text-sm text-gray-500 dark:text-gray-400">Loading the views…</div></div>'
+                 f'<noscript><div class="{CARD} text-sm text-gray-500 dark:text-gray-400">The interactive views need '
+                 f'JavaScript. The cards above, and the data file, are complete without it.</div></noscript>')
+        return self.shell(here, item["title"], intro + grid + mount, scripts=(f"{item['id']}.js",),
+                          description=item.get("summary", ""))
+
     def data(self) -> dict:
         times = [int(t) for t in git(self.repo.root, "log", "--format=%ct", "HEAD").split()]
         week = 7 * 86400
@@ -1868,7 +1955,8 @@ class Site:
         }
 
     def search_index(self) -> list[dict]:
-        return [
+        return [{"t": p["title"], "p": f"{p['id']}.html", "u": f"{p['id']}.html", "s": p.get("summary", ""), "h": []}
+                for p in self.pages] + [
             {"t": d.title, "p": d.path, "u": d.page, "s": d.summary, "h": d.headings[:30],
              "b": plain(re.sub(r"```.*?```", " ", d.body, flags=re.S))[:1500]}
             for d in self.docs.values()
@@ -1896,6 +1984,13 @@ class Site:
         self.write("docs.html", self.docs_page())
         if self.layer.present:
             self.write("ai.html", self.ai_page())
+        for item in self.pages:
+            data = page_data(self.repo.root, item)
+            self.write(f"data/{item['id']}.json", json.dumps(data, ensure_ascii=False, sort_keys=True))
+            self.write(f"{item['id']}.html", self.declared_page(item, data))
+        # What the browser check drives: every declared page and the scenario that proves it.
+        self.write("data/pages.json", json.dumps(
+            [{"id": p["id"], "title": p["title"], "page": f"{p['id']}.html", "e2e": p["e2e"]} for p in self.pages]))
         self.write("404.html", self.shell("404.html", "Not found",
                    f'<div class="{CARD}"><p class="text-gray-500 dark:text-gray-400">No page here. '
                    f'Search above, or start from the <a class="font-medium text-primary-700 underline '
@@ -1906,7 +2001,7 @@ class Site:
         declare(self.out, "site", self.cfg["site"]["mount"], f"{self.title} — documentation site",
                 "documentation", self.repo, "tools/surfaces/surfaces site")
         if assets:
-            build_assets(self.out)
+            build_assets(self.out, self.repo.root, self.pages)
 
 
 def declare(out: Path, sid: str, mount: str, title: str, category: str, repo: Repo, producer: str) -> None:
@@ -1918,7 +2013,46 @@ def declare(out: Path, sid: str, mount: str, title: str, category: str, repo: Re
     }, indent=2) + "\n")
 
 
-def build_assets(out: Path) -> None:
+def page_data(root: Path, item: dict) -> dict:
+    """Run a declared page's data command from the repository root; its stdout is the page's JSON
+    data contract, an object that names its `schema`. A command that fails stops the build."""
+    env = dict(os.environ, **{NESTED_ENV: "1"})
+    run = subprocess.run(item["data"], cwd=root, capture_output=True, text=True, env=env)
+    if run.returncode != 0:
+        raise SystemExit(f"surfaces: page {item['id']}: `{' '.join(item['data'])}` exited {run.returncode}:\n"
+                         + (run.stderr or run.stdout)[-2000:])
+    try:
+        data = json.loads(run.stdout)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"surfaces: page {item['id']}: the data command did not print JSON: {e}")
+    if not isinstance(data, dict) or not data.get("schema"):
+        raise SystemExit(f"surfaces: page {item['id']}: the data must be an object naming its `schema`")
+    return data
+
+
+def check_pages(repo: Repo, cfg: dict) -> list[Finding]:
+    """Every declared page names an id, a title, a data command, its script and its browser scenario,
+    and each of those files is tracked: a page no browser check drives is not built."""
+    found, seen = [], set()
+    for i, item in enumerate(cfg["pages"]["items"]):
+        pid = item.get("id", "")
+        where = f"pages.items[{i}]"
+        if not re.fullmatch(r"[a-z][a-z0-9-]*", pid) or pid in seen or pid in ("index", "docs", "ai", "404"):
+            found.append(Finding("page", CONFIG_FILE, 0, f"{where}: id '{pid}' must be a new lowercase slug"))
+        seen.add(pid)
+        for key in ("title", "summary"):
+            if not item.get(key):
+                found.append(Finding("page", CONFIG_FILE, 0, f"{where} ({pid}): no {key}"))
+        cmd = item.get("data") or []
+        if not cmd or cmd[0] not in repo.tracked:
+            found.append(Finding("page", CONFIG_FILE, 0, f"{where} ({pid}): data must be a command whose first word is a tracked file"))
+        for key in ("script", "e2e"):
+            if item.get(key) not in repo.tracked:
+                found.append(Finding("page", CONFIG_FILE, 0, f"{where} ({pid}): {key} '{item.get(key)}' is not a tracked file"))
+    return found
+
+
+def build_assets(out: Path, root: Path | None = None, pages: list[dict] = ()) -> None:
     modules = HERE / "node_modules"
     if not (modules / ".bin/tailwindcss").exists():
         subprocess.run(["npm", "ci", "--no-audit", "--no-fund"], cwd=HERE, check=True)
@@ -1926,8 +2060,17 @@ def build_assets(out: Path) -> None:
     for src in ("flowbite/dist/flowbite.min.js", "mermaid/dist/mermaid.min.js", "echarts/dist/echarts.min.js"):
         shutil.copy(modules / src, out / "js" / posixpath.basename(src))
     shutil.copy(HERE / "assets/app.js", out / "js/app.js")
+    stylesheet = HERE / "assets/input.css"
+    if pages:
+        # A declared page's script carries its own classes: scan it too. The wrapper lives under
+        # node_modules (ignored), beside the packages the stylesheet imports.
+        for p in pages:
+            shutil.copy(root / p["script"], out / "js" / f"{p['id']}.js")
+        stylesheet = modules / ".surfaces-pages.css"
+        stylesheet.write_text('@import "../assets/input.css";\n' + "".join(
+            f'@source "{(root / p["script"]).as_posix()}";\n' for p in pages))
     css = subprocess.run(
-        [str(modules / ".bin/tailwindcss"), "-i", str(HERE / "assets/input.css"),
+        [str(modules / ".bin/tailwindcss"), "-i", str(stylesheet),
          "-o", str(out / "css/app.css"), "--minify"],
         cwd=HERE, capture_output=True, text=True,
     )
@@ -2233,6 +2376,7 @@ def run_check(repo: Repo, cfg: dict, docs: dict[str, Doc], layer: Layer) -> list
         if not matches(path, cfg["check"]["front_matter_exclude"]):
             findings.append(Finding("front", path, 1, f"front matter does not parse, so the page shows it as text: {why}"))
     findings += check_libraries(repo, cfg)
+    findings += check_pages(repo, cfg)
     tools = load_tools(repo, cfg)
     findings += check_tool_headers(tools)
     for path, doc in docs.items():

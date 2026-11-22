@@ -10,6 +10,7 @@ sources are its tracked Markdown, its git history and its `.ai/` layer. The outp
 | Markdown regions | `surfaces sync` | Tables inside the documents themselves (document indexes, features, decisions, rules, plan, surfaces, facts, a table of contents, a region included from another document), between markers, after every declared generator has run | The repository |
 | Gate | `surfaces check` | Fails while a region is stale, a declared generator's check fails, a relative link or anchor leads nowhere, a document's front matter does not parse, a tool's flags and its usage disagree, or a diagram is drawn in characters instead of Mermaid | Pre-commit, `tools/gate.sh`, CI |
 | Diagrams | `diagrams-check` | Opens every built page with a Mermaid block in Chrome and fails on a diagram that does not render to an SVG | CI, after `site` |
+| Declared pages | `pages-check` | Opens every page `[[pages.items]]` declares in Chrome, desktop and phone, light and dark, then runs the page's own scenario | CI, after `site` |
 
 Nothing in the generator names a repository. Every fact comes from git (`origin`, `HEAD`,
 the tracked files, the log), from the `.ai/manifest.yaml` sections, and from each
@@ -109,6 +110,11 @@ A region is a pair of HTML comments whose contents the generator owns:
 | `toc` | `depth=<n>` (default 3) | The headings that follow the region, levels 2 to `n`, nested and linked with their anchors |
 | `include` | `src=<document>`, `region=<name>` | The body of a marked region of another document (`<!-- name:begin -->`, any tool's marker, or a surfaces region of that generator), its relative links rewritten for this document and its comment lines dropped |
 | `facts` | `group=<name>`, `as=table\|line\|pie` | Numbers counted from the tracked files: each `[[facts.items]]` in `surfaces.toml` counts regex `matches` `in` a glob, tracked `files` matching a glob, or published `docs` under a path; the table shows what was counted, `line` is one sentence of bold numbers, `pie` a Mermaid pie |
+| `open-findings` | `as=pie` | What the records say is missing, blocked, handed off, not run or failed, one row per finding with its kind, its evidence (record and line), its follow-up issue and an OBSERVED/DERIVED label, computed by `findings.py` from the sources `[findings]` declares; or a pie by kind, each slice opening the table filtered to that kind ([Open findings](#open-findings)) |
+
+A fact marked `site_only = true` is left out of every Markdown region and shown only on the site's
+overview, where it is computed at build time. The document count is one: nearly every pull request
+adds a document, so in `README.md` it made every two open pull requests conflict on the same line.
 
 A fact is the one kind of number a committed document can state without going stale: it changes
 only when the files it counts change, and `surfaces sync` rewrites it in the same commit. A count
@@ -166,26 +172,82 @@ ECharts already draws, so they are listed.
 A count in a region changes with every pull request that adds what it counts. Two pull requests
 that each add a document both write the same new number, both pass on their own, and the second
 to merge leaves `README.md` one short. Waiting for every owner to re-sync turns auto-merge into a
-race, so the workflow keeps the branches current itself:
+race. What keeps it from blocking:
 
-- **On every same-repository pull request, and on every push to the default branch for each open
-  pull request with auto-merge**, the `refresh` job runs `tools/surfaces/refresh-branch --push
-  <branch>`. It merges `origin/master` into the branch, resolves a conflict inside a generated
-  region by taking master's side, runs `surfaces sync`, and commits "Doc: [Surfaces] Regenerate
-  derived regions after merging master" only when the sync changed something. A conflict
-  anywhere else aborts the merge and leaves the branch to its owner (exit 10).
-- **The push is a fast-forward of what was fetched, never a force.** When the owner pushed in the
-  meantime it is refused, and the next push to master retries.
-- **A push made with `GITHUB_TOKEN` starts no workflow**, so the job dispatches Surfaces on the
-  branch; that run reports "Check and build" on the new head, which is what branch protection and
-  auto-merge wait for. Dispatched runs do not refresh again, so a sync commit cannot start another.
-- **The default branch builds from regenerated regions**, so a count that still slipped through
-  never stops the site and the wiki from deploying; the next pull request brings the file back in
-  step.
+- **A branch behind master still merges.** Branch protection is `strict: false` and requires only
+  "Check and build", so master moving does not by itself block a pull request.
+- **The default branch builds from regenerated regions**, so a count that slipped through never
+  stops the site and the wiki from deploying, and master's next state is correct.
+- **When a stale count turns a pull request red, its owner refreshes it**:
+  `tools/surfaces/refresh-branch <branch>` merges `origin/master` into the branch, resolves a
+  conflict inside a generated region by taking master's side, runs `surfaces sync`, and commits
+  "Doc: [Surfaces] Regenerate derived regions after merging master" only when the sync changed
+  something; `--push` pushes it as a fast-forward, never a force. A conflict anywhere else aborts
+  the merge and leaves the branch to its owner (exit 10).
+- **No CI job pushes to a pull request's branch.** A `refresh` job used to run `refresh-branch
+  --push` as github-actions[bot] on every auto-merge branch for each push to master and dispatch
+  Surfaces on it, because a push made with `GITHUB_TOKEN` starts no workflow. A bot-pushed head
+  never merged: its `pull_request` workflows end `action_required` with no jobs, and even with the
+  dispatched run's "Check and build" green on that head the pull request stayed BLOCKED until a
+  human pushed (#70). With every pull request reset on each merge, the job only stranded them and
+  filled the runner queue. Running it from CI again needs a push that starts `pull_request`
+  workflows (an App or PAT token), which is the owner's call.
 
-Locally, `tools/surfaces/refresh-branch <branch>` does the same without pushing.
-`tools/surfaces/test_refresh_branch.py` runs every path of it against scratch repositories, in
-the Surfaces workflow.
+`tools/surfaces/test_refresh_branch.py` runs every path of `refresh-branch` against scratch
+repositories, and `tools/surfaces/test_surfaces_workflow.py` keeps the workflow from pushing to a
+pull request's branch again; both run in the Surfaces workflow.
+
+## Open findings
+
+A list of what is still missing restates the records it was read from, so it is a derived
+surface like any index. `findings.py` computes it, the `open-findings` region renders it (here:
+[`research/open-findings.md`](../../research/open-findings.md)), and `check` fails while the
+committed copy is stale. The generator names no fact of a repository: `[findings]` in
+`surfaces.toml` says where to look and which vocabulary the records use.
+
+| Source | Declared by | A finding when | Kind | Label |
+|---|---|---|---|---|
+| Issue records | `issues = { in, id, non_scope_of }` | an issue that is not done depends on one that is not done | `blocked` | DERIVED |
+| | | a `non_scope` entry of an issue whose status is in `non_scope_of` names no open issue (one that names only done issues was taken over and is dropped) | `out-of-scope` | DERIVED |
+| | | an `evidence[].result` holds an open status: the sentence around it | the status's kind | OBSERVED |
+| Tables | `tables = { in, columns, exclude }` | a row's cell under a header in `columns` begins with an open status | the status's kind | OBSERVED |
+| Front matter | `front_matter = [{ in, field, values, kind }]` | the document's `field` holds one of `values` | `kind` | OBSERVED |
+| Markers | `markers = { in, exclude }` | a passage is marked as below | the marker's `kind` | OBSERVED |
+| Live | `live = [{ id, kind, command, items, keep, record, text }]` | only under `findings.py --live`: each item of the command's JSON at `items` whose fields match `keep` | `kind` | DERIVED |
+
+`statuses` maps each open status of the records' vocabulary (`NOT RUN`, `PARTIAL`, ...) to a kind,
+matched as a whole token, case and all. `kinds` declares every kind, with its meaning and in the
+order the page lists them; a finding of an undeclared kind is a check finding. An issue's status
+comes from its lifecycle stamps: `completed_at` is done, `verified_at` verified, `started_at`
+active, none open; only a done issue satisfies a dependency, as in Majordomus.
+
+A finding's **follow-up** is the open issues that own it: what a blocked issue waits on, the
+issue whose evidence says NOT RUN while it is still open, the open issues a row or passage names
+(`id` is how an issue id is written), or a marker's `follow-up=`. With none the page says
+"none — needs an issue". The **evidence** is the record id or document with the line it is on.
+
+A sentence in prose is not a status cell, so a document marks the passage it means:
+
+```html
+... settings. <!-- open-finding kind=failed -->In that round no route was found.<!-- /open-finding --> Then ...
+
+<!-- open-finding kind=handoff follow-up=I0123 -->
+A paragraph that is the finding, up to the next blank line.
+```
+
+The marker takes `kind=` (required, a declared kind) and `follow-up=` (an issue record that
+exists). An inline marker runs to `<!-- /open-finding -->`, or to the end of its paragraph or the
+next marker; one on its own line takes the paragraph after it. Markers inside code fences or
+backticks are examples, not findings. `check` fails on an unknown attribute, an undeclared kind,
+a follow-up that names no issue and a closing marker with no opening one in its paragraph.
+
+Live sources answer for the moment (`majordomus plan drift` reads the forge and the branches), so
+committing them would make every check depend on the clock. `findings.py --live` prints them with
+the rest, and prints `NOT RUN: <id>: <why>` for a command that is missing or fails.
+
+`findings.py [--json] [--live]` prints the same list from the command line (from the tracked
+files only, where `sync` also reads files not yet added). `test_findings.py` runs every line of
+it against scratch repositories and a `surfaces sync`/`check` round trip.
 
 ## Generators
 
@@ -262,6 +324,42 @@ the tooltip. Search reads the title, path, summary, headings and the first part 
 and is shown at every width. `404.html` carries a `<base href>` set to the Pages path, because
 GitHub serves it at whatever URL was missed.
 
+## Declared pages
+
+A page that is not a document, such as a view over a repository's own records, is declared in
+`surfaces.toml` instead of written into the generator, which stays generic:
+
+```toml
+[[pages.items]]
+id = "atlas"                                   # published as atlas.html, listed in the sidebar
+title = "Research Atlas"
+summary = "One paragraph: the page's intro, its meta description and its search entry."
+data = ["tools/research/atlas/atlas", "data"]  # run at build time; stdout is the page's JSON
+script = "tools/research/atlas/atlas.js"       # the page's own client script, copied to js/<id>.js
+e2e = "tools/research/atlas/atlas.e2e.mjs"     # the scenario pages-check runs in Chrome
+```
+
+- **Data.** `surfaces site` runs `data` from the repository root and publishes its stdout as
+  `data/<id>.json`. It must be a JSON object that names its `schema`; a failing command or other
+  output stops the build. The data is derived at build time, so it cannot drift from the commit.
+- **Cards.** When the data carries `cards` (`value`, `label`, `detail`, `view`, `chain` of
+  `{label, href}`), the page renders them as plain HTML, so it states what it found with no
+  script at all. A `chain` href is a repository path (a document becomes its page, any other file
+  the forge at the built commit, a trailing `/` a directory); `view` is a query on the page itself.
+- **Script.** The page's script draws into `#page-app` and builds on `window.surfaces`
+  (`assets/app.js`): the URL state (`params`, `setParam`), the chart registry (`charts`, so a chart
+  resizes and its `.chart-card` maximizes and restores on Escape), `echarts()` (the site's own
+  copy), `onTheme`, `href(path)` and `restoreMax`. It sets `data-state="ready"` once every view is
+  drawn, or `"error"` with a message when its data does not load. Tailwind scans the script, so its
+  classes are in the stylesheet.
+- **Checked.** `surfaces check` fails on a declaration without a slug id, title, summary, a data
+  command whose first word is tracked, or a tracked `script` and `e2e` (finding `page`): a page no
+  browser check drives is not built. `pages-check [SITE_DIR] [--shots DIR]` opens each declared
+  page (from the built `data/pages.json`) at 1440 and 390 px in light and dark, waits for its
+  ready state rather than a fixed time, and fails on a page error, a console error, sideways scroll
+  or a relative link to nothing; then it imports the page's `e2e` module and calls its default
+  export with `{browser, base, url, site, root, open, check}`.
+
 ## Wiki
 
 GitHub keeps a wiki in a separate repository, `<repo>.wiki.git`, which exists only after
@@ -315,7 +413,9 @@ The project rule `project.published-surfaces-are-derived` states the contract.
 |---|---|
 | `surfaces` | Entry point. Creates the virtual environment, then runs `surfaces.py` |
 | `surfaces.py` | The generator: discovery, rendering, regions, check |
+| `findings.py` | The open findings: their sources, read through `[findings]` in `surfaces.toml` |
 | `assets/input.css`, `assets/app.js` | The site's stylesheet source and client script (Mermaid theme, ECharts builders, maximize) |
 | `diagrams-check` | Every Mermaid diagram of a built site renders, in Chrome |
+| `pages-check` | Every declared page of a built site works, in Chrome, with its own scenario |
 | `package.json`, `package-lock.json` | Pinned front-end dependencies |
 | `requirements.txt` | Pinned Python dependencies |
