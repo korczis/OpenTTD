@@ -103,6 +103,7 @@ require("steward.nut");
 require("autopilot.nut");
 require("catchment.nut");
 require("statues.nut");
+require("growth.nut");
 
 /* Cheapest buildable road engine that carries a passenger-class cargo. */
 function PrismaticAI::PickPassengerEngine() {
@@ -327,6 +328,7 @@ function PrismaticAI::Behaviour() {
 		invest_borrow = AIController.GetSetting("invest_borrow"),
 		air_add_waiting = AIController.GetSetting("air_add_waiting"),
 		rail_twin_max = AIController.GetSetting("rail_twin_max"),
+		rail_grow_max = AIController.GetSetting("rail_grow_max"),
 		rail_double = AIController.GetSetting("rail_double"),
 	};
 	/* Autopilot (default on): a bot nobody gave a plan (no planner line, air or rail pair) grows on
@@ -562,6 +564,7 @@ function PrismaticAI::Start() {
 		if (b.self_steward == 1 && PrismaticAI.MonthKey() != this.month) {
 			this.SelfSteward();
 			if (!frozen) this.TwinLines(b);
+			if (!frozen) this.GrowPlatforms(b);
 		}
 		this.ReconcileLines(b.cash_reserve);
 		if (PrismaticAI.MonthKey() != this.month) { this.month = PrismaticAI.MonthKey(); PrismaticAI.LogLines(); }
