@@ -106,6 +106,29 @@ pub fn shared() -> &'static Shared {
     S.get_or_init(Shared::default)
 }
 
+/// One author per freight-line slot (src/fr_author.rs): the key format and the rule, pure.
+#[path = "fr_author.rs"]
+pub mod fr_author;
+
+/// The shared check of this panel's writers: None when `writer` may propose `company`'s
+/// freight-line slots (its planner key is unset, null or names it), else the refusal
+/// `{key, company, holder, writer, why}` read from the memory `s`.
+fn fr_refusal_in(s: &Shared, company: i64, writer: &str) -> Option<Value> {
+    fr_author::refusal(s.get(&fr_author::planner_key(company)).map(|e| e.value).as_ref(), company, writer)
+}
+
+/// Every company whose planner key names another writer than `writer`, as refusals in key order.
+/// Empty when no planner key is set, which is the case outside a Battlebrain cutover.
+pub fn fr_refusals(writer: &str) -> Vec<Value> {
+    fr_refusals_in(shared(), writer)
+}
+
+fn fr_refusals_in(s: &Shared, writer: &str) -> Vec<Value> {
+    s.list(fr_author::PLANNER_KEY_PREFIX).iter()
+        .filter_map(|(k, _)| fr_author::company_of_key(k))
+        .filter_map(|c| fr_refusal_in(s, c, writer)).collect()
+}
+
 pub fn entry_json(key: &str, e: &Entry) -> Value {
     json!({"key": key, "value": e.value, "rev": e.rev, "writer": e.writer, "at": e.at})
 }
