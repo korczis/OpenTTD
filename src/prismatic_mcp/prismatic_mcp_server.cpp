@@ -585,6 +585,8 @@ struct PendingApproval {
 	std::string mcp_args;        ///< its arguments as called, serialized
 	uint64_t superseded_by = 0;  ///< the newer approval that withdrew this one (state Denied), else 0
 	std::string settled_by;      ///< "deadline keep" / "deadline approve" when the deadline settled it, else empty
+	std::string plan;            ///< the plan it belongs to (detail::PlanOf): its rows settle all or none; empty for none
+	int company = -1;            ///< the company its arguments name, else -1
 	uint64_t created_tick = 0;
 	uint64_t expiry_tick = 0;
 	ApprovalState state = ApprovalState::Pending;
@@ -688,7 +690,7 @@ json ResourceApprovals()
 				: a.state == ApprovalState::Denied ? "denied" : "consumed";
 			arr.push_back({{"id", a.id}, {"action", a.tool}, {"tool", a.mcp_tool},
 				{"args", json::parse(a.mcp_args.empty() ? a.canonical_args : a.mcp_args, nullptr, false)},
-				{"state", a.superseded_by != 0 ? "superseded" : st}, {"superseded_by", a.superseded_by}, {"expired", a.state == ApprovalState::Pending && now > a.expiry_tick},
+				{"state", a.superseded_by != 0 ? "superseded" : st}, {"superseded_by", a.superseded_by}, {"plan", a.plan}, {"expired", a.state == ApprovalState::Pending && now > a.expiry_tick},
 				{"created_tick", a.created_tick}, {"expires_tick", a.expiry_tick},
 				{"deadline_tick", detail::DeadlineTick(a.created_tick, _deadline_policy.ticks).value_or(0)},
 				{"settled_by", a.settled_by}});
@@ -1134,8 +1136,16 @@ json HandleToolsCall(const json &id, const json &params)
 		 * the queue is measured: approving the older afterwards would undo the newer for that setting
 		 * (detail::Supersedes). */
 		uint64_t new_id = _next_approval_id;
+		/* Plans (detail::PlanSupersedes): a change outside any plan that touches a setting a pending
+		 * plan holds is refused, so a plan never settles with a row missing. */
+		for (const auto &old : _approvals) {
+			if (old.state != ApprovalState::Pending) continue;
+			if (detail::PlanSupersedes(type, aargs, old.tool, json::parse(old.canonical_args, nullptr, false)) != detail::PlanConflict::Refuse) continue;
+			json out = {{"status", "refused"}, {"error", fmt::format("pending plan '{}' (approval #{}) holds this setting: approve or deny that plan first (prismatic_mcp approve|deny {})", old.plan, old.id, old.id)}};
+			return RpcResult(id, json{{"content", json::array({{{"type", "text"}, {"text", out.dump()}}})}, {"isError", true}});
+		}
 		for (auto &old : _approvals) {
-			if (old.state != ApprovalState::Pending || !detail::Supersedes(type, aargs, old.tool, json::parse(old.canonical_args, nullptr, false))) continue;
+			if (old.state != ApprovalState::Pending || detail::PlanSupersedes(type, aargs, old.tool, json::parse(old.canonical_args, nullptr, false)) != detail::PlanConflict::Withdraw) continue;
 			old.state = ApprovalState::Denied;
 			old.superseded_by = new_id;
 			Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approval #{} superseded by #{} ({})", old.id, new_id, type);
@@ -1160,6 +1170,8 @@ json HandleToolsCall(const json &id, const json &params)
 		pa.mcp_tool = std::string(name);
 		pa.mcp_args = args.dump();
 		pa.created_tick = now;
+		pa.plan = detail::PlanOf(type, aargs);
+		if (aargs.is_object() && aargs.contains("company") && aargs["company"].is_number_integer()) pa.company = aargs["company"].get<int>();
 		/* An action that names its own stale date (ai.set_settings' expires_tick, bound with the args)
 		 * expires then, if that is sooner than the TTL; its execution re-checks the date as well. */
 		pa.expiry_tick = detail::ApprovalExpiry(now, APPROVAL_TTL_TICKS, detail::BoundExpiresTick(type, aargs));
@@ -1755,12 +1767,58 @@ std::vector<PendingApprovalInfo> PendingApprovals()
 	return out;
 }
 
+/** The pending rows of the plan `a` belongs to (itself included); just `a` when it has no plan. */
+static std::vector<PendingApproval *> PlanRows(PendingApproval &a)
+{
+	std::vector<PendingApproval *> rows;
+	if (a.plan.empty()) { rows.push_back(&a); return rows; }
+	for (auto &o : _approvals) {
+		if (o.state == ApprovalState::Pending && o.plan == a.plan && o.company == a.company) rows.push_back(&o);
+	}
+	return rows;
+}
+
+/**
+ * Approve a whole plan at once: every row is checked again first (not expired, still valid against
+ * the game as it is now), and when any is not, the whole plan is retired with the reason and
+ * nothing of it is enacted. Then every row executes, in the same main-thread call.
+ */
+static bool ApprovePlan(PendingApproval &first, std::string &message, std::string_view via)
+{
+	const uint64_t now = (uint64_t)TimerGameTick::counter;
+	std::vector<PendingApproval *> rows = PlanRows(first);
+	std::string why;
+	for (PendingApproval *r : rows) {
+		if (now > r->expiry_tick) { why = fmt::format("#{} expired", r->id); break; }
+		json errs = json::array();
+		ValidateAction(r->tool, json::parse(r->canonical_args), errs);
+		if (!errs.empty()) { why = fmt::format("#{} no longer valid: {}", r->id, errs.dump()); break; }
+	}
+	if (!why.empty()) {
+		for (PendingApproval *r : rows) { r->state = ApprovalState::Denied; r->settled_by = "plan refused: " + why; }
+		message = fmt::format("plan '{}' ({} setting(s)) refused whole, nothing enacted: {}", first.plan, rows.size(), why);
+		Debug(Facility::Net, Severity::Error, "[prismatic-mcp] {}", message);
+		return false;
+	}
+	for (PendingApproval *r : rows) r->state = ApprovalState::Approved;
+	Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approved plan '{}' ({} setting(s)) via {}", first.plan, rows.size(), via);
+	size_t executed = 0;
+	for (PendingApproval *r : rows) {
+		json out = ExecuteApproval(*r, via);
+		if (out["status"] == "executed") executed++;
+	}
+	message = fmt::format("approved plan '{}' ({} setting(s)): {} executed", first.plan, rows.size(), executed);
+	return executed == rows.size();
+}
+
 bool ApproveById(uint64_t id, std::string &message, std::string_view via)
 {
 	PendingApproval *a = FindApproval(id);
 	if (a == nullptr) { message = fmt::format("no approval #{}", id); return false; }
 	uint64_t now = (uint64_t)TimerGameTick::counter;
 	if (a->state != ApprovalState::Pending) { message = fmt::format("approval #{} is not pending", id); return false; }
+	/* A row of a plan approves the whole plan (research/design-approval-countdown-owner-companies.md). */
+	if (!a->plan.empty()) return ApprovePlan(*a, message, via);
 	if (now > a->expiry_tick) { message = fmt::format("approval #{} expired", id); return false; }
 	a->state = ApprovalState::Approved;
 	Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approved #{} ({}) via {}", id, a->tool, via);
@@ -1972,6 +2030,12 @@ static void SettleDueApprovals()
 		} else {
 			a.settled_by = "deadline keep";
 		}
+		/* A plan is retired whole, as it would have been approved whole. */
+		for (PendingApproval *r : PlanRows(a)) {
+			if (r == &a) continue;
+			r->state = ApprovalState::Denied;
+			r->settled_by = a.settled_by + fmt::format(" (plan '{}', with #{})", a.plan, a.id);
+		}
 		a.state = ApprovalState::Denied;
 		Debug(Facility::Net, Severity::Error, "[prismatic-mcp] deadline: approval #{} ({}) retired unanswered after {} game day(s); nothing enacted",
 			a.id, a.tool, days);
@@ -2007,6 +2071,13 @@ bool DenyById(uint64_t id, std::string &message)
 	/* A decided approval stays as it was decided: denying a consumed one would relabel an action
 	 * that ran. */
 	if (a->state != ApprovalState::Pending) { message = fmt::format("approval #{} is not pending", id); return false; }
+	/* A row of a plan denies the whole plan: half of it is never left to settle on its own. */
+	if (!a->plan.empty()) {
+		std::vector<PendingApproval *> rows = PlanRows(*a);
+		for (PendingApproval *r : rows) r->state = ApprovalState::Denied;
+		message = fmt::format("denied plan '{}' ({} setting(s))", a->plan, rows.size());
+		return true;
+	}
 	a->state = ApprovalState::Denied;
 	message = fmt::format("denied #{}", id);
 	return true;

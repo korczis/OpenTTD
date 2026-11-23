@@ -11,7 +11,8 @@
 //
 //   api_intent(text)            the same resolver the console verb uses
 //     -> reading + build.settings
-//   api_botSetting(...)         one call per setting, on the running bot
+//   api_botSetting(...)         one call per setting, on the running bot, all under one plan id
+//                               (plan_id): the game approves, denies or retires them together
 //     -> each returns pending_approval #id, because openttd.ai.set_setting is gated
 //   the owner approves          `prismatic_mcp approve <id>` in the console, or the panel
 //     -> the bot builds the line on its next heartbeat
@@ -45,6 +46,16 @@ fn apply_as(a, writer) { apply_to(a, writer, running_bot()) }
 
 /// apply_as() for the running company `bot` (an entry of /api/bots running[]) instead of the first
 /// running bot: replan proposes each company of its AI the plan the panel made for that company.
+/// The id one call of apply_to files its settings under: the company, the panel's event sequence and
+/// the game tick, so two re-plans never share one. The game settles every pending setting of a plan
+/// together and a newer plan of the company withdraws the older one, so a slot is never assembled
+/// from rows of plans months apart (run 12609: #227, #460, #461 completed fr10 over nine months).
+fn plan_id(company) {
+    let tick = 0;
+    try { tick = read("openttd://game/state").game_tick ?? 0; } catch { }
+    `plan-c${company}-e${status().event_seq ?? 0}-t${tick}`
+}
+
 fn apply_to(a, writer, bot) {
     let settings = (a.build ?? #{}).settings ?? #{};
     let out = #{ pending: [], refused: [], withheld: [], held: (), lines: [], bot: "" };
@@ -63,6 +74,8 @@ fn apply_to(a, writer, bot) {
     }
     let declared = [];
     for s in (bot.settings ?? []) { declared.push(s.name); }
+    let plan = plan_id(bot.id);
+    out.plan = plan;
     for name in settings.keys() {
         if !declared.contains(name) {
             out.refused.push(name);
@@ -71,7 +84,7 @@ fn apply_to(a, writer, bot) {
         }
         // `writer` is named, so the panel checks it against planner.<company> too: a freight-line
         // slot sent with no writer is refused there (fr_needs_writer).
-        let r = api_botSetting(#{ company: bot.id, name: name, value: settings[name], writer: writer });
+        let r = api_botSetting(#{ company: bot.id, name: name, value: settings[name], writer: writer, plan: plan });
         // the gated reply is {status: "pending_approval", approval_id, argument_digest,
         // expires_at_tick, message}. Reading the wrong key here printed "nothing is waiting for
         // you" while three changes waited -- a false clean, so the key is taken from the reply.

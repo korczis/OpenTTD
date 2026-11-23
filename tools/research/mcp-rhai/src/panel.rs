@@ -2785,7 +2785,7 @@ pub fn routes() -> Vec<Route> {
           s(json!({"ai": st(), "start": {"type": "boolean"}, "track": {"type": "integer", "minimum": 0, "maximum": 16}}), &["ai"]), h_bot_planned),
         r("POST", "/api/bots/start", "botStart", "Start the owner's bot: an AI with a settings map", false,
           s(json!({"ai": st(), "settings": obj()}), &["ai"]), h_bot_start),
-        r("POST", "/api/bots/setting", "botSetting", "Change one setting of a running bot (openttd.ai.set_setting, approval-gated). A freight-line slot (fr_*, fr2_* .. fr16_*) is sent only when `writer` names who sends it and the company's planner key planner.<company> (/api/rhai/shared) is unset or names that writer: else 422 fr_needs_writer (no writer) or 409 fr_planner_held, and nothing reaches the game", true,
+        r("POST", "/api/bots/setting", "botSetting", "Change one setting of a running bot (openttd.ai.set_setting, approval-gated); `plan` (optional) files it under a re-plan's id, so the game settles that plan's settings together. A freight-line slot (fr_*, fr2_* .. fr16_*) is sent only when `writer` names who sends it and the company's planner key planner.<company> (/api/rhai/shared) is unset or names that writer: else 422 fr_needs_writer (no writer) or 409 fr_planner_held, and nothing reaches the game", true,
           s(json!({"company": {"type": "integer"}, "name": st(), "value": {"type": "integer"}, "writer": st()}), &["company", "name", "value"]), h_bot_setting),
         r("GET", "/api/bridge/companies", "bridgeCompanies", "Every company as the bridge's GET /companies answers it (CompanyOut: money, loan, income from the vehicles' profit, company value, vehicle counts), so Prismatic decides from this game with OPENTTD_BRIDGE_URL=<panel>/api/bridge (src/panel_decision.rs); each company's `history` (prismatic-history/v1, I0085) names the bus endpoint and the read-only store query of its samples, to fit from on /api/db/query", true,
           None, h_bridge_companies),
@@ -4713,6 +4713,44 @@ mod tests {
         assert_eq!(ev.len(), 1, "the refusal is on the bus");
         let choice = &ev[0]["data"]["choice"];
         assert_eq!((choice["accepted"].clone(), choice["outcome"].clone()), (json!(false), json!("stale")));
+    }
+
+    /// A re-plan's settings reach the game under its plan id (POST /api/bots/setting {plan}), so the
+    /// game settles them together; without one, or with a blank one, the call carries no plan, as
+    /// before (research/design-approval-countdown-owner-companies.md, option (a)).
+    #[test]
+    fn a_setting_carries_its_plan_id_to_the_game() {
+        let calls: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen = calls.clone();
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        thread::spawn(move || for mut c in l.incoming().flatten() {
+            let Some(req) = read_request(&mut c) else { continue };
+            let call: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+            let out = match call["method"].as_str().unwrap_or("") {
+                "tools/list" => json!({"jsonrpc": "2.0", "id": 1, "result": {"tools": [{"name": "openttd.ai.set_setting"}]}}),
+                "resources/read" => json!({"jsonrpc": "2.0", "id": 1, "result": {"contents": [{"text": "{}"}]}}),
+                _ => {
+                    seen.lock().unwrap().push(call["params"].clone());
+                    json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text",
+                        "text": json!({"status": "pending_approval", "approval_id": 7}).to_string()}]}})
+                }
+            };
+            hub::respond(c, 200, "application/json", out.to_string().as_bytes());
+        });
+        let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", "5", "--mcp-port", &port.to_string()].map(String::from)).unwrap();
+        let g = Game::new(args);
+        g.mcp_up.store(true, Ordering::SeqCst);
+        *g.token.lock().unwrap() = Some("t".into());
+        let p = Panel { game: g, routes: routes() };
+        for (body, plan) in [(json!({"company": 0, "name": "rail_a", "value": 3, "plan": "plan-c0-e9-t100"}), json!("plan-c0-e9-t100")),
+                             (json!({"company": 0, "name": "rail_b", "value": 4}), Value::Null),
+                             (json!({"company": 0, "name": "rail_b", "value": 5, "plan": "  "}), Value::Null)] {
+            let (code, out) = post_to(&p, "/api/bots/setting", body.clone());
+            assert_eq!((code, out["approval_id"].as_i64()), (200, Some(7)), "{body}: {out}");
+            let last = calls.lock().unwrap().iter().rev().find(|c| c["name"] == "openttd.ai.set_setting").cloned().expect("a set_setting call");
+            assert_eq!(last["arguments"].get("plan").cloned().unwrap_or(Value::Null), plan, "{body}: {last}");
+        }
     }
 
     /// A freight-line slot reaches the game through the panel only from a request that names its

@@ -600,6 +600,60 @@ inline bool Supersedes(std::string_view new_type, const nlohmann::json &new_args
 	return std::any_of(a.begin(), a.end(), [&](const std::string &k) { return std::find(b.begin(), b.end(), k) != b.end(); });
 }
 
+/** Longest plan id an ai.set_setting may carry (PlanOf). */
+inline constexpr size_t PLAN_ID_MAX = 64;
+
+/**
+ * Whether `v` is a valid plan id: a string of 1 to PLAN_ID_MAX letters, digits or `._:-`. A
+ * re-planner files the per-setting approvals of one plan under one id, so they settle as one
+ * (research/design-approval-countdown-owner-companies.md, option (a)).
+ */
+inline bool ValidPlanId(const nlohmann::json &v)
+{
+	if (!v.is_string()) return false;
+	const std::string &s = v.get_ref<const std::string &>();
+	if (s.empty() || s.size() > PLAN_ID_MAX) return false;
+	return std::all_of(s.begin(), s.end(), [](char c) {
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == ':' || c == '-';
+	});
+}
+
+/** The plan an action belongs to: an ai.set_setting's valid `plan` argument, else empty. */
+inline std::string PlanOf(std::string_view type, const nlohmann::json &args)
+{
+	if (type != "ai.set_setting" || !args.is_object() || !args.contains("plan") || !ValidPlanId(args["plan"])) return {};
+	return args["plan"].get<std::string>();
+}
+
+/** What a new pending approval does to an older pending one (PlanSupersedes). */
+enum class PlanConflict : uint8_t {
+	None,     ///< they are independent
+	Withdraw, ///< the older one is withdrawn (denied, superseded by the new one)
+	Refuse,   ///< the new one is refused: a pending plan holds a setting it changes
+};
+
+/**
+ * How a new AI-setting approval meets an older pending one of the same company, once re-plans come
+ * as plans: per-setting approvals under one plan id that settle all or none.
+ * - A new plan replaces every pending row of an older, different plan of the company, whatever the
+ *   keys: a re-plan is a whole plan, and half of an old one must never be enacted beside it.
+ * - Within one plan, or against an older change outside any plan, a newer change of the same
+ *   setting withdraws the older (Supersedes).
+ * - A change outside any plan that touches a setting a pending plan holds is refused: withdrawing
+ *   that one row would leave the rest of the plan to settle without it, and withdrawing the whole
+ *   plan for one manual key would kill a re-plan unseen. The plan is approved or denied first.
+ */
+inline PlanConflict PlanSupersedes(std::string_view new_type, const nlohmann::json &new_args, std::string_view old_type, const nlohmann::json &old_args)
+{
+	if (!new_args.is_object() || !old_args.is_object() || !new_args.contains("company") || new_args["company"] != old_args.value("company", nlohmann::json())) return PlanConflict::None;
+	if (SettingKeys(new_type, new_args).empty() || SettingKeys(old_type, old_args).empty()) return PlanConflict::None;
+	const std::string np = PlanOf(new_type, new_args), op = PlanOf(old_type, old_args);
+	if (!np.empty() && !op.empty() && np != op) return PlanConflict::Withdraw;
+	if (!Supersedes(new_type, new_args, old_type, old_args)) return PlanConflict::None;
+	if (np.empty() && !op.empty()) return PlanConflict::Refuse;
+	return PlanConflict::Withdraw;
+}
+
 /**
  * Whether a chat line may decide an action at all (ADR 0038): only what acts on one company. That
  * is a change of one company's AI settings, or a game command that is neither a server, an offline

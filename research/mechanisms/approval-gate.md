@@ -82,6 +82,31 @@ that only the owner turns auto-approve on, never an agent on an inference, is re
 The full contract, with every field, is
 [`16-decision-contract.md`](../prismatic-mcp/16-decision-contract.md).
 
+### Plans: a re-plan settles as one
+
+A re-planner changes several AI settings at once (`fr_from`, `fr_to`, `fr_cargo`, ...). Filed one
+`openttd.ai.set_setting` each, they used to settle one by one. In run 12609 (2026-11-23), rows of
+plans nine months apart completed one freight slot (#227 `fr10_to`, #460 `fr10_cargo`,
+#461 `fr10_from`). The bot left its autopilot for a plan nobody had made, and its road and air
+growth stopped for 17 months. Now `openttd.ai.set_setting` takes an optional `plan` id
+(`detail::ValidPlanId`: 1-64 letters, digits or `._:-`), bound with the arguments:
+
+- **All or none.** Approving or denying any row of a plan, through any channel, approves or denies
+  every pending row of that plan (`ApprovePlan`, `DenyById`). Approval first checks every row
+  again: not expired, and valid against the game as it is now (`ValidateAction`). When any row fails,
+  the whole plan is retired with the reason (`settled_by: plan refused: ...`) and nothing of it is
+  enacted. The deadline settles a plan the same way, as one.
+- **A newer plan replaces the older.** The first row of a new plan withdraws every pending row of an
+  older, different plan of the same company, whatever their settings (`superseded_by`).
+- **A change outside any plan does not cut into one.** It is refused when a pending plan holds the
+  setting it changes, and the answer names the plan to approve or deny first
+  (`detail::PlanSupersedes`).
+- **Filing.** `build_plan.rhai` files each re-plan under one id (`plan_id`: company, event sequence,
+  game tick) through `POST /api/bots/setting {plan}`. `openttd://approvals` shows each row's `plan`.
+
+The design and its review are in `research/design-approval-countdown-owner-companies.md`
+(branch `doc/auto-approve-owner-answer`, PR #254).
+
 ### The deadline
 
 An approval nobody answers no longer waits until it expires (`APPROVAL_TTL_TICKS`, about 3.7 game

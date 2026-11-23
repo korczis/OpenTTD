@@ -399,12 +399,19 @@ pub fn start_bot(g: &Arc<Game>, ai: &str, settings: Value) -> Result<Value, Stri
     Ok(json!({"status": "started", "via": "console", "command": cmd}))
 }
 
-pub fn set_bot_setting(g: &Arc<Game>, company: &Value, name: &str, value: &Value) -> Result<Value, String> {
+/// `plan`: the re-plan this setting belongs to. The game settles every pending setting of one plan
+/// together (approve, deny, deadline) and a newer plan of the company withdraws the older one
+/// (research/design-approval-countdown-owner-companies.md, option (a)); None files it on its own.
+pub fn set_bot_setting(g: &Arc<Game>, company: &Value, name: &str, value: &Value, plan: Option<&str>) -> Result<Value, String> {
     if !g.tool_names().contains("openttd.ai.set_setting") {
         return Ok(json!({"error": "this game binary has no openttd.ai.set_setting: a running bot's settings cannot change; start a bot with the new settings instead",
                          "fallback": "start"}));
     }
-    g.tool("openttd.ai.set_setting", json!({"company": py_int(company)?, "name": name, "value": py_int(value)?}))
+    let mut args = json!({"company": py_int(company)?, "name": name, "value": py_int(value)?});
+    if let Some(p) = plan.filter(|p| !p.trim().is_empty()) {
+        args["plan"] = json!(p.trim());
+    }
+    g.tool("openttd.ai.set_setting", args)
 }
 
 /// Where a freight-line slot is sent from, named in every refusal of one.
@@ -435,7 +442,7 @@ fn refused(g: &Arc<Game>, (status, answer): (u16, Value)) -> (u16, Value) {
     (status, answer)
 }
 
-/// POST /api/bots/setting {company, name, value, writer?}: set_bot_setting, except that a
+/// POST /api/bots/setting {company, name, value, writer?, plan?}: set_bot_setting, except that a
 /// freight-line slot is refused before the game is asked unless the request names its `writer`
 /// and the company's planner key is unset or names that writer (slot_refusal). Every other
 /// setting is sent as before, with or without a writer.
@@ -445,7 +452,7 @@ pub fn bot_setting(g: &Arc<Game>, body: &Value) -> Result<(u16, Value), String> 
     if let Some(r) = slot_refusal(&body["company"], std::slice::from_ref(&name), writer, &crate::rhai_shared::planner_of) {
         return Ok(refused(g, r));
     }
-    Ok((200, set_bot_setting(g, &body["company"], &name, &body["value"])?))
+    Ok((200, set_bot_setting(g, &body["company"], &name, &body["value"], body.get("plan").and_then(Value::as_str))?))
 }
 
 /// The settings of a company's AI that an MCP call changes: `name` of openttd.ai.set_setting, the

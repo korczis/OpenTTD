@@ -1297,6 +1297,51 @@ TEST_CASE("A chat line is capped at a UTF-8 boundary, and a newer AI settings pl
 	CHECK(SettingKeys("ai.set_settings", json::array()).empty());
 }
 
+TEST_CASE("A re-plan's settings carry one plan id and settle as one plan; a newer plan replaces an older one", "[prismatic_mcp]")
+{
+	/* research/design-approval-countdown-owner-companies.md, option (a). In run 12609 rows of plans
+	 * nine months apart completed one freight slot, and the bot left its autopilot for 17 months. */
+	CHECK(ValidPlanId(json("replan-0-350647")));
+	CHECK(ValidPlanId(json("a.b:c_d-1")));
+	CHECK(ValidPlanId(json(std::string(PLAN_ID_MAX, 'x'))));
+	CHECK_FALSE(ValidPlanId(json(std::string(PLAN_ID_MAX + 1, 'x'))));
+	CHECK_FALSE(ValidPlanId(json("")));
+	CHECK_FALSE(ValidPlanId(json("has space")));
+	CHECK_FALSE(ValidPlanId(json("semi;colon")));
+	CHECK_FALSE(ValidPlanId(json(7)));
+
+	auto row = [](int company, const char *name, int value, const char *plan) {
+		json j = {{"company", company}, {"name", name}, {"value", value}};
+		if (plan != nullptr) j["plan"] = plan;
+		return j;
+	};
+	CHECK(PlanOf("ai.set_setting", row(0, "fr_from", 1, "p1")) == "p1");
+	CHECK(PlanOf("ai.set_setting", row(0, "fr_from", 1, nullptr)).empty());
+	CHECK(PlanOf("ai.set_setting", json{{"company", 0}, {"name", "x"}, {"value", 1}, {"plan", "bad id"}}).empty());
+	CHECK(PlanOf("ai.set_settings", json{{"company", 0}, {"settings", {{"x", 1}}}, {"plan", "p1"}}).empty());
+	CHECK(PlanOf("ai.set_setting", json::array()).empty());
+
+	using PC = PlanConflict;
+	/* A newer plan withdraws every pending row of an older plan of the company, whatever the keys. */
+	CHECK(PlanSupersedes("ai.set_setting", row(0, "fr_to", 2, "p2"), "ai.set_setting", row(0, "fr_from", 1, "p1")) == PC::Withdraw);
+	/* ... but not another company's plan. */
+	CHECK(PlanSupersedes("ai.set_setting", row(0, "fr_to", 2, "p2"), "ai.set_setting", row(1, "fr_to", 1, "p1")) == PC::None);
+	/* Within one plan, rows of different settings stand together; the same setting again replaces the older row. */
+	CHECK(PlanSupersedes("ai.set_setting", row(0, "fr_to", 2, "p1"), "ai.set_setting", row(0, "fr_from", 1, "p1")) == PC::None);
+	CHECK(PlanSupersedes("ai.set_setting", row(0, "fr_to", 3, "p1"), "ai.set_setting", row(0, "fr_to", 2, "p1")) == PC::Withdraw);
+	/* A change outside any plan to a setting a pending plan holds is refused; to another setting it is independent. */
+	CHECK(PlanSupersedes("ai.set_setting", row(0, "fr_to", 9, nullptr), "ai.set_setting", row(0, "fr_to", 2, "p1")) == PC::Refuse);
+	CHECK(PlanSupersedes("ai.set_setting", row(0, "cash_reserve", 9, nullptr), "ai.set_setting", row(0, "fr_to", 2, "p1")) == PC::None);
+	/* A plan's row withdraws an older change outside any plan of the same setting; two changes outside plans behave as before. */
+	CHECK(PlanSupersedes("ai.set_setting", row(0, "fr_to", 2, "p1"), "ai.set_setting", row(0, "fr_to", 9, nullptr)) == PC::Withdraw);
+	CHECK(PlanSupersedes("ai.set_setting", row(0, "x", 2, nullptr), "ai.set_setting", row(0, "x", 1, nullptr)) == PC::Withdraw);
+	CHECK(PlanSupersedes("ai.set_setting", row(0, "x", 2, nullptr), "ai.set_setting", row(0, "y", 1, nullptr)) == PC::None);
+	/* Not AI settings, or nothing to compare: independent. */
+	CHECK(PlanSupersedes("game.set_pause", json{{"company", 0}, {"pause", true}}, "ai.set_setting", row(0, "x", 1, "p1")) == PC::None);
+	CHECK(PlanSupersedes("ai.set_setting", json::array(), "ai.set_setting", row(0, "x", 1, "p1")) == PC::None);
+	CHECK(PlanSupersedes("ai.set_setting", row(0, "x", 1, "p2"), "ai.set_setting", json{{"name", "x"}, {"value", 1}, {"plan", "p1"}}) == PC::None);
+}
+
 TEST_CASE("An unanswered approval is settled at its deadline with the operator's standing verdict, keep by default", "[prismatic_mcp]")
 {
 	DeadlinePolicy keep;  /* the policy a server starts with */
