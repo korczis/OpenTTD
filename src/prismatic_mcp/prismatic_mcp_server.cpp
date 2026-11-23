@@ -57,6 +57,7 @@
 #include "../settings_type.h"
 #include "../network/core/config.h"
 #include "../network/network_base.h"
+#include "../console_func.h"
 #include "../debug.h"
 #include "../rev.h"
 #include "../openttd.h"
@@ -81,11 +82,13 @@
 #include <filesystem>
 #if !defined(_WIN32)
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 #include <deque>
 #include <functional>
 #include <charconv>
+#include <ctime>
 #include <map>
 #include <optional>
 #include <string>
@@ -640,6 +643,16 @@ PendingApproval *FindApproval(uint64_t id)
 	return nullptr;
 }
 
+/** The owner's standing rules, in id order (ADR 0041; their lifecycle is below, with ApplyRules). */
+std::vector<Rules::Rule> _rules;
+uint64_t _next_rule_id = 1;
+
+/** The rules' verdict on one approval. */
+Rules::Verdict RuleVerdict(const PendingApproval &a, const json &args)
+{
+	return Rules::Decide(_rules, Rules::Subject{a.mcp_tool, a.tool, args});
+}
+
 using detail::IsKnownActionType;
 
 /* ---- JSON-RPC dispatch (main thread) -------------------------------------- */
@@ -692,9 +705,17 @@ json ResourceApprovals()
 				{"created_tick", a.created_tick}, {"expires_tick", a.expiry_tick},
 				{"deadline_tick", detail::DeadlineTick(a.created_tick, _deadline_policy.ticks).value_or(0)},
 				{"settled_by", a.settled_by}});
+			if (a.state == ApprovalState::Pending) {
+				Rules::Verdict v = RuleVerdict(a, json::parse(a.canonical_args, nullptr, false));
+				if (const Rules::Rule *r = v.decides != nullptr ? v.decides : v.blocked; r != nullptr) {
+					arr.back()["matched_rule"] = {{"id", r->id}, {"effect", Rules::EffectName(r->effect)}, {"decides", v.decides != nullptr && !(r->effect == Rules::Effect::Allow && now > a.expiry_tick)}};
+				}
+			}
 		}
 	}
-	env["data"] = json{{"approvals", std::move(arr)}, {"capacity", MAX_APPROVALS},
+	json rules = json::array();
+	for (const auto &r : _rules) rules.push_back(Rules::ToJson(r));
+	env["data"] = json{{"approvals", std::move(arr)}, {"capacity", MAX_APPROVALS}, {"rules", std::move(rules)},
 		{"deadline", {{"ticks", _deadline_policy.ticks}, {"days", _deadline_policy.ticks / detail::DEADLINE_DAY_TICKS},
 			{"verdict", detail::DeadlineVerdictName(_deadline_policy.verdict)}}}};
 	return env;
@@ -732,6 +753,61 @@ json ExecuteApproval(PendingApproval &a, std::string_view via)
 		{"note", "the verdict is taken when the command has run; read it with openttd.decision.get"}};
 	if (!rec->error.empty()) out["error"] = rec->error;
 	return out;
+}
+
+/* ---- the owner's standing rules (ADR 0041) ------------------------------------------------ *
+ * "always allow <tool-glob> [<json matcher>]" and "always deny ...", made only by the owner: at the
+ * game's console, by the owner's own click in the control window, or through the panel's
+ * owner-authenticated routes (created_via "panel", which never decides an owner-only tool). None
+ * exists until the owner makes one; each lives as long as this process, or in the rules file with
+ * --persist. Every approval is checked as it is created, and every waiting one when a rule is
+ * added; what a rule decides is recorded like a manual decision, naming the rule (approved_via of
+ * its decision, settled_by of a denied approval). The matching itself is the pure Rules::Decide. */
+/**
+ * Let the standing rules decide approval \p a, if one applies and may: a deny rule withdraws it, an
+ * allow rule approves it and carries it out through the one execution path. Expired approvals are
+ * only ever denied by a rule, never approved.
+ * @return The answer for the requester when a rule decided it; nullopt when it still waits.
+ */
+std::optional<json> ApplyRules(PendingApproval &a)
+{
+	if (_rules.empty() || a.state != ApprovalState::Pending) return std::nullopt;
+	json args = json::parse(a.canonical_args, nullptr, false);
+	Rules::Verdict v = RuleVerdict(a, args);
+	if (v.decides == nullptr) return std::nullopt;
+	/* The verdict points into _rules, which this function may count a hit in. */
+	Rules::Rule &rule = *std::ranges::find_if(_rules, [&v](const Rules::Rule &r) { return &r == v.decides; });
+	const bool expired = (uint64_t)TimerGameTick::counter > a.expiry_tick;
+	const uint64_t rule_id = rule.id;
+	const std::string via = Rules::Describe(rule);
+	if (rule.effect == Rules::Effect::Deny) {
+		rule.hits++;
+		a.state = ApprovalState::Denied;
+		a.settled_by = via;
+		Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approval #{} ({}) denied by {}", a.id, a.tool, via);
+		return json{{"status", "denied"}, {"approval_id", a.id}, {"rule", rule_id},
+			{"message", fmt::format("denied by the owner's standing {}; nothing was enacted", via)}};
+	}
+	if (expired) return std::nullopt;
+	rule.hits++;
+	a.state = ApprovalState::Approved;
+	Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approval #{} ({}) approved by {}", a.id, a.tool, via);
+	json out = ExecuteApproval(a, via);
+	out["rule"] = rule_id;
+	return out;
+}
+
+/** The current wall-clock time, ISO 8601 UTC, for a rule's created_at. */
+std::string NowUtc()
+{
+	std::time_t t = std::time(nullptr);
+	std::tm tm{};
+#if defined(_WIN32)
+	gmtime_s(&tm, &t);
+#else
+	gmtime_r(&t, &tm);
+#endif
+	return fmt::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 }
 
 /** The command a "command.<Name>" action type names, if any. */
@@ -1140,17 +1216,6 @@ json HandleToolsCall(const json &id, const json &params)
 			old.superseded_by = new_id;
 			Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approval #{} superseded by #{} ({})", old.id, new_id, type);
 		}
-		/* A full queue drops what is decided or expired, never a pending approval: a new request that
-		 * still does not fit is refused, with the reason, rather than silently pushing out one the
-		 * operator has not answered (ADR 0038). */
-		if (_approvals.size() >= MAX_APPROVALS) {
-			std::erase_if(_approvals, [now](const PendingApproval &a) { return a.state != ApprovalState::Pending || now > a.expiry_tick; });
-		}
-		if (_approvals.size() >= MAX_APPROVALS) {
-			Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approval queue full ({} pending): {} refused", _approvals.size(), type);
-			json out = {{"status", "refused"}, {"error", fmt::format("the approval queue is full: {} decisions wait for the operator; approve or deny some first (prismatic_mcp approvals)", _approvals.size())}};
-			return RpcResult(id, json{{"content", json::array({{{"type", "text"}, {"text", out.dump()}}})}, {"isError", true}});
-		}
 		PendingApproval pa;
 		pa.id = _next_approval_id++;
 		pa.tool = type;
@@ -1164,9 +1229,27 @@ json HandleToolsCall(const json &id, const json &params)
 		 * expires then, if that is sooner than the TTL; its execution re-checks the date as well. */
 		pa.expiry_tick = detail::ApprovalExpiry(now, APPROVAL_TTL_TICKS, detail::BoundExpiresTick(type, aargs));
 		pa.state = ApprovalState::Pending;
+		/* A full queue drops what is decided or expired, never a pending approval: a new request that
+		 * still does not fit is refused, with the reason, rather than silently pushing out one the
+		 * operator has not answered (ADR 0038). One a standing rule decides at once (ADR 0041) waits
+		 * for nobody, so it is decided even when the queue is full. */
+		const bool ruled = RuleVerdict(pa, aargs).decides != nullptr;
+		if (_approvals.size() >= MAX_APPROVALS) {
+			std::erase_if(_approvals, [now](const PendingApproval &a) { return a.state != ApprovalState::Pending || now > a.expiry_tick; });
+		}
+		if (_approvals.size() >= MAX_APPROVALS && !ruled) {
+			_next_approval_id--; // not queued: the id is free again
+			Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approval queue full ({} pending): {} refused", _approvals.size(), type);
+			json out = {{"status", "refused"}, {"error", fmt::format("the approval queue is full: {} decisions wait for the operator; approve or deny some first (prismatic_mcp approvals)", _approvals.size())}};
+			return RpcResult(id, json{{"content", json::array({{{"type", "text"}, {"text", out.dump()}}})}, {"isError", true}});
+		}
 		_approvals.push_back(pa);
 		Debug(Facility::Net, Severity::Error, "[prismatic-mcp] pending approval #{} for {} args={} (approve in console: prismatic_mcp approve {})",
 			pa.id, type, pa.args_summary, pa.id);
+		/* The owner's standing rules decide it at once when one applies (ADR 0041). */
+		if (auto decided = ApplyRules(_approvals.back()); decided.has_value()) {
+			return RpcResult(id, json{{"content", json::array({{{"type", "text"}, {"text", decided->dump()}}})}, {"isError", (*decided)["status"] != "executed"}});
+		}
 		json out = {{"status", "pending_approval"}, {"approval_id", pa.id}, {"argument_digest", digest},
 			{"expires_at_tick", pa.expiry_tick},
 			{"message", "Approval required in OpenTTD: prismatic_mcp approve " + fmt::format("{}", pa.id)}};
@@ -1555,6 +1638,8 @@ bool Start(uint16_t port, std::string &error)
 	_mcp.requests_total = 0;
 	_mcp.requests_denied = 0;
 	Debug(Facility::Net, Severity::Error, "[prismatic-mcp] RESEARCH-ONLY MCP server listening on {} (loopback only)", GetEndpoint());
+	/* The owner's persisted standing rules, each said aloud (ADR 0041). */
+	LoadApprovalRules();
 	Registry::Announce(GetEndpoint(), _mcp.port); // discoverable by any reader of the instance registry
 	return true;
 }
@@ -1572,6 +1657,13 @@ static void ClearApprovals(detail::ResetReason reason)
 	if (effect.clear_approvals && !_approvals.empty()) {
 		Debug(Facility::Net, Severity::Error, "[prismatic-mcp] {} approval(s) cleared: {}", _approvals.size(), why);
 		_approvals.clear();
+	}
+	/* A standing rule may name a company or a tile of this world: when the world is gone, only the
+	 * owner's persisted rules (--persist) stay (ADR 0041). */
+	if (effect.invalidate_awaiting) {
+		size_t before = _rules.size();
+		std::erase_if(_rules, [](const Rules::Rule &r) { return !r.persisted; });
+		if (_rules.size() != before) Debug(Facility::Net, Severity::Error, "[prismatic-mcp] {} standing rule(s) of this game ended: {}", before - _rules.size(), why);
 	}
 	/* Commands already posted still run in the same world after a stop or a token rotation, and
 	 * their results still arrive. Only when the world itself is gone will they never come: the
@@ -1741,16 +1833,222 @@ std::string ListApprovals()
 }
 
 /* The pending queue, read rather than parsed out of ListApprovals()' prose: the console needs
- * the ids for 'deny all' and the tool and arguments to print for an id the operator names.
- * This decides nothing and approves nothing -- every id still goes through ApproveById or
- * DenyById, one at a time, and there is no bulk approval in this build. */
+ * the ids for 'deny all' and the tool and arguments to print for an id the operator names, the
+ * control window its rows. This decides nothing: every id still goes through ApproveById or
+ * DenyById, one at a time, also in bulk (DecideAll) and when a standing rule decides it. */
 std::vector<PendingApprovalInfo> PendingApprovals()
 {
 	uint64_t now = (uint64_t)TimerGameTick::counter;
 	std::vector<PendingApprovalInfo> out;
 	for (const auto &a : _approvals) {
 		if (a.state != ApprovalState::Pending) continue;
-		out.push_back(PendingApprovalInfo{a.id, a.tool, a.canonical_args, now > a.expiry_tick});
+		PendingApprovalInfo info{a.id, a.tool, a.canonical_args, now > a.expiry_tick, a.mcp_tool};
+		Rules::Verdict v = RuleVerdict(a, json::parse(a.canonical_args, nullptr, false));
+		if (const Rules::Rule *r = v.decides != nullptr ? v.decides : v.blocked; r != nullptr) {
+			info.matched_rule = r->id;
+			info.rule_decides = v.decides != nullptr && !(r->effect == Rules::Effect::Allow && info.expired);
+		}
+		out.push_back(std::move(info));
+	}
+	return out;
+}
+
+/* ---- bulk consent and the rules' lifecycle (ADR 0041) ------------------------------------- */
+
+std::string RulesFile()
+{
+	return fmt::format("{}prismatic_mcp_approval_rules.{}.json", _personal_dir, _settings_client.network.server_port);
+}
+
+/** Write every persisted rule through a temporary file renamed over the old one, readable by its owner only. */
+static bool SaveRules()
+{
+	json list = json::array();
+	for (const auto &r : _rules) {
+		if (!r.persisted) continue;
+		json j = Rules::ToJson(r);
+		j.erase("hits");
+		j.erase("text");
+		j.erase("id");
+		j.erase("persisted");
+		list.push_back(std::move(j));
+	}
+	std::string tmp = RulesFile() + ".tmp";
+	std::error_code ec;
+	std::filesystem::remove(tmp, ec);
+	{
+#if !defined(_WIN32)
+		int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+		if (fd < 0) return false;
+		close(fd);
+#endif
+		auto f = FileHandle::Open(tmp, "w");
+		bool written = f.has_value();
+		if (written) {
+			fmt::print(*f, "{}\n", json{{"schema", "prismatic-approval-rules/v1"},
+				{"note", "RESEARCH-ONLY (ADR 0041): the owner's standing approval rules, made with --persist; prismatic_mcp rules lists them"},
+				{"rules", std::move(list)}}.dump(2));
+			written = fflush(*f) == 0;
+		}
+		if (!written) {
+			f.reset();
+			std::filesystem::remove(tmp, ec);
+			return false;
+		}
+	}
+	std::filesystem::rename(tmp, RulesFile(), ec);
+	if (ec) std::filesystem::remove(tmp, ec);
+	return !ec;
+}
+
+static std::string _rules_loaded_from; ///< the rules file read already; another port's file is read afresh
+
+std::vector<std::string> LoadApprovalRules()
+{
+	std::vector<std::string> said;
+	if (_rules_loaded_from == RulesFile()) return said;
+	_rules_loaded_from = RulesFile();
+	auto say = [&said]() {
+		for (const auto &line : said) {
+			Debug(Facility::Net, Severity::Error, "[prismatic-mcp] {}", line);
+			IConsolePrint(CC_WARNING, "[prismatic-mcp] {}", line);
+		}
+		return said;
+	};
+#if !defined(_WIN32)
+	/* Only the owner's own file, readable by nobody else, is the owner's standing consent. */
+	struct stat st{};
+	if (stat(RulesFile().c_str(), &st) != 0) return said;
+	if (st.st_uid != getuid() || (st.st_mode & 077) != 0) {
+		said.push_back(fmt::format("rules file {} refused: it must belong to this user and be readable by nobody else (mode 0600); no rule loaded from it", RulesFile()));
+		return say();
+	}
+#endif
+	auto f = FileHandle::Open(RulesFile(), "r");
+	if (!f.has_value()) return said;
+	std::string text;
+	char buf[4096];
+	for (size_t n; (n = fread(buf, 1, sizeof(buf), *f)) > 0;) text.append(buf, n);
+	json doc = json::parse(text, nullptr, false);
+	const json list = doc.is_object() && doc.contains("rules") && doc["rules"].is_array() ? doc["rules"] : json::array();
+	for (const json &j : list) {
+		auto r = Rules::FromJson(j);
+		if (!r.has_value()) {
+			said.push_back(fmt::format("rules file {}: skipped an entry that is not a rule: {}", RulesFile(), j.dump()));
+			continue;
+		}
+		r->id = _next_rule_id++;
+		const std::string made_via = r->created_via;
+		/* A rule read from a file is the file's: it never decides an owner-only tool (Rules::OwnersOwnChannel). */
+		r->created_via = "file";
+		_rules.push_back(*r);
+		said.push_back(fmt::format("standing approval {} loaded from {} (made via {} at {})", Rules::Describe(*r), RulesFile(), made_via, r->created_at));
+	}
+	if (doc.is_discarded()) said.push_back(fmt::format("rules file {} is not JSON; no rule loaded from it", RulesFile()));
+	return say();
+}
+
+std::vector<Rules::Rule> ApprovalRules() { return _rules; }
+
+/** The record of one approval acted on: its id, what happened, its tool and its arguments. */
+static std::string OutcomeLine(const PendingApproval &a, std::string_view what)
+{
+	return fmt::format("#{}: {} -- tool={} args={}", a.id, what, a.mcp_tool.empty() ? a.tool : a.mcp_tool, a.canonical_args);
+}
+
+BulkOutcome AddApprovalRule(Rules::Effect effect, const Rules::Spec &spec)
+{
+	BulkOutcome out;
+	if (!spec.error.empty()) { out.ok = false; out.lines.push_back(spec.error); return out; }
+	if (auto err = Rules::MatcherError(spec.match); err.has_value()) { out.ok = false; out.lines.push_back(*err); return out; }
+	if (auto err = Rules::BroadAllowRefusal(effect, spec); err.has_value()) { out.ok = false; out.lines.push_back(*err); return out; }
+	Rules::Rule r;
+	r.id = _next_rule_id++;
+	r.effect = effect;
+	r.tool = spec.tool.empty() ? "*" : spec.tool;
+	r.match = spec.match;
+	r.created_via = spec.via.empty() ? "console" : spec.via;
+	r.created_at = NowUtc();
+	r.created_tick = (uint64_t)TimerGameTick::counter;
+	r.persisted = spec.persist;
+	_rules.push_back(r);
+	if (r.persisted && !SaveRules()) {
+		_rules.back().persisted = false;
+		out.lines.push_back(fmt::format("could not write {}: the rule holds for this process only", RulesFile()));
+	}
+	out.rule_id = r.id;
+	out.lines.insert(out.lines.begin(), fmt::format("added {} (via {}{})", Rules::Describe(r), r.created_via, _rules.back().persisted ? ", persisted in " + RulesFile() : ""));
+	Debug(Facility::Net, Severity::Error, "[prismatic-mcp] {}", out.lines.front());
+	/* Every approval already waiting, at once. */
+	for (auto &a : _approvals) {
+		if (a.state != ApprovalState::Pending) continue;
+		Rules::Verdict v = RuleVerdict(a, json::parse(a.canonical_args, nullptr, false));
+		if (v.decides == nullptr || v.decides->id != r.id) {
+			if (v.blocked != nullptr && v.blocked->id == r.id) {
+				out.skipped++;
+				out.skipped_ids.push_back(a.id);
+				out.lines.push_back(OutcomeLine(a, "skipped: an owner-only tool, decided only at the game's console or by the owner's click in the game"));
+			}
+			continue;
+		}
+		auto ruled = ApplyRules(a);
+		if (!ruled.has_value()) {
+			out.skipped++;
+			out.skipped_ids.push_back(a.id);
+			out.lines.push_back(OutcomeLine(a, "skipped: expired"));
+			continue;
+		}
+		const std::string status = (*ruled)["status"].get<std::string>();
+		if (status == "rejected") out.refused++; else out.decided++;
+		(status == "rejected" ? out.refused_ids : out.decided_ids).push_back(a.id);
+		out.lines.push_back(OutcomeLine(a, status + (ruled->contains("error") ? " -- " + (*ruled)["error"].get<std::string>() : "")));
+	}
+	return out;
+}
+
+bool RemoveApprovalRule(uint64_t id, std::string &message)
+{
+	auto it = std::ranges::find_if(_rules, [id](const Rules::Rule &r) { return r.id == id; });
+	if (it == _rules.end()) { message = fmt::format("no rule #{} ('prismatic_mcp rules' lists them)", id); return false; }
+	Rules::Rule removed = *it;
+	_rules.erase(it);
+	message = fmt::format("removed {} after {} decision(s)", Rules::Describe(removed), removed.hits);
+	if (removed.persisted && !SaveRules()) message += fmt::format("; could not rewrite {}, so it loads again at the next start", RulesFile());
+	Debug(Facility::Net, Severity::Error, "[prismatic-mcp] {}", message);
+	return true;
+}
+
+BulkOutcome DecideAll(bool approve, const Rules::Spec &spec)
+{
+	BulkOutcome out;
+	if (!spec.error.empty()) { out.ok = false; out.lines.push_back(spec.error); return out; }
+	const uint64_t now = (uint64_t)TimerGameTick::counter;
+	const std::string via = fmt::format("{} ({} all {}{})", spec.via.empty() ? "console" : spec.via, approve ? "approve" : "deny",
+		spec.tool, spec.match.is_null() ? "" : " " + spec.match.dump());
+	Rules::Rule filter;
+	filter.tool = spec.tool;
+	filter.match = spec.match;
+	std::vector<uint64_t> ids;
+	for (const auto &a : _approvals) {
+		if (a.state != ApprovalState::Pending) continue;
+		if (!Rules::Applies(filter, Rules::Subject{a.mcp_tool, a.tool, json::parse(a.canonical_args, nullptr, false)})) continue;
+		ids.push_back(a.id);
+	}
+	for (uint64_t id : ids) {
+		PendingApproval *a = FindApproval(id);
+		if (a == nullptr || a->state != ApprovalState::Pending) continue; // decided by an earlier one of these (a superseding plan)
+		if (approve && now > a->expiry_tick) { out.skipped++; out.skipped_ids.push_back(id); out.lines.push_back(OutcomeLine(*a, "skipped: expired")); continue; }
+		if (approve && !Rules::MayDecide(Rules::Effect::Allow, spec.via, a->tool)) {
+			out.skipped++;
+			out.skipped_ids.push_back(id);
+			out.lines.push_back(OutcomeLine(*a, "skipped: an owner-only tool, decided only at the game's console or by the owner's click in the game"));
+			continue;
+		}
+		std::string msg;
+		bool ok = approve ? ApproveById(id, msg, via) : DenyById(id, msg, via);
+		if (ok) out.decided++; else out.refused++;
+		(ok ? out.decided_ids : out.refused_ids).push_back(id);
+		if (PendingApproval *now_a = FindApproval(id)) out.lines.push_back(OutcomeLine(*now_a, msg));
 	}
 	return out;
 }
@@ -2000,7 +2298,7 @@ std::string DescribeApprovalDeadline()
 			: "retires it unanswered, enacting nothing");
 }
 
-bool DenyById(uint64_t id, std::string &message)
+bool DenyById(uint64_t id, std::string &message, std::string_view via)
 {
 	PendingApproval *a = FindApproval(id);
 	if (a == nullptr) { message = fmt::format("no approval #{}", id); return false; }
@@ -2008,6 +2306,7 @@ bool DenyById(uint64_t id, std::string &message)
 	 * that ran. */
 	if (a->state != ApprovalState::Pending) { message = fmt::format("approval #{} is not pending", id); return false; }
 	a->state = ApprovalState::Denied;
+	if (!via.empty()) a->settled_by = fmt::format("denied via {}", via);
 	message = fmt::format("denied #{}", id);
 	return true;
 }
@@ -2020,9 +2319,9 @@ std::string DecisionTrace(int max_rows)
 	if (start < 0) start = 0;
 	for (size_t i = (size_t)start; i < _provenance.size(); i++) {
 		const auto &p = _provenance[i];
-		s += fmt::format("decision #{} approval #{} {} result={} verdict={} req_tick={} obs_tick={}\n",
+		s += fmt::format("decision #{} approval #{} {} result={} verdict={} req_tick={} obs_tick={}{}\n",
 			p.decision_id, p.approval_id, p.action_type, p.command_result, p.verdict,
-			p.requested_tick, p.observed_tick);
+			p.requested_tick, p.observed_tick, p.approved_via.empty() ? "" : " via=" + p.approved_via);
 	}
 	return s;
 }

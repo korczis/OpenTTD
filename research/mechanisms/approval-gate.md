@@ -49,8 +49,11 @@ sequenceDiagram
   afterwards asks for a fresh approval, and approving that one runs the action a second time.
   Approvals expire after `APPROVAL_TTL_TICKS` and the store holds at most `MAX_APPROVALS`
   (`prismatic_mcp_server.cpp`).
-- **Named ids only.** The console takes `prismatic_mcp approve <id> [<id> ...]` and
-  `deny <id>|all`. There is no `approve all` (`src/console_cmds.cpp`).
+- **Named ids, or the owner's filter.** The console takes `prismatic_mcp approve <id> [<id> ...]`
+  and `deny <id> [<id> ...]`. Since [ADR 0041](../../.ai/repo/adrs/0041-bulk-consent-and-standing-approval-rules.md)
+  it also takes `approve all|deny all [<tool-glob> [<json-matcher>]]` and standing rules (below),
+  as the owner's acts: never from an armed or injected console, an MCP client or the panel's
+  `/api/console` (`src/console_cmds.cpp`).
 - **Through commands.** `ExecuteAction()` posts the command through the normal deterministic path,
   never a pool write (rule
   [`project.game-state-mutates-only-through-commands`](../../.ai/repo/rules/project/game-state-mutates-only-through-commands.v1.md)).
@@ -80,6 +83,43 @@ that only the owner turns auto-approve on, never an agent on an inference, is re
 
 The full contract, with every field, is
 [`16-decision-contract.md`](../prismatic-mcp/16-decision-contract.md).
+
+### Standing rules and bulk consent
+
+The owner's order of 2026-11-23 ([ADR 0041](../../.ai/repo/adrs/0041-bulk-consent-and-standing-approval-rules.md)):
+approve or deny all over a filter, and "always allow" / "always deny" rules, as Claude Code's
+permission rules do.
+
+| Console line | What it does |
+|---|---|
+| `prismatic_mcp approve all [<tool-glob> [<json-matcher>]]` | approves and executes every pending approval the filter selects, one id at a time; skips expired ones (and owner-only ones with `--via panel`) |
+| `prismatic_mcp deny all [<tool-glob> [<json-matcher>]]` | withdraws every pending approval the filter selects |
+| `prismatic_mcp rule allow\|deny <tool-glob> [<json-matcher>] [--persist]` | a standing rule: applied at once to every waiting approval, then to each new one as it is created |
+| `prismatic_mcp rules` | every rule with its hits, channel and time |
+| `prismatic_mcp rule remove <id>` | ends a rule (and drops it from the rules file) |
+
+- **The glob** (`*` any run, `?` one character) matches the MCP tool name (`openttd.ai.set_setting`)
+  or the action type (`ai.set_setting`, `command.BuildRailroadTrack`).
+- **The matcher** is JSON over the approval's canonical arguments. A plain key is a subset match.
+  A `$` key is a path (`$.a.b`, `$['a b']`, `$.list[0]`, `$.list[*]`, `$.*`, `$..name`) whose every
+  selected value must match. A string is a glob (against the JSON text of a non-string), `"*"` is
+  any value present, other scalars are equality, an array matches element by element. At the
+  console it may be written with single quotes, `{'company': 1, 'name': 'max_*'}`, or as one quoted
+  token `"{\"name\":\"max_*\"}"`.
+- **Deny wins over allow.** An allow rule from the panel (`--via panel`) never decides an
+  owner-only tool (`ai.set_settings`).
+- **Recorded:** a decision a rule makes names it (`approved_via` / `settled_by`:
+  `rule #3 allow ...`), and `DecisionTrace` prints `via=`. `openttd://approvals` and
+  `openttd.ui.control` carry `rules` and each approval's `matched_rule`.
+- **Lifetime:** none exists by default. A rule lives as long as the process; with `--persist` it is
+  kept in `<personal dir>/prismatic_mcp_approval_rules.<server port>.json` (mode 0600). That file is
+  loaded and printed when the MCP server starts.
+
+The Prismatic control window drives the same lines with `--via window`. Every row has Approve,
+Deny and Always... at the same x, a check box (Shift for a range, Space on the selected row) and
+Approve selected/all (confirmed with the count). There are a tool selector and Hide expired, and
+after each decision the next row is selected. Keys: Up/Down or J/K move, A, Y or Enter approve,
+D or N deny. The panel's owner routes write them with `--via panel`.
 
 ### The deadline
 
@@ -118,8 +158,10 @@ queue:
 | File | What it holds |
 |---|---|
 | [`src/prismatic_mcp/prismatic_mcp_server.cpp`](../../src/prismatic_mcp/prismatic_mcp_server.cpp) | `ValidateAction`, the approval store, `ExecuteAction`, `Conclude`, the trace |
+| [`src/prismatic_mcp/prismatic_mcp_rules.h`](../../src/prismatic_mcp/prismatic_mcp_rules.h) | the standing rules' glob, JSON matcher and paths, `Decide` (deny over allow, the owner-only guard), the console spelling |
+| [`src/prismatic_mcp/prismatic_mcp_panel.cpp`](../../src/prismatic_mcp/prismatic_mcp_panel.cpp) | the control window: per-row buttons, check boxes, selectors, keyboard, Rules section |
 | [`src/prismatic_mcp/prismatic_mcp_detail.h`](../../src/prismatic_mcp/prismatic_mcp_detail.h) | `ACTION_TYPES`, the pure `ClassifySubmit` state machine, the deadline's `DeadlineDue` and `ParseDeadlinePolicy` |
-| [`src/console_cmds.cpp`](../../src/console_cmds.cpp) | `prismatic_mcp approvals`, `approve`, `deny`, `approval_deadline`, `decisions` |
+| [`src/console_cmds.cpp`](../../src/console_cmds.cpp) | `prismatic_mcp approvals`, `approve`, `deny`, `approve all`, `deny all`, `rule`, `rules`, `approval_deadline`, `decisions` |
 | [`tools/research/mcp-rhai/src/panel.rs`](../../tools/research/mcp-rhai/src/panel.rs) | pending list, `/api/approve`, `/api/auto-approve`, the console refusal |
 | [`tools/research/mcp-panel/rhai/ttd.rhai`](../../tools/research/mcp-panel/rhai/ttd.rhai) | `ttd::set_pause`, which waits for the approval and never approves itself |
 
@@ -131,6 +173,11 @@ queue:
   `tools/gate.sh research`. The deadline has two cases of its own: "An unanswered approval is
   settled at its deadline with the operator's standing verdict, keep by default" and "The deadline
   policy is parsed from the console's game days and verdict, and a malformed line changes nothing".
+- The rules and bulk consent have their own cases there: the glob, the JSON matcher and its
+  paths, "A deny rule wins over an allow rule, and an allow rule from the panel never decides an
+  owner-only tool", rules applied when added and as approvals are created, approve all and deny
+  all with filters, the console's spelling (an injected line approves nothing), and the control
+  window's rows, selectors, bulk targets, next row and hit areas.
 - `tools/research/mcp-live-check` approves and denies real mutations over HTTP.
 - `cargo test` in `tools/research/mcp-rhai` covers `is_approval_line` (including the deadline's
   standing `approve` verdict) and that

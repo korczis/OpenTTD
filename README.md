@@ -788,12 +788,12 @@ from the code. The right-hand column says what was counted.
 |---|---|---|
 | **146** | [game commands, each an MCP tool an agent can call (`openttd.cmd.*`)](research/mcp-api.md) | `DEF_CMD_TRAIT\(Commands::` in `src/*_cmd.h` |
 | **24** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
-| **46** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
+| **55** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **60** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **61** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **22** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
-| **38** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
+| **39** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **209** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **99** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
 <!-- surfaces:end facts -->
@@ -801,7 +801,7 @@ from the code. The right-hand column says what was counted.
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 60
+    "research tools and checks (tools/research/, shell and Python)" : 61
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 13
     "Rhai scripts that drive a live game (director, narrator, steward, …)" : 22
 ```
@@ -1467,10 +1467,10 @@ choices, with its status (generated from [`.ai/repo/adrs/`](./.ai/repo/adrs/READ
 <!-- surfaces:begin ai-adrs as=pie -->
 ```mermaid
 pie showData title Decisions by status
-    %% links: README.md?col=Status&filter=accepted#071-architecture-decisions | README.md?col=Status&filter=superseded#071-architecture-decisions | README.md?col=Status&filter=proposed#071-architecture-decisions
+    %% links: README.md?col=Status&filter=accepted#071-architecture-decisions | README.md?col=Status&filter=proposed#071-architecture-decisions | README.md?col=Status&filter=superseded#071-architecture-decisions
     "accepted" : 36
+    "proposed" : 2
     "superseded" : 1
-    "proposed" : 1
 ```
 <!-- surfaces:end ai-adrs -->
 
@@ -1517,6 +1517,7 @@ pie showData title Decisions by status
 | [adr-0037](.ai/repo/adrs/0037-battlebrain-in-this-fork-is-the-one-authority-for-the-freigh.md) | accepted | Battlebrain in this fork is the one authority for the freight-line decision; planner and AlgoGlyph only produce candidates, the executor only applies |
 | [adr-0038](.ai/repo/adrs/0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md) | accepted | One approval core on the game server: a plan is approved as a whole and executes on approval, and every channel (web, console, game command, chat) is an adapter to it |
 | [adr-0039](.ai/repo/adrs/0039-algoglyph-is-a-git-submodule-pinned-at-one-commit-and-its-ru.md) | proposed | AlgoGlyph is a git submodule pinned at one commit, and its Rust kernels run in-process as native-rust catalogue entries |
+| [adr-0041](.ai/repo/adrs/0041-bulk-consent-and-standing-approval-rules.md) | proposed | The owner's bulk consent and standing approval rules: approve or deny all over a filter, and always-allow or always-deny rules of a tool glob and a JSON matcher, applied in the one approval core |
 <!-- surfaces:end ai-adrs -->
 
 </details>

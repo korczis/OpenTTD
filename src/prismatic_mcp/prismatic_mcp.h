@@ -20,6 +20,8 @@
 #include <string_view>
 #include <vector>
 
+#include "prismatic_mcp_rules.h"
+
 /**
  * Lifecycle + control surface of the embedded MCP server. Every function here
  * runs on the OpenTTD main (game) thread; the server never touches game state
@@ -68,16 +70,64 @@ std::string ListApprovals();
  */
 struct PendingApprovalInfo {
 	uint64_t id = 0;
-	std::string tool;            ///< the gated tool this approval belongs to.
+	std::string tool;            ///< the gated action this approval belongs to (ai.set_setting, command.BuildRail).
 	std::string canonical_args;  ///< the exact arguments the approval binds to.
 	bool expired = false;        ///< past its TTL: listed, but ApproveById will refuse it.
+	std::string mcp_tool;        ///< the MCP tool as it was called (openttd.ai.set_setting).
+	uint64_t matched_rule = 0;   ///< the standing rule that applies to it (Rules::Decide), else 0.
+	bool rule_decides = false;   ///< whether that rule may decide it (false: an allow rule held back, or it expired).
 };
 /**
- * Every approval whose state is still Pending, in id order. The console uses it to spell
- * 'deny all' and to print what a named id would do. It decides nothing and approves nothing;
- * there is deliberately no bulk approval anywhere in this build.
+ * Every approval whose state is still Pending, in id order. The console, the control window and
+ * openttd.ui.control read it; it decides nothing. Consent stays the owner's act (ADR 0038, ADR
+ * 0040): one id at a time (ApproveById), or in bulk only through DecideAll and the owner's standing
+ * rules (AddApprovalRule), which the game's console, the owner's own click in the control window, or
+ * the panel's owner-authenticated routes make, never an MCP client, a script or injected input.
  */
 std::vector<PendingApprovalInfo> PendingApprovals();
+
+/* --- bulk consent and standing rules (ADR 0041) ------------------------------------------ */
+
+/** What a bulk decision or a new rule did, one console line per approval it decided or skipped. */
+struct BulkOutcome {
+	bool ok = true;                 ///< false: refused as a whole (a malformed rule, no such rule); lines say why.
+	uint64_t rule_id = 0;           ///< the rule added, for AddApprovalRule.
+	int decided = 0;                ///< approvals approved (and executed) or denied.
+	int refused = 0;                ///< approvals whose approval the core refused (it ran and was rejected, say).
+	int skipped = 0;                ///< approvals the filter took but this channel may not decide (expired, owner-only).
+	std::vector<std::string> lines; ///< what happened, in order: what each id did, its tool and its arguments.
+	std::vector<uint64_t> decided_ids; ///< the ids decided, for the machine-readable result line.
+	std::vector<uint64_t> refused_ids; ///< the ids refused.
+	std::vector<uint64_t> skipped_ids; ///< the ids skipped.
+};
+/** Every standing rule, in id order. */
+std::vector<Rules::Rule> ApprovalRules();
+/**
+ * Add a standing rule and apply it at once to every approval already waiting (a deny rule withdraws
+ * what it matches; an allow rule approves and executes it, unless it expired or the rule may not
+ * decide it). From then on every new approval is checked against the rules as it is created. A
+ * spec with `persist` is written to the rules file (RulesFile(), mode 0600) and loaded at the next
+ * start. `spec.via` is recorded as created_via; a rule made through the panel never decides an
+ * owner-only tool.
+ */
+BulkOutcome AddApprovalRule(Rules::Effect effect, const Rules::Spec &spec);
+/** Remove rule \p id (and from the rules file when it was persisted); false when there is none. */
+bool RemoveApprovalRule(uint64_t id, std::string &message);
+/**
+ * Approve all (\p approve) or deny all pending approvals the spec's tool glob and matcher select.
+ * Approving skips an expired one and, for a spec from the panel, an owner-only one; each approval
+ * still goes through ApproveById (or DenyById) on its own and records `spec.via` as its channel.
+ */
+BulkOutcome DecideAll(bool approve, const Rules::Spec &spec);
+/** The file standing rules made with --persist are kept in: one per server port, in the personal directory. */
+std::string RulesFile();
+/**
+ * Load the persisted rules of RulesFile(), once per file, and say each one on the console and in
+ * the log: a standing rule is never silent. Start() calls it.
+ * @return The lines said: one per rule loaded, and one per entry or file that could not be read.
+ */
+std::vector<std::string> LoadApprovalRules();
+
 /** Approve a pending mutation by id and carry it out at once; false if not found, expired or not
  * executed. `via` names the channel, recorded with its decision (approved_via). */
 bool ApproveById(uint64_t id, std::string &message, std::string_view via = "console");
@@ -102,8 +152,8 @@ bool AddApprover(std::string_view key);
 /** Remove the one approver whose key starts with this (at least 8 characters, matching exactly one
  * key); the key removed, or empty when none or several match. */
 std::string RemoveApprover(std::string_view key_or_prefix);
-/** Deny a pending mutation by id. */
-bool DenyById(uint64_t id, std::string &message);
+/** Deny a pending mutation by id; `via` names the channel, recorded as how it was settled (settled_by). */
+bool DenyById(uint64_t id, std::string &message, std::string_view via = {});
 /**
  * The approval deadline: after `days` game days unanswered (0: off) a pending approval is settled
  * with the operator's standing verdict, "keep" (retire it, enacting nothing; the default) or
