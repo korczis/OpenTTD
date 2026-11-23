@@ -77,6 +77,23 @@ with "no second track ... would cost about N" and `ERR_NOT_ENOUGH_CASH`.
   owners are PrismaticAI. Tests: `SharedProducers` and `FitnessRun` in
   `tools/research/test_ai_battle.py`.
 
+- **The planner plans per company and leaves out producers another company holds.** `mcp-plan
+  --for <ids>` applies the bot's rule from `openttd://map` and `openttd://map/ways`
+  (`cargo.rs` `rail_claims`). A freight candidate whose raw producer has a rail station of a
+  company outside `<ids>` is no candidate. It is left out before the list is cut and before
+  AlgoGlyph prices the best lines, and the plan's `claims` names it. `panel_bot.rs` plans every
+  running company of its AI from that one answer. Each producer goes to one company only
+  (`assign_producers`): the best to the lower id, the next best to the other, a producer a
+  company holds to that company alone. The settings for a new company get only what is left, and
+  `bot_settings.companies` carries one plan per company. `replan.rhai` re-plans every running
+  company of the AI with its own entry. It keeps its switch model and the owner's approval for
+  each company, and sends each company's changes to that company (`build_plan::apply_to`). Tests:
+  `rail_stations_near_a_raw_producer_hold_it_for_their_company` (`cargo.rs`),
+  `a_plan_for_a_company_leaves_out_the_producers_another_company_holds` (`plan_pipeline.rs`),
+  `two_companies_of_one_ai_are_handed_different_producers_best_first` and
+  `every_running_company_gets_a_plan_of_its_own` (`panel_bot.rs`), and
+  `replan_proposes_each_company_of_its_ai_its_own_plan` (`rhai_shared.rs`).
+
 The check against the tree before and after the change. Both runs used `build/openttd`
 `20261119-master-g9750b3f946` and the arena cache at `~/ttd-battle/arena`, and ran
 `battle.py fitness --config <copy with fitness.seed set>`. "Siblings" is the sibling lineup's two
@@ -101,10 +118,14 @@ where it did not before. Producers that rivals claimed are no longer candidates,
 other sink for the money. The gate's seed passes. The sink that is missing is the capital loop:
 more trains and second tracks on lines that already earn.
 
-<!-- open-finding kind=staged -->
-The planner (`panel_bot.rs`, `mcp-plan`) and `replan.rhai` still plan for one company of an AI. A
-plan per company, with the producers a sibling holds left out, is not written. Until it is, the bot's
-own check is the only guard on the planner's lines.
+<!-- open-finding kind=not-run -->
+The per-company plan is tested offline only. No live game has run a `replan.rhai` round with
+several PrismaticAI companies yet, and no fitness or duel record measures it. Some parts of a plan
+are still shared by every company of an AI: the passenger rail pair (`rail_a`, `rail_b`) and the
+air pair. The plain-language answers of `intent.rs` do not use the claims at all. The planner
+infers which industry a tile belongs to and whether an industry is raw, because the game serves
+neither (`cargo.rs` `CLAIM_RULE`). The sub-tropical lumber mill, which accepts no cargo, therefore
+counts as raw.
 
 <!-- open-finding kind=partial -->
 A processing industry served by two PrismaticAI companies is still possible: only the
