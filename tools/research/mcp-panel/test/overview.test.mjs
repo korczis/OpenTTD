@@ -87,7 +87,8 @@ test('app.css is built from the current sources (tailwindcss -i input.css -o sta
   const { execFileSync } = await import('node:child_process');
   const out = path.join(fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'panel-css-')), 'app.css');
   execFileSync('tailwindcss', ['-i', 'input.css', '-o', out, '--minify'], { cwd: path.join(here, '..'), stdio: 'ignore' });
-  assert.equal(fs.readFileSync(out, 'utf8'), fs.readFileSync(path.join(STATIC, 'app.css'), 'utf8'), 'rebuild static/app.css and commit it');
+  // The committed file ends with a newline (the commit checker asks for one); the CLI writes none.
+  assert.equal(fs.readFileSync(out, 'utf8').trimEnd(), fs.readFileSync(path.join(STATIC, 'app.css'), 'utf8').trimEnd(), 'rebuild static/app.css and commit it');
 });
 
 test('duel pages: options from results, every registered chart has its card', async () => {

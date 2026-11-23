@@ -13,7 +13,7 @@
 //   Deny    #7 -> 504             the server never marked it denied
 //   Deny    #4 -> 409, Deny #5 -> 404
 //
-// For #4 and #5 the page keeps the list it drew (its /api/status is held) while the server's queue
+// For #4 and #5 the page keeps the list it drew (its /api/approvals is held) while the server's queue
 // changes under it, as a page a person left open does. Then every line of static/app.js that this
 // change adds runs in the page (Chrome's own JS coverage), and the list redrawn from the server
 // holds only #7.
@@ -23,6 +23,20 @@
 // closes it and the switch stays off, a wrong secret is refused in the box, the right one signs in
 // and the switch goes on. A reload keeps the sign-in, and so does a restart of the panel on the same
 // secret file; signing out asks again. Every changed line of static/shell.js runs in these pages.
+//
+// Then the approvals list (static/approvals.js) against the approval-rules core as the stand-in plays
+// it (`fake seed bulk`): the checkboxes (one, a Shift+click range, the header one, Space), the
+// filters and their address, Yes and No at the same place on every row (a decided row leaves and
+// the next one is under the pointer), the keys (j k y n a d Enter), Approve selected with its
+// confirmation, Deny all over the filter, the rule editor (always allow with a JSON matcher, kept;
+// always deny without one; a bad matcher refused in the box; an owner-only row offers no allow), the
+// rules deciding waiting and new approvals, an allow rule that never decides an owner-only tool, and
+// Remove. The owner routes refuse a caller without the secret, and /api/console refuses every rule
+// line. Every line of static/approvals.js runs in Chrome.
+//
+// The owner secret is made in a fresh HOME, as on a first start; Yes then answers 200 as 127.0.0.1
+// and as localhost, after the launcher's signed-in address and after the sign-in box, and the core
+// records the panel's decisions as the panel's (--via panel). POST /api/approvers is the owner's.
 //
 // e2e-covers: panel /
 //
@@ -58,13 +72,18 @@ const until = async (pred, ms = 20000) => { for (let t = 0; t < ms; t += 200) { 
 const [panelPort, mcpPort, gamePort] = [await freePort(), await freePort(), await freePort()];
 const base = `http://127.0.0.1:${panelPort}`;
 const store = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || '/tmp'), 'mcp-approval-ui-'));
-// The owner secret lives in a file of this run, never in the person's own ~/.config.
-const secretFile = path.join(store, 'owner', 'panel-owner-secret');
+// A fresh HOME of this run: the panel makes the owner secret where a first start on a new machine
+// does (~/.config/prismatic/panel-owner-secret), never in the person's own ~/.config.
+const home = path.join(store, 'home');
+fs.mkdirSync(home);
+const secretFile = path.join(home, '.config', 'prismatic', 'panel-owner-secret');
 let out = '';
+const env = { ...process.env };
+delete env.PRISMATIC_PANEL_OWNER_SECRET_FILE;
 /** One mcp-panel on this run's ports and secret file (a second call is the restart). */
 const startPanel = () => {
   const child = spawn(bin, ['--bin', path.join(here, 'mcp-fake-game'), '--panel-port', String(panelPort), '--mcp-port', String(mcpPort),
-    '--game-port', String(gamePort), '--no-plan-bot'], { env: { ...process.env, PRISMATIC_STORE_DIR: store, PRISMATIC_PANEL_OWNER_SECRET_FILE: secretFile }, stdio: ['ignore', 'pipe', 'pipe'] });
+    '--game-port', String(gamePort), '--no-plan-bot'], { env: { ...env, HOME: home, PRISMATIC_STORE_DIR: store }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
   return child;
@@ -87,7 +106,7 @@ const leftovers = () => {
 process.on('exit', () => { stop(); fs.rmSync(store, { recursive: true, force: true }); });
 
 const get = (p) => fetch(base + p).then((r) => r.json());
-const post = (p, body) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify(body) });
+const post = (p, body, headers = {}) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, ...headers }, body: JSON.stringify(body) });
 const queue = async () => ((await get('/api/resources/approvals')).data || {}).approvals || [];
 
 let browser;
@@ -113,7 +132,7 @@ try {
 
   // The page's list stays as drawn while the server's queue changes under it.
   let held = null;
-  await page.route('**/api/status', async (route) => {
+  await page.route('**/api/approvals', async (route) => {
     const r = await route.fetch();
     if (!held) held = await r.json();
     await route.fulfill({ response: r, json: held });
@@ -156,12 +175,14 @@ try {
   check('the decisions are the server\'s, recorded for #1 and #2 alone', decided.map((d) => d.approval_id).sort().join() === '1,2');
 
   // The list redrawn from the server's queue: only #7 still waits.
-  await page.unroute('**/api/status');
+  await page.unroute('**/api/approvals');
   check('redrawn from the server, the list holds only #7', await until(async () => {
     const ids = await page.locator('#pending [data-approve]').evaluateAll((bs) => bs.map((b) => b.dataset.approve));
     return ids.join() === '7';
   }));
   check('the page threw no error', errors.length === 0, errors.join('; '));
+  check('a core without rules: the list says so and Always… is off', await page.locator('#approvals-rules-note').isVisible()
+    && await page.locator('#pending [data-always="7"]').isDisabled());
 
   // Every line this change adds to static/app.js ran in the page (V8 block coverage, by byte).
   const covered = await page.coverage.stopJSCoverage();
@@ -230,6 +251,7 @@ try {
   check('the close button closes it too', await until(async () => (await box.count()) === 0));
   signed.push(...await owner.coverage.stopJSCoverage());
   check('the sign-in pages threw no error', errors.length === 0, errors.join('; '));
+  await bulkPhase(owner, secret, [...covered, ...signed]);
   // Every line this change adds to static/shell.js ran in one of the pages.
   const shells = [...covered, ...signed].filter((e) => e.url.endsWith('/static/shell.js'));
   const changedShell = changedLines('tools/research/mcp-panel/static/shell.js');
@@ -249,6 +271,232 @@ const failed = results.filter((r) => !r).length;
 console.log(`${failed ? 'FAIL' : 'PASS'} mcp-approval-ui-check: ${results.length - failed}/${results.length}`);
 process.exit(failed ? 1 : 0);
 
+/** The approvals list against the approval-rules core (the stand-in's `fake seed bulk`), signed in
+ *  on `page`; every line of static/approvals.js ran in `earlier` or here. */
+async function bulkPhase(page, secret, earlier) {
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  const runs = [];
+  await page.coverage.startJSCoverage({ resetOnNavigation: false });
+  const snapshot = async () => { runs.push(...await page.coverage.stopJSCoverage()); await page.coverage.startJSCoverage({ resetOnNavigation: false }); };
+  // The owner routes and the console, without the secret.
+  for (const [p, body] of [['/api/rules', { effect: 'allow', tool: '*' }], ['/api/rules/remove', { id: 1 }], ['/api/approve/many', { ids: [11] }],
+    ['/api/deny/many', { ids: [11] }], ['/api/approve/all', {}], ['/api/deny/all', {}], ['/api/approvers', { add: 2 }]]) {
+    check(`${p} refuses a caller without the owner secret`, (await post(p, body)).status === 401);
+  }
+  for (const line of ['prismatic_mcp rule allow *', 'prismatic_mcp rule allow * --persist', 'prismatic_mcp RU_LES', 'prismatic_mcp deny all',
+    'prismatic_mcp deny 1 --via panel', 'prismatic_mcp deny 1 --nonce 1', 'prismatic_mcp approvers add 2', 'prismatic_mcp app_rovers']) {
+    check(`/api/console refuses \`${line}\``, (await post('/api/console', { command: line })).status === 403);
+  }
+  const owner = { 'X-Panel-Owner': secret };
+  const added = await post('/api/approvers', { add: 2 }, owner);
+  check('POST /api/approvers registers the owner\'s client, with the owner secret', added.status === 200 && (await added.json()).output.some((l) => /is an approver now/.test(l)));
+  check('and answers 422 for a client that is not connected', (await post('/api/approvers', { add: 404 }, owner)).status === 422);
+  await post('/api/console', { command: 'fake seed bulk' });
+  check('the stand-in now holds the list\'s queue and keeps rules', await until(async () => {
+    const d = (await get('/api/resources/approvals')).data || {};
+    return Array.isArray(d.rules) && (d.approvals || []).some((a) => a.id === 22);
+  }));
+  await page.goto(`${base}/?owner=${encodeURIComponent(secret)}#approvals`, { waitUntil: 'load' });
+  const L = (sel) => page.locator(`#pending ${sel}`);
+  await L('[data-approve="22"]').waitFor({ timeout: 15000 });
+  const text = async (id) => (await page.locator(`#${id}`).textContent()).trim();
+  const ids = async () => L('tr[data-row]').evaluateAll((rs) => rs.map((r) => Number(r.dataset.row)));
+  const state = async (id) => (((await get('/api/resources/approvals')).data || {}).approvals || []).find((a) => a.id === id) || {};
+  const settled = (fn) => until(fn, 10000);
+  const toast = async (tone, t) => page.locator(`[data-toast="${tone}"]`).filter({ hasText: t }).first().waitFor({ timeout: 10000 }).then(() => true).catch(() => false);
+  check('every waiting row shows, the expired one hidden', (await ids()).join() === '11,12,13,14,15,16,18,19,20,21,22');
+  check('an owner-only row says where it is decided and has no Yes, no No, no pick', await L('tr[data-row="16"]').filter({ hasText: 'decide at the game\'s console' }).count() === 1
+    && await L('[data-approve="16"]').count() === 0 && await L('[data-deny="16"]').count() === 0 && await L('[data-select="16"]').isDisabled());
+  check('Approve all and Deny all name the rows the filter shows', await text('approvals-approve-bulk') === 'Approve all (10)' && await text('approvals-deny-bulk') === 'Deny all (10)');
+  await page.locator('#approvals-expired').check();
+  check('Show expired brings the expired row back, marked', await settled(async () => (await ids()).includes(17)) && await L('tr[data-row="17"]').filter({ hasText: 'expired' }).count() === 1
+    && page.url().includes('a_expired=show'));
+  await page.locator('#approvals-expired').uncheck();
+
+  // Picks: one, a Shift+click range, the header checkbox, Space.
+  const all = page.locator('#approvals-pick-all');
+  const head = async () => all.evaluate((b) => `${b.checked}/${b.indeterminate}`);
+  await L('[data-select="11"]').click();
+  check('a checkbox picks one row: Approve selected (1), the header half-checked', await text('approvals-approve-bulk') === 'Approve selected (1)' && await head() === 'false/true');
+  await L('[data-select="14"]').click({ modifiers: ['Shift'] });
+  check('Shift+click picks the range', await text('approvals-approve-bulk') === 'Approve selected (4)' && await text('approvals-deny-bulk') === 'Deny selected (4)'
+    && (await L('input[data-select]:checked').evaluateAll((bs) => bs.map((b) => b.dataset.select))).join() === '11,12,13,14');
+  await all.click();
+  check('the header checkbox picks every row the filter shows', await text('approvals-approve-bulk') === 'Approve selected (10)' && await head() === 'true/false');
+  await all.click();
+  check('and again picks none', await text('approvals-approve-bulk') === 'Approve all (10)' && await head() === 'false/false');
+  await L('tr[data-row="11"] td:nth-child(3)').click();
+  await page.keyboard.press('Space');
+  check('Space picks the focused row', await L('[data-select="11"]').isChecked());
+  await page.keyboard.press('Space');
+  check('and Space again leaves it', !(await L('[data-select="11"]').isChecked()));
+
+  // Filters, kept in the address.
+  await page.locator('#approvals-tool').selectOption('openttd.cmd.BuildRoad');
+  check('the tool filter shows its rows and the bulk buttons follow', (await ids()).join() === '14,15,21,22' && await text('approvals-approve-bulk') === 'Approve all (4)'
+    && page.url().includes('a_tool=openttd.cmd.BuildRoad'));
+  await page.locator('#approvals-company').selectOption('2');
+  check('the company filter (the arguments name one)', (await ids()).join() === '14');
+  await page.locator('#approvals-company').selectOption('');
+  await page.locator('#approvals-q').fill('no such approval');
+  check('a filter that takes no row says none is waiting', (await ids()).length === 0 && (await page.locator('#pending').textContent()).includes('none waiting'));
+  await page.locator('#approvals-q').fill('780');
+  check('the search box', (await ids()).join() === '22');
+  await snapshot();
+  await page.reload({ waitUntil: 'load' });
+  await L('[data-approve="22"]').waitFor({ timeout: 15000 });
+  check('a reload keeps the filter from the address', (await ids()).join() === '22' && await page.locator('#approvals-tool').inputValue() === 'openttd.cmd.BuildRoad'
+    && await page.locator('#approvals-q').inputValue() === '780');
+  await page.locator('#approvals-q').fill('');
+  await page.locator('#approvals-tool').selectOption('');
+  check('cleared, every row again', (await ids()).length === 11);
+
+  // Yes and No at the same place on every row; the next row slides under the pointer.
+  const xs = await L('[data-approve]').evaluateAll((bs) => [...new Set(bs.map((b) => Math.round(b.getBoundingClientRect().x)))]);
+  const nos = await L('[data-deny]').evaluateAll((bs) => [...new Set(bs.map((b) => Math.round(b.getBoundingClientRect().x)))]);
+  check('every Yes and every No is at one x', xs.length === 1 && nos.length === 1, `${xs} ${nos}`);
+  const box = await L('[data-approve="11"]').boundingBox();
+  const big = box.width >= 56 && box.height >= 40;
+  check('Yes is a large target', big, `${box.width}x${box.height}`);
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  const under = () => page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest('[data-approve]')?.dataset.approve, [x, y]);
+  await page.mouse.click(x, y);
+  check('Yes approves #11 and the next row\'s Yes is under the pointer', await toast('green', '#11 approved') && await settled(async () => (await under()) === '12'));
+  check('the focus moved to #12\'s Yes', await page.evaluate(() => document.activeElement?.dataset.approve) === '12');
+  await page.mouse.click(x, y);
+  check('a second click on the same place approves #12', await toast('green', '#12 approved') && (await state(12)).state === 'consumed');
+  const via = async (id) => ((((await get('/api/resources/decisions')).data || {}).decisions || []).find((d) => d.approval_id === id) || {}).approved_via;
+  check('the core records the panel\'s Yes as the panel\'s (--via panel)', await via(11) === 'panel' && await via(12) === 'panel');
+  await L('[data-deny="13"]').click();
+  check('No denies #13 and the focus goes to #14\'s No', await toast('green', '#13 denied') && await settled(async () => page.evaluate(() => document.activeElement?.dataset.deny === '14')));
+
+  // The keys.
+  await page.keyboard.press('j');
+  check('j moves to the next row', await settled(async () => page.evaluate(() => document.activeElement?.dataset.row === '15')));
+  await page.keyboard.press('k');
+  check('k moves back', await page.evaluate(() => document.activeElement?.dataset.row === '14'));
+  await page.keyboard.press('y');
+  check('y approves the focused row (#14), the next row takes the focus', await toast('green', '#14 approved') && await page.evaluate(() => document.activeElement?.dataset.row === '15'));
+  await page.keyboard.press('n');
+  check('n denies #15', await toast('green', '#15 denied') && (await state(15)).state === 'denied');
+  await page.keyboard.press('y');
+  check('y on an owner-only row does nothing', (await state(16)).state === 'pending' && await page.evaluate(() => document.activeElement?.dataset.row === '16'));
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('a');
+  check('a approves #18', await toast('green', '#18 approved'));
+  await page.keyboard.press('d');
+  check('d denies #19', await toast('green', '#19 denied'));
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  check('Enter approves #20', await toast('green', '#20 approved') && await settled(async () => (await state(20)).state === 'consumed'));
+
+  // Approve selected, with its confirmation; Deny all over the filter.
+  await L('[data-select="21"]').click();
+  await page.locator('#approvals-approve-bulk').click();
+  const confirm = page.locator('#approve-confirm');
+  check('Approve selected asks first, naming the count', await confirm.filter({ hasText: 'Approve 1 selected approval?' }).count() === 1);
+  await confirm.locator('[data-confirm="no"]').click();
+  check('Cancel approves nothing', await confirm.count() === 0 && (await state(21)).state === 'pending');
+  await page.locator('#approvals-approve-bulk').click();
+  await page.keyboard.press('Escape');
+  check('Escape approves nothing', await confirm.count() === 0 && (await state(21)).state === 'pending');
+  await page.locator('#approvals-approve-bulk').click();
+  await confirm.locator('[data-confirm="yes"]').click();
+  check('Approve in the box approves the picked row', await toast('green', 'Approved 1 of 1') && (await state(21)).state === 'consumed' && await via(21) === 'panel');
+  await page.locator('#approvals-deny-bulk').click();
+  check('Deny all denies every row the filter shows', await toast('green', 'Denied 1 of 1') && (await state(22)).state === 'denied');
+  // A bulk decision over a row the server consumed meanwhile: the failure is named.
+  await post('/api/console', { command: "fake add openttd.cmd.BuildRoad {'company':4,'tile':9}" });
+  await L('[data-approve="23"]').waitFor({ timeout: 10000 });
+  await page.route('**/api/approvals', (r) => r.abort());
+  await post('/api/console', { command: 'fake consume 23' });
+  await page.locator('#approvals-approve-bulk').click();
+  await confirm.locator('[data-confirm="yes"]').click();
+  check('a row consumed meanwhile is named in a red toast', await toast('red', '#23: 409'));
+  check('a list that cannot be read says so in the card', await settled(async () => /GET \/api\/approvals/.test(await page.locator('#approvals-msg').getAttribute('data-failure') || '')));
+  await page.unroute('**/api/approvals');
+
+  // Standing rules.
+  for (const [tool, args] of [['openttd.ai.set_setting', "{'company':3,'name':'max_ships','value':5}"], ['openttd.ai.set_setting', "{'company':3,'name':'max_trains','value':6}"],
+    ['openttd.cmd.BuildRoad', "{'company':3,'tile':5}"]]) await post('/api/console', { command: `fake add ${tool} ${args}` });
+  await L('[data-always="26"]').waitFor({ timeout: 10000 });
+  await L('[data-always="24"]').click();
+  const ed = page.locator('#rule-editor');
+  check('Always… opens the editor prefilled from the row', await page.locator('#rule-tool').inputValue() === 'openttd.ai.set_setting'
+    && JSON.parse(await page.locator('#rule-match').inputValue()).name === 'max_ships' && await ed.locator('input[value="allow"]').isChecked());
+  await page.locator('#rule-match').fill('{"company": 3, "name": "max_*"');
+  await ed.locator('button[type="submit"]').click();
+  check('a matcher that is not JSON is refused in the box', await page.locator('#rule-error').filter({ hasText: 'not JSON' }).isVisible() && await ed.count() === 1);
+  await page.locator('#rule-match').fill('{"company": 3, "name": "max_*"}');
+  await page.locator('#rule-persist').check();
+  await ed.locator('button[type="submit"]').click();
+  check('Add rule makes "always allow" with its matcher', await toast('green', 'Rule #1: always allow openttd.ai.set_setting where {"company":3,"name":"max_*"}') && await ed.count() === 0);
+  check('the rule decided both waiting rows it takes', await settled(async () => (await state(24)).state === 'consumed' && (await state(25)).state === 'consumed'
+    && !(await ids()).includes(24)));
+  const decided = ((await get('/api/resources/decisions')).data || {}).decisions || [];
+  check('each decision says the rule decided it', decided.filter((d) => d.approved_via === 'rule #1').length === 2);
+  check('the rules list: allow, its matcher, 2 hits, kept', await settled(async () => (await page.locator('#approvals-rules tr').first().textContent()).replace(/\s+/g, ' ')
+    .includes('#1 always allow openttd.ai.set_setting {"company":3,"name":"max_*"} panel 2 kept')));
+  await L('[data-always="26"]').click();
+  await ed.locator('input[value="deny"]').check();
+  await page.locator('#rule-use-match').uncheck();
+  await ed.locator('button[type="submit"]').click();
+  check('always deny without a matcher denies the row', await toast('green', 'Rule #2: always deny openttd.cmd.BuildRoad') && await settled(async () => (await state(26)).state === 'denied'));
+  await post('/api/console', { command: "fake add openttd.cmd.BuildRoad {'company':1,'tile':1}" });
+  check('a new request the deny rule takes never waits', await settled(async () => (await state(27)).state === 'denied' && (await state(27)).matched_rule?.id === 2));
+  await L('[data-always="16"]').click();
+  check('an owner-only row offers no allow rule', await ed.locator('input[value="allow"]').isDisabled() && await ed.locator('input[value="deny"]').isChecked());
+  await page.locator('#rule-tool').fill('bad tool');
+  await ed.locator('button[type="submit"]').click();
+  check('a rule the panel refuses is shown in the box', await settled(async () => (await page.locator('#rule-error').textContent()).includes('POST /api/rules: 400 a tool glob')));
+  await ed.locator('[data-rule-cancel]').first().click();
+  check('the close button closes the editor', await ed.count() === 0);
+  await L('[data-always="16"]').click();
+  await page.keyboard.press('Escape');
+  check('Escape closes it too', await ed.count() === 0);
+  // An allow rule over every AI tool: the owner-only row records the match and still waits for the console.
+  await post('/api/console', { command: "fake add openttd.ai.set_setting {'company':5,'name':'x','value':1}" });
+  await L('[data-always="28"]').click();
+  await page.locator('#rule-tool').fill('openttd.ai.*');
+  await page.locator('#rule-use-match').uncheck();
+  await ed.locator('button[type="submit"]').click();
+  check('an allow rule never decides the owner-only row', await toast('green', 'Rule #3: always allow openttd.ai.*') && await settled(async () => (await state(28)).state === 'consumed')
+    && (await state(16)).state === 'pending' && await settled(async () => (await L('tr[data-row="16"]').textContent()).includes('rule #3 allow (console decides)')));
+  await page.locator('#approvals-rules [data-rule-remove="2"]').click();
+  check('Remove takes rule #2 off the list', await toast('green', 'Rule #2 removed') && await settled(async () => (await page.locator('#approvals-rules [data-rule-remove="2"]').count()) === 0));
+  check('the approvals pages threw no error', errors.length === 0, errors.join('; '));
+
+  // The 401 class, closed: as 127.0.0.1 and as localhost, after the launcher's signed-in address
+  // and after the sign-in box, Yes answers 200.
+  runs.push(...await page.coverage.stopJSCoverage());
+  for (const [host, how, i] of [['127.0.0.1', 'box', 0], ['localhost', 'launcher', 1], ['localhost', 'box', 2]]) {
+    await post('/api/console', { command: `fake add openttd.game.set_pause {'pause':${i % 2 === 0}}` });
+    const id = Math.max(...(((await get('/api/resources/approvals')).data || {}).approvals || []).map((a) => a.id));
+    const ctx = await page.context().browser().newContext({ viewport: { width: 1440, height: 1000 } });
+    const tab = await ctx.newPage();
+    await tab.coverage.startJSCoverage({ resetOnNavigation: false });
+    const origin = `http://${host}:${panelPort}`;
+    await tab.goto(how === 'launcher' ? `${origin}/?owner=${encodeURIComponent(secret)}#approvals` : `${origin}/#approvals`, { waitUntil: 'load' });
+    await tab.locator(`#pending [data-approve="${id}"]`).click({ timeout: 15000 });
+    if (how === 'box') {
+      await tab.locator('#owner-secret').fill(secret, { timeout: 10000 });
+      await tab.locator('#owner-signin-form button[type="submit"]').click();
+    }
+    const done = await tab.locator('[data-toast="green"]').filter({ hasText: `#${id} approved` }).first().waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
+    check(`as ${host}, after the ${how === 'box' ? 'sign-in box' : 'launcher\'s signed-in address'}, Yes answers 200`, done && (await state(id)).state === 'consumed'
+      && await tab.locator('[data-toast="red"]').count() === 0);
+    runs.push(...await tab.coverage.stopJSCoverage());
+    await ctx.close();
+  }
+  const mine = [...earlier, ...runs].filter((e) => e.url.endsWith('/static/approvals.js'));
+  const lines = changedLines('tools/research/mcp-panel/static/approvals.js');
+  const missed = lines.filter((n) => !mine.some((e) => lineRan(e, n)));
+  check(`every changed line of static/approvals.js ran in Chrome (${lines.length} line(s))`, mine.length > 0 && lines.length > 0 && missed.length === 0,
+    missed.map((n) => `approvals.js:${n}`).join(', '));
+}
+
 /** The added or modified executable lines of `file` since the base (comments and blank lines left out). */
 function changedLines(file) {
   // --base, else $COVERAGE_BASE (CI: the pull request's base), else the merge base with origin/master;
@@ -256,7 +504,10 @@ function changedLines(file) {
   const holds = (r) => { try { execFileSync('git', ['-C', repo, 'cat-file', '-e', `${r}^{commit}`], { stdio: 'ignore' }); return true; } catch { return false; } };
   const ref = [opt('--base', ''), process.env.COVERAGE_BASE || ''].find((r) => r && holds(r))
     || execFileSync('git', ['-C', repo, 'merge-base', 'HEAD', 'origin/master'], { encoding: 'utf8' }).trim();
-  const diff = execFileSync('git', ['-C', repo, 'diff', '-U0', ref, '--', file], { encoding: 'utf8' });
+  // A file git does not track yet counts whole, as it will once committed.
+  const tracked = (() => { try { execFileSync('git', ['-C', repo, 'ls-files', '--error-unmatch', file], { stdio: 'ignore' }); return true; } catch { return false; } })();
+  const diff = tracked ? execFileSync('git', ['-C', repo, 'diff', '-U0', ref, '--', file], { encoding: 'utf8' })
+    : `@@ -0,0 +1,${fs.readFileSync(path.join(repo, file), 'utf8').split('\n').length} @@`;
   const text = fs.readFileSync(path.join(repo, file), 'utf8').split('\n');
   const lines = [];
   for (const m of diff.matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)) {

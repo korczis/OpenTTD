@@ -16,16 +16,9 @@ const tag = (text, tone) => `<span class="${UI.badge} ${TONE[tone]}">${esc(text)
 const money = (v) => (typeof v === 'number' ? v.toLocaleString('en') : v ?? '-');
 
 /* ---- markup from what the panel answers (pure) --------------------------------------------- */
-/** The decisions waiting for the owner, each with its Approve and its Deny: both go to the game
- *  server's one approval core (POST /api/approve, /api/deny), which decides and answers. */
-const pendingHtml = (pending) => (pending.length ? pending.map((p) => `
-    <li class="flex items-center justify-between gap-2 p-2 border border-gray-200 rounded-lg dark:border-gray-700">
-      <span class="min-w-0 font-mono break-all">#${p.id} ${esc(p.tool)}(${esc(JSON.stringify(p.args))})</span>
-      <span class="flex shrink-0 gap-2">
-        <button data-approve="${p.id}" type="button" class="${UI.primary}">Approve</button>
-        <button data-deny="${p.id}" type="button" class="${UI.secondary}">Deny</button>
-      </span>
-    </li>`).join('') : '<li>none</li>');
+/** How many decisions wait for the owner; the list itself, with its Yes and No, its picks, filters
+ *  and standing rules, is the Approvals section (static/approvals.js). */
+const pendingText = (pending) => (pending.length ? `${pending.length} waiting for you` : 'none waiting');
 /** A game string as a person reads it: OpenTTD's formatting codes (font, colour, sprites: the
  *  private use area its strings carry them in) and control characters dropped, line breaks folded
  *  into one space. */
@@ -89,7 +82,7 @@ async function refreshStatus() {
   const s = await api('/api/status');
   $('endpoint').textContent = `${s.endpoint} · game 127.0.0.1:${s.game_port}`;
   $('auto').checked = !!s.auto_approve;
-  $('pending').innerHTML = pendingHtml(s.pending);
+  $('pending-count').textContent = pendingText(s.pending);
   $('events').innerHTML = eventsHtml(s.events);
   return s;
 }
@@ -125,25 +118,9 @@ async function tick() {
 }
 
 document.addEventListener('click', async (ev) => {
-  const t = ev.target.closest('[data-approve],[data-deny],[data-read]');
+  const t = ev.target.closest('[data-read]');
   if (!t) return;
   ev.preventDefault();
-  if (t.dataset.approve) {
-    // A failure is shown by the one API client; a success says what the game did with it.
-    t.disabled = true;
-    const r = await api('/api/approve', { id: Number(t.dataset.approve) });
-    if (r.ok) notify(`#${t.dataset.approve} approved: ${r.status} ${r.command_result ?? ''}`.trim(), 'green');
-    t.disabled = false;
-    tick();
-  }
-  if (t.dataset.deny) {
-    // A denial enacts nothing; the server's answer (or the API client's failure toast) says how it went.
-    t.disabled = true;
-    const r = await api('/api/deny', { id: Number(t.dataset.deny) });
-    if (r.ok) notify(`#${t.dataset.deny} denied`, 'green');
-    t.disabled = false;
-    tick();
-  }
   if (t.dataset.read) location.href = '/resource/' + t.dataset.read.replace(/^openttd:\/\//, '');
 });
 $('btn-pause').onclick = async () => { await api('/api/pause', { pause: true }); tick(); };
@@ -440,10 +417,10 @@ globalThis.document && liveImage($('live-img'), $('live-msg'));
   };
 })();
 
-if (typeof module !== 'undefined') {
-  module.exports = {
-    money, gameText, pendingHtml, eventsHtml, fleetText, companiesHtml, decisionsHtml, clusterHtml, newsHtml,
-    townOptions, asksHtml, planSummary, planStepsHtml, planGraphOption, contentRowsHtml, highlightJson,
-    lineClass, consoleHtml, tailNames, NOTABLE, toastHtml, HELP,
-  };
-}
+// The pure builders, for node --test; built in the page too, so every name listed here is one it runs.
+const PURE = {
+  money, gameText, pendingText, eventsHtml, fleetText, companiesHtml, decisionsHtml, clusterHtml, newsHtml,
+  townOptions, asksHtml, planSummary, planStepsHtml, planGraphOption, contentRowsHtml, highlightJson,
+  lineClass, consoleHtml, tailNames, NOTABLE, toastHtml, HELP,
+};
+if (typeof module !== 'undefined') module.exports = PURE;
