@@ -33,7 +33,7 @@ another personal directory: Linux uses `$XDG_DATA_HOME/openttd`, and a test run 
 | `main.nut` | The heartbeat: the planner's air, freight and passenger lines first, then the bot's own lines, buses, fleet, line reconciliation and loan |
 | `rail.nut` | Rail lines: termini with a throat, the A* line search, laying, the walk check, depots, trains, platform length; the opt-in double track (`BuildDoubleRailLineAndTrain`: a junction at each terminus, two one-way tracks, one-way path signals) |
 | `lines.nut` | Rail lines as desired state: line slots, the record the Rhai steward reads (with station ids), and the reconciliation of its targets; closing removes only what the line owns |
-| `fleet.nut` | Road, air and ship capacity follows waiting cargo and the link graph's planned flow; vehicles that lose money are sold |
+| `fleet.nut` | Road, air and ship capacity follows waiting cargo and the link graph's planned flow; vehicles that lose money are sold; no vehicle more on a route that runs part empty (`load_add_min`) and no new bus route while the road does not pay (`road_yield`); a yearly road and air report in the log |
 | `ships.nut` | Ships behind `ships_max` (0, default: none; RESEARCH-ONLY): the bot's own water routes from an oil rig or a coastal producer to an acceptor by the sea, or between two coastal towns, scored by estimated yearly profit, checked on the map before anything is built (dock sites in `AITestMode`, an A* over water), then docks, a ship depot and ships; `fleet.nut` grows and sells them like road and air routes |
 | `catchment.nut`, `statues.nut` | Mechanisms learned from AAAHogEx: joined drive-through stops that ring each airport to collect the whole town, and statues in the towns of our stations; each behind its setting, off by default |
 | `autopilot.nut` | Autopilot's own air routes for a bot without a plan: the best big-town pairs, built first on borrowed money with a real budget check; a half-built route takes its airport down again |
@@ -60,6 +60,12 @@ Full rationale: [`research/rail-steward.md`](../../../research/rail-steward.md),
   platforms into the single line, with a path signal on each platform's exit. A train leaves only
   when it can reserve its way into a free platform at the other end, so up to `trains_max`
   trains share one track without a passing loop.
+- **A terminus finds a site on hilly land** (`BuildRailStationAt`). It tries the axis toward the
+  other end, then the other axis, then the reversed exit. In each it takes the catching site
+  with the most cargo: flat first, then sloped land the game builds on with foundations
+  (`construction.build_on_slopes`; `FitsOnFoundations`, then a test-mode build). It levels a
+  site only when no orientation has one. Sites used to be flat and on one axis only, and in the
+  owner's hilly 1950 settings about half of the failed own lines ended there.
 - **The laid line is walked** (`VerifyRailLine`) before any train is bought. A missing piece is
   laid again, and a line that stays broken gets no train.
 - **Every wagon is checked.** A wagon the game will not refit or couple (a NewGRF rule) is sold
@@ -149,7 +155,7 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 
 <!-- prismatic-ai-settings:begin -->
 
-165 settings in 77 declarations, 164 of them live-changeable (`CONFIG_INGAME`), 36 genes of the battle's genetic algorithm (`tuning` in [`battle.json`](../ai-battle/battle.json)). Derived from [`PrismaticAI/info.nut`](PrismaticAI/info.nut) by `derive_docs.py`.
+169 settings in 81 declarations, 168 of them live-changeable (`CONFIG_INGAME`), 36 genes of the battle's genetic algorithm (`tuning` in [`battle.json`](../ai-battle/battle.json)). Derived from [`PrismaticAI/info.nut`](PrismaticAI/info.nut) by `derive_docs.py`.
 
 | Setting | Default | Range / step | Live | GA | Description |
 |---|---|---|---|---|---|
@@ -229,7 +235,11 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 | [`ships_cap`](PrismaticAI/info.nut#L581) | 6 | 1 .. 20 | yes |  | Ships: most ships per water route, for the fleet's additions where cargo waits and InvestSurplus (fleet.nut), and for how many a new route is planned with (ships.nut). |
 | [`ships_max_tiles`](PrismaticAI/info.nut#L588) | 150 | 40 .. 500 / 10 | yes |  | Ships: the longest water route, in tiles between its two ends (the shortest is 20; ships.nut). |
 | [`air_planes`](PrismaticAI/info.nut#L595) | 1 | 1 .. 8 | yes | gene 1 .. 6 | Aircraft on the planner's air route. |
-| [`test_trainless`](PrismaticAI/info.nut#L606) | 0 | 0 .. 2 | no |  | RESEARCH-ONLY test hook. 1: the first train of every new rail line, and every other new line's depot, is refused as if for money, so the line waits trainless for KeepLinesServed to buy it; 2: as 1, and once a game month the bot forgets its lines that still have no train, as a restart would, so AdoptTrainlessLines (monthly in this mode, yearly otherwise) takes them back from the map. 0 (default): off. |
+| [`load_add_min`](PrismaticAI/info.nut#L605) | 50 | 0 .. 100 / 5 | yes |  | Yield: no vehicle is added to a road, air or water route (fleet growth, InvestSurplus) whose vehicles ran under this percent full over the last heartbeats, sampled while they run (fleet.nut RouteLoad; 0: off). |
+| [`road_yield`](PrismaticAI/info.nut#L612) | 20 | 0 .. 200 / 5 | yes |  | Yield: a new bus route is built only while our road vehicles a year old earned, last year, at least this percent of their price between them; before any is a year old, only while fewer than road_probes road routes run (fleet.nut RoadPays; 0: off). |
+| [`road_probes`](PrismaticAI/info.nut#L619) | 2 | 0 .. 30 | yes |  | Yield: how many bus routes run before any road vehicle is a year old and road_yield can judge them (fleet.nut RoadPays). |
+| [`air_yield_routes`](PrismaticAI/info.nut#L626) | 8 | 0 .. 30 | yes |  | Yield: autopilot air routes beyond air_routes_max, one at a time, each once every air route we fly has planes a year old that earned last year at least their price / invest_ppv_div a plane (autopilot.nut AirRoutesPay; 0: off). |
+| [`test_trainless`](PrismaticAI/info.nut#L635) | 0 | 0 .. 2 | no |  | RESEARCH-ONLY test hook. 1: the first train of every new rail line, and every other new line's depot, is refused as if for money, so the line waits trainless for KeepLinesServed to buy it; 2: as 1, and once a game month the bot forgets its lines that still have no train, as a restart would, so AdoptTrainlessLines (monthly in this mode, yearly otherwise) takes them back from the map. 0 (default): off. |
 
 <!-- prismatic-ai-settings:end -->
 
@@ -277,6 +287,36 @@ hoards (`hoards` anomaly, [`research/ai-battle/README.md`](../../../research/ai-
 Outside the bot, `tools/research/mcp-panel/rhai/prismatic_tune.rhai` is the 10-minute live tuner
 of the owner's company ([`research/battle-brain.md`](../../../research/battle-brain.md)); its changes
 are approval-gated like every MCP change.
+
+## Yield: money goes where it earns (2026-11-22)
+
+Six-year headless matches from 1950 with the live game's settings (seeds 15805, 2927, 31337 and
+4242 against AAAHogEx, LuDiAI AfterFix, CivilAI and AdmiralAI) showed two sinks that took the
+early money and returned almost nothing, while the second air route waited until 1954-55:
+
+| Sink | What the logs showed |
+|---|---|
+| more vehicles on a full route | `InvestSurplus` grew any route earning above price / `invest_ppv_div` a vehicle, by the average of its year-old vehicles. Seed 15805: one air route earned 106,795 a year with 5 planes; the 6th plane took it to 87,026, and it went on to 10 planes. On the road it added buses at 951 to 2,790 a year each |
+| bus routes | one a heartbeat up to the autopilot's 30 routes, 14 to 23 per game. By the yearly road report, a bus inside one town (10-11 tiles between stops) earned 38-536 a year on a price of 4,921; intercity buses (26-52 tiles) earned 460-3,048 |
+
+The changes, each an AI setting in the info.nut "Yield" block:
+
+- `load_add_min` (default 50): fleet growth and `InvestSurplus` add no vehicle to a route whose
+  vehicles ran under that percent full. `RouteLoad` samples the cargo aboard every running road
+  vehicle, plane and ship each heartbeat, as a decaying sum per route.
+- `road_yield` (default 20) and `road_probes` (default 2): a new bus route only while our
+  year-old road vehicles earned at least 20% of their price last year between them; before any
+  is a year old, at most two bus routes (`RoadPays`, checked in the heartbeat's one road-route
+  condition in `main.nut`).
+- `air_yield_routes` (default 8): one autopilot air route beyond `air_routes_max` at a time, each
+  once every air route we fly has planes a year old that earned their price / `invest_ppv_div`
+  last year; with money idle (`rich`), the proven routes vouch for a route not yet a year old
+  (`AirRoutesPay`).
+- `RoadReport` logs every road route once a game year (distance, town or intercity, how full,
+  profit per vehicle), next to the air report.
+
+The measurement and its limits are in
+[`research/mechanisms/prismatic-ai.md`](../../../research/mechanisms/prismatic-ai.md#road-and-air-yield).
 
 ## Checks
 

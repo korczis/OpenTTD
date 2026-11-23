@@ -1,0 +1,309 @@
+#!/usr/bin/env bash
+# RESEARCH-ONLY. The Battlebrain cutover runbook as one script, one subcommand per phase
+# (research/battlebrain/cutover.md). Every route, body and key form below is the code's:
+# src/rhai_shared.rs, src/panel_decision.rs, src/bin/battlebrain.rs in tools/research/mcp-rhai.
+#
+#   hold            POST /api/rhai/shared {key: planner.<c>, value: battlebrain, writer, rev: 0}
+#   capture         mcp-plan --panel P --limit 40 --track 16 --capture DIR/capture; coherent only
+#   snapshot        battlebrain snapshot --capture DIR/capture --instance I --company C
+#   decide          one GET /api/resources/companies, then battlebrain live --max-window-ticks 0;
+#                   HOLD writes no directive
+#   serve-and-pull  battlebrain serve --directive F --port p (one loopback GET), then
+#                   POST /api/decision/pull {url, key: the decision's idempotency_key}
+#   record          read-only reads, then the outcome record (DIR/outcome.json)
+#   release         POST /api/rhai/shared/delete {key, writer, rev}
+#   rollback        battlebrain rollback --snapshot DIR/snapshot.json --company C [--of the
+#                   decision], then serve-and-pull of that directive
+#
+# It stops at the owner's approval: serve-and-pull and rollback print the pending approval ids and
+# the console command `prismatic_mcp approve <id>` for the owner. It never approves, and it calls
+# neither /api/approve nor /api/auto-approve. A pull is refused here while the panel's auto-approve
+# is on, or while planner.<c> is not held by this run's writer at this run's revision.
+#
+# Usage: tools/research/battlebrain-cutover <phase> --panel URL --dir DIR --company C
+#                 [--writer W] [--instance NAME] [--adopt-rev N] [--margin X] [--reserve N]
+#   --panel     the game's panel, required, no default: a run names the game it acts on
+#   --dir       this run's directory; every phase reads the earlier phases' files from it
+#   --writer    the writer that holds planner.<c> (default battlebrain-cutover)
+#   --instance  the instance name in the decision's key (snapshot; e.g. coplay-8800)
+#   --adopt-rev hold: take over planner.<c> already set to battlebrain by --writer at rev N
+#   --margin, --reserve   decide: battlebrain live's policy parameters (recorded in the decision)
+# Environment: BATTLEBRAIN, MCP_PLAN (the binaries; default the crate's target/release),
+# BATTLEBRAIN_STATE_DIR (battlebrain serve's served-key ledger; else $HOME/.local/state).
+# Exit 0 done (or done before), 1 refused, 2 usage.
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TARGET="${CARGO_TARGET_DIR:-$ROOT_DIR/tools/research/mcp-rhai/target}"
+BATTLEBRAIN="${BATTLEBRAIN:-$TARGET/release/battlebrain}"
+MCP_PLAN="${MCP_PLAN:-$TARGET/release/mcp-plan}"
+
+die() { echo "battlebrain-cutover: $*" >&2; exit 1; }
+say() { echo "==> $*"; }
+usage() { sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+
+PHASE="${1:-}"
+[[ $# -gt 0 ]] && shift
+PANEL="" DIR="" COMPANY="" WRITER="battlebrain-cutover" INSTANCE="" ADOPT_REV=""
+LIVE_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --panel) PANEL="${2%/}"; shift 2 ;;
+    --dir) DIR="$2"; shift 2 ;;
+    --company) COMPANY="$2"; shift 2 ;;
+    --writer) WRITER="$2"; shift 2 ;;
+    --instance) INSTANCE="$2"; shift 2 ;;
+    --adopt-rev) ADOPT_REV="$2"; shift 2 ;;
+    --margin|--reserve) LIVE_ARGS+=("$1" "$2"); shift 2 ;;
+    *) echo "battlebrain-cutover: unknown option $1" >&2; usage ;;
+  esac
+done
+[[ "$PANEL" == http://* || "$PANEL" == https://* ]] || { echo "battlebrain-cutover: --panel URL is required" >&2; usage; }
+[[ -n "$DIR" && "$COMPANY" =~ ^[0-9]+$ ]] || { echo "battlebrain-cutover: --dir and --company are required" >&2; usage; }
+mkdir -p "$DIR"
+KEY="planner.$COMPANY"
+
+# One call to the panel: METHOD PATH BODY OUT; the answer is written to OUT, its status printed.
+call() {
+  curl -sS -m 60 -o "$4" -w '%{http_code}' -X "$1" -H 'Content-Type: application/json' \
+    ${3:+--data "$3"} "$PANEL$2" || die "$1 $PANEL$2: the panel cannot be reached"
+}
+need() { [[ -f "$DIR/$1" ]] || die "$PHASE: no $DIR/$1; run \`$2\` first"; }
+free_port() { python3 -I -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
+# Whether the shared-key entry in FILE is battlebrain, written by this run's writer, at REV.
+held_by_us() {
+  jq -e --arg w "$WRITER" --argjson r "$2" '.value == "battlebrain" and .writer == $w and .rev == $r' "$1" >/dev/null
+}
+check_held() {
+  local code rev="$1"
+  code="$(call GET "/api/rhai/shared?key=$KEY" "" "$DIR/.held.json")"
+  # shellcheck disable=SC2015 # die when either fails
+  [[ "$code" == 200 ]] && held_by_us "$DIR/.held.json" "$rev" \
+    || die "$PHASE: $KEY is not held by $WRITER at rev $rev (HTTP $code): $(cat "$DIR/.held.json")"
+}
+
+cmd_hold() {
+  if [[ -f "$DIR/hold.json" || -n "$ADOPT_REV" ]]; then
+    local rev="${ADOPT_REV:-$(jq -r .rev "$DIR/hold.json" 2>/dev/null)}"
+    say "hold: $KEY is held already at rev $rev; checking GET $PANEL/api/rhai/shared?key=$KEY"
+    check_held "$rev"
+    cp "$DIR/.held.json" "$DIR/hold.json"
+    say "hold: $KEY = battlebrain, writer $WRITER, rev $rev (nothing written)"
+    return 0
+  fi
+  local code body
+  body="$(jq -nc --arg k "$KEY" --arg w "$WRITER" '{key: $k, value: "battlebrain", writer: $w, rev: 0}')"
+  say "hold: POST $PANEL/api/rhai/shared $body"
+  code="$(call POST /api/rhai/shared "$body" "$DIR/.hold.json")"
+  if [[ "$code" == 409 ]]; then
+    call GET "/api/rhai/shared?key=$KEY" "" "$DIR/.held.json" >/dev/null
+    die "hold: 409, $KEY is held already: $(jq -c '{value, writer, rev}' "$DIR/.held.json"); stop"
+  fi
+  [[ "$code" == 200 ]] || die "hold: HTTP $code: $(cat "$DIR/.hold.json")"
+  mv "$DIR/.hold.json" "$DIR/hold.json"
+  say "hold: $KEY = battlebrain, writer $WRITER, rev $(jq -r .rev "$DIR/hold.json"); next: capture"
+}
+
+cmd_capture() {
+  need hold.json hold
+  local cap="$DIR/capture"
+  if [[ -f "$cap/capture.json" ]]; then
+    jq -e '.window.coherent == true' "$cap/capture.json" >/dev/null || die "capture: $cap is not coherent"
+    say "capture: taken already, coherent at tick $(jq -r .window.tick_from "$cap/capture.json")"
+    return 0
+  fi
+  mkdir -p "$cap"
+  say "capture: $MCP_PLAN --panel $PANEL --limit 40 --track 16 --capture $cap > $cap/plan.json"
+  if ! "$MCP_PLAN" --panel "$PANEL" --limit 40 --track 16 --capture "$cap" > "$cap/plan.json" 2> "$DIR/mcp-plan.err"; then
+    mv "$cap" "$cap.failed.$(date +%s).$$"
+    die "capture: mcp-plan failed: $(tail -c 400 "$DIR/mcp-plan.err")"
+  fi
+  if ! jq -e '.window.coherent == true' "$cap/capture.json" >/dev/null 2>&1; then
+    local window
+    window="$(jq -c .window "$cap/capture.json" 2>/dev/null || echo 'no capture.json')"
+    mv "$cap" "$cap.incoherent.$(date +%s).$$"
+    die "capture: not coherent (window $window); take it again"
+  fi
+  say "capture: coherent at tick $(jq -r .window.tick_from "$cap/capture.json"); next: snapshot"
+}
+
+cmd_snapshot() {
+  need capture/capture.json capture
+  [[ -n "$INSTANCE" ]] || die "snapshot: --instance NAME is required (it is part of the decision's key)"
+  say "snapshot: $BATTLEBRAIN snapshot --capture $DIR/capture --instance $INSTANCE --company $COMPANY"
+  "$BATTLEBRAIN" snapshot --capture "$DIR/capture" --instance "$INSTANCE" --company "$COMPANY" \
+    > "$DIR/.snapshot.json" || die "snapshot: refused: $(cat "$DIR/.snapshot.json")"
+  if [[ -f "$DIR/snapshot.json" ]] && ! cmp -s "$DIR/.snapshot.json" "$DIR/snapshot.json"; then
+    die "snapshot: differs from the one this run wrote ($DIR/snapshot.json); a run has one snapshot"
+  fi
+  mv "$DIR/.snapshot.json" "$DIR/snapshot.json"
+  say "snapshot: $(jq -r '"\(.id) at tick \(.at.tick), \(.at.date)"' "$DIR/snapshot.json"); next: decide"
+}
+
+# What decide decided: HOLD, or the directive in DIR/decision.directive.json.
+decided() {
+  if jq -e '.directive == null' "$DIR/live.json" >/dev/null; then
+    say "decide: HOLD, no directive ($(jq -r .comparison.reason "$DIR/live.json")); next: record, then release"
+    return 0
+  fi
+  jq .directive "$DIR/live.json" > "$DIR/decision.directive.json"
+  say "decide: $(jq -r '"company \(.company_id): \(.settings | split(",") | .[:4] | join(",")),..."' "$DIR/decision.directive.json")"
+  say "decide: key $(jq -r .decision.idempotency_key "$DIR/decision.directive.json"); next: serve-and-pull"
+}
+
+cmd_decide() {
+  need snapshot.json snapshot
+  if [[ -f "$DIR/live.json" ]]; then
+    say "decide: decided already ($DIR/live.json); nothing read again"
+    decided
+    return 0
+  fi
+  local code
+  say "decide: GET $PANEL/api/resources/companies (fresh, saved raw with its envelope)"
+  code="$(call GET /api/resources/companies "" "$DIR/companies.json")"
+  [[ "$code" == 200 ]] || die "decide: companies HTTP $code: $(cat "$DIR/companies.json")"
+  say "decide: $BATTLEBRAIN live ... --company $COMPANY --max-window-ticks 0 ${LIVE_ARGS[*]-}"
+  "$BATTLEBRAIN" live --snapshot "$DIR/snapshot.json" --plan "$DIR/capture/plan.json" \
+    --companies "$DIR/companies.json" --company "$COMPANY" --max-window-ticks 0 \
+    ${LIVE_ARGS[@]+"${LIVE_ARGS[@]}"} > "$DIR/.live.json" || die "decide: refused: $(cat "$DIR/.live.json")"
+  mv "$DIR/.live.json" "$DIR/live.json"
+  decided
+}
+
+# Print what a pull (DIR/NAME.pull.json) did, and for the owner the approvals it waits for.
+pulled() {
+  local f="$DIR/$1.pull.json" ids
+  jq -r '(.steps // [])[] | "    \(.line)"' "$f"
+  [[ "$(jq -r .http_status "$f")" == 200 ]] \
+    || die "$1: the panel refused the pull (HTTP $(jq -r .http_status "$f")): $(jq -c '{error, errors}' "$f")"
+  ids="$(jq -r '[(.steps // [])[] | .approval_id | select(. != null)] | map(tostring) | join(" ")' "$f")"
+  [[ -n "$ids" ]] || die "$1: the pull left no approval pending; check the game before anything else"
+  say "OWNER: approve in the game console (this script never approves):"
+  # shellcheck disable=SC2086 # one line per id
+  printf '      prismatic_mcp approve %s\n' $ids
+  say "STOP: the next step is the owner's approval; after some game months: record, then release"
+}
+
+# Serve DIRECTIVE once and pull it under its idempotency key; NAME names this run's files.
+serve_and_pull() {
+  local d="$1" name="$2" key code port pid body i
+  key="$(jq -r '.decision.idempotency_key // empty' "$d")"
+  [[ -n "$key" ]] || die "$name: $d carries no decision.idempotency_key"
+  if [[ -f "$DIR/$name.pull.json" ]]; then
+    say "$name: pulled already under key $key ($DIR/$name.pull.json); nothing served again"
+    pulled "$name"
+    return 0
+  fi
+  code="$(call GET /api/status "" "$DIR/.status.json")"
+  [[ "$code" == 200 ]] || die "$name: GET /api/status HTTP $code"
+  jq -e '.auto_approve == false' "$DIR/.status.json" >/dev/null \
+    || die "$name: the panel's auto-approve is on, so no person would approve; the owner turns it off"
+  need hold.json hold
+  check_held "$(jq -r .rev "$DIR/hold.json")"
+  port="$(free_port)"
+  say "$name: $BATTLEBRAIN serve --directive $d --port $port (one loopback GET, then it exits)"
+  "$BATTLEBRAIN" serve --directive "$d" --port "$port" > "$DIR/$name.serve.log" 2>&1 &
+  pid=$!
+  body="$(jq -nc --arg u "http://127.0.0.1:$port/" --arg k "$key" '{url: $u, key: $k}')"
+  say "$name: POST $PANEL/api/decision/pull $body"
+  # Until serve listens, the panel cannot connect (502, kept by no key): ask again.
+  # shellcheck disable=SC2015 # ask again only while all three hold
+  for ((i = 0; i < 50; i++)); do
+    code="$(call POST /api/decision/pull "$body" "$DIR/.$name.pull.json")"
+    [[ "$code" == 502 ]] && kill -0 "$pid" 2>/dev/null && grep -q onnect "$DIR/.$name.pull.json" || break
+    sleep 0.2
+  done
+  for ((i = 0; i < 25; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  say "$name: serve: $(tail -n 1 "$DIR/$name.serve.log")"
+  jq --argjson c "$code" '. + {http_status: $c}' "$DIR/.$name.pull.json" > "$DIR/$name.pull.json"
+  pulled "$name"
+}
+
+cmd_serve_and_pull() {
+  [[ -f "$DIR/live.json" ]] && jq -e '.directive == null' "$DIR/live.json" >/dev/null \
+    && die "serve-and-pull: the decision is HOLD; there is nothing to pull (record, then release)"
+  need decision.directive.json decide
+  serve_and_pull "$DIR/decision.directive.json" decision
+}
+
+cmd_rollback() {
+  need snapshot.json snapshot
+  local of=()
+  if [[ ! -f "$DIR/rollback.directive.json" ]]; then
+    [[ -f "$DIR/decision.directive.json" ]] && of=(--of "$DIR/decision.directive.json")
+    say "rollback: $BATTLEBRAIN rollback --snapshot $DIR/snapshot.json --company $COMPANY ${of[*]-}"
+    "$BATTLEBRAIN" rollback --snapshot "$DIR/snapshot.json" --company "$COMPANY" ${of[@]+"${of[@]}"} \
+      > "$DIR/rollback.json" || die "rollback: refused: $(cat "$DIR/rollback.json")"
+    jq .directive "$DIR/rollback.json" > "$DIR/rollback.directive.json"
+  fi
+  serve_and_pull "$DIR/rollback.directive.json" rollback
+}
+
+cmd_record() {
+  local name=decision code result
+  if [[ -f "$DIR/live.json" ]] && jq -e '.directive == null' "$DIR/live.json" >/dev/null; then
+    jq '{result: "hold", decision: (.records[] | select(.type == "decision")), comparison}' \
+      "$DIR/live.json" > "$DIR/record.json"
+    say "record: HOLD recorded ($DIR/record.json); decision $(jq -r .decision.id "$DIR/record.json")"
+    return 0
+  fi
+  [[ -f "$DIR/rollback.pull.json" ]] && name=rollback
+  need "$name.pull.json" serve-and-pull
+  say "record: read-only GET /api/resources/game/state and /api/bots (company $COMPANY's settings)"
+  code="$(call GET /api/resources/game/state "" "$DIR/.state.json")"
+  [[ "$code" == 200 ]] || die "record: game state HTTP $code"
+  code="$(call GET /api/bots "" "$DIR/.bots.json")"
+  [[ "$code" == 200 ]] || die "record: bots HTTP $code"
+  # observed: the company's AI settings now; result: refused (the pull was), applied (every setting
+  # of the directive is what the AI runs with), else pending (not observable yet).
+  jq -n --slurpfile b "$DIR/.bots.json" --slurpfile p "$DIR/$name.pull.json" \
+    --slurpfile d "$DIR/$name.directive.json" --argjson c "$COMPANY" '
+    ([$b[0].running[]? | select(.id == $c) | .settings[]? | {(.name): (.value // .current)}] | add // {}) as $now
+    | ($d[0].settings | split(",") | map(split("=") | {(.[0]): (.[1] | tonumber)}) | add) as $want
+    | {observed: {settings: $now, pull_status: $p[0].http_status, pull_error: $p[0].error},
+       result: (if $p[0].http_status != 200 then "refused"
+                elif ($want | to_entries | all(. as $e | $now[$e.key] == $e.value)) then "applied"
+                else "pending" end)}' > "$DIR/.observed.json"
+  result="$(jq -r .result "$DIR/.observed.json")"
+  [[ "$result" != pending ]] \
+    || die "record: not observable yet: the company does not run the directive's settings; record later"
+  jq -n --slurpfile o "$DIR/.observed.json" --slurpfile s "$DIR/snapshot.json" \
+    --slurpfile st "$DIR/.state.json" --slurpfile d "$DIR/$name.directive.json" '
+    {schema: "battlebrain-record/v1", type: "outcome", status: "observed", scope: $s[0].scope,
+     at: {tick: $st[0].game_tick, date: $st[0].game_date},
+     producer: {id: "battlebrain-cutover", version: "1"}, derived_from: [$d[0].decision.decision],
+     body: {decision: $d[0].decision.decision, executor: {id: "mcp-panel"}, result: $o[0].result,
+            observed: $o[0].observed}}' > "$DIR/.outcome.json"
+  jq --arg id "$("$BATTLEBRAIN" id "$DIR/.outcome.json")" '. + {id: $id}' "$DIR/.outcome.json" > "$DIR/outcome.json"
+  "$BATTLEBRAIN" validate "$DIR/outcome.json" >/dev/null || die "record: $("$BATTLEBRAIN" validate "$DIR/outcome.json")"
+  say "record: $name $result, outcome $(jq -r .id "$DIR/outcome.json") ($DIR/outcome.json)"
+}
+
+cmd_release() {
+  if [[ -f "$DIR/released.json" ]]; then
+    say "release: released already ($(jq -c . "$DIR/released.json"))"
+    return 0
+  fi
+  need hold.json hold
+  local code body
+  body="$(jq -c --arg w "$WRITER" '{key, writer: $w, rev}' "$DIR/hold.json")"
+  say "release: POST $PANEL/api/rhai/shared/delete $body"
+  code="$(call POST /api/rhai/shared/delete "$body" "$DIR/.release.json")"
+  [[ "$code" == 200 ]] || die "release: HTTP $code: $(cat "$DIR/.release.json"); the key is not this run's"
+  mv "$DIR/.release.json" "$DIR/released.json"
+  say "release: $KEY deleted at rev $(jq -r .rev "$DIR/released.json")"
+}
+
+case "$PHASE" in
+  hold) cmd_hold ;;
+  capture) cmd_capture ;;
+  snapshot) cmd_snapshot ;;
+  decide) cmd_decide ;;
+  serve-and-pull) cmd_serve_and_pull ;;
+  record) cmd_record ;;
+  release) cmd_release ;;
+  rollback) cmd_rollback ;;
+  *) echo "battlebrain-cutover: unknown phase '$PHASE'" >&2; usage ;;
+esac

@@ -38,7 +38,8 @@ tree and one binary, so it can run on every change to the bot.
 - a contestant held healthy ended below `fitness.rules.fleet_keep` of its fleet peak (when that
   peak was at least `fleet_min_peak` vehicles),
 - a contestant held healthy hoarded: in some window of `hoard_window` quarters its fleet stayed
-  within `hoard_fleet_slack` of the window's start while its money grew `hoard_factor` times to
+  within `hoard_fleet_slack` of the window's start while its money net of the loan (the bank
+  balance less the loan, as the referee logs both) grew `hoard_factor` times to
   at least `hoard_floor` (`hoards`; the owner's co-play game of 2026-11-22 held 35-37 vehicles
   from 1955 to 1960 while its bank rose from 0.6M to 3.77M), its stations not growing either.
   Only the contestants listed in `fitness.must_not_hoard` of battle.json fail on it (default:

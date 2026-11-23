@@ -3,13 +3,15 @@
  *
  * Line format (one per company, all fields space separated key=value, name last because
  * it may contain spaces):
- *   REF Q date=<y>-<m> cid=<n> value=<v> money=<m> income=<i> perf=<p> vehicles=<n>
+ *   REF Q date=<y>-<m> cid=<n> value=<v> money=<m> loan=<l> income=<i> perf=<p> vehicles=<n>
  *       stations=<n> rail=<n> road=<n> air=<n> water=<n> prail=<p> proad=<p> pair=<p>
  *       pwater=<p> cargo=<delivered> expenses=<e> name=<company name>
  * rail..water count vehicles by transport mode; prail..pwater are their summed profit last year;
  * cargo is cargo delivered and expenses the expenses, both of the last completed quarter.
  * value/income/perf are for the last *completed* quarter (GSCompany quarter index 1);
- * money, vehicles and stations are the current values.
+ * money (the bank balance, borrowed money included), loan, vehicles and stations are the current
+ * values: a company that just drew its whole loan to build shows the loan as money, so the
+ * orchestrator judges hoarding on money minus loan (battle.py hoarding).
  *
  * Shared producers, one line per producing industry whose output rail stations of two or more
  * companies pick up (a station with a rating for one of its cargoes), after the company lines
@@ -30,6 +32,15 @@ class BattleReferee extends GSController {
 	function Report();
 	function ReportShared(d);
 	function ReportTrainless(d);
+	function LoanOf(c);
+}
+
+/* The loan of company `c`: GSCompany.GetLoanAmount answers for the company of the current mode
+ * only, so it is read in that company's mode, which ends when this function returns. */
+function BattleReferee::LoanOf(c)
+{
+	local mode = GSCompanyMode(c);
+	return GSCompany.GetLoanAmount();
 }
 
 function BattleReferee::ReportTrainless(d)
@@ -114,6 +125,7 @@ function BattleReferee::Report()
 			+ " cid=" + c
 			+ " value=" + GSCompany.GetQuarterlyCompanyValue(c, 1)
 			+ " money=" + GSCompany.GetBankBalance(c)
+			+ " loan=" + this.LoanOf(c)
 			+ " income=" + GSCompany.GetQuarterlyIncome(c, 1)
 			+ " perf=" + GSCompany.GetQuarterlyPerformanceRating(c, 1)
 			+ " vehicles=" + (a.n[0] + a.n[1] + a.n[2] + a.n[3])

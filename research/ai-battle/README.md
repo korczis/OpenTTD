@@ -299,10 +299,17 @@ The first editions showed two failures. The battle now catches both by itself.
   - `hoards:<t0>..<t1>:<money0>-><money1>@<vehicles>v`: over `anomaly_rules.hoard_window`
     quarterly samples (default 8, two game years) the fleet stayed flat or shrank (its maximum at
     most `hoard_fleet_slack`, default 0.1, above the count at the window's start), its stations did
-    too (a company laying lines is spending, not hoarding), while the bank
-    balance rose at least `hoard_factor`-fold (default 2) and ended at or above `hoard_floor`
-    (default 500000). Every window is judged, so the fitness check also sees a hoard the bot
-    later spent its way out of. The window is the first one that matched.
+    too (a company laying lines is spending, not hoarding), while its money net of the loan (the
+    referee's `money`, the bank balance, less its `loan`) rose at least `hoard_factor`-fold
+    (default 2) and ended at or above `hoard_floor` (default 500000). Every window is judged, so
+    the fitness check also sees a hoard the bot later spent its way out of. The window is the
+    first one that matched, and the money it shows is net of the loan. The bank balance alone
+    counted borrowed money as hoarded: on the fitness seed (930967890, 2026-11-23,
+    fix/prismatic-steward-capital) the self-steward contestant held 36-42 vehicles from 1964-04,
+    and its last sample (1966-01) came while a new rail line was being built on the whole 300k
+    loan, so the balance read 348k in 1965-10 and 795k then, and the check called 321k -> 795k a
+    hoard (about 1.5-fold net of the loan). A log or record from before the referee logged
+    `loan=` reads it as 0 (`parse_log`; test `test_money_borrowed_to_build_is_not_hoarded`).
 
   A new anomaly goes to the event log as an `ALERT` and onto the dashboard's alert panel. Records
   keep each standing's anomalies, and the leaderboard counts each contestant's anomalous matches.
