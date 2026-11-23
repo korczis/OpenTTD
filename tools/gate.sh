@@ -316,6 +316,7 @@ COVERAGE_TABLE=(
   'src/battlebrain_contract.rs|battlebrain|all'
   'src/battlebrain_policy.rs|battlebrain|all'
   'src/bin/battlebrain.rs|battlebrain|all'
+  'src/service_eval.rs|mcp-panel|all'
   'src/panel_decision.rs|mcp-panel|items:fn is_freight_slot_setting;fn live_expiry;fn decision_gate;fn live_world;fn apply_live;impl LiveGame for Arc<Game>'
 )
 # The only way a counted line may stay unrun: <file>|<item start>|<reason>. The item is found as a

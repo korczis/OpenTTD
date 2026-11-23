@@ -52,6 +52,7 @@ flowchart TB
 | [Rhai scripting](rhai-scripting.md) | Scripts that drive a game, with functions derived from the live panel, run and hot-reloaded from the Scripts page |
 | [Planner and AlgoGlyph](planner-and-algoglyph.md) | Route candidates priced from the game's formulas, a portfolio within a budget, AlgoGlyph kernels for the hard parts |
 | [Strategist and blackboard](strategist-and-blackboard.md) | A panel thread that keeps the long-term plan current and posts it, with town warnings and tuning proposals, on a blackboard scripts and pages share |
+| [Service self-evaluation](service-self-evaluation.md) | The panel's Rhai services judged by what followed their actions, scored in the store, thresholds derived from it, a persistently poor service said and never silenced |
 | [PrismaticAI](prismatic-ai.md) | The owner's company AI, steered by its settings, building rail lines a train can always run |
 | [Rail steward and monitor](rail-steward-and-monitor.md) | Rhai services that set each rail line's target and report what is wrong to the board |
 | [Duels](duels.md) | The planned bot against an unplanned one on the same map, from a held start, recorded as evidence |
