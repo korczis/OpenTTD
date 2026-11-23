@@ -377,6 +377,14 @@ inline std::optional<DeadlinePolicy> ParseDeadlinePolicy(std::string_view days, 
 	return p;
 }
 
+/** The policy the environment names at start-up, PRISMATIC_MCP_APPROVAL_DEADLINE="<days>[:keep|approve]" (the launcher's --approval-deadline), or nullopt for a malformed value. The operator chooses it when starting the server, so it is consent given in advance as on the console. */
+inline std::optional<DeadlinePolicy> ParseDeadlinePolicyText(std::string_view text)
+{
+	size_t colon = text.find(':');
+	if (colon == std::string_view::npos) return ParseDeadlinePolicy(text, "");
+	return ParseDeadlinePolicy(text.substr(0, colon), text.substr(colon + 1));
+}
+
 /** At most this many resources one openttd.resources.read_many call reads: a bound on one main-thread poll. */
 inline constexpr size_t READ_MANY_MAX_URIS = 32;
 /** The only scheme openttd.resources.read_many reads; anything else is refused per entry. */

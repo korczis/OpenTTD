@@ -306,7 +306,7 @@ class PrismaticAI extends AIInfo {
 		});
 		AddSetting({
 			name = "own_fail_pause",
-			description = "After this many own freight lines in a row could not be built, try no more that game year (a failed line still costs its stations); 0: never pause.",
+			description = "After this many own freight lines in a row could not be built, try no more that game year (a failed line still costs its stations); 0: at most 8 a game year (main.nut OWN_FAIL_YEAR_MAX).",
 			min_value = 0, max_value = 10,
 			easy_value = 6, medium_value = 6, hard_value = 6, custom_value = 6, step_size = 1,
 			flags = CONFIG_INGAME,
@@ -447,6 +447,22 @@ class PrismaticAI extends AIInfo {
 		AddSetting({
 			name = "self_steward",
 			description = "1: with no steward's target for a rail line, the bot applies the Rhai steward's policy itself (lengthen, add a train, shrink, close) and reinvests idle money in more own lines beyond own_lines (steward.nut); 0: lines run what the external steward sets.",
+			min_value = 0, max_value = 1,
+			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
+		/* The in-bot steward's capital rules (steward.nut, lines.nut): a full-load train takes the
+		 * cargo it waits for, so "a trainload waiting" rarely shows that a line is short of trains. */
+		AddSetting({
+			name = "steward_rating",
+			description = "In-bot steward: an earning rail line whose source station rates its cargo below this percent gets one more train (up to trains_max, its newest train at least 90 days old, a source platform free). The rating falls with the days between pickups, which a full-load train hides from the cargo waiting (steward.nut; 0: off, only waiting cargo grows a line).",
+			min_value = 0, max_value = 100,
+			easy_value = 55, medium_value = 55, hard_value = 55, custom_value = 55, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "steward_borrow",
+			description = "1 (default): a rail line whose trains earn may borrow for the next train the steward set, while the loan stays at most half its limit and the headroom left holds a line budget and two quarters of running costs (lines.nut FundTrain); 0: a new train only from the bank balance, which RepaySurplus keeps near the reserve.",
 			min_value = 0, max_value = 1,
 			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
 			flags = CONFIG_INGAME | CONFIG_BOOLEAN,

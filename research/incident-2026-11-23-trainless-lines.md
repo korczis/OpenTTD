@@ -96,7 +96,7 @@ live game had.
   is no engine for the cargo yet (`line.train_fail` says which), the line goes into `RAIL_LINES`
   with no train and logs its record. It returns 1, because the line is built.
   `KeepLinesServed` buys its first train once the bank holds the reserve plus the train's price
-  (`TrainPrice`). It does not count that train as one of the line's two replacements, and it does
+  (`FirstTrainPrice`). It does not count that train as one of the line's two replacements, and it does
   not try a purchase the bank cannot pay on every heartbeat.
 - **Trainless lines already on the map are adopted** (`AdoptTrainlessLines`, `lines.nut`), from
   `Start` after `Restore` and then once a game year. An adopted line is a pair of our rail stations,
@@ -107,6 +107,18 @@ live game had.
   (`RailWalk`, the walk the lost-train repair uses) and have a joined rail depot near
   (`RestoreDepot`, `DepotJoined`). This is what brings the two iron ore lines of the live game back
   once the build is deployed there (see Validation).
+- **A line halted by lost trains is closed when it stands with no train** (`CloseHaltedLines`,
+  `lines.nut`, with the adoption). `events.nut` sells a train that stays lost and halts its line
+  until a lost train reaches a station, which a sold train never does. The line kept its
+  stations, track and upkeep for the rest of the game. After `HALTED_CLOSE_DAYS` (180) with no
+  train, `CloseLine` clears it. After the merge of master on 2026-11-23, the fitness seed's sibling
+  match had such a line (`WOOD Hartburg Forest - Pronhattan Sawmill`, double track). The branch now
+  closes it ("halted by lost trains for 252 days with no train; closing it", 598 tiles cleared).
+- **Two definitions of one function name fail a test** (`OneDefinitionPerFunction`,
+  `tools/research/test_prismatic_ai_docs.py`). That merge also brought master's
+  `TrainPrice(train)` into `lines.nut`. Squirrel silently kept it over this branch's
+  `TrainPrice(line)`, and the trainless test lineup threw 35 Squirrel errors. The branch's function
+  is now `FirstTrainPrice`, and the test lists every `function PrismaticAI::X` defined twice.
 - **The rail monitor reads the map, not only the bot's records** (`trainless_stations`, `report`,
   `rail_lib.rhai`). Every rail station of the company that no train of the company has orders to
   is a `trainless_station` problem, ranked after `unserved`. `locomotive not bought`, `first train
@@ -231,12 +243,14 @@ neither has been seen in a judged lineup on the gate seed: a line whose laying t
 a year, and a station id the game hands to a new station soon after the old one was removed. The
 failure message names the stations so that a reader can tell.
 
-<!-- open-finding kind=failed -->
-A line whose trains got lost on a whole track is halted (`lost_trains`, `events.nut`) and keeps its
-stations without a train for the rest of the game. On seed 31337 the `PrismaticAI solo-max` lineup
-fails `trainless_stations` on such a line (station 98, `WOOD Gonbourne Forest - Wundwood Sawmill`,
-`train 470 reached no station in 266 days on its whole track`), and master fails there too. A
-halted line should either be repaired or closed, so that its stations go.
+<!-- open-finding kind=partial -->
+A line whose trains got lost on a whole track is halted (`lost_trains`, `events.nut`). Before
+`CloseHaltedLines`, it kept its stations without a train for the rest of the game, as on seed 31337
+(`PrismaticAI solo-max`, station 98, `WOOD Gonbourne Forest - Wundwood Sawmill`). It is closed now,
+not repaired: why a train gets lost on a track the walk calls whole is not known. After the merge,
+seed 31337 still fails `trainless_stations` with one station each in `PrismaticAI self-steward`
+(71) and `PrismaticAI planned` (113). They have not been looked at. The gate seed and seed 15805
+pass.
 
 <!-- open-finding kind=staged -->
 A line waiting for its depot (`depot_pending`) has no depot for the adoption to find. When a restart

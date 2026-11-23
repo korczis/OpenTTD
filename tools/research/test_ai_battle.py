@@ -680,6 +680,20 @@ class Health(unittest.TestCase):
         self.assertEqual(battle.anomalies(owed, 0, self.RULES),
                          ["hoards:1955-01..1956-10:500000->1620000@37v"])
 
+    def test_a_window_that_starts_in_debt_is_not_judged(self):
+        # Review of #244: 100k in the bank on a 300k loan, then 520k with no loan, is a company
+        # paying back its loan; "-200000->520000" passed the factor test for any rise.
+        vehicles = [20] * 8
+        money = [100_000, 150_000, 200_000, 250_000, 320_000, 400_000, 460_000, 520_000]
+        loan = [300_000, 300_000, 250_000, 200_000, 100_000, 50_000, 0, 0]
+        repaying = [dict(s, loan=l) for s, l in zip(self.books(vehicles, money), loan)]
+        self.assertEqual(battle.anomalies(repaying, 0, self.RULES), [])
+        # The same company holding on afterwards is caught by a window that starts above 0.
+        later = self.books([20] * 16, money + [600_000 + i * 150_000 for i in range(8)])
+        later = [dict(s, loan=l) for s, l in zip(later, loan + [0] * 8)]
+        self.assertEqual(battle.anomalies(later, 0, self.RULES),
+                         ["hoards:1955-10..1957-07:50000->900000@20v"])
+
     def test_the_referee_line_carries_the_loan(self):
         line = ("[2026-11-23 00:00:00] dbg: [script:1] [18] [E] REF Q date=1966-1 cid=0 value=1340672 "
                 "money=794771 loan=300000 income=189062 perf=303 vehicles=37 stations=40 name=A B")
