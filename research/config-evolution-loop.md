@@ -156,6 +156,7 @@ downloads a configuration's BaNaNaS contestants into its cache).
 | `live-*.json`, `live_entries`, `live_veto`, `live_seeds`, `live_genes`, `settings_dict`, `live_tuning` | live outcome learning (PR #256) | trigger, veto, live seed candidate, gene space |
 | ablation rows' `standings` | this change | AAAHogEx's value and mode mix per arm |
 | `evolve.proposal.<company>`, `evolve.status.<company>` | this change | the proposal for the owner or the ADR 0042 executor |
+| `GET /api/services/scores?horizon=3` (`service_eval`) | service self-evaluation (`feature/rhai-self-evaluation`) | not wired yet: a further trigger or prior; its verdicts are associative, never proof that a variant is better |
 
 ## Validation
 
