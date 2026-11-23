@@ -359,7 +359,7 @@ TEST_CASE("Every menu item's target exists: its tool, console command, window or
 			case M::Action::Toggle: CHECK(tools.contains(arg)); break;
 			case M::Action::Console: CHECK(IConsole::CmdGet(arg.substr(0, arg.find(' '))) != nullptr); break;
 			case M::Action::Window: CHECK(arg == "control"); break; // Panel::Show, the one fork window
-			case M::Action::Browse: CHECK(arg.rfind("/", 0) == 0); break;
+			case M::Action::Browse: CHECK((arg.rfind("/", 0) == 0 || arg.rfind("panel:/", 0) == 0)); break;
 			case M::Action::Request: case M::Action::Ask: CHECK_FALSE(arg.empty()); break;
 		}
 	}
@@ -483,11 +483,11 @@ TEST_CASE("A network client reads the server's approval queue from its '[approva
 	CHECK(r.Feed(R"([approvals] {"id": 23, "tool": "ai.start", "chat_decidable": false, "args_truncated": true})"));
 	CHECK(r.rows.empty());                             // a reply counts once it is whole
 	CHECK(r.replies == 0);
-	CHECK(r.Feed(R"([approvals] {"count": 12, "page": 1, "pages": 2})"));
+	CHECK(r.Feed(R"([approvals] {"count": 12, "page": 1, "pages": 1})"));
 	REQUIRE(r.rows.size() == 2);
 	CHECK(r.rows[0]["id"] == 22);
 	CHECK(r.rows[1]["tool"] == "ai.start");
-	CHECK(r.count == 12);                              // the server holds more than one page
+	CHECK(r.count == 12);                              // the count the server says, whatever the rows
 	CHECK(r.replies == 1);
 	/* The next whole reply replaces the queue; an empty one empties it. */
 	CHECK(r.Feed(R"([approvals] {"count": 0, "page": 1, "pages": 1})"));
@@ -1925,10 +1925,15 @@ TEST_CASE("The control window's rows follow its selectors, and its bulk, next-ro
 	CHECK(rows[2].text == "Waiting for your approval (2 of 4 shown)");
 	v.hide_expired = true;
 	CHECK(P::Shown(P::Rows(s, v)) == std::vector<uint64_t>{1});
-	v.hidden = {1};
-	rows = P::Rows(s, v);
-	CHECK(P::Shown(rows).empty());
-	CHECK(rows[3].text == "nothing the selectors show: choose Tool: all, or show expired");
+	v.tool = "none.such";
+	CHECK(P::Rows(s, v)[3].text == "nothing the selectors show: choose Tool: all, or show expired");
+	/* A row sent to a server stays, marked, and no bulk decision takes it again. */
+	P::View sent;
+	sent.sent = {1};
+	rows = P::Rows(s, sent);
+	CHECK(rows[3].sent);
+	CHECK(rows[3].text.find("(sent, waiting for the server)") != std::string::npos);
+	CHECK(P::BulkTargets(rows, false) == std::vector<uint64_t>{2, 3, 4});
 
 	/* Bulk: every row shown, approve leaving out expired and the operator's; checked rows when any. */
 	P::View all;
@@ -1990,6 +1995,157 @@ TEST_CASE("The control window's rows follow its selectors, and its bulk, next-ro
 	CHECK_FALSE(local["approvals"][0].contains("matched_rule"));
 	CHECK(local["approvals"][0]["mcp_tool"] == "openttd.game.set_pause");
 	ClearRulesAndQueue();
+}
+
+TEST_CASE("A glob escapes its wildcards and takes one UTF-8 character for ?, and a matcher compares numbers and strings both ways", "[prismatic_mcp]")
+{
+	namespace R = PrismaticMCP::Rules;
+	CHECK(R::Glob("a\\*b", "a*b"));
+	CHECK_FALSE(R::Glob("a\\*b", "axb"));
+	CHECK(R::Glob("what\\?", "what?"));
+	CHECK_FALSE(R::Glob("what\\?", "whatx"));
+	CHECK(R::Glob("a\\\\b", "a\\b"));
+	CHECK(R::Glob("trail\\", "trail\\"));            // a lone backslash at the end is itself
+	CHECK(R::Glob("?", "\xC5\xBE"));                 // one UTF-8 character, two bytes
+	CHECK(R::Glob("n??", "n\xC3\xA1\xC5\xBE"));
+	CHECK_FALSE(R::Glob("??", "\xC5\xBE"));
+	CHECK(R::Glob("*\xC5\xBE", "abc\xC5\xBE"));
+	CHECK(R::Glob("*?x", "\xE2\x82\xACx"));          // a star backtracks by whole characters
+	CHECK(R::Glob("?", "\xF0\x9F\x9A\x82"));         // four bytes
+	CHECK(R::Glob("?", "\xFF"));                     // a stray byte is one character
+	CHECK(R::HasWildcard("openttd.ai.*"));
+	CHECK(R::HasWildcard("a?"));
+	CHECK_FALSE(R::HasWildcard("openttd.ai.set_setting"));
+	CHECK_FALSE(R::HasWildcard("a\\*"));
+
+	/* A number pattern against a string holding it, and a string glob against a number. */
+	CHECK(R::Match({{"v", 5}}, {{"v", "5"}}));
+	CHECK(R::Match({{"v", "5"}}, {{"v", 5}}));
+	CHECK_FALSE(R::Match({{"v", 5}}, {{"v", "05"}}));
+	CHECK(R::Match({{"v", true}}, {{"v", "true"}}));
+	/* Bounds and sets. */
+	const json v = {{"value", 250}, {"name", "max_loan"}};
+	CHECK(R::Match({{"value", {{"$gte", 100}, {"$lt", 300}}}}, v));
+	CHECK_FALSE(R::Match({{"value", {{"$gt", 250}}}}, v));
+	CHECK(R::Match({{"value", {{"$lte", 250}}}}, v));
+	CHECK_FALSE(R::Match({{"name", {{"$lt", 5}}}}, v));   // a bound needs a number
+	CHECK(R::Match({{"name", {{"$in", json::array({"min_*", "max_*"})}}}}, v));
+	CHECK_FALSE(R::Match({{"name", {{"$in", json::array({"x"})}}}}, v));
+	CHECK_FALSE(R::Match({{"name", {{"$in", "max_loan"}}}}, v));
+	CHECK(R::Match({{"name", {{"$ne", "min_*"}}}}, v));
+	CHECK_FALSE(R::Match({{"name", {{"$ne", "max_*"}}}}, v));
+	CHECK(R::MatcherError({{"value", {{"$lt", "x"}}}}).has_value());
+	CHECK(R::MatcherError({{"value", {{"$in", 3}}}}).has_value());
+	CHECK_FALSE(R::MatcherError({{"value", {{"$in", json::array({1, 2})}, {"$ne", 3}}}}).has_value());
+	/* An empty list selects nothing through [*]: the key fails, for an allow rule and a deny rule alike. */
+	CHECK_FALSE(R::Match({{"$.params[*]", "*"}}, {{"params", json::array()}}));
+	CHECK(R::Match({{"params", json::array()}}, {{"params", json::array()}}));
+	/* {} matches anything; a long line is matched whole. */
+	CHECK(R::Match(json::object(), json::array({1})));
+	const std::string long_value(1024, 'x');
+	CHECK(R::Match({{"note", "x*x"}}, {{"note", long_value}}));
+	CHECK(R::Glob(std::string(1024, '?'), long_value));
+	CHECK_FALSE(R::Glob(std::string(1025, '?'), long_value));
+
+	/* Single quotes at the console: an apostrophe inside a double-quoted string stays, an escaped one in a single-quoted string is one. */
+	CHECK(*R::ParseMatcherText("{'name': \"O'Brien\"}") == json{{"name", "O'Brien"}});
+	CHECK(*R::ParseMatcherText("{'name': 'O\\'Brien'}") == json{{"name", "O'Brien"}});
+	CHECK(*R::ParseMatcherText("{'say': 'a \"quote\"'}") == json{{"say", "a \"quote\""}});
+	CHECK(*R::ParseMatcherText("{'p': 'a\\\\b'}") == json{{"p", "a\\b"}});
+	CHECK(R::SingleToDoubleQuotes("{'a': 1}") == "{\"a\": 1}");
+}
+
+TEST_CASE("An allow rule over a whole glob without a matcher needs --force at the console, and the channels are named", "[prismatic_mcp]")
+{
+	namespace R = PrismaticMCP::Rules;
+	auto spec = [](std::vector<std::string_view> t) { return R::ParseSpec(t); };
+	CHECK(R::BroadAllowRefusal(R::Effect::Allow, spec({"openttd.cmd.*"})).has_value());
+	CHECK(R::BroadAllowRefusal(R::Effect::Allow, spec({"*", "--force", "--via", "window"})).has_value()); // the console only
+	CHECK(R::BroadAllowRefusal(R::Effect::Allow, spec({"*", "--force", "--via", "panel"})).has_value());
+	CHECK_FALSE(R::BroadAllowRefusal(R::Effect::Allow, spec({"*", "--force"})).has_value());
+	CHECK_FALSE(R::BroadAllowRefusal(R::Effect::Allow, spec({"openttd.cmd.*", "{'company': 1}"})).has_value());
+	CHECK_FALSE(R::BroadAllowRefusal(R::Effect::Allow, spec({"openttd.ai.set_setting"})).has_value());
+	CHECK_FALSE(R::BroadAllowRefusal(R::Effect::Deny, spec({"*"})).has_value());
+	R::Spec s = spec({"*", "--via", "auto", "--nonce", "n-7"});
+	CHECK((s.error.empty() && s.via == "auto" && s.nonce == "n-7"));
+	CHECK_FALSE(spec({"*", "--nonce"}).error.empty());
+	CHECK(R::KnownVia("auto"));
+	CHECK_FALSE(R::KnownVia("console")); // the console is the line without --via
+	CHECK_FALSE(R::OwnersOwnChannel("auto"));
+	CHECK_FALSE(R::OwnersOwnChannel("file"));
+	CHECK_FALSE(R::MayDecide(R::Effect::Allow, "auto", "ai.set_settings"));
+}
+
+TEST_CASE("Removing a deny rule is refused to injected input, the console answers one result line per --nonce, and rules of a game end with it", "[prismatic_mcp]")
+{
+	namespace U = PrismaticMCP::UI;
+	ClearRulesAndQueue();
+	IConsoleStdLibRegister();
+	IConsoleCmdExec("prismatic_mcp rule deny openttd.game.* --nonce n1");
+	IConsoleCmdExec("prismatic_mcp rule allow openttd.game.set_pause --nonce n2");
+	auto rules = PrismaticMCP::ApprovalRules();
+	REQUIRE(rules.size() == 2);
+	{
+		U::InjectionScope script;
+		IConsoleCmdExec(fmt::format("prismatic_mcp rule remove {} --nonce n3", rules[0].id)); // the deny rule: refused
+		CHECK(PrismaticMCP::ApprovalRules().size() == 2);
+		IConsoleCmdExec(fmt::format("prismatic_mcp rule remove {}", rules[1].id)); // the allow rule: anyone may end it
+		CHECK(PrismaticMCP::ApprovalRules().size() == 1);
+	}
+	IConsoleCmdExec("prismatic_mcp rule allow * --nonce n4");     // refused: every tool without --force
+	IConsoleCmdExec("prismatic_mcp rule maybe --nonce n5");       // usage
+	CHECK(PrismaticMCP::ApprovalRules().size() == 1);
+	AskPause(true);
+	IConsoleCmdExec("prismatic_mcp deny all game.set_pause --nonce n6");
+	IConsoleCmdExec("prismatic_mcp deny 999999 --nonce n7");
+	IConsoleCmdExec("prismatic_mcp deny nope --nonce n8");
+	IConsoleCmdExec(fmt::format("prismatic_mcp rule remove {} --nonce n9", rules[0].id));
+	CHECK(PrismaticMCP::ApprovalRules().empty());
+
+	/* A rule of this game ends with it; a persisted one stays. */
+	PrismaticMCP::Rules::Spec game_rule;
+	game_rule.tool = "openttd.ai.set_setting";
+	game_rule.match = {{"company", 1}};
+	REQUIRE(PrismaticMCP::AddApprovalRule(PrismaticMCP::Rules::Effect::Deny, game_rule).ok);
+	PrismaticMCP::OnGameModeChanged();
+	CHECK(PrismaticMCP::ApprovalRules().empty());
+	ClearRulesAndQueue();
+}
+
+TEST_CASE("Open approvals in the browser leads to the panel, every other browse item to the hub", "[prismatic_mcp]")
+{
+	namespace M = PrismaticMCP::Menu;
+	CHECK(M::BrowseUrl("/viz") == M::HubUrl() + "/viz");
+	CHECK(M::BrowseUrl("panel:/#approvals") == M::PanelUrl() + "/#approvals");
+	setenv("PRISMATIC_PANEL_URL", "http://lan:9000//", 1);
+	CHECK(M::PanelUrl() == "http://lan:9000");
+	unsetenv("PRISMATIC_PANEL_URL");
+	CHECK(M::PanelUrl() == "http://127.0.0.1:8800");
+	bool listed = false;
+	for (const auto &item : M::Items()) listed |= std::string_view{item.label} == "Open approvals in the browser";
+	CHECK(listed);
+}
+
+TEST_CASE("A network client reads every page of the server's queue before it shows it", "[prismatic_mcp]")
+{
+	ServerApprovalsReader r;
+	CHECK(r.Feed(R"([approvals] {"id": 1, "tool": "ai.set_setting"})"));
+	CHECK(r.Feed(R"([approvals] {"count": 2, "page": 1, "pages": 2})"));
+	CHECK(r.next_page == 2);
+	CHECK(r.rows.empty());      // not whole yet
+	CHECK(r.replies == 0);
+	CHECK(r.answers == 1);
+	CHECK(r.Feed(R"([approvals] {"id": 2, "tool": "ai.set_setting"})"));
+	CHECK(r.Feed(R"([approvals] {"count": 2, "page": 2, "pages": 2})"));
+	CHECK(r.next_page == 0);
+	REQUIRE(r.rows.size() == 2);
+	CHECK(r.rows[1]["id"] == 2);
+	CHECK(r.replies == 1);
+	/* A new first page starts the reply again. */
+	CHECK(r.Feed(R"([approvals] {"id": 3})"));
+	CHECK(r.Feed(R"([approvals] {"count": 1, "page": 1, "pages": 1})"));
+	REQUIRE(r.rows.size() == 1);
+	CHECK(r.rows[0]["id"] == 3);
 }
 
 #endif /* OTTD_PRISMATIC_MCP_SERVER */

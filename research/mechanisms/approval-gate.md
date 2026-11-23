@@ -111,15 +111,27 @@ permission rules do.
 - **Recorded:** a decision a rule makes names it (`approved_via` / `settled_by`:
   `rule #3 allow ...`), and `DecisionTrace` prints `via=`. `openttd://approvals` and
   `openttd.ui.control` carry `rules` and each approval's `matched_rule`.
-- **Lifetime:** none exists by default. A rule lives as long as the process; with `--persist` it is
-  kept in `<personal dir>/prismatic_mcp_approval_rules.<server port>.json` (mode 0600). That file is
-  loaded and printed when the MCP server starts.
+- **Lifetime:** none exists by default. A rule lives as long as the game: a new or loaded world
+  ends every rule that is not persisted. With `--persist` it is kept in
+  `<personal dir>/prismatic_mcp_approval_rules.<server port>.json` (mode 0600). That file is loaded
+  and printed when the MCP server starts, only if it is the user's and nobody else may read it.
+  A loaded rule is `created_via file` and never decides an owner-only tool.
+- **Guards:**
+  - An allow rule over several tools without a matcher (`*`, `openttd.cmd.*`) needs `--force`,
+    and only the console takes it.
+  - Removing a deny rule is refused to armed or injected input, like an allow rule.
+  - Rules decide a request before the queue's cap.
+- **For programs:** `--via panel|auto|window` names the channel. With `--nonce <n>` the console
+  prints one line, `[approval-core] {"nonce", "ok", "decided", "refused", "skipped", "rule_id",
+  "error"}`.
 
 The Prismatic control window drives the same lines with `--via window`. Every row has Approve,
 Deny and Always... at the same x, a check box (Shift for a range, Space on the selected row) and
 Approve selected/all (confirmed with the count). There are a tool selector and Hide expired, and
-after each decision the next row is selected. Keys: Up/Down or J/K move, A, Y or Enter approve,
-D or N deny. The panel's owner routes write them with `--via panel`.
+after each decision the next row is selected. Keys: Up/Down or J/K move, A or Y approve,
+D or N deny; only after a click in the window, a held key decides once, and for 400 ms after rows
+moved by themselves nothing decides. An allow rule and a Remove are confirmed. The panel's owner
+routes write the lines with `--via panel`.
 
 ### The deadline
 

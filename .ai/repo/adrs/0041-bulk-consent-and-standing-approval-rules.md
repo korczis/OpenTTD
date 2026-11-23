@@ -62,18 +62,31 @@ like a single approval, and every one of them is recorded.
      select at least one value, and every value it selects must match. A string pattern is a glob
      against a string value or the JSON text of any other value, `"*"` matches any value present;
      a number, boolean or null is JSON equality; an array matches element by element.
+   - The glob escapes `\*`, `\?` and `\\`, and `?` is one UTF-8 character. A matcher may also
+     bound a value with `$lt`, `$lte`, `$gt`, `$gte`, `$in` and `$ne`. A number pattern matches a
+     string holding its JSON text. A path that selects nothing (`[*]` of an empty list) fails its
+     key, for an allow rule and a deny rule alike.
    - A deny rule wins over every allow rule. An allow rule made through the panel
-     (`created_via panel`) never decides an owner-only tool (`ai.set_settings`, a Battlebrain plan);
-     one made at the game's console or by the owner's own click in the window does.
+     (`created_via panel`), the panel's auto-approve loop (`auto`) or loaded from the rules file
+     (`file`) never decides an owner-only tool (`ai.set_settings`, a Battlebrain plan); one made at
+     the game's console or by the owner's own click in the window does.
+   - An allow rule over a glob of several tools without a matcher (`*`, `openttd.cmd.*`) is
+     refused, except at the console with `--force`.
+   - Removing a deny rule is guarded like an allow rule, since an allow rule may then decide what
+     it held back.
    - Rules apply to every approval as it is created, and to every approval already waiting when a
      rule is added. Each decision a rule makes is recorded like a manual one: the decision's
      `approved_via`, or the denied approval's `settled_by`, names the rule
      (`rule #3 allow openttd.ai.set_setting {"name":"max_*"}`), so `openttd://decisions`,
      `DecisionTrace` (`via=`) and the ledger show it; the rule counts its hits.
-   - Default: no rules. A rule lives as long as the game process. With `--persist` it is also kept
-     in `<personal dir>/prismatic_mcp_approval_rules.<server port>.json`, written atomically with
-     mode 0600. That file is loaded when the MCP server starts, and every loaded rule is printed to
-     the console and the log, so a standing rule is never silent.
+   - Rules decide a new request before the queue's cap is measured, so a full queue never refuses
+     what a rule decides at once.
+   - Default: no rules. A rule lives as long as the game: a new or loaded world ends every rule
+     that is not persisted, since it may name a company or a tile of the old one. With `--persist`
+     it is also kept in `<personal dir>/prismatic_mcp_approval_rules.<server port>.json`, written
+     atomically with mode 0600. That file is loaded when the MCP server starts, only when it belongs
+     to the user and nobody else may read it, and every loaded rule is printed to the console and
+     the log, so a standing rule is never silent.
 3. **Channels.**
    - The game's console: `prismatic_mcp rule allow|deny <tool-glob> [<json-matcher>] [--persist]`,
      `prismatic_mcp rules`, `prismatic_mcp rule remove <id>`, `approve all`, `deny all`. A matcher is
@@ -82,10 +95,25 @@ like a single approval, and every one of them is recorded.
    - The control window: one-click Approve, Deny and Always... on every row at the same x, check
      boxes with Shift ranges and Space, Approve selected/all (confirmed with the count), Deny
      selected/all, a tool selector and Hide expired, the next waiting row selected after a decision,
-     the keyboard (Up/Down or J/K, A, Y or Enter, D or N), the details of the selected approval, a
-     Rules section with Remove. It issues the console lines above with `--via window`.
+     the keyboard (Up/Down or J/K, A or Y, D or N), the details of the selected approval, a Rules
+     section with Remove (confirmed), and an allow rule confirmed with how many waiting approvals
+     it decides now. It issues the console lines above with `--via window`. Guards against a
+     decision the owner did not aim at:
+     - its keys decide only after a click in the window, and Enter (the chat key) decides nothing;
+     - a repeat of the same key within 250 ms is ignored;
+     - for 400 ms after rows moved, or the selection changed, by themselves, a row's buttons and the
+       keys decide nothing;
+     - on a network client a decided row is marked "sent, waiting for the server" until the server
+       stops listing it, and the client reads every page of the server's queue;
+     - a dropdown's choice arrives frames after the click, outside any injection scope, so a menu an
+       injected click opened never makes an allow rule.
+   - The toolbar's "Open approvals in the browser" opens the panel's approvals
+     (`$PRISMATIC_PANEL_URL`, else `http://127.0.0.1:8800`).
    - The panel (`mcp-panel`): its owner-authenticated routes write the same console lines on the
-     dedicated server's stdin and append `--via panel`.
+     dedicated server's stdin and append `--via panel` (its auto-approve loop `--via auto`), and
+     `--nonce <n>`. The console then prints one machine-readable line per command,
+     `[approval-core] {"nonce", "ok", "decided", "refused", "skipped", "rule_id", "error"}`,
+     which is all the panel reads.
    - MCP stays read-only: `openttd://approvals` and `openttd.ui.control` carry `rules` and, per
      approval, `matched_rule {id, effect, decides}`. No MCP tool makes a rule or approves in bulk.
    - On a network client, `approve all` and `deny all` expand over the server's queue as the client

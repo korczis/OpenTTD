@@ -58,6 +58,15 @@ std::span<const Item> Items();
 /** The hub's base URL: $PRISMATIC_HUB_URL, else http://127.0.0.1:8790. */
 std::string HubUrl();
 
+/**
+ * The panel's base URL: $PRISMATIC_PANEL_URL, else http://127.0.0.1:8800 (the port mcp-e2e starts the
+ * panel on), without a trailing slash.
+ */
+std::string PanelUrl();
+
+/** Where a Browse item leads: a target "panel:<path>" is the panel's, any other the hub's. */
+std::string BrowseUrl(std::string_view target);
+
 /** The submenus in the order their first item appears in Items(); each holds at least one item. */
 std::vector<std::string_view> Groups();
 

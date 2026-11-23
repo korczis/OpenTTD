@@ -17,7 +17,7 @@
  *
  * Every approval row has its own Approve, Deny and Always... buttons at the same x on every row,
  * a check box for Approve selected / Deny selected, and the keyboard goes through a queue without the
- * mouse (Up/Down or J/K, A or Y or Enter approve, D or N deny, Space checks). The owner's order of
+ * mouse (Up/Down or J/K, A or Y approve, D or N deny, Space checks). The owner's order of
  * 2026-11-23 ("tlacitko u kazdeho radku, approve/deny all, selectory; next"), ADR 0041.
  *
  * Every consent runs the console's `prismatic_mcp approve|deny <id> ... --via window` or
@@ -119,11 +119,20 @@ static void AskServerQuietly()
 
 bool OnServerChat(std::string_view msg)
 {
-	uint64_t replies = _server_queue.replies;
+	uint64_t answers = _server_queue.answers;
 	if (!_server_queue.Feed(msg)) return false;
 	const bool quiet = _quiet_asks > 0;
-	if (_server_queue.replies == replies) return quiet; // a row; the reply goes on
+	if (_server_queue.answers == answers) return quiet; // a row; the answer goes on
 	if (quiet) _quiet_asks--;
+	/* Every page of the server's queue, not the first ten rows only: the next page is asked quietly. */
+	if (_server_queue.next_page != 0) {
+		if (OnJoinedNetworkClient()) {
+			_quiet_asks++;
+			NetworkClientSendChat(NetworkAction::ChatClient, NetworkChatDestinationType::Client, to_underlying(ClientID::Server),
+				fmt::format("!approvals {}", _server_queue.next_page));
+		}
+		return quiet;
+	}
 	uint64_t highest = _highest_seen;
 	for (const json &r : _server_queue.rows) highest = std::max<uint64_t>(highest, r.value("id", uint64_t{0}));
 	if (highest > _highest_seen) {
@@ -256,15 +265,16 @@ std::vector<Row> Rows(const json &s, const View &view)
 		const bool expired = FlagAt(a, "expired");
 		if (!view.tool.empty() && tool != view.tool) continue;
 		if (view.hide_expired && expired) continue;
-		if (view.hidden.contains(id)) continue;
 		/* A server's approval that a chat approver may not decide stays with the server's operator. */
 		const bool operators = FlagAt(a, "on_server") && !FlagAt(a, "chat_decidable");
 		std::string rule;
 		if (auto it = a.is_object() ? a.find("matched_rule") : a.end(); a.is_object() && it != a.end() && it->is_object()) {
 			rule = fmt::format("  (rule #{} {}{})", IdAt(*it, "id"), StringAt(*it, "effect"), FlagAt(*it, "decides") ? "" : ", held: you decide it");
 		}
-		Row r{Row::Kind::Approval, fmt::format("#{}  {}  {}{}{}", id, tool, args.size() > ROW_ARGS ? args.substr(0, ROW_ARGS) + "..." : args,
-			operators ? "  (the server's operator decides)" : "", rule), id, expired};
+		const bool sent = view.sent.contains(id);
+		Row r{Row::Kind::Approval, fmt::format("#{}  {}  {}{}{}{}", id, tool, detail::CapLine(args, ROW_ARGS),
+			operators ? "  (the server's operator decides)" : "", rule, sent ? "  (sent, waiting for the server)" : ""), id, expired};
+		r.sent = sent;
 		r.checked = view.checked.contains(id);
 		r.decidable = !operators;
 		r.tool = tool;
@@ -325,7 +335,7 @@ std::vector<uint64_t> BulkTargets(const std::vector<Row> &rows, bool approve)
 	const bool checked = AnyChecked(rows);
 	std::vector<uint64_t> ids;
 	for (const Row &r : rows) {
-		if (r.kind != Row::Kind::Approval || (checked && !r.checked)) continue;
+		if (r.kind != Row::Kind::Approval || r.sent || (checked && !r.checked)) continue;
 		if (approve && (r.flag || !r.decidable)) continue;
 		ids.push_back(r.id);
 	}
@@ -416,8 +426,18 @@ enum AlwaysItem : int {
 /** What the open query string is for. */
 enum class QueryFor : uint8_t { Ask, AllowRule, DenyRule };
 
-/** How long a row this window decided stays hidden while a server has not yet answered again. */
-static constexpr auto HIDE_FOR = std::chrono::seconds(12);
+/** How long a row this window decided is marked sent while a server has not yet answered again. */
+static constexpr auto SENT_FOR = std::chrono::seconds(12);
+/** How long rows that moved, or a selection that changed, by themselves hold the decisive clicks and keys. */
+static constexpr auto RECENTLY = std::chrono::milliseconds(400);
+/** Within this a key is taken as a repeat of the same key, and ignored. */
+static constexpr auto KEY_REPEAT = std::chrono::milliseconds(250);
+
+/** Whether \p at was less than \p span ago. */
+static bool Within(std::chrono::steady_clock::time_point at, std::chrono::milliseconds span)
+{
+	return std::chrono::steady_clock::now() - at < span;
+}
 
 struct ControlWindow : Window {
 	Scrollbar *vscroll = nullptr;
@@ -426,12 +446,20 @@ struct ControlWindow : Window {
 	View view;
 	std::optional<uint64_t> selected; ///< The approval the owner selected: the keyboard acts on it, the details show it.
 	std::optional<uint64_t> anchor; ///< The approval last checked, where a Shift+click range starts.
-	std::map<uint64_t, std::chrono::steady_clock::time_point> decided_at; ///< Ids sent to a server, hidden until it lists them no more.
+	std::map<uint64_t, std::chrono::steady_clock::time_point> decided_at; ///< Ids sent to a server, marked sent until it lists them no more.
 	std::vector<uint64_t> pending_bulk; ///< The ids Approve selected/all asks to confirm.
 	std::vector<std::string> tool_choices; ///< The tool selector's choices when it opened.
 	uint64_t always_for = 0; ///< The approval whose Always... menu is open.
+	bool always_injected = false; ///< Whether the click that opened it was injected: a dropdown's choice arrives frames later, outside any injection scope.
 	QueryFor query = QueryFor::Ask;
 	bool keys_armed = false; ///< The owner clicked in this window since it got the focus: only then do its keys decide.
+	std::vector<std::pair<Row::Kind, uint64_t>> layout; ///< What each row of the list was at the last refresh.
+	std::chrono::steady_clock::time_point moved_at{}; ///< When rows moved without the owner's doing (a refresh).
+	std::chrono::steady_clock::time_point auto_selected_at{}; ///< When the selection changed without the owner's doing.
+	std::chrono::steady_clock::time_point last_key_at{}; ///< When the last key was taken, to ignore its repeats.
+	uint16_t last_key = 0; ///< The last key taken.
+	std::optional<uint64_t> pending_remove; ///< The rule Remove asks to confirm.
+	std::optional<std::pair<Rules::Effect, Rules::Spec>> pending_rule; ///< The allow rule Always... asks to confirm.
 
 	ControlWindow(WindowDesc &desc, WindowNumber number) : Window(desc)
 	{
@@ -449,20 +477,36 @@ struct ControlWindow : Window {
 		return nullptr;
 	}
 
-	/** Read the snapshot again; keep the selection while that approval still shows, else select the first. */
-	void Refresh()
+	/**
+	 * Read the snapshot again. The selection stays while that approval still shows; when it went
+	 * (decided elsewhere, expired), the row now at its place is selected. Rows that moved, or a
+	 * selection that changed, without the owner's doing (\p owner false: the 1 s refresh) hold the
+	 * decisive clicks and keys for a moment (RECENTLY), so that a click aimed at one row never
+	 * decides the one that slid under the pointer.
+	 */
+	void Refresh(bool owner = true)
 	{
+		const std::vector<uint64_t> before = Shown(this->rows);
 		this->snapshot = Snapshot();
 		std::set<uint64_t> waiting;
 		for (const json &a : ArrayAt(this->snapshot, "approvals")) waiting.insert(IdAt(a, "id"));
 		auto now = std::chrono::steady_clock::now();
-		this->view.hidden.clear();
-		std::erase_if(this->decided_at, [&](const auto &e) { return !waiting.contains(e.first) || now - e.second > HIDE_FOR; });
-		for (const auto &e : this->decided_at) this->view.hidden.insert(e.first);
+		this->view.sent.clear();
+		std::erase_if(this->decided_at, [&](const auto &e) { return !waiting.contains(e.first) || now - e.second > SENT_FOR; });
+		for (const auto &e : this->decided_at) this->view.sent.insert(e.first);
 		std::erase_if(this->view.checked, [&](uint64_t id) { return !waiting.contains(id); });
 		this->rows = Rows(this->snapshot, this->view);
+		std::vector<std::pair<Row::Kind, uint64_t>> layout;
+		for (const Row &r : this->rows) layout.emplace_back(r.kind, r.id);
+		if (!owner && !this->layout.empty() && layout != this->layout) this->moved_at = now;
+		this->layout = std::move(layout);
 		const std::vector<uint64_t> shown = Shown(this->rows);
-		if (this->Find(this->selected) == nullptr) this->selected = shown.empty() ? std::nullopt : std::optional<uint64_t>{shown.front()};
+		if (this->selected.has_value() && this->Find(this->selected) == nullptr) {
+			const uint64_t gone = *this->selected;
+			this->selected = NextSelection(before, {gone}, shown);
+			if (!owner) this->auto_selected_at = now;
+		}
+		if (!this->selected.has_value() && !shown.empty()) this->selected = shown.front();
 		this->vscroll->SetCount(this->rows.size());
 		this->SetWidgetDisabledState(WID_PC_APPROVE_ALL, BulkTargets(this->rows, true).empty());
 		this->SetWidgetDisabledState(WID_PC_DENY_ALL, BulkTargets(this->rows, false).empty());
@@ -540,7 +584,7 @@ struct ControlWindow : Window {
 				size.height = std::max<uint>(size.height, resize.height * 14 + WidgetDimensions::scaled.framerect.Vertical());
 				break;
 			case WID_PC_DETAILS:
-				size.height = std::max<uint>(size.height, GetCharacterHeight(FontSize::Normal) * 4 + WidgetDimensions::scaled.framerect.Vertical());
+				size.height = std::max<uint>(size.height, GetCharacterHeight(FontSize::Normal) * 6 + WidgetDimensions::scaled.framerect.Vertical());
 				break;
 			case WID_PC_APPROVE_ALL:
 			case WID_PC_DENY_ALL:
@@ -566,7 +610,7 @@ struct ControlWindow : Window {
 			Rect ir = r.Shrink(WidgetDimensions::scaled.framerect);
 			const Row *sel = this->Find(this->selected);
 			std::string text = sel == nullptr
-				? std::string{"Select an approval to read its whole arguments. Keys (click the window first): Up/Down or J/K move, A, Y or Enter approve, D or N deny, Space checks the row."}
+				? std::string{"Select an approval to read its whole arguments. Keys (click the window first): Up/Down or J/K move, A or Y approve, D or N deny, Space checks the row."}
 				: fmt::format("#{} {}{}: {}", sel->id, sel->tool, sel->flag ? " (expired)" : "", sel->args);
 			DrawStringMultiLineWithClipping(ir.left, ir.right, ir.top, ir.bottom, text, sel == nullptr ? TextColour::Grey : TextColour::White);
 			return;
@@ -640,8 +684,8 @@ struct ControlWindow : Window {
 		const std::vector<uint64_t> before = Shown(this->rows);
 		const std::set<uint64_t> decided(ids.begin(), ids.end());
 		IConsoleCmdExec(ConsentCommand(approve, ids));
-		/* A server's queue lists them until it is asked again; this window stops showing them now
-		 * (unless this client cannot consent at all: then its console said why, and they stay). */
+		/* A server's queue lists them until it is asked again; this window marks them sent meanwhile
+		 * (unless this client cannot consent at all: then its console said why, and they stay as they were). */
 		if (OnJoinedNetworkClient() && !(approve && UI::InputArmed())) {
 			for (uint64_t id : ids) this->decided_at[id] = std::chrono::steady_clock::now();
 		}
@@ -653,15 +697,71 @@ struct ControlWindow : Window {
 		this->Refresh();
 	}
 
-	/** Make a standing rule through the console's own command, unless an allow rule is not the owner's own act. */
-	void MakeRule(Rules::Effect effect, const Rules::Spec &spec)
+	/**
+	 * Make a standing rule through the console's own command, unless an allow rule is not the owner's
+	 * own act. An allow rule is confirmed first, with how many waiting approvals it decides at once.
+	 */
+	void MakeRule(Rules::Effect effect, const Rules::Spec &spec, bool confirmed = false)
 	{
 		if (auto refused = ConsentRefusal(effect == Rules::Effect::Allow); refused.has_value()) {
 			IConsolePrint(CC_ERROR, "Prismatic control: {}", *refused);
 			return;
 		}
+		if (effect == Rules::Effect::Allow && !confirmed) {
+			const size_t now = Selected(Snapshot(), spec).size();
+			this->pending_rule = std::make_pair(effect, spec);
+			ShowQuery(GetEncodedString(STR_JUST_RAW_STRING, fmt::format("Always allow {}?", spec.tool)),
+				GetEncodedString(STR_JUST_RAW_STRING, fmt::format("{}{}: it approves {} waiting approval{} now and every new one it matches, until you remove it.",
+					spec.tool, spec.match.is_null() ? " with any arguments" : " matching " + spec.match.dump(), now, now == 1 ? "" : "s")),
+				this, &ControlWindow::RuleConfirmed);
+			return;
+		}
 		IConsoleCmdExec(Rules::RuleCommand(effect, spec.tool, spec.match, spec.persist, "window"));
 		this->Refresh();
+	}
+
+	/** Make the allow rule Always... named, once the owner confirmed it. */
+	static void RuleConfirmed(Window *w, bool confirmed)
+	{
+		auto *cw = dynamic_cast<ControlWindow *>(w);
+		if (cw == nullptr || !confirmed || !cw->pending_rule.has_value()) return;
+		auto [effect, spec] = *cw->pending_rule;
+		cw->pending_rule.reset();
+		cw->MakeRule(effect, spec, true);
+	}
+
+	/**
+	 * Remove rule \p id, once confirmed. Removing a deny rule lets an allow rule decide what it held
+	 * back, so it is refused to injected input like an approval.
+	 */
+	void RemoveRule(uint64_t id, bool deny, bool confirmed)
+	{
+		if (auto refused = ConsentRefusal(deny); refused.has_value()) {
+			IConsolePrint(CC_ERROR, "Prismatic control: {}", *refused);
+			return;
+		}
+		if (!confirmed) {
+			this->pending_remove = id;
+			ShowQuery(GetEncodedString(STR_JUST_RAW_STRING, fmt::format("Remove rule #{}?", id)),
+				GetEncodedString(STR_JUST_RAW_STRING, deny ? std::string{"What it denies then waits for you, or an allow rule decides it."}
+					: std::string{"What it allows then waits for you again."}),
+				this, &ControlWindow::RemoveConfirmed);
+			return;
+		}
+		IConsoleCmdExec(fmt::format("prismatic_mcp rule remove {}", id));
+		this->Refresh();
+	}
+
+	/** Remove the rule Remove named, once the owner confirmed it. */
+	static void RemoveConfirmed(Window *w, bool confirmed)
+	{
+		auto *cw = dynamic_cast<ControlWindow *>(w);
+		if (cw == nullptr || !confirmed || !cw->pending_remove.has_value()) return;
+		const uint64_t id = *cw->pending_remove;
+		cw->pending_remove.reset();
+		bool deny = false;
+		for (const Row &r : cw->rows) if (r.kind == Row::Kind::Rule && r.id == id) deny = !r.flag;
+		cw->RemoveRule(id, deny, true);
 	}
 
 	/** Check every shown approval between the anchor and \p id, both included. */
@@ -691,6 +791,7 @@ struct ControlWindow : Window {
 	void ShowAlways(const Row &row, const Rect &button)
 	{
 		this->always_for = row.id;
+		this->always_injected = UI::InjectingInput();
 		const bool masked = OnJoinedNetworkClient(); // the rules live on the game server
 		DropDownList list;
 		list.push_back(MakeDropDownListStringItem(fmt::format("Always allow {} (any arguments)", row.tool), AI_ALLOW_TOOL, masked));
@@ -707,9 +808,13 @@ struct ControlWindow : Window {
 		const Row row = *it;
 		const Rect ir = this->GetWidget<NWidgetBase>(WID_PC_LIST)->GetCurrentRect().Shrink(WidgetDimensions::scaled.framerect);
 		const int button = ButtonWidth(), always = AlwaysWidth();
+		/* A row that slid under the pointer by itself is not what the owner aimed at. */
+		const bool moved = Within(this->moved_at, RECENTLY);
 		switch (row.kind) {
 			case Row::Kind::Approval: {
-				switch (HitPart(ir.left, ir.right, pt.x, CheckWidth(), button, always)) {
+				const RowPart part = HitPart(ir.left, ir.right, pt.x, CheckWidth(), button, always);
+				if (part != RowPart::Text && part != RowPart::Check && (moved || row.sent)) return;
+				switch (part) {
 					case RowPart::Check:
 						if (IsShiftPressed() && this->anchor.has_value()) {
 							this->CheckRange(row.id);
@@ -742,10 +847,7 @@ struct ControlWindow : Window {
 				break;
 			}
 			case Row::Kind::Rule:
-				if (pt.x >= ir.right - always + 1) {
-					IConsoleCmdExec(fmt::format("prismatic_mcp rule remove {}", row.id));
-					this->Refresh();
-				}
+				if (pt.x >= ir.right - always + 1 && !moved) this->RemoveRule(row.id, !row.flag, false);
 				break;
 			case Row::Kind::Switch:
 				Menu::Run(static_cast<int>(row.id));
@@ -828,6 +930,13 @@ struct ControlWindow : Window {
 		if (widget != WID_PC_LIST) return;
 		const Row *row = this->Find(this->always_for);
 		if (row == nullptr) return;
+		/* The menu's choice comes frames after the click that opened it: a menu an injected click
+		 * opened never makes an allow rule, whoever lets go over it. */
+		if ((index == AI_ALLOW_TOOL || index == AI_ALLOW_EDIT) && this->always_injected) {
+			IConsolePrint(CC_ERROR, "Prismatic control: {}", ConsentRefusal(true).value_or(
+				"an approval needs the owner's own click; this menu was opened by input injected through a UI tool"));
+			return;
+		}
 		Rules::Spec spec;
 		spec.tool = row->tool;
 		switch (index) {
@@ -873,16 +982,23 @@ struct ControlWindow : Window {
 		 * toolbar's hotkeys, and a window that opened by itself (a new approval on a client) must not
 		 * decide on a key the owner meant for the game. */
 		if (_focused_window != this || !this->keys_armed) return EventState::NotHandled;
+		/* A held key repeats: one press decides one row. Enter is the chat key in a network game, so it decides nothing. */
+		const bool decisive = keycode == 'A' || keycode == 'Y' || keycode == 'D' || keycode == 'N';
+		if (decisive && keycode == this->last_key && Within(this->last_key_at, KEY_REPEAT)) return EventState::Handled;
+		this->last_key = keycode;
+		this->last_key_at = std::chrono::steady_clock::now();
+		/* A selection the owner did not make (the selected row went by itself) is not decided by a key at once. */
+		if (decisive && Within(this->auto_selected_at, RECENTLY)) return EventState::Handled;
 		switch (keycode) {
 			case WKC_UP: case 'K': this->Move(-1); return EventState::Handled;
 			case WKC_DOWN: case 'J': this->Move(1); return EventState::Handled;
-			case 'A': case 'Y': case WKC_RETURN: {
+			case 'A': case 'Y': {
 				const Row *r = this->Find(this->selected);
-				if (r != nullptr && !r->flag && r->decidable) this->Consent(true, {r->id});
+				if (r != nullptr && !r->flag && r->decidable && !r->sent) this->Consent(true, {r->id});
 				return EventState::Handled;
 			}
 			case 'D': case 'N':
-				if (const Row *r = this->Find(this->selected); r != nullptr) this->Consent(false, {r->id});
+				if (const Row *r = this->Find(this->selected); r != nullptr && !r->sent) this->Consent(false, {r->id});
 				return EventState::Handled;
 			case WKC_SPACE:
 				if (this->selected.has_value() && !this->view.checked.erase(*this->selected)) this->view.checked.insert(*this->selected);
@@ -906,7 +1022,7 @@ struct ControlWindow : Window {
 
 	/** Approvals arrive and expire, decisions run, answers come back: read it all again every second. */
 	const IntervalTimer<TimerWindow> refresh_interval = {std::chrono::seconds(1), [this](auto) {
-		this->Refresh();
+		this->Refresh(false);
 	}};
 };
 

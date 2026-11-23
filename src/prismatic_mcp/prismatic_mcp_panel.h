@@ -53,6 +53,7 @@ struct Row {
 	bool flag = false;    ///< Approval: expired. Switch: on. Rule: an allow rule.
 	bool checked = false; ///< Approval: checked for Approve selected / Deny selected.
 	bool decidable = true; ///< Approval: this window may decide it (false: the server's operator does).
+	bool sent = false;     ///< Approval: decided here and sent to the server, which has not answered yet.
 	std::string tool{};   ///< Approval: its tool, as the filter and "Always..." name it.
 	std::string args{};   ///< Approval: its whole arguments, for the details area and the matcher.
 };
@@ -62,7 +63,7 @@ struct View {
 	std::string tool;             ///< Show only approvals of this tool; empty: every tool.
 	bool hide_expired = false;    ///< Hide approvals past their expiry.
 	std::set<uint64_t> checked;   ///< Approvals checked for a bulk decision.
-	std::set<uint64_t> hidden;    ///< Approvals this window decided that a server has not yet stopped listing (a network client's queue refreshes every few seconds).
+	std::set<uint64_t> sent;      ///< Approvals this window decided that a server has not yet stopped listing (a network client's queue refreshes every few seconds).
 };
 
 /**
@@ -81,8 +82,9 @@ std::vector<uint64_t> Shown(const std::vector<Row> &rows);
 
 /**
  * What Approve selected / Deny selected (or, with nothing checked, Approve all / Deny all) acts on:
- * the checked approval rows shown, or every approval row shown when none is checked. Approving
- * leaves out expired rows and those the server's operator decides.
+ * the checked approval rows shown, or every approval row shown when none is checked. A row already
+ * sent to the server is left out; approving leaves out expired rows and those the server's
+ * operator decides as well.
  */
 std::vector<uint64_t> BulkTargets(const std::vector<Row> &rows, bool approve);
 

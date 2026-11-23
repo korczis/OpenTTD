@@ -75,7 +75,12 @@ const click = async (x, y) => {
 const ask = async (pause) => (await tool('openttd.game.set_pause', { pause })).approval_id;
 // The window reads the queue again every second: wait until its caption counts what waits, so that
 // a sweep clicks rows that are drawn, never the switches below them.
-const shows = (n) => waitFor(async () => ((await win())?.caption || '').includes(n === 0 ? 'control' : `${n} waiting`), 5000);
+// Rows that moved by themselves hold the decisive clicks for 400 ms (RECENTLY): a click waits it out.
+const shows = async (n) => {
+  const ok = await waitFor(async () => ((await win())?.caption || '').includes(n === 0 ? 'control' : `${n} waiting`), 5000);
+  await sleep(600);
+  return ok;
+};
 const caption = async () => (await win())?.caption || '';
 // The approval rows' buttons sit at the right end of the list (WID_PC_LIST, index 5), the same x on
 // every row: Always... rightmost, Deny left of it, Approve left of that, each about 64 pixels wide at
@@ -122,6 +127,7 @@ try {
   const opened = (await press('Approve all')).opened || [];
   check('Approve all refuses injected input: no confirmation opens, nothing is approved', opened.length === 0 && (await waiting()).length === 2);
   await key(65); // A
+  await sleep(300);
   await key(89); // Y
   check('the A and Y keys refuse injected input', (await waiting()).length === 2);
 
@@ -143,9 +149,16 @@ try {
   check('a new approval appears in the window', (await waiting()).length === 2 && await shows(2), await caption());
   await press('Check none'); // a click in the window arms its keys
   await key(68); // D
+  await sleep(300); // a second press, not a repeat of the first (KEY_REPEAT)
   await key(68); // D: the next row, selected after the first decision
   check('D, D denies two rows in turn without the mouse', (await waiting()).length === 0, `c=#${c}`);
 
+  // Deny all over the rows shown.
+  await ask(true);
+  await ask(false);
+  await shows(2);
+  await press('Deny all');
+  check('Deny all denies every row shown', (await waiting()).length === 0);
   // Always deny from a row's Always... menu: a rule that decides the waiting approvals at once.
   const d = await ask(true);
   const e = await ask(false);
@@ -158,7 +171,9 @@ try {
   }
   check('Always... opens a menu on the row', dropdown);
   if (dropdown) await tool('openttd.ui.choose', { result: 0 }); // AI_ALLOW_TOOL
-  check('Always allow refuses injected input: no rule is made', (await control()).rules.length === 0 && (await waiting()).length === 2);
+  await sleep(500); // a dropdown's choice arrives a few frames after the click on it
+  const confirm = (await tool('openttd.ui.windows', {})).windows.some((w) => /^Always allow/.test(w.caption || ''));
+  check('Always allow refuses injected input: no rule is made, no confirmation opens', !confirm && (await control()).rules.length === 0 && (await waiting()).length === 2);
   await waitFor(async () => !(await dropdownOpen()), 3000);
   dropdown = false;
   for (let y = r2.y + 3; y < r2.y + r2.h - 3 && !dropdown; y += 3) {
@@ -166,21 +181,22 @@ try {
     dropdown = await dropdownOpen();
   }
   if (dropdown) await tool('openttd.ui.choose', { result: 2 }); // AI_DENY_TOOL
+  await waitFor(async () => (await control()).rules.length > 0, 3000); // the choice arrives a few frames later
   const rules = (await control()).rules;
   check('Always deny makes a deny rule from the window, which withdraws both at once', rules.length === 1 && rules[0].effect === 'deny'
     && rules[0].created_via === 'window' && rules[0].hits === 2 && (await waiting()).length === 0, JSON.stringify(rules[0] || {}));
   check('a new request it matches is denied as it is created', (await tool('openttd.game.set_pause', { pause: true })).status === 'denied', `d=#${d} e=#${e}`);
-  // The rule's Remove sits at the Always... column of its row.
+  // The rule's Remove sits at the Always... column of its row. Removing a deny rule lets an allow
+  // rule decide what it held back, so injected input may not, and no confirmation opens either.
   await waitFor(async () => (await caption()).includes('1 standing rule'), 5000);
-  for (let y = r2.y + 3; y < r2.y + r2.h - 3 && (await control()).rules.length; y += 3) await click(columns(r2).always, y);
-  check('the rule\'s Remove ends it', (await control()).rules.length === 0);
+  await sleep(600);
+  let asked = false;
+  for (let y = r2.y + 3; y < r2.y + r2.h - 3; y += 3) {
+    await click(columns(r2).always, y);
+    asked = asked || (await tool('openttd.ui.windows', {})).windows.some((w) => /^Remove rule/.test(w.caption || ''));
+  }
+  check('Remove of a deny rule refuses injected input: the rule stays, no confirmation opens', (await control()).rules.length === 1 && !asked);
 
-  // Deny all over the rows shown.
-  await ask(true);
-  await ask(false);
-  await shows(2);
-  await press('Deny all');
-  check('Deny all denies every row shown', (await waiting()).length === 0);
   const trace = (await control()).decisions;
   check('the window\'s denials leave no executed decision behind', trace.length === 0, trace.join(' | '));
 } catch (err) {
