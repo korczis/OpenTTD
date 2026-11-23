@@ -149,7 +149,8 @@ store and is not matched. Its metrics:
 The watchdog keeps tuning itself from its own gaps once it has seen five (unchanged); the store only
 replaces its first week, and only after 20 comparable spells (a stricter floor than five: a 90th
 percentile of five values says little about the tail). `watchdog.tuning.threshold_source` says which
-one holds: `start` (7, the store off or too thin), `store` or `this run`. `service_eval.rhai` publishes every derived value as
+one holds: `start` (7, the store off or too thin), `store` or `this run`. The store read has its own `try`: a store that is off or answers
+something the baselines cannot read leaves the start value and never costs the round its reads. `service_eval.rhai` publishes every derived value as
 `derived.<consumer>.<name>` so each is visible with its provenance. Vehicle-count stability is a
 proxy of the watchdog's signature, which also counts vehicle types and stations, so store spells are
 at least as long as the watchdog's own; that is why its own gaps take over.
@@ -207,7 +208,7 @@ from canned query answers and the route without a store (its 503); the real SQL 
 in-memory store with two runs of samples and replan and watchdog writes (actions derived, the state
 of the month before, a stall resolved within the horizon and not within a shorter one, the coverage,
 `?scope=run`, each query's failure); `derive_lib.rhai` against a stubbed store; the watchdog run
-against a scripted panel and store (cold start 51 days derived, `threshold_source` store, a stall found); `baselines` leaving out a loaded run, another lineup and the latest run; and
+against a scripted panel and store (cold start 51 days derived, `threshold_source` store, a stall found; a store that breaks the baselines or is off: the start value, round 0 still read); `baselines` leaving out a loaded run, another lineup and the latest run; and
 `service_eval.rhai` run for seven game months against a scripted route (streaks that advance only
 on new outcomes and reset, the `POOR` line once at three, `eval.coverage`, `derived.*`, a failing
 route). The store's own tests check that every view and column is commented and listed here and in

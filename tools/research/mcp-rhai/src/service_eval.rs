@@ -515,8 +515,8 @@ mod tests {
 
     /// The watchdog's cold start comes from the store's quiet spells (whole days, bounded), is kept
     /// in watchdog.tuning with its source, and is the threshold until MIN_GAPS gaps of its own.
-    #[test]
-    fn the_watchdog_starts_from_the_stores_quiet_spells() {
+    /// A watchdog run of two looks against a scripted panel whose store answers `store`.
+    fn watchdog_run(store: Value) -> (BTreeMap<String, Value>, Vec<String>) {
         let mut e = engine();
         let (shared, printed) = board(&mut e);
         let looks = std::sync::Arc::new(std::sync::Mutex::new(0i64));
@@ -536,16 +536,33 @@ mod tests {
         e.register_fn("api_services", || dynv(json!({"services": []})));
         e.register_fn("api_bots", || dynv(json!({"running": []})));
         e.register_fn("con_say", |_: &str| {});
-        e.register_fn("api_dbNamedRun", |_: rhai::Map| dynv(baselines_answer()));
+        e.register_fn("api_dbNamedRun", move |_: rhai::Map| dynv(store.clone()));
         e.run(&rhai_file("watchdog.rhai")).unwrap();
-        let shared = shared.lock().unwrap();
+        let shared = shared.lock().unwrap().clone();
+        let printed = printed.lock().unwrap().clone();
+        (shared, printed)
+    }
+
+    #[test]
+    fn the_watchdog_starts_from_the_stores_quiet_spells() {
+        let (shared, printed) = watchdog_run(baselines_answer());
         let t = &shared["watchdog.tuning"];
         assert_eq!((t["threshold_days"].clone(), t["threshold_source"].clone(), t["cold_start"]["value"].clone(), t["cold_start"]["source"].clone()),
                    (json!(51), json!("store"), json!(51), json!("derived")), "{t}");
         // 60 quiet days on the second look are more than the 51 the store gave: stalled.
         assert_eq!((shared["watchdog.0"]["quiet_days"].clone(), shared["watchdog.0"]["stalled"].clone()), (json!(60), json!(true)));
-        let printed = printed.lock().unwrap();
         assert!(printed.iter().any(|p| p.starts_with("watchdog: cold start 51 day(s), derived: 1.5 x p90")), "{printed:?}");
+        // A store whose answer breaks the baselines (they throw): the start value, said so, and
+        // round 0 still reads and records the company.
+        let (shared, printed) = watchdog_run(json!({"columns": 5, "rows": [[1]]}));
+        let t = &shared["watchdog.tuning"];
+        assert_eq!((t["threshold_days"].clone(), t["threshold_source"].clone(), t["cold_start"]["source"].clone()),
+                   (json!(7), json!("start"), json!("fallback")), "{t}");
+        assert_eq!((shared["watchdog.0"]["since_day"].clone(), shared["watchdog.0"]["quiet_days"].clone()), (json!(100), json!(60)));
+        assert!(printed.iter().any(|p| p.starts_with("watchdog: cold start 7 day(s), fallback: the store's baselines failed (")), "{printed:?}");
+        // A store that is off: no rows, the start value.
+        let (shared, _) = watchdog_run(json!({"error": "store off"}));
+        assert_eq!(shared["watchdog.tuning"]["threshold_source"], "start");
         let functions = rhai_file("watchdog.rhai").split("\nlet looks = 0;").next().unwrap().to_string();
         let out: rhai::Array = engine().eval(&format!("{functions}\n[cold_start(()).value, cold_start(()).source, threshold_from([], 40), threshold_from([10, 10, 10, 10, 10], 40),
              source_of([], cold_start(())), source_of([1, 2, 3, 4, 5], cold_start(())), source_of([], #{{ source: \"derived\" }})]")).unwrap();

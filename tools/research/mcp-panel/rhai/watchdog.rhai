@@ -145,11 +145,18 @@ let looks = 0;
 let cold = #{ value: START_DAYS };
 print(`watchdog: a look every ${ROUND_S} s; a company with no progress for longer than the threshold is stalled`);
 loop {
-    try {
-        if looks % STORE_EVERY_ROUNDS == 0 {
+    // The store's cold start in its own try: a store that is off, or a host without the store's
+    // function, leaves START_DAYS (threshold_source "start") and never costs the round its reads.
+    if looks % STORE_EVERY_ROUNDS == 0 {
+        try {
             cold = cold_start(dl::baselines(6));
-            print(`watchdog: cold start ${cold.value} day(s), ${cold.source}: ${cold.why}`);
+        } catch (err) {
+            cold = cold_start(());
+            cold.why = `the store's baselines failed (${err}): the declared fallback ${START_DAYS}`;
         }
+        print(`watchdog: cold start ${cold.value} day(s), ${cold.source}: ${cold.why}`);
+    }
+    try {
         let state = read("openttd://game/state");
         let day = state.game_tick / DAY_TICKS;
         let tuning = shared_get("watchdog.tuning") ?? #{ gaps: [] };
