@@ -99,6 +99,7 @@ MODES = ("rail", "road", "air", "water")
 SQ_ERROR = re.compile(r"\[script:\d\] \[(\d+)\] \[S\] ")
 # The referee's shared producers: an industry whose output rail stations of several companies catch.
 REF_SHARED = re.compile(r"REF S date=(\d+)-(\d+) ind=(\d+) owners=([\d,]+) name=(.*)$")
+REF_TRAINLESS = re.compile(r"REF T date=(\d+)-(\d+) cid=(\d+) rail_stations=(\d+) trainless=(\d+) ids=([\d,]*)")
 
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
             "-o", "ControlMaster=auto", "-o", "ControlPersist=120",
@@ -1229,6 +1230,48 @@ def parse_shared(text: str) -> dict[int, dict]:
                                          "first": f"{y}-{int(mo):02d}"})
         e["owners"] |= {int(o) for o in owners.split(",") if o}
     return shared
+
+
+def parse_trainless(text: str) -> dict[int, list[dict]]:
+    """{company id: [{"date", "rail", "trainless", "ids"}, ...] in report order} from a match log's
+    REF T lines: per quarter, a company's rail stations, how many of them no train of its own calls
+    at, and which (a set of station ids)."""
+    out: dict[int, list[dict]] = {}
+    for line in text.splitlines():
+        m = REF_TRAINLESS.search(line)
+        if not m:
+            continue
+        y, mo, cid, rail, bare = map(int, m.groups()[:5])
+        ids = {int(i) for i in m.group(6).split(",") if i}
+        out.setdefault(cid, []).append({"date": f"{y}-{mo:02d}", "rail": rail, "trainless": bare, "ids": ids})
+    return out
+
+
+def trainless_stations(m: dict, rules: dict) -> list[str]:
+    """The fitness failures of PrismaticAI companies that keep rail stations no train of theirs calls
+    at (`m["trainless"]` from parse_trainless, keyed by company id in start order): more than
+    `trainless_max` (default 0) stations that were trainless in each of the last `trainless_reports`
+    (default 4, a game year) quarterly reports. The same station for a year, so the termini of a line
+    still being laid do not count: on the fitness seed a double-track line took three quarters from
+    its stations to its first train. In the owner's live game of seed 15805 10 of company 0's 12 rail
+    stations had no train by 1958, two of them the termini of finished lines whose locomotive was
+    refused for money (research/incident-2026-11-23-trainless-lines.md). A contestant in
+    `trainless_skip` is not judged: the test_trainless lineup refuses each line's first train on
+    purpose and is judged by `must_run_trains` instead."""
+    limit, n = rules.get("trainless_max", 0), rules.get("trainless_reports", 4)
+    fails = []
+    for i, c in enumerate(m["lineup"]):
+        if not c["ai"].startswith("PrismaticAI") or c["key"] in rules.get("trainless_skip", []):
+            continue
+        last = m.get("trainless", {}).get(i, [])[-n:]
+        if len(last) < n:
+            continue
+        kept = set.intersection(*(r["ids"] for r in last))
+        if len(kept) > limit:
+            fails.append(f"{c['key']}: trainless_stations:{len(kept)} rail station(s) without a train from "
+                         f"{last[0]['date']} to {last[-1]['date']} (stations {', '.join(map(str, sorted(kept)))}; "
+                         f"max {limit})")
+    return fails
 
 
 def sibling_producers(m: dict) -> list[str]:
@@ -2590,6 +2633,14 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
             bad = [b for b in bad if not b.startswith("hoards")]
         fails += [f"{c['key']}: {b}" for b in bad]
     fails += sibling_producers(m)
+    fails += trainless_stations(m, fit["rules"])
+    # A contestant held to run trains ends with at least one: the test_trainless lineup refuses every
+    # new line's first train, so a train at the end proves KeepTrainlessLine, the adoption and
+    # KeepLinesServed's first train (research/incident-2026-11-23-trainless-lines.md).
+    for c in m["lineup"]:
+        s = m["series"].get(c["key"], [])
+        if c["key"] in fit.get("must_run_trains", []) and (s[-1].get("rail", 0) if s else 0) < 1:
+            fails.append(f"{c['key']}: no_trains: no train at the end of the match")
     # The owner's order (2026-11-19): PrismaticAI is never last. By final value on the fitness seed.
     finals = sorted(((s[-1]["value"] if s else 0), k) for k, s in
                     ((c["key"], m["series"].get(c["key"], [])) for c in m["lineup"]))
@@ -2657,6 +2708,7 @@ def cmd_fitness(cfg: dict) -> int:
                  "errors": {lineup[c]["key"]: n for c, n in errors.items() if c < len(lineup)}}
             m["status"] = match_status(m, proc.returncode)
             m["shared"] = parse_shared(out)
+            m["trainless"] = parse_trainless(out)
             for c in lineup:
                 s = m["series"].get(c["key"], [])
                 peak, final = fleet_peak_final(s)
@@ -2667,6 +2719,10 @@ def cmd_fitness(cfg: dict) -> int:
                 owners = ", ".join(lineup[o]["key"] if o < len(lineup) else f"company {o}"
                                    for o in sorted(e["owners"]))
                 print(f"fitness[{i}]: shared producer {e['name']} (industry {ind}) from {e['first']}: {owners}")
+            for cid, reps in sorted(m["trainless"].items()):
+                if cid < len(lineup) and reps and lineup[cid]["ai"].startswith("PrismaticAI"):
+                    print(f"fitness[{i}]: {lineup[cid]['key']:26} rail stations {reps[-1]['rail']:>3}, "
+                          f"without a train {reps[-1]['trainless']:>3} ({reps[-1]['date']})")
             fails += [f"[{i}] {f}" for f in fitness_verdict(m, fit)]
     for f in fails:
         print(f"fitness: FAIL {f}", file=sys.stderr)

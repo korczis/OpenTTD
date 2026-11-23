@@ -39,8 +39,8 @@ pie showData title Open findings by kind
     "blocked" : 71
     "out-of-scope" : 40
     "not-run" : 20
-    "partial" : 13
-    "staged" : 10
+    "partial" : 16
+    "staged" : 13
     "unreviewed" : 9
     "failed" : 5
     "handoff" : 1
@@ -56,8 +56,8 @@ pie showData title Open findings by kind
 | out-of-scope | 40 | A finished issue left this out (its non_scope) and no open issue names it |
 | failed | 5 | A run or check the records say failed |
 | not-run | 20 | A validation the records say did not run |
-| partial | 13 | A capability or run the records say is only partly there |
-| staged | 10 | Designed and written down, not implemented |
+| partial | 16 | A capability or run the records say is only partly there |
+| staged | 13 | Designed and written down, not implemented |
 | handoff | 1 | A change asked of another repository; nothing in this one can close it |
 | unreviewed | 9 | A knowledge record still awaiting its review |
 | drift | 0 | An issue's stamps contradict its delivered work (live only: majordomus plan drift) |
@@ -209,6 +209,9 @@ pie showData title Open findings by kind
 | partial | The same-days tie-break settles a race only when both source stations stand when the later check runs. If the company of the higher id finishes its station before the other's site search ends, it sees no rival and keeps it, and the lower one then sees a higher rival and keeps… | [research/incident-2026-11-22-sibling-industries.md](incident-2026-11-22-sibling-industries.md):134 | none — needs an issue | OBSERVED |
 | partial | A line still starts once the balance plus the loan headroom reach line_budget (30000 in this game), which is less than the price of the one train it needs (30649 in this log). #234 makes a line that runs short of money wait, but the gate still starts lines the company cannot… | [research/incident-2026-11-23-live-game-15805.md](incident-2026-11-23-live-game-15805.md):218 | none — needs an issue | OBSERVED |
 | partial | On a mature map, more own lines do not help much. In the headless replay of the 1958 save, NextOwnFreightLine found no candidate even with the restore fixed: 26 producer-cargoes were held by a rival's rail station, and the holder moved 72-91% of their output. The levers left… | [research/incident-2026-11-23-live-game-15805.md](incident-2026-11-23-live-game-15805.md):230 | none — needs an issue | OBSERVED |
+| partial | The trainless rule counts the same station ids over a year. Two cases can still mislead it, and neither has been seen in a judged lineup on the gate seed: a line whose laying takes longer than a year, and a station id the game hands to a new station soon after the old one was… | [research/incident-2026-11-23-trainless-lines.md](incident-2026-11-23-trainless-lines.md):240 | none — needs an issue | OBSERVED |
+| partial | A line whose trains got lost on a whole track is halted (lost_trains, events.nut). Before CloseHaltedLines, it kept its stations without a train for the rest of the game, as on seed 31337 (PrismaticAI solo-max, station 98, WOOD Gonbourne Forest - Wundwood Sawmill). It is closed… | [research/incident-2026-11-23-trainless-lines.md](incident-2026-11-23-trainless-lines.md):246 | none — needs an issue | OBSERVED |
+| partial | An adopted line is only as good as the pairing heuristic. Two trainless stations near a producer and an acceptor that the walk joins are taken as one line even when the bot never planned them as one. A train that gets lost there is sold within LOST_SELL_DAYS and the line is… | [research/incident-2026-11-23-trainless-lines.md](incident-2026-11-23-trainless-lines.md):259 | none — needs an issue | OBSERVED |
 | partial | Dedicated build, feature ON: PARTIAL | [research/prismatic-mcp/11-continuation-baseline.md](prismatic-mcp/11-continuation-baseline.md):21 | none — needs an issue | OBSERVED |
 | partial | Native status visible: PARTIAL | [research/prismatic-mcp/11-continuation-baseline.md](prismatic-mcp/11-continuation-baseline.md):26 | none — needs an issue | OBSERVED |
 | partial | Streamable HTTP: DELETE (session end): PARTIAL | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):14 | none — needs an issue | OBSERVED |
@@ -217,6 +220,9 @@ pie showData title Open findings by kind
 | staged | The planner still hands company 0 producers that AAAHogEx holds. The first line of the plan of 1958-05-18 is the Plondham Iron Ore line that the bot skipped in 1953. Planning per company with the held producers left out is on fix/planner-per-company and is not merged. | [research/incident-2026-11-23-live-game-15805.md](incident-2026-11-23-live-game-15805.md):239 | none — needs an issue | OBSERVED |
 | staged | Five of the 15 lines found no station site. Sites on sloped land, on the other axis and with the exit reversed are on fix/prismatic-station-sites and are not merged. Whether that branch would have found a site for the two 0 sloped cases is not known. | [research/incident-2026-11-23-live-game-15805.md](incident-2026-11-23-live-game-15805.md):244 | none — needs an issue | OBSERVED |
 | staged | From 1954 the company paid its whole 300k loan back (0 by 1958-08-23) and built no rail line, while its buses earned 371 a year each. The capital sink and the road and air yield are the subjects of fix/prismatic-steward-capital and fix/prismatic-road-air-yield, which have no… | [research/incident-2026-11-23-live-game-15805.md](incident-2026-11-23-live-game-15805.md):253 | none — needs an issue | OBSERVED |
+| staged | The track of a line given up half laid stays on the map, and so does its upkeep. The builders keep no list of the pieces they laid before BuildRailAlong gave up, so removing it needs that list first. | [research/incident-2026-11-23-trainless-lines.md](incident-2026-11-23-trainless-lines.md):230 | none — needs an issue | OBSERVED |
+| staged | Re-plans that wait for approval are not surfaced. 199 set_setting calls for company 0 stayed pending from 1952 to 1962, and the plan the bot runs is still that of 1950-02-08. Whether the co-play company's re-plans are approved by the panel or by the owner is the owner's decision. | [research/incident-2026-11-23-trainless-lines.md](incident-2026-11-23-trainless-lines.md):235 | none — needs an issue | OBSERVED |
+| staged | A line waiting for its depot (depot_pending) has no depot for the adoption to find. When a restart from the map loses it, it is not adopted again. | [research/incident-2026-11-23-trainless-lines.md](incident-2026-11-23-trainless-lines.md):255 | none — needs an issue | OBSERVED |
 | staged | Streamable HTTP: GET/SSE: STAGED | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):15 | none — needs an issue | OBSERVED |
 | staged | resources/templates/list: STAGED | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):22 | none — needs an issue | OBSERVED |
 | staged | resources/list_changed notification: STAGED | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):23 | none — needs an issue | OBSERVED |
