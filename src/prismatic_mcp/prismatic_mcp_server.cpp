@@ -76,6 +76,7 @@
 #include "../network/network.h"
 #include "../misc_cmd.h"
 
+#include <cstdlib>
 #include <array>
 #include <filesystem>
 #if !defined(_WIN32)
@@ -1489,6 +1490,17 @@ void Init()
 {
 	/* Nothing heavy at startup; the listener is created only on explicit Start(). */
 	_mcp.running = false;
+	/* The approval deadline the operator chose when starting this process (mcp-e2e
+	 * --approval-deadline, research/mechanisms/approval-gate.md "The deadline"): a dedicated server
+	 * has no console of its own to type it at, and the panel refuses an 'approve' line. */
+	if (const char *env = std::getenv("PRISMATIC_MCP_APPROVAL_DEADLINE"); env != nullptr && *env != '\0') {
+		if (auto policy = detail::ParseDeadlinePolicyText(env); policy.has_value()) {
+			_deadline_policy = *policy;
+			Debug(Facility::Net, Severity::Error, "[prismatic-mcp] {} (PRISMATIC_MCP_APPROVAL_DEADLINE)", DescribeApprovalDeadline());
+		} else {
+			Debug(Facility::Net, Severity::Error, "[prismatic-mcp] PRISMATIC_MCP_APPROVAL_DEADLINE='{}' is not <game days 0-3650>[:keep|approve]; the default stays: {}", env, DescribeApprovalDeadline());
+		}
+	}
 }
 
 /**
