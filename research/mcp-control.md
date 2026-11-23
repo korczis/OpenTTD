@@ -1622,9 +1622,11 @@ because each of them runs lines the panel cannot read first. The panel splits a 
 character, so a newline inside a value (an AI's settings, a content query) cannot add a second
 command. Approvals go through `POST /api/approve` with the owner secret, or through the game's own
 console. Withdrawing your own request (`deny`) is still allowed. `mcp-panel-check` tests both cases.
-The standing rules are the owner's too: `/api/console` refuses a `rule` or `rules` word, the core's
-`--via` marker and `deny all`, in every spelling `console_word` accepts; the owner routes below send
-them.
+The same refusal covers who may approve in the game (`approvers`, now `POST /api/approvers` with the
+owner secret), the approval core's standing rules (`rule`, `rules`), its channel and result markers
+(`--via`, `--nonce`: the core trusts a stdin line without `--via` as the console's own) and `deny
+all`, in every spelling `console_word` accepts; Rhai's `console()` goes through `/api/console`, so
+it is refused the same. The owner routes below send them.
 
 ### The approvals list and standing rules
 
