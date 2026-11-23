@@ -349,7 +349,8 @@ bool FromJson(const json &j, T &out, std::string &err)
 		if (index >= std::variant_size_v<U>) { err = "index: no such alternative"; return false; }
 		bool ok = false;
 		[&]<size_t... I>(std::index_sequence<I...>) {
-			((I == index ? ([&] {
+			/* The fold only selects the alternative at index and runs it once; its own value is not needed. */
+			(void)((I == index ? ([&] {
 				using A = std::variant_alternative_t<I, U>;
 				if constexpr (std::is_same_v<A, std::monostate>) {
 					err = "index names the empty alternative: give null";

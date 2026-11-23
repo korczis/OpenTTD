@@ -122,6 +122,26 @@ function PrismaticAI::Restore(b) {
 		" airports (" + how + ")");
 }
 
+/* own_built after a load: the own freight lines built (restored RAIL_LINES whose producer,
+ * acceptor and cargo the planner did not hand over in fr_* .. fr16_*, each pair once, closed ones
+ * too: closing a line at runtime does not give its slot back, so neither does a load), never the
+ * saved count. Before main.nut stopped counting a failed own line (PR #234), the saved count held
+ * every line tried: the owner's live game (seed 15805) was saved with "4 own" and one rail line,
+ * so after its load with the fix it still planned no own line. `saved` is the count the save
+ * held, logged when it differs. */
+function PrismaticAI::RestoreOwnBuilt(saved) {
+	local planned = {};
+	foreach (fl in PrismaticAI.FreightLines()) planned[fl.from + "-" + fl.to + "-" + fl.cargo] <- true;
+	local own = {};
+	foreach (l in RAIL_LINES) {
+		if (!("from" in l) || !("to" in l)) continue;
+		local key = l.from + "-" + l.to + "-" + l.cargo;
+		if (!planned.rawin(key)) own[key] <- true;
+	}
+	if (own.len() != saved) AILog.Info("PrismaticAI: own lines counted from the restored lines: " + own.len() + " (the save said " + saved + ")");
+	return own.len();
+}
+
 /* The state Save wrote. */
 function PrismaticAI::RestoreFromSave(data) {
 	RAIL_LINES.clear();
@@ -139,7 +159,7 @@ function PrismaticAI::RestoreFromSave(data) {
 	this.air_done = PrismaticAI.RestoreField(data, "air_done", "");
 	this.rail_done = PrismaticAI.RestoreField(data, "rail_done", "");
 	this.freight_tried = PrismaticAI.RestoreField(data, "freight_tried", {});
-	this.own_built = PrismaticAI.RestoreField(data, "own_built", 0);
+	this.own_built = PrismaticAI.RestoreOwnBuilt(PrismaticAI.RestoreField(data, "own_built", 0));
 	this.own_failed = PrismaticAI.RestoreField(data, "own_failed", 0);
 	this.own_failed_year = PrismaticAI.RestoreField(data, "own_failed_year", 0);
 	this.rescued_at = PrismaticAI.RestoreField(data, "rescued_at", -1);
