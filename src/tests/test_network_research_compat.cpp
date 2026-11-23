@@ -66,4 +66,17 @@ TEST_CASE("research_net_compat policy names and aliases parse both ways", "[rese
 	CHECK_FALSE(ParseResearchNetRevisionPolicy("nonsense").has_value());
 }
 
+TEST_CASE("A client rejoins the company it played after the server restarts its game", "[research]")
+{
+	/* Upstream reconnects every client as a spectator; the owner co-playing company 1 asks for it again. */
+	CHECK(ResearchRejoinCompany(CompanyID{0}) == CompanyID{0});
+	CHECK(ResearchRejoinCompany(CompanyID{MAX_COMPANIES - 1}) == CompanyID{MAX_COMPANIES - 1});
+	/* A spectator, or a client that was still choosing a company, rejoins as upstream does. */
+	CHECK(ResearchRejoinCompany(COMPANY_SPECTATOR) == COMPANY_SPECTATOR);
+	CHECK(ResearchRejoinCompany(COMPANY_NEW_COMPANY) == COMPANY_SPECTATOR);
+	CHECK(ResearchRejoinCompany(CompanyID::Invalid()) == COMPANY_SPECTATOR);
+	/* Until a server restart is seen, the reconnect company is the upstream one. */
+	CHECK(_research_rejoin_company == COMPANY_SPECTATOR);
+}
+
 #endif /* OTTD_RESEARCH_INSTRUMENTATION */

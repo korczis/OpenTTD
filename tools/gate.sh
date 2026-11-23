@@ -74,9 +74,11 @@ Usage: $SELF <smoke|change|research|research-free|full> [options]
             build/ is configured with a research option ON).
             When the change touches tools/research/real-world, also runs its
             cargo tests and replays the Brno snapshot against its recorded
-            hashes (offline). When it touches the Rhai host's Prismatic client
-            (tools/research/mcp-rhai/src/prismatic.rs), also requires 100% line
-            coverage of that file (cargo llvm-cov; NOT RUN, so PARTIAL, without it).
+            hashes (offline). When it touches a file of COVERAGE_TABLE (the
+            Prismatic client, Battlebrain, the live-decision executor), requires
+            every counted line of that file's criterion to be run by a test or
+            exempt with its reason (cargo llvm-cov; rule
+            project.new-code-is-covered; NOT RUN, so PARTIAL, without it).
             Names the research tier when the change touches research-gated
             code.
 
@@ -228,6 +230,12 @@ run_ctest() {
   return "$EXIT_PARTIAL"
 }
 
+# The worse of two tier statuses, FAIL (any other non-zero) over PARTIAL over PASS: a later step's
+# PARTIAL never hides an earlier step's FAIL.
+worst() {
+  if [[ "$1" -ne 0 && "$1" -ne "$EXIT_PARTIAL" ]]; then echo "$1"; elif [[ "$2" -ne 0 ]]; then echo "$2"; else echo "$1"; fi
+}
+
 # Finish a tier: PASS, PARTIAL ($EXIT_PARTIAL) or FAIL (anything else), with its exit status.
 finish_tier() {
   local tier="$1" status="$2"
@@ -294,29 +302,129 @@ panel_tests() {
   PANEL_CSS_CHECK="$css" node --test "$dir"/test/*.test.mjs
 }
 
-# Whether this change, staged or not, touches the Rhai host's Prismatic client (I0092).
-prismatic_changed() {
-  local files
+# The files the change tier keeps covered line by line by their own tests (rule
+# project.new-code-is-covered; src/prismatic.rs since I0092). One row per file of tools/research/mcp-rhai:
+#   <file>|<the test binaries whose tests run it, comma-separated>|<criterion>
+# Criterion `all`: every line llvm-cov counts in the file, its tests included.
+# Criterion `items:<start>;<start>;...`: only the lines of each named item, for a file the rule
+# covers in part. An item runs from the first line containing <start> (e.g. `fn apply_live`) to the
+# line where its braces balance again. A <start> the file no longer contains fails the step.
+COVERAGE_TABLE=(
+  'src/prismatic.rs|mcp-rhai|all'
+  'src/battlebrain_contract.rs|battlebrain|all'
+  'src/battlebrain_policy.rs|battlebrain|all'
+  'src/bin/battlebrain.rs|battlebrain|all'
+  'src/panel_decision.rs|mcp-panel|items:fn is_freight_slot_setting;fn live_expiry;fn decision_gate;fn live_world;fn apply_live;impl LiveGame for Arc<Game>'
+)
+# The only way a counted line may stay unrun: <file>|<item start>|<reason>. The item is found as a
+# criterion item is (its first line containing <item start>, through its balanced braces, or that
+# line alone when it opens none), by text and not line number, so an edit above it cannot move an
+# exemption onto other lines; one that names nothing fails the step. Each is printed with its
+# reason on every run of the change tier.
+COVERAGE_EXEMPT=(
+  'src/bin/battlebrain.rs|fn main() {|the process entry: it hands the real argv and stdin to cli() and exits with its code; every subcommand is cli(), which the tests run'
+  'src/battlebrain_contract.rs|_ => unreachable!("types are closed"),|validate_record has already restricted the type to TYPES with one_of, and every type has its arm; a type added without one panics here by design'
+)
+
+# The rows of COVERAGE_TABLE whose file this change, staged or not, touches.
+coverage_rows_changed() {
+  local files row
   files="$(changed_files)"
-  grep -qE '^tools/research/mcp-rhai/src/prismatic\.rs$' <<< "$files"
+  for row in "${COVERAGE_TABLE[@]}"; do
+    if grep -qxF "tools/research/mcp-rhai/${row%%|*}" <<< "$files"; then printf '%s\n' "$row"; fi
+  done
 }
 
-# The Prismatic client stays fully covered by its own tests (I0092; the owner asked for 100%):
-# cargo llvm-cov over mcp-rhai's tests, then every line of src/prismatic.rs executed at least once.
-# Without cargo-llvm-cov the step is NOT RUN and the tier PARTIAL, never PASS.
-prismatic_coverage() {
-  local dir=tools/research/mcp-rhai lcov
+# One row's verdict from an lcov report: every counted line of the criterion run at least once,
+# or inside an exempt item. Prints "<file>: <n> of <m> lines covered" and each missed line with its
+# number and text. An item (of a criterion or an exemption) whose start the file lacks fails it.
+coverage_check() {
+  local lcov="$1" dir="$2" file="$3" criterion="$4" items="" exempt="" row
+  [[ "$criterion" == items:* ]] && items="${criterion#items:}"
+  for row in ${COVERAGE_EXEMPT[@]+"${COVERAGE_EXEMPT[@]}"}; do
+    [[ "${row%%|*}" == "$file" ]] && { row="${row#*|}"; exempt+="${row%%|*}"$'\x1f'; }
+  done
+  awk -v want="/$file" -v file="$file" -v items="$items" -v exempt="$exempt" '
+    FNR == NR { src[FNR] = $0; nsrc = FNR; next }
+    # A file a binary includes by #[path = "../x.rs"] is reported as src/bin/../x.rs: normalised first.
+    /^SF:/ { p = substr($0, 4); while (sub(/\/[^\/.][^\/]*\/\.\.\//, "/", p)) {}
+             f = (length(p) >= length(want) && substr(p, length(p) - length(want) + 1) == want); next }
+    /^end_of_record/ { f = 0; next }
+    f && /^DA:/ { split(substr($0, 4), a, ","); seen[a[1] + 0] = 1; hits[a[1] + 0] += a[2] }
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    function count(s, c,   n, i) { n = 0; for (i = 1; i <= length(s); i++) if (substr(s, i, 1) == c) n++; return n }
+    # Mark the item that starts at the first line containing `start`: through the line where its
+    # braces balance, or that line alone when it opens no brace. 0 when the file has no such line.
+    function mark(start, kind,   s, l, depth) {
+      s = 0
+      for (l = 1; l <= nsrc; l++) if (index(src[l], start) > 0) { s = l; break }
+      if (!s) return 0
+      if (count(src[s], "{") == 0) { marked[kind, s] = 1; return 1 }
+      depth = 0
+      for (l = s; l <= nsrc; l++) {
+        marked[kind, l] = 1; depth += count(src[l], "{") - count(src[l], "}")
+        if (depth <= 0) break
+      }
+      return 1
+    }
+    END {
+      bad = 0
+      if (items == "") { for (l = 1; l <= nsrc; l++) marked["in", l] = 1 }
+      k = split(items, it, ";")
+      for (i = 1; i <= k; i++) if (!mark(it[i], "in")) { printf "%s: the criterion names \"%s\", which the file does not contain\n", file, it[i]; bad = 1 }
+      k = split(exempt, ex, "\037")
+      for (i = 1; i <= k; i++) if (ex[i] != "" && !mark(ex[i], "ex")) { printf "%s: the exemption \"%s\" names nothing in the file: remove it\n", file, ex[i]; bad = 1 }
+      total = 0; missed = 0; excused = 0
+      for (l = 1; l <= nsrc; l++) {
+        if (!(l in seen) || !(("in", l) in marked)) continue
+        total++
+        if (hits[l] > 0) continue
+        if (("ex", l) in marked) { excused++; continue }
+        missed++; lines = lines sprintf("\n    %s:%d  %s", file, l, trim(src[l]))
+      }
+      printf "%s: %d of %d lines covered%s%s\n", file, total - missed - excused, total,
+             (excused ? sprintf(", %d exempt", excused) : ""), (missed ? sprintf(", %d run by no test:%s", missed, lines) : "")
+      if (total == 0) printf "%s: no counted line: its test binaries do not build it, or the criterion selects nothing\n", file
+      exit (bad || total == 0 || missed > 0)
+    }' "$dir/$file" "$lcov"
+}
+
+# New code is covered (rule project.new-code-is-covered): for every COVERAGE_TABLE file this change
+# touches, cargo llvm-cov runs the tests of the binaries that build it, and each counted line of its
+# criterion must be run by a test or be exempt. Built without the `store` feature: no file of the
+# table has a line it gates, and the step then needs no system libduckdb. Without cargo-llvm-cov the
+# step is NOT RUN and the tier PARTIAL, never PASS.
+new_code_coverage() {
+  local dir=tools/research/mcp-rhai rows row bins="" b lcov status=0 rest file criterion
+  local -a binargs=()
+  echo "==> new code is covered (rule project.new-code-is-covered): ${#COVERAGE_TABLE[@]} file(s) in the table, ${#COVERAGE_EXEMPT[@]} exemption(s)"
+  for row in ${COVERAGE_EXEMPT[@]+"${COVERAGE_EXEMPT[@]}"}; do
+    rest="${row#*|}"
+    printf '    exempt %s  "%s"\n      because %s\n' "${row%%|*}" "${rest%%|*}" "${rest#*|}"
+  done
+  rows="$(coverage_rows_changed)"
+  if [[ -z "$rows" ]]; then
+    echo "    no file of the table changed: nothing to measure"
+    return 0
+  fi
   if ! cargo llvm-cov --version >/dev/null 2>&1; then
-    echo "src/prismatic.rs coverage: NOT RUN -- cargo-llvm-cov is not installed (cargo install cargo-llvm-cov)"
+    echo "coverage: NOT RUN -- cargo-llvm-cov is not installed (cargo install cargo-llvm-cov)"
     return "$EXIT_PARTIAL"
   fi
+  while IFS='|' read -r _ b _; do bins+="${b},"; done <<< "$rows"
+  for b in $(tr ',' '\n' <<< "$bins" | sort -u); do binargs+=(--bin "$b"); done
   lcov="$(mktemp)"
-  echo "==> cargo llvm-cov --release --bin mcp-rhai ($dir; src/prismatic.rs must be 100% covered)"
-  (cd "$dir" && cargo llvm-cov --release --bin mcp-rhai --lcov --output-path "$lcov" --quiet)
-  awk '/^SF:.*\/src\/prismatic\.rs$/ { f = 1 } /^end_of_record/ { f = 0 }
-       f && /^DA:/ { split($0, a, /[:,]/); n++; if (a[3] == 0) { z++; missed = missed " " a[2] } }
-       END { printf "src/prismatic.rs: %d of %d lines covered%s\n", n - z, n, (z ? ", missed:" missed : "");
-             exit (n == 0 || z > 0) }' "$lcov"
+  echo "==> cargo llvm-cov --release --no-default-features ${binargs[*]} ($dir)"
+  if ! (cd "$dir" && cargo llvm-cov --release --no-default-features "${binargs[@]}" --lcov --output-path "$lcov" --quiet); then
+    echo "coverage: FAIL -- the tests did not pass, so no line counts as covered"
+    rm -f "$lcov"
+    return 1
+  fi
+  while IFS='|' read -r file b criterion; do
+    coverage_check "$lcov" "$dir" "$file" "$criterion" || status=1
+  done <<< "$rows"
+  rm -f "$lcov"
+  return "$status"
 }
 
 # Whether this change, staged or not, touches the real-world scenario pipeline.
@@ -575,7 +683,7 @@ cmd_change() {
     python3 -B tools/research/ai-battle/battle.py fitness
   fi
   if real_world_changed; then real_world_tests; fi
-  if prismatic_changed; then prismatic_coverage || status=$?; fi
+  new_code_coverage || status=$(worst "$status" $?)
 
   if [[ ! -f build/CMakeCache.txt ]]; then
     echo "==> cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo ${GATE_CMAKE_EXTRA[*]} (initial configure)"
@@ -585,9 +693,9 @@ cmd_change() {
   echo "==> cmake --build build -j$JOBS"
   cmake --build build -j"$JOBS"
 
-  run_ctest build || status=$?
-  # A failure outranks a PARTIAL: neither may hide the other's worse result.
-  default_build_free_of_research build || { rc=$?; [[ "$status" -eq 1 ]] || status=$rc; }
+  run_ctest build || status=$(worst "$status" $?)
+  # A failure outranks a PARTIAL: neither may hide the other's worse result (`worst`).
+  default_build_free_of_research build || status=$(worst "$status" $?)
 
   echo "==> git status --porcelain (review below for unwanted generated files)"
   git status --porcelain

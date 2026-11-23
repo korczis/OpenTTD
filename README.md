@@ -788,11 +788,11 @@ from the code. The right-hand column says what was counted.
 |---|---|---|
 | **146** | [game commands, each an MCP tool an agent can call (`openttd.cmd.*`)](research/mcp-api.md) | `DEF_CMD_TRAIT\(Commands::` in `src/*_cmd.h` |
 | **24** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
-| **43** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
+| **46** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **56** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **58** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
-| **21** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
+| **22** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **38** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **209** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **99** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
@@ -801,9 +801,9 @@ from the code. The right-hand column says what was counted.
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 56
+    "research tools and checks (tools/research/, shell and Python)" : 58
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 13
-    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 21
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 22
 ```
 <!-- surfaces:end facts -->
 
@@ -1419,6 +1419,7 @@ those files:
 | [project.long-runs-are-owned-bounded-and-stoppable](.ai/repo/rules/project/long-runs-are-owned-bounded-and-stoppable.v1.md) | blocking | Before a job runs unattended or on another machine, make it write who owns it and how to stop it on every host, refuse new work over the host's load ceiling or under its 35 GiB disk floor, and honour a PAUSED file on the host and a STOP file beside it. |
 | [project.mcp-surfaces-are-derived](.ai/repo/rules/project/mcp-surfaces-are-derived.v1.md) | blocking | Derive every surface of the MCP integration from the live catalogue and the one route table; do not hand-list tools, routes, functions or settings in a second place. |
 | [project.never-report-unrun-validation-as-pass](.ai/repo/rules/project/never-report-unrun-validation-as-pass.v1.md) | blocking | Report every validation layer with the command that ran and its exit status, mark a layer that did not run as NOT RUN, and never round PARTIAL or ambiguous up to PASS. |
+| [project.new-code-is-covered](.ai/repo/rules/project/new-code-is-covered.v1.md) | blocking | Ship tests that run every line you add or modify; for a file of COVERAGE_TABLE, let tools/gate.sh change run cargo llvm-cov and refuse any counted line of its criterion no test ran, restructure a line a test cannot reach so its logic is testable, and exempt only what still cannot run, in COVERAGE_EXEMPT, with its written reason. |
 | [project.new-code-tested](.ai/repo/rules/project/new-code-tested.v1.md) | blocking | Ship every change with tests that run every line it adds or modifies; keep tools/coverage/changed-lines passing, which refuses any changed Python line no test runs (file:line) and accepts an untestable one only through an exemption with a written reason that every run prints; until the other languages are measured, cover their changed lines with tests anyway and say in the report that no gate measured them. |
 | [project.no-commit-without-current-instruction](.ai/repo/rules/project/no-commit-without-current-instruction.v1.md) | blocking | Commit, push, rewrite history or force-push only on an explicit, current instruction from the owner that covers this change. |
 | [project.no-upstream-interaction](.ai/repo/rules/project/no-upstream-interaction.v1.md) | blocking | Never push to, open an issue against, or open a pull request against OpenTTD/OpenTTD; keep every commit, branch and experiment in korczis/OpenTTD, and keep the upstream remote fetch-only. |
@@ -1440,7 +1441,7 @@ those files:
 ```mermaid
 pie showData title Rules (project) by class
     %% links: README.md?col=Class&filter=blocking#06-ground-rules-short-version | README.md?col=Class&filter=advisory#06-ground-rules-short-version
-    "blocking" : 22
+    "blocking" : 23
     "advisory" : 2
 ```
 <!-- surfaces:end ai-rules -->

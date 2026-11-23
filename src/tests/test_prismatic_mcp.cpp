@@ -465,6 +465,47 @@ TEST_CASE("Only the owner's own click consents in the control window", "[prismat
 	CHECK(P::ConsentCommand(false, 12) == "prismatic_mcp deny 12");
 }
 
+TEST_CASE("A network client reads the server's approval queue from its '[approvals]' replies", "[prismatic_mcp]")
+{
+	ServerApprovalsReader r;
+	CHECK_FALSE(r.Feed("hello"));                      // ordinary chat is not the queue
+	CHECK_FALSE(r.Feed("[approvals] not json"));       // nor is a line that does not parse
+	CHECK_FALSE(r.Feed("[approvals] [1, 2]"));         // nor JSON that is not an object
+	CHECK(r.Feed(R"([approvals] {"id": 22, "tool": "ai.set_setting", "args": "{\"company\":0}", "chat_decidable": true})"));
+	CHECK(r.Feed(R"([approvals] {"id": 23, "tool": "ai.start", "chat_decidable": false, "args_truncated": true})"));
+	CHECK(r.rows.empty());                             // a reply counts once it is whole
+	CHECK(r.replies == 0);
+	CHECK(r.Feed(R"([approvals] {"count": 12, "page": 1, "pages": 2})"));
+	REQUIRE(r.rows.size() == 2);
+	CHECK(r.rows[0]["id"] == 22);
+	CHECK(r.rows[1]["tool"] == "ai.start");
+	CHECK(r.count == 12);                              // the server holds more than one page
+	CHECK(r.replies == 1);
+	/* The next whole reply replaces the queue; an empty one empties it. */
+	CHECK(r.Feed(R"([approvals] {"count": 0, "page": 1, "pages": 1})"));
+	CHECK(r.rows.empty());
+	CHECK(r.count == 0);
+	CHECK(r.replies == 2);
+	CHECK_FALSE(r.Feed(R"([approvals] {"page": 1})")); // neither a row nor the count
+
+	/* Not a network client here: the window keeps its own process's queue, and every reply line is
+	 * printed (none is swallowed), since this process asked for none. */
+	namespace P = PrismaticMCP::Panel;
+	CHECK_FALSE(P::OnServerChat("hello"));
+	CHECK_FALSE(P::OnServerChat(R"([approvals] {"id": 5, "tool": "ai.set_setting"})"));
+	CHECK_FALSE(P::OnServerChat(R"([approvals] {"count": 1, "page": 1, "pages": 1})"));
+
+	/* A server's approval that a chat approver may not decide says who decides it. */
+	json snap = {{"approvals", json::array({{{"id", 9}, {"tool", "ai.start"}, {"args", "{}"}, {"on_server", true}, {"chat_decidable", false}},
+		{{"id", 10}, {"tool", "ai.set_setting"}, {"args", "{}"}, {"on_server", true}, {"chat_decidable", true}}})}};
+	std::vector<P::Row> rows = P::Rows(snap);
+	auto approval = [&rows](uint64_t id) { return std::ranges::find_if(rows, [id](const P::Row &r) { return r.kind == P::Row::Kind::Approval && r.id == id; }); };
+	REQUIRE(approval(9) != rows.end());
+	CHECK(approval(9)->text.ends_with("(the server's operator decides)"));
+	REQUIRE(approval(10) != rows.end());
+	CHECK_FALSE(approval(10)->text.ends_with("(the server's operator decides)"));
+}
+
 TEST_CASE("A request is queued, listed with its kind and answered once", "[prismatic_mcp]")
 {
 	namespace M = PrismaticMCP::Menu;
@@ -1254,6 +1295,51 @@ TEST_CASE("A chat line is capped at a UTF-8 boundary, and a newer AI settings pl
 	CHECK(SettingKeys("ai.set_setting", json{{"name", 3}}).empty());
 	CHECK(SettingKeys("ai.set_settings", json{{"settings", json::array()}}).empty());
 	CHECK(SettingKeys("ai.set_settings", json::array()).empty());
+}
+
+TEST_CASE("An unanswered approval is settled at its deadline with the operator's standing verdict, keep by default", "[prismatic_mcp]")
+{
+	DeadlinePolicy keep;  /* the policy a server starts with */
+	CHECK(keep.ticks == 30 * DEADLINE_DAY_TICKS);
+	CHECK(keep.verdict == DeadlineVerdict::Keep);
+	CHECK(DeadlineTick(1000, keep.ticks) == std::optional<uint64_t>(1000 + 30 * 74));
+	CHECK_FALSE(DeadlineTick(1000, 0).has_value());
+
+	const uint64_t due = 1000 + keep.ticks;
+	CHECK(DeadlineDue(true, 1000, due - 1, keep, true) == DeadlineAction::None);
+	CHECK(DeadlineDue(true, 1000, due, keep, true) == DeadlineAction::Retire);
+	CHECK(DeadlineDue(true, 1000, due + 5000, keep, false) == DeadlineAction::Retire);
+	/* Decided already: the deadline has nothing to settle. */
+	CHECK(DeadlineDue(false, 1000, due + 1, keep, true) == DeadlineAction::None);
+
+	DeadlinePolicy approve{keep.ticks, DeadlineVerdict::Approve};
+	CHECK(DeadlineDue(true, 1000, due, approve, true) == DeadlineAction::Execute);
+	/* Wider than a chat approver may decide (a server setting, starting an AI): retired, never executed. */
+	CHECK(DeadlineDue(true, 1000, due, approve, false) == DeadlineAction::Retire);
+
+	DeadlinePolicy off{0, DeadlineVerdict::Approve};
+	CHECK(DeadlineDue(true, 1000, UINT64_MAX, off, true) == DeadlineAction::None);
+
+	CHECK(DeadlineVerdictName(DeadlineVerdict::Keep) == "keep");
+	CHECK(DeadlineVerdictName(DeadlineVerdict::Approve) == "approve");
+}
+
+TEST_CASE("The deadline policy is parsed from the console's game days and verdict, and a malformed line changes nothing", "[prismatic_mcp]")
+{
+	auto p = ParseDeadlinePolicy("7", "");
+	REQUIRE(p.has_value());
+	CHECK(p->ticks == 7 * DEADLINE_DAY_TICKS);
+	CHECK(p->verdict == DeadlineVerdict::Keep);
+	CHECK(ParseDeadlinePolicy("30", "keep")->verdict == DeadlineVerdict::Keep);
+	CHECK(ParseDeadlinePolicy("30", "approve")->verdict == DeadlineVerdict::Approve);
+	CHECK(ParseDeadlinePolicy("0", "keep")->ticks == 0);
+	CHECK(ParseDeadlinePolicy("3650", "")->ticks == 3650 * DEADLINE_DAY_TICKS);
+	CHECK_FALSE(ParseDeadlinePolicy("3651", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("-1", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("7d", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("99999", "").has_value());
+	CHECK_FALSE(ParseDeadlinePolicy("7", "yes").has_value());
 }
 
 TEST_CASE("Only an action on one company is decided in the game's chat, classified by the command's own flags and category", "[prismatic_mcp]")

@@ -100,15 +100,8 @@ pub fn rollback_directive(snapshot: &Value, company: i64, prior: Option<&Value>,
     let block = json!({"schema": DECISION_SCHEMA, "decision": decision["id"], "snapshot_digest": snapshot["body"]["digest"],
         "snapshot_tick": at["tick"], "idempotency_key": key, "policy": format!("{}@{}", ROLLBACK_POLICY.0, ROLLBACK_POLICY.1),
         "valid_until": valid_until, "settings_digest": settings_digest(&settings), "mode": "live"});
-    let mut errs = Vec::new();
-    for r in [&hold, &decision] {
-        if let Err(e) = validate_record(r) {
-            errs.extend(e);
-        }
-    }
-    if let Err(e) = validate_decision_block(&block) {
-        errs.extend(e);
-    }
+    let errs: Vec<Refusal> = [&hold, &decision].into_iter().filter_map(|r| validate_record(r).err()).flatten()
+        .chain(validate_decision_block(&block).err().into_iter().flatten()).collect();
     if !errs.is_empty() {
         return Err(errs);
     }
@@ -1462,9 +1455,8 @@ mod tests {
     #[test]
     fn every_valid_fixture_is_accepted() {
         for (name, f) in fixtures("valid") {
-            if let Err(e) = check(&name, &f) {
-                panic!("{name} refused: {:?}", e);
-            }
+            let r = check(&name, &f);
+            assert!(r.is_ok(), "{name} refused: {r:?}");
         }
     }
 
@@ -1472,10 +1464,8 @@ mod tests {
     fn every_invalid_fixture_is_refused_with_its_code() {
         for (name, f) in fixtures("invalid") {
             let want = f["expect"].as_str().unwrap_or_else(|| panic!("{name}: an invalid fixture names its expected code"));
-            match check(&name, &f) {
-                Ok(()) => panic!("{name} was accepted"),
-                Err(e) => assert!(e.iter().any(|r| r.code == want), "{name}: expected {want}, got {:?}", e),
-            }
+            let e = check(&name, &f).err().unwrap_or_default();
+            assert!(e.iter().any(|r| r.code == want), "{name}: expected {want}, got {e:?} (an empty list: it was accepted)");
         }
     }
 
@@ -1644,11 +1634,11 @@ mod tests {
             assert!(ids.insert(c.id), "{} is declared twice", c.id);
             for f in c.inputs.iter().chain(c.outputs) {
                 assert!(FIELD_KINDS.contains(&f.kind), "{}.{}: kind {}", c.id, f.name, f.kind);
-                match (f.kind.starts_with("amount"), f.unit) {
-                    (true, Some(u)) => assert!(UNITS.contains(&u), "{}.{}: unit {u}", c.id, f.name),
-                    (false, None) => {}
-                    other => panic!("{}.{}: an amount carries a unit and nothing else does ({other:?})", c.id, f.name),
-                }
+                let unit_ok = match (f.kind.starts_with("amount"), f.unit) {
+                    (true, Some(u)) => UNITS.contains(&u),
+                    (amount, unit) => !amount && unit.is_none(),
+                };
+                assert!(unit_ok, "{}.{}: an amount carries a known unit and nothing else carries one ({:?})", c.id, f.name, f.unit);
             }
         }
         for a in ADAPTERS {
@@ -1911,4 +1901,85 @@ mod tests {
         assert_eq!(contract["$defs"]["battlebrainDecision"], schema("decision").unwrap(), "decision-contract.schema.json $defs.battlebrainDecision differs from `battlebrain schema decision`");
         assert_eq!(contract["$defs"]["decisionDirective"]["properties"]["decision"]["$ref"], "#/$defs/battlebrainDecision");
     }
+
+    /// The refusals (code, path) of the valid fixture `name` after `edit` changed its value.
+    fn after(name: &str, edit: impl FnOnce(&mut Value)) -> Vec<(&'static str, String)> {
+        let mut f = fixtures("valid").into_iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("no fixture {name}")).1;
+        edit(&mut f["value"]);
+        check(name, &f).err().unwrap_or_default().into_iter().map(|r| (r.code, r.path)).collect()
+    }
+
+    fn names(refusals: &[(&'static str, String)], code: &str, path: &str) -> bool {
+        refusals.iter().any(|(c, p)| *c == code && p == path)
+    }
+
+    /// An edit of a fixture, boxed so a table can hold one per case.
+    fn edit(f: impl FnOnce(&mut Value) + 'static) -> Box<dyn FnOnce(&mut Value)> {
+        Box::new(f)
+    }
+
+    fn remove(v: &mut Value, pointer: &str) {
+        let (parent, key) = pointer.rsplit_once('/').unwrap();
+        v.pointer_mut(parent).and_then(Value::as_object_mut).unwrap().remove(key);
+    }
+
+    #[test]
+    fn every_field_a_record_checks_is_refused_by_its_path() {
+        let bb = format!("bb:{}", "a".repeat(64));
+        let cases: Vec<(&str, Box<dyn FnOnce(&mut Value)>, &str, &str)> = vec![
+            ("candidate-freight-line.json", edit(|v| v["body"]["estimate"]["cost"]["value"] = json!("x")), "invalid_field", "body.estimate.cost.value"),
+            ("candidate-freight-line.json", edit(|v| remove(v, "/body/estimate/cost")), "missing_field", "body.estimate.cost"),
+            ("candidate-freight-line.json", edit(|v| v["body"]["invocations"] = json!(["x"])), "invalid_field", "body.invocations"),
+            ("decision.json", edit(|v| remove(v, "/schema")), "missing_field", "schema"),
+            ("decision.json", edit(|v| remove(v, "/producer/id")), "missing_field", "producer.id"),
+            ("decision.json", edit(|v| v["id"] = json!("x")), "invalid_field", "id"),
+            ("decision.json", edit(|v| v["supersedes"] = json!("x")), "invalid_field", "supersedes"),
+            ("decision.json", edit(|v| v["derived_from"] = json!(["x"])), "invalid_field", "derived_from"),
+            ("decision.json", edit(|v| v["body"]["rejected"] = json!([{"candidate": "x"}])), "invalid_field", "body.rejected.0"),
+            ("decision.json", edit(|v| remove(v, "/body/rejected")), "missing_field", "body.rejected"),
+            ("decision.json", edit(|v| remove(v, "/body/snapshot")), "missing_field", "body.snapshot"),
+            ("snapshot.json", edit(|v| v["body"]["sources"] = json!([{"uri": ""}])), "invalid_field", "body.sources.0"),
+            ("snapshot.json", edit(|v| remove(v, "/body/sources")), "missing_field", "body.sources"),
+            ("snapshot.json", edit(|v| v["body"]["window"] = json!({"tick_from": 5, "tick_to": 1, "coherent": false})), "invalid_field", "body.window"),
+            ("inference.json", edit(|v| v["body"]["confidence"] = json!(2.0)), "invalid_field", "body.confidence"),
+            ("inference-capability-match.json", edit(|v| remove(v, "/body/params/schema")), "missing_field", "body.params.schema"),
+            ("inference-capability-match.json", edit(|v| v["body"]["params"]["candidates"] = json!([{"kernel": ""}])), "invalid_field", "body.params.candidates.0"),
+            ("inference-capability-match.json", edit(|v| { v["body"]["params"]["chosen"] = Value::Null; v["body"]["params"]["refusal"] = json!({"code": "nope"}); }),
+             "invalid_field", "body.params.refusal.code"),
+            ("invocation-knapsack.json", edit(|v| v["kernel"]["engine"] = json!("numeric")), "invalid_field", "kernel.engine"),
+            ("invocation-knapsack.json", edit(|v| remove(v, "/kernel/id")), "missing_field", "kernel.id"),
+            ("invocation-knapsack.json", edit(|v| remove(v, "/catalogue/digest")), "missing_field", "catalogue.digest"),
+            ("invocation-knapsack.json", edit(|v| v["catalogue"]["commit"] = json!("0".repeat(40))), "stale_catalogue", "catalogue.commit"),
+            ("invocation-knapsack.json", edit(|v| remove(v, "/input/units")), "missing_field", "input.units"),
+            ("invocation-knapsack.json", edit(|v| v["status"] = json!("weird")), "invalid_field", "status"),
+        ];
+        for (name, edit, code, path) in cases {
+            let got = after(name, edit);
+            assert!(names(&got, code, path), "{name}: expected {code} at {path}, got {got:?}");
+        }
+        // Without a schema, an envelope or a block is refused before anything else is read.
+        let value = |name: &str| fixtures("valid").into_iter().find(|(n, _)| n == name).unwrap().1["value"].clone();
+        let (mut inv, mut block) = (value("invocation-knapsack.json"), value("decision-block.json"));
+        remove(&mut inv, "/schema");
+        remove(&mut block, "/schema");
+        assert_eq!(validate_invocation(&inv, &catalogue()).unwrap_err()[0].code, "missing_field");
+        assert_eq!(validate_decision_block(&block).unwrap_err()[0].code, "missing_field");
+        // A record may supersede another one; only the id it no longer matches is refused.
+        let got = after("decision.json", |v| v["supersedes"] = json!(bb));
+        assert_eq!(got, vec![("id_mismatch", "id".to_string())]);
+    }
+
+    #[test]
+    fn a_track_plan_without_a_piece_does_not_price_a_line() {
+        let e = domain_check("track-planning", &json!({}), &json!({"result": {"status": "found", "cost": 1.0, "pieces": []}})).unwrap_err();
+        assert_eq!((e.code, e.path.as_str()), ("invalid_output", "result.pieces"));
+    }
+
+    #[test]
+    fn a_field_is_its_declaration_and_an_unknown_schema_name_has_none() {
+        let f = field("money", "amount", Some("money"), "doc");
+        assert_eq!((f.name, f.kind, f.unit, f.doc), ("money", "amount", Some("money"), "doc"));
+        assert!(schema("nope").is_none());
+    }
+
 }
