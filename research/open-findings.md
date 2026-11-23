@@ -39,7 +39,7 @@ pie showData title Open findings by kind
     "blocked" : 71
     "out-of-scope" : 40
     "not-run" : 18
-    "partial" : 10
+    "partial" : 11
     "unreviewed" : 9
     "staged" : 7
     "failed" : 2
@@ -56,7 +56,7 @@ pie showData title Open findings by kind
 | out-of-scope | 40 | A finished issue left this out (its non_scope) and no open issue names it |
 | failed | 2 | A run or check the records say failed |
 | not-run | 18 | A validation the records say did not run |
-| partial | 10 | A capability or run the records say is only partly there |
+| partial | 11 | A capability or run the records say is only partly there |
 | staged | 7 | Designed and written down, not implemented |
 | handoff | 1 | A change asked of another repository; nothing in this one can close it |
 | unreviewed | 9 | A knowledge record still awaiting its review |
@@ -201,6 +201,7 @@ pie showData title Open findings by kind
 | partial | Decide: PARTIAL | [research/agent-loop.md](agent-loop.md):57 | none — needs an issue | OBSERVED |
 | partial | Authorize: PARTIAL | [research/agent-loop.md](agent-loop.md):59 | none — needs an issue | OBSERVED |
 | partial | A processing industry served by two PrismaticAI companies is still possible: only the transported-last-month filter covers it. | [research/incident-2026-11-22-sibling-industries.md](incident-2026-11-22-sibling-industries.md):109 | none — needs an issue | OBSERVED |
+| partial | The same-days tie-break settles a race only when both source stations stand when the later check runs. If the company of the higher id finishes its station before the other's site search ends, it sees no rival and keeps it, and the lower one then sees a higher rival and keeps… | [research/incident-2026-11-22-sibling-industries.md](incident-2026-11-22-sibling-industries.md):113 | none — needs an issue | OBSERVED |
 | partial | Dedicated build, feature ON: PARTIAL | [research/prismatic-mcp/11-continuation-baseline.md](prismatic-mcp/11-continuation-baseline.md):21 | none — needs an issue | OBSERVED |
 | partial | Native status visible: PARTIAL | [research/prismatic-mcp/11-continuation-baseline.md](prismatic-mcp/11-continuation-baseline.md):26 | none — needs an issue | OBSERVED |
 | partial | Streamable HTTP: DELETE (session end): PARTIAL | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):14 | none — needs an issue | OBSERVED |

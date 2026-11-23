@@ -1211,7 +1211,9 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 		return -1;
 	}
 	local acc_a = AIAccounting();
-	local laid = PrismaticAI.BuildRailAlong(path, sa.end, sb.end, 2, true, true);
+	/* One wait for money (RailCashWait) for both tracks of the line, not RAIL_CASH_WAIT_DAYS each. */
+	local cash = {days = 0};
+	local laid = PrismaticAI.BuildRailAlong(path, sa.end, sb.end, 2, true, true, cash);
 	local cost_a = acc_a.GetCosts();
 	if (laid == null) return 0;
 	local broken = PrismaticAI.VerifyRailLine(laid, sa.end, sb.end);
@@ -1237,7 +1239,7 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 	/* Track B runs beside track A: where it is found, its search took 0.88 to 1.09 times track A's
 	 * nodes (the fitness match above, four double lines), so twice that is its budget. */
 	local path2 = afford_b ? PrismaticAI.FindRailPath(da.b2, db.b2, da.s1, db.s1, taken, da.lane, true, true, 2 * nodes_a) : null;
-	if (path2 != null) laid2 = PrismaticAI.BuildRailAlong(path2, da.s1, db.s1, 2, true, true);
+	if (path2 != null) laid2 = PrismaticAI.BuildRailAlong(path2, da.s1, db.s1, 2, true, true, cash);
 	if (laid2 != null) {
 		broken = PrismaticAI.VerifyRailLine(laid2, da.s1, db.s1);
 		if (broken == -1) broken = PrismaticAI.VerifyJunction(da, true);
@@ -1487,7 +1489,13 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
 	/* Two companies that chose one producer in the same days both passed the check above: in the
 	 * fitness check's sibling match (seed 930967890) both PrismaticAI companies picked Wontford Coal
 	 * Mine in their first heartbeat, the second's track ran into the first's and its line failed.
-	 * With both source stations standing, the company of the higher id yields, before any track. */
+	 * With both source stations standing, the company of the higher id yields, before any track.
+	 * It settles only a race where both stations stand when the later check runs: the company of
+	 * the higher id may finish its station before the other's site search ends, see no rival and
+	 * keep it, while the lower one then sees a higher rival and keeps its own too. Waiting 10 days
+	 * before the check closed that window but delayed every line: on the fitness seed 930967890
+	 * the six PrismaticAI lineups summed 7.87M with the wait against 9.36M without, so it is not
+	 * done (research/incident-2026-11-22-sibling-industries.md, still open). */
 	local rival = PrismaticAI.ForeignRailStationAt(p);
 	if (rival != null && rival < AICompany.ResolveCompanyID(AICompany.COMPANY_SELF)) {
 		AILog.Warning("PrismaticAI: freight line " + label + " given up: company " + (rival + 1) +
