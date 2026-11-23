@@ -465,6 +465,47 @@ TEST_CASE("Only the owner's own click consents in the control window", "[prismat
 	CHECK(P::ConsentCommand(false, 12) == "prismatic_mcp deny 12");
 }
 
+TEST_CASE("A network client reads the server's approval queue from its '[approvals]' replies", "[prismatic_mcp]")
+{
+	ServerApprovalsReader r;
+	CHECK_FALSE(r.Feed("hello"));                      // ordinary chat is not the queue
+	CHECK_FALSE(r.Feed("[approvals] not json"));       // nor is a line that does not parse
+	CHECK_FALSE(r.Feed("[approvals] [1, 2]"));         // nor JSON that is not an object
+	CHECK(r.Feed(R"([approvals] {"id": 22, "tool": "ai.set_setting", "args": "{\"company\":0}", "chat_decidable": true})"));
+	CHECK(r.Feed(R"([approvals] {"id": 23, "tool": "ai.start", "chat_decidable": false, "args_truncated": true})"));
+	CHECK(r.rows.empty());                             // a reply counts once it is whole
+	CHECK(r.replies == 0);
+	CHECK(r.Feed(R"([approvals] {"count": 12, "page": 1, "pages": 2})"));
+	REQUIRE(r.rows.size() == 2);
+	CHECK(r.rows[0]["id"] == 22);
+	CHECK(r.rows[1]["tool"] == "ai.start");
+	CHECK(r.count == 12);                              // the server holds more than one page
+	CHECK(r.replies == 1);
+	/* The next whole reply replaces the queue; an empty one empties it. */
+	CHECK(r.Feed(R"([approvals] {"count": 0, "page": 1, "pages": 1})"));
+	CHECK(r.rows.empty());
+	CHECK(r.count == 0);
+	CHECK(r.replies == 2);
+	CHECK_FALSE(r.Feed(R"([approvals] {"page": 1})")); // neither a row nor the count
+
+	/* Not a network client here: the window keeps its own process's queue, and every reply line is
+	 * printed (none is swallowed), since this process asked for none. */
+	namespace P = PrismaticMCP::Panel;
+	CHECK_FALSE(P::OnServerChat("hello"));
+	CHECK_FALSE(P::OnServerChat(R"([approvals] {"id": 5, "tool": "ai.set_setting"})"));
+	CHECK_FALSE(P::OnServerChat(R"([approvals] {"count": 1, "page": 1, "pages": 1})"));
+
+	/* A server's approval that a chat approver may not decide says who decides it. */
+	json snap = {{"approvals", json::array({{{"id", 9}, {"tool", "ai.start"}, {"args", "{}"}, {"on_server", true}, {"chat_decidable", false}},
+		{{"id", 10}, {"tool", "ai.set_setting"}, {"args", "{}"}, {"on_server", true}, {"chat_decidable", true}}})}};
+	std::vector<P::Row> rows = P::Rows(snap);
+	auto approval = [&rows](uint64_t id) { return std::ranges::find_if(rows, [id](const P::Row &r) { return r.kind == P::Row::Kind::Approval && r.id == id; }); };
+	REQUIRE(approval(9) != rows.end());
+	CHECK(approval(9)->text.ends_with("(the server's operator decides)"));
+	REQUIRE(approval(10) != rows.end());
+	CHECK_FALSE(approval(10)->text.ends_with("(the server's operator decides)"));
+}
+
 TEST_CASE("A request is queued, listed with its kind and answered once", "[prismatic_mcp]")
 {
 	namespace M = PrismaticMCP::Menu;
