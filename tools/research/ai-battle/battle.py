@@ -2384,12 +2384,62 @@ ABLATION_REQUIRED = {"schema": str, "id": str, "generated_at": str, "seed": int,
                      "field": list, "match_cfg": dict, "rev": str, "tree_dirty": bool, "rows": list}
 ABLATION_ROW = ("variant", "settings", "exit_code", "value", "money", "vehicles", "rail", "road", "air",
                 "errors", "field_best", "t", "vs_first")
+# Optional per row (records from 2026-11-23 on): `standings`, the final company value of every company
+# of the variant's match keyed as its lineup names it, so a reader derives rank and strongest rival.
+# Optional per record: `imported`, the provenance of a record built after the run from its kept log.
 
 
 def ablation_vs_first(rows: list[dict]) -> list[float]:
     """Each variant's final value against the first (the baseline), as cmd_ablate records it."""
     base = rows[0]["value"] or 1
     return [round(r["value"] / base - 1, 4) for r in rows]
+
+
+def ablation_row(name: str, settings: str, exit_code: int | None, text: str, field: list[str],
+                 slot: int) -> dict:
+    """One variant's ablation row from its match log: its last quarterly referee sample, the best
+    opponent's final value, and `standings`, every company's last sample keyed as the lineup names
+    it (the opponents by AI, the variant by its name, at `slot`). `exit_code` is None when the run's
+    exit status was not kept (a record imported from a log)."""
+    series, errors = parse_log(text)
+    me = min(slot, len(field))
+    keys = list(field)
+    keys.insert(me, name)
+    mine = series.get(me, [])
+    last = mine[-1] if mine else {}
+    field_best = max((s[-1]["value"] for c, s in series.items() if c != me and s), default=0)
+    standings = [{"key": keys[c], "value": s[-1]["value"], "t": s[-1]["t"]}
+                 for c, s in sorted(series.items()) if s and c < len(keys)]
+    return {"variant": name, "settings": settings, "exit_code": exit_code,
+            "value": last.get("value", 0), "money": last.get("money", 0),
+            "vehicles": last.get("vehicles", 0), "rail": last.get("rail"), "road": last.get("road"),
+            "air": last.get("air"), "errors": errors.get(0, 0), "field_best": field_best,
+            "t": last.get("t", ""), "standings": standings}
+
+
+def standings_errors(rec: dict, r: dict, name: str) -> list[str]:
+    """What a row's optional `standings` must hold: one entry per company, each key named once
+    (the variant and every AI of the field), integer values, and the row's own value and best
+    opponent agreeing with them."""
+    st, where = r["standings"], f"{name}: row {r['variant']} standings"
+    if not isinstance(st, list) or not all(isinstance(e, dict) for e in st):
+        return [f"{where}: not a list of companies"]
+    if any(not isinstance(e.get("key"), str) or type(e.get("value")) is not int for e in st):
+        return [f"{where}: an entry lacks a string key or an integer value"]
+    keys = [e["key"] for e in st]
+    if len(set(keys)) != len(keys):
+        return [f"{where}: a company is named twice"]
+    want = set(rec["field"]) | {r["variant"]}
+    if set(keys) != want:
+        return [f"{where}: names {sorted(set(keys))}, the match held {sorted(want)}"]
+    value = {e["key"]: e["value"] for e in st}
+    errs = []
+    if value[r["variant"]] != r["value"]:
+        errs.append(f"{where}: the variant's value {value[r['variant']]} is not the row's {r['value']}")
+    best = max((v for k, v in value.items() if k != r["variant"]), default=0)
+    if best != r["field_best"]:
+        errs.append(f"{where}: the best opponent {best} is not the row's field_best {r['field_best']}")
+    return errs
 
 
 def validate_ablation(rec: dict, name: str) -> list[str]:
@@ -2419,6 +2469,9 @@ def validate_ablation(rec: dict, name: str) -> list[str]:
         errs.append(f"{name}: a variant is named twice")
     if [r["vs_first"] for r in rows] != ablation_vs_first(rows):
         errs.append(f"{name}: vs_first is not derived from the values")
+    for r in rows:
+        if "standings" in r:
+            errs += standings_errors(rec, r, name)
     return errs
 
 
@@ -2459,6 +2512,13 @@ def render_ablation_charts(rec: dict) -> str:
     return "\n".join(out)
 
 
+def imported_line(imp: dict) -> str:
+    """The provenance sentence of a record built after the run from its kept log."""
+    binary = f", binary `{imp['binary']}`" if imp.get("binary") else ""
+    return (f"Imported after the run from its kept log `{imp['log']}` (sha256 `{imp['log_sha256'][:16]}`)"
+            f"{binary}, by `{imp['by']}`; the run's exit status was not kept. {imp.get('note', '')}").rstrip()
+
+
 def render_ablation_md(rec: dict, charts: bool = True) -> str:
     mc, rows = rec["match_cfg"], rec["rows"]
     md = [f"# {rec['id']}", "",
@@ -2467,6 +2527,7 @@ def render_ablation_md(rec: dict, charts: bool = True) -> str:
           f"{rec['years']} years from {mc['start_year']}, at `{rec['rev'][:10]}`"
           f"{' (tree dirty)' if rec['tree_dirty'] else ''}. "
           "Each value is the variant's last quarterly referee sample. One seed: a direction, not a verdict.", "",
+          *([imported_line(rec["imported"]), ""] if rec.get("imported") else []),
           "| Variant | Value | vs first | Vehicles | Rail | Road | Air | Squirrel errors | Settings |",
           "|---|---|---|---|---|---|---|---|---|"]
     md += [f"| {r['variant']} | {r['value']:,} | {r['vs_first']:+.1%} | {r['vehicles']} | {r['rail']} | "
@@ -2881,16 +2942,7 @@ def cmd_ablate(cfg: dict, seed: int, years: int, variants: list[str], field: lis
             if log_dir:
                 Path(log_dir).mkdir(parents=True, exist_ok=True)
                 (Path(log_dir) / f"{name}.log").write_text(out)
-            series, errors = parse_log(out)
-            me = min(slot, len(field))
-            mine = series.get(me, [])
-            last = mine[-1] if mine else {}
-            field_best = max((s[-1]["value"] for c, s in series.items() if c != me and s), default=0)
-            rows.append({"variant": name, "settings": settings, "exit_code": proc.returncode,
-                         "value": last.get("value", 0), "money": last.get("money", 0),
-                         "vehicles": last.get("vehicles", 0), "rail": last.get("rail"), "road": last.get("road"),
-                         "air": last.get("air"), "errors": errors.get(0, 0), "field_best": field_best,
-                         "t": last.get("t", "")})
+            rows.append(ablation_row(name, settings, proc.returncode, out, field, slot))
     for r, vs in zip(rows, ablation_vs_first(rows)):
         r["vs_first"] = vs
         print(f"ablate: {r['variant']:12} value {r['value']:>12,} ({r['vs_first']:+.1%})  veh {r['vehicles']:>4} "
