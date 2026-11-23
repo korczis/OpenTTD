@@ -60,6 +60,19 @@ The same change fixes the client supervisor in `mcp-e2e`. Under `set -e`, a cras
 (`wait` returning 134) ended the restart loop, so the client was never restarted (seen
 2026-11-22, an abort in libiconv at Cocoa start-up).
 
+## Services
+
+`mcp-e2e --coplay` starts the panel services that a co-play game runs, so nobody has to post them by
+hand:
+
+- `arena` fills the other seven companies ([live-arena.md](live-arena.md)).
+- `replan` re-plans the bot every game month ([Planner and AlgoGlyph](mechanisms/planner-and-algoglyph.md#replanning-while-the-game-runs)).
+- `watchdog` says when a company has built nothing for longer than its data-tuned threshold, and
+  what holds it ([The progress watchdog](mechanisms/rhai-scripting.md#the-progress-watchdog)).
+
+`MCP_SERVICES` names another list, and an empty value starts none. A service that does not start is
+reported on stderr, and the stack runs on without it.
+
 ## Validation
 
 Run on 2026-11-22 on this branch (macOS, `build-gate-research`: RelWithDebInfo,
@@ -101,6 +114,17 @@ the news-refs branch. All 8 companies came back with their names, money and loan
 `/api/bots` listed all 8 AIs running: PrismaticAI four times, AAAHogEx, LuDiAI AfterFix, CivilAI
 and AdmiralAI. No new bot was started. The client half (`--coplay` after `--load`): NOT RUN on
 that check.
+
+### After a load
+
+A `load` on the server restarts its game, and every client reconnects in the same process. Upstream
+it rejoins as a spectator (`NetworkClientConnectGame(last_joined, COMPANY_SPECTATOR)` in
+`src/openttd.cpp`). In the game of 2026-11-22 the owner therefore landed among the spectators after
+each deploy and had to be moved back by hand (`move 3 1`). In a research build a client that played
+a company now asks for that company again (`ResearchRejoinCompany`,
+`src/network/core/network_game_info.cpp`). The co-play opening is server state that a load does not
+clear, so the server admits the owner into the co-play company as it did on the first join. A client
+that was a spectator rejoins as one.
 
 ## Limits
 
