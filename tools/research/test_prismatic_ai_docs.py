@@ -208,5 +208,24 @@ class Check(unittest.TestCase):
             docs.main(["--check"])
 
 
+class OneDefinitionPerFunction(unittest.TestCase):
+    """Squirrel keeps the last of two `function PrismaticAI::X` definitions without a word, in the
+    order main.nut requires the files: a merge of master brought a TrainPrice(train) into lines.nut
+    that silently replaced rail.nut's TrainPrice(line), and the fitness check's trainless test
+    lineup then threw 35 Squirrel errors (research/incident-2026-11-23-trainless-lines.md)."""
+
+    def test_no_prismatic_function_is_defined_twice(self):
+        import re
+        seen: dict[str, list[str]] = {}
+        for f in sorted((HERE / "prismatic-ai" / "PrismaticAI").glob("*.nut")):
+            for n, line in enumerate(f.read_text().splitlines(), 1):
+                m = re.match(r"function PrismaticAI::(\w+)\s*\(", line)
+                if m:
+                    seen.setdefault(m.group(1), []).append(f"{f.name}:{n}")
+        twice = {k: v for k, v in seen.items() if len(v) > 1}
+        self.assertTrue(seen, "no PrismaticAI function found: the pattern no longer matches the sources")
+        self.assertEqual(twice, {}, f"defined more than once (the last silently wins): {twice}")
+
+
 if __name__ == "__main__":
     unittest.main()

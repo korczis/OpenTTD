@@ -4561,8 +4561,10 @@ mod tests {
         assert_eq!(books_from_caller(&body(json!({"cash": 5, "max_loan": 9}))), json!({"cash": "caller", "loan": "missing", "max_loan": "caller"}));
     }
 
-    /// A game's MCP server for the live path: openttd://game/state at `tick`, one AI company 1,
-    /// openttd.ai.set_settings offered; every set_settings call is kept in `calls`.
+    /// A game's MCP server for the live path: openttd://game/state at `tick`, one AI company 1
+    /// (openttd://companies read at that tick, with its money, as the game's envelope carries it),
+    /// openttd.ai.set_settings offered; every set_settings call is kept in `calls` and answered as
+    /// the game answers a gated call, with a pending approval.
     fn fake_game(tick: i64, date: &str, calls: Arc<Mutex<Vec<Value>>>) -> u16 {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = l.local_addr().unwrap().port();
@@ -4575,13 +4577,30 @@ mod tests {
                 "tools/list" => json!({"jsonrpc": "2.0", "id": 1, "result": {"tools": [{"name": "openttd.ai.set_settings"}]}}),
                 "resources/read" => match call["params"]["uri"].as_str().unwrap_or("") {
                     "openttd://game/state" => res(json!({"game_tick": tick, "game_date": date})),
-                    // The game's own envelope (prismatic_mcp_server.cpp: env["data"] = {companies}).
-                    "openttd://companies" => res(json!({"game_tick": tick, "data": {"companies": [{"id": 1, "is_ai": true, "name": "A"}]}})),
+                    // The game's own envelope (prismatic_mcp_server.cpp: env["data"] = {companies}), read at
+                    // the tick and date of the game, each company with its books.
+                    "openttd://companies" => res(json!({"game_tick": tick, "game_date": date, "data": {"companies": [
+                        {"id": 1, "is_ai": true, "name": "A", "money": 5_000_000, "loan": 0, "max_loan": 300_000}]}})),
+                    // The server's queue the panel reads its pending approvals from (#211): every
+                    // set_settings call below is held as approval 40 + its place among the calls.
+                    "openttd://approvals" => res(json!({"data": {"approvals": calls.lock().unwrap().iter().enumerate()
+                        .filter(|(_, c)| c["name"] == "openttd.ai.set_settings")
+                        .map(|(i, c)| json!({"id": 41 + i, "tool": c["name"], "args": c["arguments"], "state": "pending",
+                                             "expired": false, "created_tick": tick, "expires_tick": tick + 74}))
+                        .collect::<Vec<_>>()}})),
                     other => res(json!({"error": format!("no {other}")})),
                 },
                 _ => {
-                    calls.lock().unwrap().push(call["params"].clone());
-                    json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": json!({"ok": true, "applied": 17}).to_string()}]}})
+                    let mut seen = calls.lock().unwrap();
+                    seen.push(call["params"].clone());
+                    let answer = if call["params"]["name"] == "openttd.ai.set_settings" {
+                        let id = 40 + seen.len();
+                        json!({"status": "pending_approval", "approval_id": id,
+                               "message": format!("Approval required in OpenTTD: prismatic_mcp approve {id}")})
+                    } else {
+                        json!({"ok": true, "applied": 17})
+                    };
+                    json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": answer.to_string()}]}})
                 }
             };
             hub::respond(c, 200, "application/json", out.to_string().as_bytes());
@@ -4640,6 +4659,37 @@ mod tests {
         assert!(calls.lock().unwrap().is_empty(), "nothing set in a world behind the snapshot");
         let ev = g.bus.since(since, &kinds_of("plan.directive"), 10);
         assert_eq!(ev.last().unwrap()["data"]["choice"]["outcome"], "world_changed");
+    }
+
+    /// RESEARCH-ONLY, ignored: the stand-in that tools/research/battlebrain-cutover-check runs the
+    /// cutover script against. One real panel per world of $BATTLEBRAIN_STANDIN_WORLDS
+    /// (`name=tick,date;...`), each on its own loopback port in front of `fake_game` at that tick;
+    /// it writes each panel's URL to $BATTLEBRAIN_STANDIN_DIR/<name>.url and serves until that
+    /// directory holds `stop` (at most 15 minutes). The panels share this process's Rhai shared
+    /// memory and pull keys, as one panel's calls do. Without the directory it does nothing.
+    #[test]
+    #[ignore]
+    fn the_cutover_rehearsal_stand_in() {
+        let Some(dir) = std::env::var_os("BATTLEBRAIN_STANDIN_DIR").map(std::path::PathBuf::from) else { return };
+        let worlds = std::env::var("BATTLEBRAIN_STANDIN_WORLDS").unwrap_or_default();
+        for w in worlds.split(';').filter(|w| !w.is_empty()) {
+            let (name, at) = w.split_once('=').expect("name=tick,date");
+            let (tick, date) = at.split_once(',').expect("tick,date");
+            let game = fake_game(tick.parse().expect("a tick"), date, Arc::new(Mutex::new(Vec::new())));
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = l.local_addr().unwrap().port().to_string();
+            let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", &port, "--mcp-port", &game.to_string()].map(String::from)).unwrap();
+            let g = Game::new(args);
+            g.mcp_up.store(true, Ordering::SeqCst);
+            *g.token.lock().unwrap() = Some("t".into());
+            std::fs::write(dir.join(format!("{name}.url")), format!("http://127.0.0.1:{port}")).unwrap();
+            let p = Arc::new(Panel { game: g, routes: routes() });
+            thread::spawn(move || serve(l, p));
+        }
+        let until = Instant::now() + Duration::from_secs(900);
+        while !dir.join("stop").exists() && Instant::now() < until {
+            thread::sleep(Duration::from_millis(100));
+        }
     }
 
     #[test]

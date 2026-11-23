@@ -3,13 +3,15 @@
  *
  * Line format (one per company, all fields space separated key=value, name last because
  * it may contain spaces):
- *   REF Q date=<y>-<m> cid=<n> value=<v> money=<m> income=<i> perf=<p> vehicles=<n>
+ *   REF Q date=<y>-<m> cid=<n> value=<v> money=<m> loan=<l> income=<i> perf=<p> vehicles=<n>
  *       stations=<n> rail=<n> road=<n> air=<n> water=<n> prail=<p> proad=<p> pair=<p>
  *       pwater=<p> cargo=<delivered> expenses=<e> name=<company name>
  * rail..water count vehicles by transport mode; prail..pwater are their summed profit last year;
  * cargo is cargo delivered and expenses the expenses, both of the last completed quarter.
  * value/income/perf are for the last *completed* quarter (GSCompany quarter index 1);
- * money, vehicles and stations are the current values.
+ * money (the bank balance, borrowed money included), loan, vehicles and stations are the current
+ * values: a company that just drew its whole loan to build shows the loan as money, so the
+ * orchestrator judges hoarding on money minus loan (battle.py hoarding).
  *
  * Shared producers, one line per producing industry whose output rail stations of two or more
  * companies pick up (a station with a rating for one of its cargoes), after the company lines
@@ -17,11 +19,50 @@
  *   REF S date=<y>-<m> ind=<industry id> owners=<cid>,<cid>[,...] name=<industry name>
  * Two lines at one producer split its output by station rating; the orchestrator fails the fitness
  * check when two of them are PrismaticAI's (research/incident-2026-11-22-sibling-industries.md).
+ *
+ * Trainless rail stations, one line per company with a rail station, after the shared producers:
+ *   REF T date=<y>-<m> cid=<n> rail_stations=<n> trainless=<n> ids=<station id>,<station id>[,...]
+ * trainless counts the company's rail stations that no train of its own has orders to: the termini
+ * of lines that never got a train or were given up half laid; ids names them (empty when none). The
+ * orchestrator fails the fitness check when a PrismaticAI company keeps the same ones for a year, so
+ * a line still being laid does not count (research/incident-2026-11-23-trainless-lines.md).
  */
 class BattleReferee extends GSController {
 	function Start();
 	function Report();
 	function ReportShared(d);
+	function ReportTrainless(d);
+	function LoanOf(c);
+}
+
+/* The loan of company `c`: GSCompany.GetLoanAmount answers for the company of the current mode
+ * only, so it is read in that company's mode, which ends when this function returns. */
+function BattleReferee::LoanOf(c)
+{
+	local mode = GSCompanyMode(c);
+	return GSCompany.GetLoanAmount();
+}
+
+function BattleReferee::ReportTrainless(d)
+{
+	local rail = {}, bare = {}, ids = {};
+	foreach (st, _ in GSStationList(GSStation.STATION_TRAIN)) {
+		local o = GSStation.GetOwner(st);
+		rail[o] <- (rail.rawin(o) ? rail[o] : 0) + 1;
+		/* The trains of the station's own company that have orders to it (deity mode sees all). */
+		local trains = GSVehicleList_Station(st);
+		trains.Valuate(GSVehicle.GetVehicleType);
+		trains.KeepValue(GSVehicle.VT_RAIL);
+		trains.Valuate(GSVehicle.GetOwner);
+		trains.KeepValue(o);
+		if (!trains.IsEmpty()) continue;
+		bare[o] <- (bare.rawin(o) ? bare[o] : 0) + 1;
+		ids[o] <- (ids.rawin(o) ? ids[o] + "," : "") + st;
+	}
+	foreach (o, n in rail) {
+		GSLog.Error("REF T date=" + GSDate.GetYear(d) + "-" + GSDate.GetMonth(d) + " cid=" + o
+			+ " rail_stations=" + n + " trainless=" + (bare.rawin(o) ? bare[o] : 0) + " ids=" + (ids.rawin(o) ? ids[o] : ""));
+	}
 }
 
 function BattleReferee::ReportShared(d)
@@ -84,6 +125,7 @@ function BattleReferee::Report()
 			+ " cid=" + c
 			+ " value=" + GSCompany.GetQuarterlyCompanyValue(c, 1)
 			+ " money=" + GSCompany.GetBankBalance(c)
+			+ " loan=" + this.LoanOf(c)
 			+ " income=" + GSCompany.GetQuarterlyIncome(c, 1)
 			+ " perf=" + GSCompany.GetQuarterlyPerformanceRating(c, 1)
 			+ " vehicles=" + (a.n[0] + a.n[1] + a.n[2] + a.n[3])
@@ -95,6 +137,7 @@ function BattleReferee::Report()
 			+ " name=" + GSCompany.GetName(c));
 	}
 	this.ReportShared(d);
+	this.ReportTrainless(d);
 }
 
 function BattleReferee::Start()

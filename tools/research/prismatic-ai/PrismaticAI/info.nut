@@ -306,7 +306,7 @@ class PrismaticAI extends AIInfo {
 		});
 		AddSetting({
 			name = "own_fail_pause",
-			description = "After this many own freight lines in a row could not be built, try no more that game year (a failed line still costs its stations); 0: never pause.",
+			description = "After this many own freight lines in a row could not be built, try no more that game year (a failed line still costs its stations); 0: at most 8 a game year (main.nut OWN_FAIL_YEAR_MAX).",
 			min_value = 0, max_value = 10,
 			easy_value = 6, medium_value = 6, hard_value = 6, custom_value = 6, step_size = 1,
 			flags = CONFIG_INGAME,
@@ -447,6 +447,22 @@ class PrismaticAI extends AIInfo {
 		AddSetting({
 			name = "self_steward",
 			description = "1: with no steward's target for a rail line, the bot applies the Rhai steward's policy itself (lengthen, add a train, shrink, close) and reinvests idle money in more own lines beyond own_lines (steward.nut); 0: lines run what the external steward sets.",
+			min_value = 0, max_value = 1,
+			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
+		/* The in-bot steward's capital rules (steward.nut, lines.nut): a full-load train takes the
+		 * cargo it waits for, so "a trainload waiting" rarely shows that a line is short of trains. */
+		AddSetting({
+			name = "steward_rating",
+			description = "In-bot steward: an earning rail line whose source station rates its cargo below this percent gets one more train (up to trains_max, its newest train at least 90 days old, a source platform free). The rating falls with the days between pickups, which a full-load train hides from the cargo waiting (steward.nut; 0: off, only waiting cargo grows a line).",
+			min_value = 0, max_value = 100,
+			easy_value = 55, medium_value = 55, hard_value = 55, custom_value = 55, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "steward_borrow",
+			description = "1 (default): a rail line whose trains earn may borrow for the next train the steward set, while the loan stays at most half its limit and the headroom left holds a line budget and two quarters of running costs (lines.nut FundTrain); 0: a new train only from the bank balance, which RepaySurplus keeps near the reserve.",
 			min_value = 0, max_value = 1,
 			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
 			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
@@ -600,6 +616,45 @@ class PrismaticAI extends AIInfo {
 			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
 			step_size = 1,
 			flags = CONFIG_INGAME,
+		});
+		/* Yield (fleet.nut RouteLoad, RoadPays; autopilot.nut AirRoutesPay): money goes where it earns. */
+		AddSetting({
+			name = "load_add_min",
+			description = "Yield: no vehicle is added to a road, air or water route (fleet growth, InvestSurplus) whose vehicles ran under this percent full over the last heartbeats, sampled while they run (fleet.nut RouteLoad; 0: off).",
+			min_value = 0, max_value = 100,
+			easy_value = 50, medium_value = 50, hard_value = 50, custom_value = 50, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "road_yield",
+			description = "Yield: a new bus route is built only while our road vehicles a year old earned, last year, at least this percent of their price between them; before any is a year old, only while fewer than road_probes road routes run (fleet.nut RoadPays; 0: off).",
+			min_value = 0, max_value = 200,
+			easy_value = 20, medium_value = 20, hard_value = 20, custom_value = 20, step_size = 5,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "road_probes",
+			description = "Yield: how many bus routes run before any road vehicle is a year old and road_yield can judge them (fleet.nut RoadPays).",
+			min_value = 0, max_value = 30,
+			easy_value = 2, medium_value = 2, hard_value = 2, custom_value = 2, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "air_yield_routes",
+			description = "Yield: autopilot air routes beyond air_routes_max, one at a time, each once every air route we fly has planes a year old that earned last year at least their price / invest_ppv_div a plane (autopilot.nut AirRoutesPay; 0: off).",
+			min_value = 0, max_value = 30,
+			easy_value = 8, medium_value = 8, hard_value = 8, custom_value = 8, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
+		/* RESEARCH-ONLY test hook (rail.nut BuildTrain, TestRefuseDepot; lines.nut TestForgetTrainless): drives the paths a crowded map takes
+		 * only by chance, so the headless fitness check runs them on every change. */
+		AddSetting({
+			name = "test_trainless",
+			description = "RESEARCH-ONLY test hook. 1: the first train of every new rail line, and every other new line's depot, is refused as if for money, so the line waits trainless for KeepLinesServed to buy it; 2: as 1, and once a game month the bot forgets its lines that still have no train, as a restart would, so AdoptTrainlessLines (monthly in this mode, yearly otherwise) takes them back from the map. 0 (default): off.",
+			min_value = 0, max_value = 2,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			step_size = 1,
+			flags = CONFIG_NONE,
 		});
 	}
 }

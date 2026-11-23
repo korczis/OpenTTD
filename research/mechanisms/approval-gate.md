@@ -103,7 +103,10 @@ queue:
   deadline off). With no argument the command prints the policy in force. `approve` is consent given
   in advance, so it is refused where `approve` is refused: an armed console (`PRISMATIC_MCP_INPUT=1`)
   and the panel's `POST /api/console` (`is_approval_line`). The owner types it at the server's own
-  console.
+  console. A dedicated server has no console of its own, so its operator gives the policy when
+  starting it: `PRISMATIC_MCP_APPROVAL_DEADLINE=<days>[:keep|approve]` in the environment, read once
+  at start (`detail::ParseDeadlinePolicyText`), or `mcp-e2e --approval-deadline 30:approve`. A
+  malformed value keeps the default, and the log says so.
 - **Where you see it:** `openttd://approvals` gives each approval its `deadline_tick` and
   `settled_by`, and the queue its `deadline` (`ticks`, `days`, `verdict`). `prismatic_mcp approvals`
   prints `deadline_tick=` on a pending row and `settled_by=` on a settled one, and the log says

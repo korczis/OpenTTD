@@ -147,6 +147,47 @@ function PrismaticAI::ClearPath(path) {
 	return n;
 }
 
+/* What a clone of `train` costs now: every part at its engine's price. */
+function PrismaticAI::TrainPrice(train) {
+	local price = 0;
+	for (local i = 0; i < AIVehicle.GetNumWagons(train); i++) price += AIEngine.GetPrice(AIVehicle.GetWagonEngineType(train, i));
+	return price;
+}
+
+/* Money for one more train of `line`, a clone of `train`. Returns the loan before the purchase, or
+ * -1 when the train cannot be paid.
+ * - The bank balance pays when it holds `reserve` plus the price.
+ * - Otherwise, with setting steward_borrow, a line whose trains earn (steward.nut LineEarns) borrows
+ *   what is missing while the company is not frozen (main.nut BuildFrozen), the loan stays at most
+ *   half its limit and the headroom left still holds a line budget and two quarters of running
+ *   costs.
+ * RepaySurplus (main.nut) pays the loan down to the reserve after every heartbeat, so the bank alone
+ * almost never held a train's price: in the owner's live game (seed 15805, 1958-08) a coal line
+ * earning 33.9k a year per train kept its one train of trains_max 2 with 13k in the bank and 250k of
+ * the loan unused, while its buses earned about 370 a year each. */
+function PrismaticAI::FundTrain(line, train, reserve) {
+	local price = PrismaticAI.TrainPrice(train);
+	local bank = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
+	local loan = AICompany.GetLoanAmount();
+	if (bank >= reserve + price) return loan;
+	if (AIController.GetSetting("steward_borrow") != 1 || !PrismaticAI.LineEarns(this.LineStats(line))) return -1;
+	local afloat = PrismaticAI.QuarterRunningCost();
+	if (this.BuildFrozen(afloat)) return -1;
+	local max_loan = AICompany.GetMaxLoanAmount();
+	local step = AICompany.GetLoanInterval();
+	local want = min(max_loan, loan + ((reserve + price - bank) / step + 1) * step);
+	/* The loan stays at most half its limit, and the headroom after it still holds a line budget and
+	 * two quarters of running costs. Early in a game the loan pays for the lines: in a replay of
+	 * seed 4242 a train borrowed for with 280k of 300k drawn left the bank at the reserve, the next
+	 * quarter's survival borrowing froze construction (BuildFrozen) and the company built four
+	 * freight lines where master built seven. */
+	local line_budget = AIController.GetSetting("line_budget");
+	if (2 * want > max_loan || max_loan - want < line_budget + 2 * afloat) return -1;
+	if (!AICompany.SetLoanAmount(want)) return -1;
+	AILog.Info("PrismaticAI: borrowed " + (want - loan) + " for a train of " + line.label + " (price " + price + ", bank was " + bank + ")");
+	return loan;
+}
+
 /* Make every line what its targets say (see the head of this file). */
 function PrismaticAI::ReconcileLines(reserve) {
 	foreach (i, line in RAIL_LINES) {
@@ -192,11 +233,20 @@ function PrismaticAI::ReconcileLines(reserve) {
 			local running = 0;
 			foreach (t in trains) if (!this.selling.rawin(t)) running++;
 			/* A line whose track cannot be repaired or whose trains get lost gets no new train (events.nut). */
-			if (running < want_trains && running > 0 && !PrismaticAI.LineHalted(line) && AICompany.GetBankBalance(AICompany.COMPANY_SELF) >= reserve) {
-				local nv = AIVehicle.CloneVehicle(line.depot, trains[0], true);
-				if (AIVehicle.IsValidVehicle(nv)) {
+			if (running < want_trains && running > 0 && !PrismaticAI.LineHalted(line)) {
+				/* Every missing train at once (steward.nut STEWARD_ROUND_NOTE), each paid from the bank
+				 * or, for a line that earns, from the loan (FundTrain). */
+				while (running < want_trains) {
+					local loan_before = this.FundTrain(line, trains[0], reserve);
+					if (loan_before < 0) break;
+					local nv = AIVehicle.CloneVehicle(line.depot, trains[0], true);
+					if (!AIVehicle.IsValidVehicle(nv)) {
+						if (AICompany.GetLoanAmount() > loan_before) AICompany.SetLoanAmount(loan_before);
+						break;
+					}
 					AIVehicle.StartStopVehicle(nv);
-					AILog.Info("PrismaticAI: rail line " + slot + ": added train " + nv + " (" + (running + 1) + " of " + want_trains + ")");
+					running++;
+					AILog.Info("PrismaticAI: rail line " + slot + ": added train " + nv + " (" + running + " of " + want_trains + ")");
 				}
 			} else if (running > want_trains) {
 				local newest = -1;
@@ -206,4 +256,153 @@ function PrismaticAI::ReconcileLines(reserve) {
 			}
 		}
 	}
+}
+
+/* Industries further than this (tiles, to their location) are not looked at for a station: past any
+ * industry's size plus the station spread the game allows by default (12) and the catchment. */
+const ADOPT_INDUSTRY_REACH = 32;
+
+/* Adopting trainless lines: a pair of our rail stations, at least one of them with no train of ours
+ * calling (the other may be a station a served line joined), that no line of RAIL_LINES runs between
+ * and no train of ours serves both of. The first station's catchment holds a producer of a freight
+ * cargo, the second's an industry that accepts it (CaughtIndustry), the two are joined by our own track (RailWalk, events.nut), and a joined rail depot is near
+ * one of them (RestoreDepot, DepotJoined). Such a pair is a finished line that lost its train before
+ * KeepTrainlessLine existed, or one a restart forgot: it goes into RAIL_LINES with no train, and
+ * KeepLinesServed buys its first train once the bank holds the train's price. In the owner's live
+ * game (seed 15805) two finished iron ore lines stood like this from 1952 and 1953 while 535k lay in
+ * the bank by 1962 (research/incident-2026-11-23-trainless-lines.md). A pair the walk cannot join is
+ * left alone; a train that still gets lost is handled as on any line (events.nut: sold, the line
+ * halted). Runs from Start after Restore and once a game year (AdoptKey). Returns the lines adopted. */
+function PrismaticAI::AdoptTrainlessLines() {
+	local pairs = {}, depots = {};
+	foreach (line in RAIL_LINES) {
+		local a = AIStation.GetStationID(line.a), b = AIStation.GetStationID(line.b);
+		pairs[a + "-" + b] <- true;
+		pairs[b + "-" + a] <- true;
+		if (line.depot >= 0) depots[line.depot] <- true;
+	}
+	/* Our rail stations by their first platform tile, with the rail vehicles of ours that call. */
+	local all = [], orphans = 0;
+	foreach (st, _ in AIStationList(AIStation.STATION_TRAIN)) {
+		local tiles = AITileList_StationType(st, AIStation.STATION_TRAIN);
+		if (tiles.IsEmpty()) continue;
+		local calls = AIVehicleList_Station(st);
+		calls.Valuate(AIVehicle.GetVehicleType);
+		calls.KeepValue(AIVehicle.VT_RAIL);
+		all.push({st = st, tile = tiles.Begin(), calls = calls});
+		if (calls.IsEmpty()) orphans++;
+	}
+	if (orphans == 0) return 0;
+	local adopted = 0, used = {};
+	foreach (src in all) {
+		if (used.rawin(src.st)) continue;
+		foreach (c, _ in AICargoList()) {
+			if (!AICargo.IsFreight(c) || used.rawin(src.st)) continue;
+			local p = PrismaticAI.CaughtIndustry(AIIndustryList_CargoProducing(c), src, true);
+			if (p == -1) continue;
+			foreach (dst in all) {
+				if (dst.st == src.st || used.rawin(dst.st) || pairs.rawin(src.st + "-" + dst.st)) continue;
+				if (!src.calls.IsEmpty() && !dst.calls.IsEmpty()) continue;
+				/* A train of ours that calls at both already serves the pair. */
+				local both = false;
+				foreach (v, _ in src.calls) if (dst.calls.HasItem(v)) { both = true; break; }
+				if (both) continue;
+				local q = PrismaticAI.CaughtIndustry(AIIndustryList_CargoAccepting(c), dst, false);
+				if (q == -1 || q == p) continue;
+				if (!PrismaticAI.RailWalk(src.tile, dst.tile).joined) continue;
+				local depot = PrismaticAI.RestoreDepot(src.tile, dst.tile, depots);
+				if (depot == -1 || !PrismaticAI.DepotJoined(depot)) continue;
+				local pa = PrismaticAI.RestorePlatform(src.tile), pb = PrismaticAI.RestorePlatform(dst.tile);
+				local platforms = max(1, min(min(pa.rows, pb.rows), 2));
+				local line = {a = src.tile, b = dst.tile, depot = depot, cargo = c, wagons = 0,
+					flags = AIOrder.OF_FULL_LOAD_ANY, railtype = AIRail.GetRailType(src.tile), restored = 0,
+					len = max(1, min(pa.len, pb.len)), trains_max = platforms, platforms = platforms,
+					path = [], stations = [], closed = false, from = p, to = q, adopted = true,
+					label = AICargo.GetCargoLabel(c) + " " + AIIndustry.GetName(p) + " - " + AIIndustry.GetName(q)};
+				RAIL_LINES.push(line);
+				depots[depot] <- true;
+				pairs[src.st + "-" + dst.st] <- true;
+				pairs[dst.st + "-" + src.st] <- true;
+				/* An orphan joins one line; a station a served line joined may join more. */
+				if (src.calls.IsEmpty()) used[src.st] <- true;
+				if (dst.calls.IsEmpty()) used[dst.st] <- true;
+				this.freight_tried[p + "-" + q + "-" + c] <- true;
+				adopted++;
+				AILog.Warning("PrismaticAI: adopted trainless rail line " + line.label + " (stations " + src.st + " and " +
+					dst.st + ", depot " + depot + "); it waits for its first train");
+				AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
+				break;
+			}
+		}
+	}
+	return adopted;
+}
+
+/* The industry of `list` that the rail station `stn` ({st, tile}) serves: whose producing tiles
+ * (`producing`) or accepting tiles the station's catchment covers, the nearest first; -1 when none.
+ * By catchment and not by distance: a station can stand 19 tiles from its industry's location
+ * (the industry's north corner), past RESTORE_INDUSTRY_REACH, and still serve it (fitness seed
+ * 930967890, Pronhattan Forest). */
+function PrismaticAI::CaughtIndustry(list, stn, producing) {
+	local radius = AIStation.GetCoverageRadius(AIStation.STATION_TRAIN);
+	list.Valuate(AIIndustry.GetDistanceManhattanToTile, stn.tile);
+	list.KeepBelowValue(ADOPT_INDUSTRY_REACH + 1);
+	list.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
+	foreach (i, _ in list) {
+		local tiles = producing ? AITileList_IndustryProducing(i, radius) : AITileList_IndustryAccepting(i, radius);
+		foreach (t, _ in tiles) {
+			if (AIRail.IsRailStationTile(t) && AIStation.GetStationID(t) == stn.st) return i;
+		}
+	}
+	return -1;
+}
+
+/* test_trainless=2 (RESEARCH-ONLY, info.nut): once a game month, before AdoptTrainlessLines, the bot
+ * forgets its lines that never ran a train, as a restart from the map would (restore.nut rebuilds a
+ * line only from its trains). Their stations, track and depot stay, so the adoption must find them
+ * again on the map. Returns the number of lines forgotten. */
+function PrismaticAI::TestForgetTrainless() {
+	if (AIController.GetSetting("test_trainless") < 2) return 0;
+	local keep = [], forgot = 0;
+	foreach (line in RAIL_LINES) {
+		/* A line still waiting for its depot has none for the adoption to find (open finding of
+		 * research/incident-2026-11-23-trainless-lines.md): it is kept. */
+		if (!("first" in line) && !line.closed && !("adopted" in line) && !("depot_pending" in line)) { forgot++; continue; }
+		keep.push(line);
+	}
+	if (forgot == 0) return 0;
+	RAIL_LINES.clear();
+	foreach (line in keep) RAIL_LINES.push(line);
+	AILog.Warning("PrismaticAI: test_trainless forgot " + forgot + " trainless line(s)");
+	return forgot;
+}
+
+/* The period AdoptTrainlessLines runs once in: the game year, or the game month with
+ * test_trainless=2 (RESEARCH-ONLY), so a forgotten line waits a month and not a year. */
+function PrismaticAI::AdoptKey() {
+	if (AIController.GetSetting("test_trainless") >= 2) return PrismaticAI.MonthKey();
+	return AIDate.GetYear(AIDate.GetCurrentDate());
+}
+
+/* Days a line halted by lost trains (events.nut, `lost_trains`) may stand with no train at all
+ * before it is closed: LOST_SELL_DAYS already sold the train that got lost, and the line takes no
+ * new one until a lost train reaches a station, which a sold train never does. */
+const HALTED_CLOSE_DAYS = 180;
+
+/* Closes every line halted by lost trains that has had no train for HALTED_CLOSE_DAYS (CloseLine:
+ * track, stations and depot go). Such a line otherwise keeps its stations, upkeep and producer for
+ * the rest of the game: on the fitness seed after the merge of 2026-11-23, `WOOD Hartburg Forest -
+ * Pronhattan Sawmill` (double track, 599 tiles) stood like this from its train's sale to the end
+ * (research/incident-2026-11-23-trainless-lines.md). Runs with AdoptTrainlessLines. Returns the
+ * number of lines closed. */
+function PrismaticAI::CloseHaltedLines() {
+	local now = AIDate.GetCurrentDate(), closed = 0;
+	foreach (i, line in RAIL_LINES) {
+		if (line.closed || !("lost_trains" in line) || now - line.lost_trains < HALTED_CLOSE_DAYS) continue;
+		if (PrismaticAI.TrainsOf(line).len() > 0) continue;
+		AILog.Warning("PrismaticAI: rail line " + (i + 1) + " (" + line.label + ") has been halted by lost trains for " +
+			(now - line.lost_trains) + " days with no train; closing it");
+		if (this.CloseLine(i + 1, line)) closed++;
+	}
+	return closed;
 }

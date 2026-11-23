@@ -33,11 +33,11 @@ another personal directory: Linux uses `$XDG_DATA_HOME/openttd`, and a test run 
 | `main.nut` | The heartbeat: the planner's air, freight and passenger lines first, then the bot's own lines, buses, fleet, line reconciliation and loan |
 | `rail.nut` | Rail lines: termini with a throat, the A* line search, laying, the walk check, depots, trains, platform length; the opt-in double track (`BuildDoubleRailLineAndTrain`: a junction at each terminus, two one-way tracks, one-way path signals) |
 | `lines.nut` | Rail lines as desired state: line slots, the record the Rhai steward reads (with station ids), and the reconciliation of its targets; closing removes only what the line owns |
-| `fleet.nut` | Road, air and ship capacity follows waiting cargo and the link graph's planned flow; vehicles that lose money are sold |
+| `fleet.nut` | Road, air and ship capacity follows waiting cargo and the link graph's planned flow; vehicles that lose money are sold; no vehicle more on a route that runs part empty (`load_add_min`) and no new bus route while the road does not pay (`road_yield`); a yearly road and air report in the log |
 | `ships.nut` | Ships behind `ships_max` (0, default: none; RESEARCH-ONLY): the bot's own water routes from an oil rig or a coastal producer to an acceptor by the sea, or between two coastal towns, scored by estimated yearly profit, checked on the map before anything is built (dock sites in `AITestMode`, an A* over water), then docks, a ship depot and ships; `fleet.nut` grows and sells them like road and air routes |
 | `catchment.nut`, `statues.nut` | Mechanisms learned from AAAHogEx: joined drive-through stops that ring each airport to collect the whole town, and statues in the towns of our stations; each behind its setting, off by default |
 | `autopilot.nut` | Autopilot's own air routes for a bot without a plan: the best big-town pairs, built first on borrowed money with a real budget check; a half-built route takes its airport down again |
-| `steward.nut` | The in-bot steward behind `self_steward=1`: the Rhai steward's line policy for lines with no external target, and reinvestment of idle money in more own lines; on a double-track line, a train more while half a trainload waits and no train loads at the source |
+| `steward.nut` | The in-bot steward behind `self_steward=1`: the Rhai steward's line policy for lines with no external target, and reinvestment of idle money in more own lines; on a double-track line, a train more while half a trainload waits and no train loads at the source; on any line that earns, a train more while its source station rates the cargo below `steward_rating` (a full-load train hides a shortage of trains from the cargo waiting), and with `steward_borrow` such a train may be paid from the loan (`lines.nut` `FundTrain`) |
 | `roadstop.nut`, `intercity.nut`, `air.nut` | Bus stops and depots facing their road, intercity roads tile by tile, airports and aircraft |
 | `rich.nut` | Rich growth behind `rich_growth=1`: once the bank holds `rich_budgets` line budgets (5 by default), the caps that ran out are lifted (routes, air hubs, planes per route while its airports have room, own lines from poorly served producers too) |
 | `modernize.nut` | Fleet modernisation behind `modernize=1`: the game's autoreplace from every engine the bot runs to the better one its builders would buy now; vehicles on their way to be sold are protected from it |
@@ -60,6 +60,12 @@ Full rationale: [`research/rail-steward.md`](../../../research/rail-steward.md),
   platforms into the single line, with a path signal on each platform's exit. A train leaves only
   when it can reserve its way into a free platform at the other end, so up to `trains_max`
   trains share one track without a passing loop.
+- **A terminus finds a site on hilly land** (`BuildRailStationAt`). It tries the axis toward the
+  other end, then the other axis, then the reversed exit. In each it takes the catching site
+  with the most cargo: flat first, then sloped land the game builds on with foundations
+  (`construction.build_on_slopes`; `FitsOnFoundations`, then a test-mode build). It levels a
+  site only when no orientation has one. Sites used to be flat and on one axis only, and in the
+  owner's hilly 1950 settings about half of the failed own lines ended there.
 - **The laid line is walked** (`VerifyRailLine`) before any train is bought. A missing piece is
   laid again, and a line that stays broken gets no train.
 - **Every wagon is checked.** A wagon the game will not refit or couple (a NewGRF rule) is sold
@@ -133,6 +139,7 @@ The measured effect is in `research/ai-battle/README.md` (section *Double track*
 | `rail_double` | the owner, any surface above | 1: the bot's own new freight lines are double track, see below; 0 (default): single track, unchanged |
 | `autopilot` with a plan | the panel | since 2026-11-19 a plan no longer switches growth off: the planner's lines come first, and then the in-bot steward, the autopilot's own air routes and InvestSurplus run on top (`main.nut` `grows`) |
 | `self_steward` | the owner, e.g. the headless LAN AI battle ([`research/ai-battle/README.md`](../../../research/ai-battle/README.md)) | 1: lines without a steward's target follow the Rhai steward's policy inside the bot, and idle money funds own lines beyond `own_lines` (`steward.nut`); 0 (default): unchanged |
+| `steward_rating`, `steward_borrow` | the same surfaces | with `self_steward=1`: an earning line gets a train more while its source station rates the cargo below `steward_rating` percent (default 55; 0: off), and `steward_borrow` (default 1) lets such a line borrow for it while the loan stays at most half its limit (`steward.nut`, `lines.nut` `FundTrain`; evidence in [`research/rail-steward.md`](../../../research/rail-steward.md#the-in-bot-stewards-capital)) |
 
 Every finished line logs a record once at build time and again every game month:
 
@@ -149,7 +156,7 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 
 <!-- prismatic-ai-settings:begin -->
 
-164 settings in 76 declarations, 164 of them live-changeable (`CONFIG_INGAME`), 36 genes of the battle's genetic algorithm (`tuning` in [`battle.json`](../ai-battle/battle.json)). Derived from [`PrismaticAI/info.nut`](PrismaticAI/info.nut) by `derive_docs.py`.
+171 settings in 83 declarations, 170 of them live-changeable (`CONFIG_INGAME`), 36 genes of the battle's genetic algorithm (`tuning` in [`battle.json`](../ai-battle/battle.json)). Derived from [`PrismaticAI/info.nut`](PrismaticAI/info.nut) by `derive_docs.py`.
 
 | Setting | Default | Range / step | Live | GA | Description |
 |---|---|---|---|---|---|
@@ -187,7 +194,7 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 | [`air_reuse`](PrismaticAI/info.nut#L286) | 0 | 0 / 1 | yes | gene | Autopilot: once no pair of fresh towns is left, a new air route may fly from an airport of ours (a hub); 0: one route per airport. |
 | [`air_level_step`](PrismaticAI/info.nut#L293) | 8 | 0 .. 8 | yes | gene | Most height steps between the corners of an airport site that is still levelled (a bigger step moves corners outside the site, where houses and roads stop it); 0: any step until a levelled site is refused in this game, then 1. |
 | [`air_level_once`](PrismaticAI/info.nut#L300) | 0 | 0 / 1 | yes | gene | 1: an airport search levels no further site once a levelled site was refused anyway (a corner shared with a house or road does not move); 0: it keeps levelling. |
-| [`own_fail_pause`](PrismaticAI/info.nut#L307) | 6 | 0 .. 10 | yes | gene 1 .. 6 | After this many own freight lines in a row could not be built, try no more that game year (a failed line still costs its stations); 0: never pause. |
+| [`own_fail_pause`](PrismaticAI/info.nut#L307) | 6 | 0 .. 10 | yes | gene 1 .. 6 | After this many own freight lines in a row could not be built, try no more that game year (a failed line still costs its stations); 0: at most 8 a game year (main.nut OWN_FAIL_YEAR_MAX). |
 | [`air_keep_last`](PrismaticAI/info.nut#L314) | 1 | 0 / 1 | yes | pinned 1 | Never sell the last plane of an air route for losing money (a dead route never flies again). |
 | [`foreign_airports`](PrismaticAI/info.nut#L321) | 1 | 0 .. 5 | yes |  | Autopilot: skip a town with this many airports of other companies within 16 tiles (0: never skip). |
 | [`invest_min`](PrismaticAI/info.nut#L328) | 50 | 0 .. 2000 / 10 | yes | gene 50 .. 600 / 50 | Fleet: idle money (in thousands) above which InvestSurplus buys vehicles where they earn most. |
@@ -208,27 +215,34 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 | [`rail_double`](PrismaticAI/info.nut#L433) | 1 | 0 / 1 | yes |  | 1: the bot's own new freight lines are double track (after AAAHogEx): one one-way track each way with path signals, so a line runs many trains and the in-bot steward adds one while half a trainload waits and no train loads at the source (rail.nut BuildDoubleRailLine); 0 (default): single track, two trains a line. Default 1 since 2026-11-19: in the battle, 20 years, paired on 74 common seeds, +14.8% mean value and better in 56 of 74; 0: single track. |
 | [`autopilot`](PrismaticAI/info.nut#L440) | 1 | 0 / 1 | yes |  | 1 (default): a bot started without a plan from the panel (no planner line, air or rail pair) grows on its own: in-bot steward, own freight lines (at least 8), intercity roads, up to 30 routes and a 5000 reserve. 0: the unplanned bot stays as small as its settings say (the duels' rival before 2026-11-19). |
 | [`self_steward`](PrismaticAI/info.nut#L447) | 1 | 0 / 1 | yes | pinned 1 | 1: with no steward's target for a rail line, the bot applies the Rhai steward's policy itself (lengthen, add a train, shrink, close) and reinvests idle money in more own lines beyond own_lines (steward.nut); 0: lines run what the external steward sets. |
-| [`rich_growth`](PrismaticAI/info.nut#L454) | 1 | 0 / 1 | yes | pinned 1 | 1 (default): once the bank holds rich_budgets line budgets (default ten), the caps that ran out are lifted: max_routes at least 30, air_reuse on, more planes per air route while its airports have room, own freight lines without a cap and from poorly served producers too (rich.nut); 0: money above the caps stays in the bank. |
-| [`rich_air`](PrismaticAI/info.nut#L461) | 0 | 0 / 1 | yes | pinned 0 | 0 (default): idle money (rich_growth, compete) is not spent on aircraft: air_reuse, planes per air route, air_routes_max and air_add_waiting stay as set; six replays on 2026-11-22 lost 13-55% of company value with 53-79 planes against about 25; 1: rich growth and competitive pressure also lift the air caps (as first built). |
-| [`modernize`](PrismaticAI/info.nut#L468) | 1 | 0 / 1 | yes | pinned 1 | 1 (default): once a game month the bot sets the game's autoreplace from every engine it runs to the better one its builders would buy now (same rail type with power, same plane class; modernize.nut); 0: engines are only renewed with the same model. |
-| [`compete`](PrismaticAI/info.nut#L475) | 1 | 0 / 1 | yes | pinned 1 | 1 (default): once a game quarter the bot compares its company value with the strongest other company; while it is behind and money sits idle, its fleet limits loosen by how far behind it is (vehicles per route, the earnings a route needs for one more, air routes, twin lines; pressure.nut); 0: the limits stay as set. |
-| [`upgrade_track`](PrismaticAI/info.nut#L482) | 1 | 0 / 1 | yes | pinned 1 | 1 (default): once a month, convert one rail network to a better rail type (electrified once an electric locomotive beats the steam and diesel ones) when every train keeps power on it and the bank holds the cost plus track_keep_budgets line budgets (default two); new lines are built in the best type (infra.nut); 0: plain rail all game. |
-| [`rich_budgets`](PrismaticAI/info.nut#L489) | 5 | 1 .. 100 | yes | gene | Rich growth: the bot counts as rich once the bank holds this many line budgets (rich.nut Rich). Default 5 (250k at the default line_budget): below the fitness check's hoards floor (500k), so the bot spends before it hoards; at 10 the planned fitness contestant held 9 vehicles while its money rose from 283k to 697k (2026-11-22). |
-| [`rich_air_money`](PrismaticAI/info.nut#L496) | 250 | 10 .. 5000 / 10 | yes | gene | Rich growth: one plane more per air route for every this much bank money above the rich threshold, in thousands (rich.nut RichAirCap). |
-| [`rich_invest_rounds`](PrismaticAI/info.nut#L503) | 4 | 1 .. 20 | yes | gene | Rich growth: how many times a heartbeat idle money buys one more vehicle for the route that earns most per vehicle (fleet.nut InvestSurplus); 1 when not rich. |
-| [`rich_air_cap_max`](PrismaticAI/info.nut#L510) | 30 | 1 .. 30 | yes |  | Rich growth: the most planes per air route it raises invest_air_cap to (rich.nut RichAirCap; never lowers invest_air_cap). |
-| [`rich_served_below`](PrismaticAI/info.nut#L517) | 60 | 0 .. 100 / 5 | yes | gene | Rich growth: an own freight line may also start at a producer others serve while under this share of its production was transported last month, in percent (rich.nut, read by rail.nut NextOwnFreightLine). |
-| [`rich_min_tiles`](PrismaticAI/info.nut#L524) | 80 | 20 .. 400 / 10 | yes | gene | Rich growth: the shortest own freight line, in tiles (the planner's window is 100-260; rich.nut, read by rail.nut NextOwnFreightLine). |
-| [`rich_max_tiles`](PrismaticAI/info.nut#L531) | 320 | 100 .. 1000 / 10 | yes | gene | Rich growth: the longest own freight line, in tiles, at least rich_min_tiles (rich.nut, read by rail.nut NextOwnFreightLine). |
-| [`airport_fill`](PrismaticAI/info.nut#L538) | 100 | 25 .. 200 / 5 | yes | gene | Planes an airport takes before it counts as full, in percent of the planes its type serves (8 small to 24 international; rich.nut AirportPlanesMax, used by AirportHasRoom for every plane added). |
-| [`pressure_low`](PrismaticAI/info.nut#L545) | 125 | 100 .. 2000 / 5 | yes | gene | Competitive pressure: the strongest rival's company value against ours, in percent, from which the level is low (pressure.nut PressureLevel). |
-| [`pressure_mid`](PrismaticAI/info.nut#L552) | 200 | 100 .. 2000 / 5 | yes | gene | Competitive pressure: the leader / ours percent from which the level is mid (twin rail lines from here on); below pressure_low counts as pressure_low (pressure.nut). |
-| [`pressure_high`](PrismaticAI/info.nut#L559) | 400 | 100 .. 2000 / 5 | yes | gene | Competitive pressure: the leader / ours percent from which the level is high; below pressure_mid counts as pressure_mid (pressure.nut). |
-| [`track_keep_budgets`](PrismaticAI/info.nut#L566) | 2 | 0 .. 20 | yes |  | Track upgrade: a rail network is converted only while the bank holds its cost plus this many line budgets (infra.nut UpgradeTrack). |
-| [`ships_max`](PrismaticAI/info.nut#L574) | 0 | 0 .. 30 | yes |  | Ships (ships.nut): most water routes the bot plans itself, from an oil rig or a coastal producer to an acceptor by the sea, or between two coastal towns, one a heartbeat when money plus loan headroom reach line_budget; the fleet grows them like road and air routes (0, the default: no ships). |
-| [`ships_cap`](PrismaticAI/info.nut#L581) | 6 | 1 .. 20 | yes |  | Ships: most ships per water route, for the fleet's additions where cargo waits and InvestSurplus (fleet.nut), and for how many a new route is planned with (ships.nut). |
-| [`ships_max_tiles`](PrismaticAI/info.nut#L588) | 150 | 40 .. 500 / 10 | yes |  | Ships: the longest water route, in tiles between its two ends (the shortest is 20; ships.nut). |
-| [`air_planes`](PrismaticAI/info.nut#L595) | 1 | 1 .. 8 | yes | gene 1 .. 6 | Aircraft on the planner's air route. |
+| [`steward_rating`](PrismaticAI/info.nut#L456) | 55 | 0 .. 100 / 5 | yes |  | In-bot steward: an earning rail line whose source station rates its cargo below this percent gets one more train (up to trains_max, its newest train at least 90 days old, a source platform free). The rating falls with the days between pickups, which a full-load train hides from the cargo waiting (steward.nut; 0: off, only waiting cargo grows a line). |
+| [`steward_borrow`](PrismaticAI/info.nut#L463) | 1 | 0 / 1 | yes |  | 1 (default): a rail line whose trains earn may borrow for the next train the steward set, while the loan stays at most half its limit and the headroom left holds a line budget and two quarters of running costs (lines.nut FundTrain); 0: a new train only from the bank balance, which RepaySurplus keeps near the reserve. |
+| [`rich_growth`](PrismaticAI/info.nut#L470) | 1 | 0 / 1 | yes | pinned 1 | 1 (default): once the bank holds rich_budgets line budgets (default ten), the caps that ran out are lifted: max_routes at least 30, air_reuse on, more planes per air route while its airports have room, own freight lines without a cap and from poorly served producers too (rich.nut); 0: money above the caps stays in the bank. |
+| [`rich_air`](PrismaticAI/info.nut#L477) | 0 | 0 / 1 | yes | pinned 0 | 0 (default): idle money (rich_growth, compete) is not spent on aircraft: air_reuse, planes per air route, air_routes_max and air_add_waiting stay as set; six replays on 2026-11-22 lost 13-55% of company value with 53-79 planes against about 25; 1: rich growth and competitive pressure also lift the air caps (as first built). |
+| [`modernize`](PrismaticAI/info.nut#L484) | 1 | 0 / 1 | yes | pinned 1 | 1 (default): once a game month the bot sets the game's autoreplace from every engine it runs to the better one its builders would buy now (same rail type with power, same plane class; modernize.nut); 0: engines are only renewed with the same model. |
+| [`compete`](PrismaticAI/info.nut#L491) | 1 | 0 / 1 | yes | pinned 1 | 1 (default): once a game quarter the bot compares its company value with the strongest other company; while it is behind and money sits idle, its fleet limits loosen by how far behind it is (vehicles per route, the earnings a route needs for one more, air routes, twin lines; pressure.nut); 0: the limits stay as set. |
+| [`upgrade_track`](PrismaticAI/info.nut#L498) | 1 | 0 / 1 | yes | pinned 1 | 1 (default): once a month, convert one rail network to a better rail type (electrified once an electric locomotive beats the steam and diesel ones) when every train keeps power on it and the bank holds the cost plus track_keep_budgets line budgets (default two); new lines are built in the best type (infra.nut); 0: plain rail all game. |
+| [`rich_budgets`](PrismaticAI/info.nut#L505) | 5 | 1 .. 100 | yes | gene | Rich growth: the bot counts as rich once the bank holds this many line budgets (rich.nut Rich). Default 5 (250k at the default line_budget): below the fitness check's hoards floor (500k), so the bot spends before it hoards; at 10 the planned fitness contestant held 9 vehicles while its money rose from 283k to 697k (2026-11-22). |
+| [`rich_air_money`](PrismaticAI/info.nut#L512) | 250 | 10 .. 5000 / 10 | yes | gene | Rich growth: one plane more per air route for every this much bank money above the rich threshold, in thousands (rich.nut RichAirCap). |
+| [`rich_invest_rounds`](PrismaticAI/info.nut#L519) | 4 | 1 .. 20 | yes | gene | Rich growth: how many times a heartbeat idle money buys one more vehicle for the route that earns most per vehicle (fleet.nut InvestSurplus); 1 when not rich. |
+| [`rich_air_cap_max`](PrismaticAI/info.nut#L526) | 30 | 1 .. 30 | yes |  | Rich growth: the most planes per air route it raises invest_air_cap to (rich.nut RichAirCap; never lowers invest_air_cap). |
+| [`rich_served_below`](PrismaticAI/info.nut#L533) | 60 | 0 .. 100 / 5 | yes | gene | Rich growth: an own freight line may also start at a producer others serve while under this share of its production was transported last month, in percent (rich.nut, read by rail.nut NextOwnFreightLine). |
+| [`rich_min_tiles`](PrismaticAI/info.nut#L540) | 80 | 20 .. 400 / 10 | yes | gene | Rich growth: the shortest own freight line, in tiles (the planner's window is 100-260; rich.nut, read by rail.nut NextOwnFreightLine). |
+| [`rich_max_tiles`](PrismaticAI/info.nut#L547) | 320 | 100 .. 1000 / 10 | yes | gene | Rich growth: the longest own freight line, in tiles, at least rich_min_tiles (rich.nut, read by rail.nut NextOwnFreightLine). |
+| [`airport_fill`](PrismaticAI/info.nut#L554) | 100 | 25 .. 200 / 5 | yes | gene | Planes an airport takes before it counts as full, in percent of the planes its type serves (8 small to 24 international; rich.nut AirportPlanesMax, used by AirportHasRoom for every plane added). |
+| [`pressure_low`](PrismaticAI/info.nut#L561) | 125 | 100 .. 2000 / 5 | yes | gene | Competitive pressure: the strongest rival's company value against ours, in percent, from which the level is low (pressure.nut PressureLevel). |
+| [`pressure_mid`](PrismaticAI/info.nut#L568) | 200 | 100 .. 2000 / 5 | yes | gene | Competitive pressure: the leader / ours percent from which the level is mid (twin rail lines from here on); below pressure_low counts as pressure_low (pressure.nut). |
+| [`pressure_high`](PrismaticAI/info.nut#L575) | 400 | 100 .. 2000 / 5 | yes | gene | Competitive pressure: the leader / ours percent from which the level is high; below pressure_mid counts as pressure_mid (pressure.nut). |
+| [`track_keep_budgets`](PrismaticAI/info.nut#L582) | 2 | 0 .. 20 | yes |  | Track upgrade: a rail network is converted only while the bank holds its cost plus this many line budgets (infra.nut UpgradeTrack). |
+| [`ships_max`](PrismaticAI/info.nut#L590) | 0 | 0 .. 30 | yes |  | Ships (ships.nut): most water routes the bot plans itself, from an oil rig or a coastal producer to an acceptor by the sea, or between two coastal towns, one a heartbeat when money plus loan headroom reach line_budget; the fleet grows them like road and air routes (0, the default: no ships). |
+| [`ships_cap`](PrismaticAI/info.nut#L597) | 6 | 1 .. 20 | yes |  | Ships: most ships per water route, for the fleet's additions where cargo waits and InvestSurplus (fleet.nut), and for how many a new route is planned with (ships.nut). |
+| [`ships_max_tiles`](PrismaticAI/info.nut#L604) | 150 | 40 .. 500 / 10 | yes |  | Ships: the longest water route, in tiles between its two ends (the shortest is 20; ships.nut). |
+| [`air_planes`](PrismaticAI/info.nut#L611) | 1 | 1 .. 8 | yes | gene 1 .. 6 | Aircraft on the planner's air route. |
+| [`load_add_min`](PrismaticAI/info.nut#L621) | 50 | 0 .. 100 / 5 | yes |  | Yield: no vehicle is added to a road, air or water route (fleet growth, InvestSurplus) whose vehicles ran under this percent full over the last heartbeats, sampled while they run (fleet.nut RouteLoad; 0: off). |
+| [`road_yield`](PrismaticAI/info.nut#L628) | 20 | 0 .. 200 / 5 | yes |  | Yield: a new bus route is built only while our road vehicles a year old earned, last year, at least this percent of their price between them; before any is a year old, only while fewer than road_probes road routes run (fleet.nut RoadPays; 0: off). |
+| [`road_probes`](PrismaticAI/info.nut#L635) | 2 | 0 .. 30 | yes |  | Yield: how many bus routes run before any road vehicle is a year old and road_yield can judge them (fleet.nut RoadPays). |
+| [`air_yield_routes`](PrismaticAI/info.nut#L642) | 8 | 0 .. 30 | yes |  | Yield: autopilot air routes beyond air_routes_max, one at a time, each once every air route we fly has planes a year old that earned last year at least their price / invest_ppv_div a plane (autopilot.nut AirRoutesPay; 0: off). |
+| [`test_trainless`](PrismaticAI/info.nut#L651) | 0 | 0 .. 2 | no |  | RESEARCH-ONLY test hook. 1: the first train of every new rail line, and every other new line's depot, is refused as if for money, so the line waits trainless for KeepLinesServed to buy it; 2: as 1, and once a game month the bot forgets its lines that still have no train, as a restart would, so AdoptTrainlessLines (monthly in this mode, yearly otherwise) takes them back from the map. 0 (default): off. |
 
 <!-- prismatic-ai-settings:end -->
 
@@ -276,6 +290,36 @@ hoards (`hoards` anomaly, [`research/ai-battle/README.md`](../../../research/ai-
 Outside the bot, `tools/research/mcp-panel/rhai/prismatic_tune.rhai` is the 10-minute live tuner
 of the owner's company ([`research/battle-brain.md`](../../../research/battle-brain.md)); its changes
 are approval-gated like every MCP change.
+
+## Yield: money goes where it earns (2026-11-22)
+
+Six-year headless matches from 1950 with the live game's settings (seeds 15805, 2927, 31337 and
+4242 against AAAHogEx, LuDiAI AfterFix, CivilAI and AdmiralAI) showed two sinks that took the
+early money and returned almost nothing, while the second air route waited until 1954-55:
+
+| Sink | What the logs showed |
+|---|---|
+| more vehicles on a full route | `InvestSurplus` grew any route earning above price / `invest_ppv_div` a vehicle, by the average of its year-old vehicles. Seed 15805: one air route earned 106,795 a year with 5 planes; the 6th plane took it to 87,026, and it went on to 10 planes. On the road it added buses at 951 to 2,790 a year each |
+| bus routes | one a heartbeat up to the autopilot's 30 routes, 14 to 23 per game. By the yearly road report, a bus inside one town (10-11 tiles between stops) earned 38-536 a year on a price of 4,921; intercity buses (26-52 tiles) earned 460-3,048 |
+
+The changes, each an AI setting in the info.nut "Yield" block:
+
+- `load_add_min` (default 50): fleet growth and `InvestSurplus` add no vehicle to a route whose
+  vehicles ran under that percent full. `RouteLoad` samples the cargo aboard every running road
+  vehicle, plane and ship each heartbeat, as a decaying sum per route.
+- `road_yield` (default 20) and `road_probes` (default 2): a new bus route only while our
+  year-old road vehicles earned at least 20% of their price last year between them; before any
+  is a year old, at most two bus routes (`RoadPays`, checked in the heartbeat's one road-route
+  condition in `main.nut`).
+- `air_yield_routes` (default 8): one autopilot air route beyond `air_routes_max` at a time, each
+  once every air route we fly has planes a year old that earned their price / `invest_ppv_div`
+  last year; with money idle (`rich`), the proven routes vouch for a route not yet a year old
+  (`AirRoutesPay`).
+- `RoadReport` logs every road route once a game year (distance, town or intercity, how full,
+  profit per vehicle), next to the air report.
+
+The measurement and its limits are in
+[`research/mechanisms/prismatic-ai.md`](../../../research/mechanisms/prismatic-ai.md#road-and-air-yield).
 
 ## Checks
 

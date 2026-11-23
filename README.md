@@ -790,7 +790,7 @@ from the code. The right-hand column says what was counted.
 | **24** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
 | **46** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **56** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **60** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **22** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **38** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
@@ -801,7 +801,7 @@ from the code. The right-hand column says what was counted.
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 56
+    "research tools and checks (tools/research/, shell and Python)" : 60
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 13
     "Rhai scripts that drive a live game (director, narrator, steward, …)" : 22
 ```
@@ -1365,6 +1365,8 @@ itself (generated):
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |
 | [Incident 2026-11-19 to 11-22: an unowned AI battle held three machines, and master's CI broke twice](research/incident-2026-11-19-ai-battle-overload.md) | Post-mortem. Two failures overlapped. For three days the AI battle tournament held this Mac and the Linux build host at their limits, and nobody on either machine could tell whose processes they were. In the same... |
 | [Incident 2026-11-22: four PrismaticAI companies of one map built on the same mines](research/incident-2026-11-22-sibling-industries.md) | Post-mortem. In the owner's live 8-company game on :8800 (seed 2927, master c5bf32182a), four companies ran PrismaticAI: 0, 1, 6 and 7. Two or more of them built rail lines from the same mine or forest, so each such... |
+| [Incident 2026-11-23: PrismaticAI ran one train for eight years in the owner's live game](research/incident-2026-11-23-live-game-15805.md) | Post-mortem. In the owner's live 8-company game on :8800 (seed 15805, start 1950, binary 20261122-master-g6d1eda39e1), company 0 runs PrismaticAI and the owner co-plays it. By the end of 1957 AAAHogEx was worth... |
+| [Incident 2026-11-23: finished rail lines without a train, and nothing that saw them](research/incident-2026-11-23-trainless-lines.md) | Root-cause analysis of one failure in the owner's live 8-company game on :8800 (seed 15805, start 1950, company 0 PrismaticAI co-played by the owner). The game-wide post-mortem up to 1958 is... |
 | [Live arena](research/live-arena.md) | RESEARCH-ONLY. The live arena is the visible counterpart of the LAN AI battle. It plays the battle's contestants, read from the battle's own configuration (battle.json contestants) and never copied, plus the arena's... |
 | [The public C++ API through MCP and OpenAPI](research/mcp-api.md) | RESEARCH-ONLY. Issue I0036, rule project.public-api-is-exposed. |
 | [The MCP catalogue in the in-game console](research/mcp-console.md) | RESEARCH-ONLY, UNSTABLE. Issue I0067; rule project.mcp-surfaces-are-derived. |
@@ -1379,6 +1381,7 @@ itself (generated):
 | [A real game: a real opponent, over the real internet](research/real-game.md) | RESEARCH-ONLY. The owner's goal (2026-11-18): play a real game, over the real internet, against a real opponent. This page covers: |
 | [Real-world scenarios: a place as an OpenTTD map](research/real-world-scenario.md) | A place name becomes a playable OpenTTD map: resolved to explicit candidates, acquired from lawful open data into a versioned snapshot, compiled offline into a heightmap, towns, industries and an economy whose every... |
 | [The Rhai IDE: edit, run, debug and inspect scripts in the panel](research/rhai-ide.md) | RESEARCH-ONLY. Milestone rhai-is-a-live-ide (issues I0088 to I0093). This page states what the panel's Scripts page is meant to become and what is built so far. The status table below is the only place a part is... |
+| [Rust performance benchmarks](research/rust-bench.md) | How fast the Rust host runs the hot paths of the panel and the planner, measured by criterion benchmarks in tools/research/mcp-rhai/benches/hot_paths.rs, recorded as rust-bench/v1 JSON under results/ by... |
 | [Research-mode tooling](research/tooling.md) | This document is the detailed reference for tools/research/research, the canonical entry point that turns the policy in AGENTS.md §"Research-mode access to internals" and this directory's README.md into runnable,... |
 | [Playing on official public servers: the vanilla client](research/vanilla-client.md) | RESEARCH-ONLY tooling, not a change to the game. Issue I0071; ADR 0030; complements net-compat.md (ADR 0029), which is about games you run. |
 <!-- surfaces:end docs-index -->

@@ -24,7 +24,7 @@ RAIL_LINES <- [];
 PRISMATIC_FULL_LOAD <- 0;
 /* The most levelling one airport site may cost (setting air_level_max, in thousands; air.nut). */
 AIR_LEVEL_MAX <- 15000;
-/* Levelling a rail station site when none is flat (rail.nut BuildRailStationAt): at most this
+/* Levelling a rail station site, the last resort (rail.nut LevelRailStationSite): at most this
  * estimated cost per site, corners within RAIL_LEVEL_STEP height steps, and RAIL_LEVEL_KEEP left. */
 RAIL_LEVEL_MAX <- 40000;
 RAIL_LEVEL_STEP <- 1;
@@ -49,6 +49,7 @@ class PrismaticAI extends AIController {
 	own_built = 0; /* freight lines the bot planned itself and built (own_lines caps them) */
 	own_failed = 0; /* own freight lines in a row that were not built (OWN_FAIL_PAUSE) */
 	own_failed_year = 0; /* the game year own_failed counts for */
+	adopt_year = -1; /* the period AdoptTrainlessLines last ran in (lines.nut AdoptKey) */
 	rescued_at = -1; /* the date StayAfloat last borrowed to keep the company alive */
 	was_frozen = false; /* whether the last heartbeat froze construction (BuildFrozen) */
 	selling = null; /* vehicle id -> true while it drives to its depot to be sold */
@@ -96,6 +97,10 @@ class PrismaticAI extends AIController {
 /* Autopilot floors (Behaviour): the profile of the battle's "solo-max" contestant, which reached
  * second place with the in-bot steward (research/ai-battle/README.md). */
 const AUTOPILOT_OWN_LINES = 10;
+/* With own_fail_pause=0, still at most this many failed own lines a game year. Since a failed line
+ * no longer uses up own_lines (PR #234), nothing else bounds them, and g227.0 went bankrupt trying
+ * failing lines one after another. */
+const OWN_FAIL_YEAR_MAX = 8;
 /* Below START_FLEET vehicles, the bot borrows up to its reserve plus START_ROUTE_MONEY for its next
  * road route (main.nut). */
 const START_FLEET = 20;
@@ -434,6 +439,10 @@ function PrismaticAI::Start() {
 	 * its lines, routes and tried plans from its save, or else from the map (restore.nut): without
 	 * this it would build the planner's lines a second time next to the ones it runs. */
 	this.Restore(PrismaticAI.Behaviour());
+	/* A finished line that lost its first train before a restart, or before the bot kept such lines
+	 * (rail.nut KeepTrainlessLine), is taken back as a line; then once a game year (lines.nut). */
+	this.adopt_year = PrismaticAI.AdoptKey();
+	this.AdoptTrainlessLines();
 
 	local last = "";
 	local disclosed = false;
@@ -555,7 +564,7 @@ function PrismaticAI::Start() {
 		if (year_now != this.own_failed_year) { this.own_failed_year = year_now; this.own_failed = 0; }
 		/* planned_freight_only (RESEARCH-ONLY): one authority outside the bot decides every freight
 		 * line, so the bot plans none of its own; the handed-over lines above still get built. */
-		if (!frozen && b.planned_freight_only == 0 && handed_done && !pair_open && this.own_built < own_cap && (b.own_fail_pause == 0 || this.own_failed < b.own_fail_pause) &&
+		if (!frozen && b.planned_freight_only == 0 && handed_done && !pair_open && this.own_built < own_cap && this.own_failed < (b.own_fail_pause == 0 ? OWN_FAIL_YEAR_MAX : b.own_fail_pause) &&
 				money + headroom_own >= b.line_budget) {
 			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried, b.rail_feed, b.rich);
 			if (own != null) {
@@ -598,7 +607,7 @@ function PrismaticAI::Start() {
 				money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 			}
 		}
-		if (!frozen && this.routes < b.max_routes && money > b.cash_reserve) {
+		if (!frozen && this.routes < b.max_routes && money > b.cash_reserve && PrismaticAI.RoadPays()) {
 			local pair = (b.intercity == 1) ? PrismaticAI.BuildIntercityRoute(b.aggressiveness, this.used_towns) : null;
 			if (pair != null) {
 				this.used_towns[pair[0]] <- true;
@@ -634,7 +643,16 @@ function PrismaticAI::Start() {
 			this.GrowCatchment(b);
 			this.BuildStatues(b);
 		}
-		/* Every rail line keeps a train: one lost at a level crossing or sold is replaced. */
+		/* Adopting builds nothing (lines.nut), so a frozen company does it too: the purchase that
+		 * follows waits for money in KeepLinesServed. */
+		if (PrismaticAI.AdoptKey() != this.adopt_year) {
+			this.adopt_year = PrismaticAI.AdoptKey();
+			PrismaticAI.TestForgetTrainless();
+			this.CloseHaltedLines();
+			this.AdoptTrainlessLines();
+		}
+		/* Every rail line keeps a train: one lost at a level crossing or sold is replaced, and a line
+		 * that never had one (KeepTrainlessLine, AdoptTrainlessLines) gets its first. */
 		PrismaticAI.KeepLinesServed(b.cash_reserve);
 		/* Each line runs what the steward's targets say (lines.nut), and its record is logged again
 		 * once a game month so a steward started late still finds it. */

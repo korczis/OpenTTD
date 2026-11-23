@@ -99,6 +99,78 @@ class SharedProducers(unittest.TestCase):
                       battle.fitness_verdict(m, fit))
 
 
+def trainless(y, mo, cid, rail, ids):
+    return (f"dbg: [script] REF T date={y}-{mo} cid={cid} rail_stations={rail} trainless={len(ids)} "
+            f"ids={','.join(map(str, ids))}")
+
+
+class TrainlessStations(unittest.TestCase):
+    """The referee's REF T lines and the fitness failure of a PrismaticAI company that keeps the same
+    rail stations without a train of its own for a year (research/incident-2026-11-23-trainless-lines.md)."""
+
+    def test_parse_keeps_report_order_and_station_ids_per_company(self):
+        text = "\n".join([trainless(1960, 4, 0, 4, [3, 7]), ref(1960, 4, 0, 1), trainless(1960, 4, 1, 9, []),
+                          trainless(1960, 7, 0, 6, [3, 7, 9]),
+                          "dbg: REF T date=1960-7 cid=x rail_stations=1 trainless=1 ids=1"])
+        got = battle.parse_trainless(text)
+        self.assertEqual(sorted(got), [0, 1])
+        self.assertEqual(got[0], [{"date": "1960-04", "rail": 4, "trainless": 2, "ids": {3, 7}},
+                                  {"date": "1960-07", "rail": 6, "trainless": 3, "ids": {3, 7, 9}}])
+        self.assertEqual(got[1][0]["ids"], set())
+        self.assertEqual(battle.parse_trainless("no referee here"), {})
+
+    def lineup(self):
+        return [{"ai": "PrismaticAI", "key": "P"}, {"ai": "AAAHogEx", "key": "AAAHogEx"},
+                {"ai": "PrismaticAI", "key": "P2"}]
+
+    def reports(self, *ids):
+        return [{"date": f"{1960 + i // 4}-{3 * (i % 4) + 1:02d}", "rail": 12, "trainless": len(s), "ids": set(s)}
+                for i, s in enumerate(ids)]
+
+    def test_the_same_station_trainless_for_a_year_fails_a_line_being_laid_does_not(self):
+        kept = self.reports([1], [5, 6], [5, 6, 8], [5, 6], [5, 6, 9])
+        # The live game's pattern: two termini of a finished line keep no train. P2's stations are
+        # those of lines being laid, a different pair every few quarters, as on the fitness seed.
+        laying = self.reports([170, 171], [170, 171], [170, 171], [192, 193], [192, 193])
+        m = {"lineup": self.lineup(), "trainless": {0: kept, 1: self.reports([4], [4], [4], [4]), 2: laying}}
+        want = "P: trainless_stations:2 rail station(s) without a train from 1960-04 to 1961-01 (stations 5, 6; max 0)"
+        self.assertEqual(battle.trainless_stations(m, {}), [want])
+        self.assertEqual(battle.trainless_stations(m, {"trainless_max": 2}), [])
+        # The test hook's own lineup keeps stations trainless on purpose and is not judged here.
+        self.assertEqual(battle.trainless_stations(m, {"trainless_skip": ["P"]}), [])
+        self.assertEqual(battle.trainless_stations({"lineup": self.lineup(), "trainless": {0: kept[:3]}}, {}), [])
+        # Fewer reports than a year: not judged; a shorter window from the rules: judged on it.
+        self.assertEqual(battle.trainless_stations({"lineup": self.lineup(), "trainless": {0: kept[1:4]}},
+                                                   {"trainless_reports": 3})[0].split(":")[1], " trainless_stations")
+        self.assertEqual(battle.trainless_stations({"lineup": self.lineup()}, {}), [])
+        fit = {"rules": {}, "must_be_healthy": []}
+        m.update(status="done", errors={}, series={"P": [], "AAAHogEx": [], "P2": []})
+        self.assertIn(want, battle.fitness_verdict(m, fit))
+
+    def test_the_fitness_config_declares_the_rule(self):
+        cfg = json.loads((Path(battle.__file__).parent / "battle.json").read_text())
+        self.assertEqual((cfg["fitness"]["rules"]["trainless_max"], cfg["fitness"]["rules"]["trainless_reports"]), (0, 4))
+        # The recovery's own lineup is held to run trains, and its settings switch the test hook on.
+        self.assertEqual(cfg["fitness"]["must_run_trains"], ["PrismaticAI trainless test"])
+        self.assertEqual(cfg["fitness"]["rules"]["trainless_skip"], ["PrismaticAI trainless test"])
+        test = [c for lu in cfg["fitness"]["lineups"] for c in lu if c.get("label") == "PrismaticAI trainless test"]
+        self.assertEqual(len(test), 1)
+        self.assertIn("test_trainless=2", test[0]["settings"])
+
+    def test_a_contestant_held_to_run_trains_fails_without_one(self):
+        lineup = [{"ai": "PrismaticAI", "key": "T"}, {"ai": "PrismaticAI", "key": "P"}]
+        fit = {"rules": {}, "must_be_healthy": [], "must_run_trains": ["T"]}
+        m = {"lineup": lineup, "status": "done", "errors": {},
+             "series": {"T": [{"t": "1960-01", "value": 5, "vehicles": 3, "money": 0, "stations": 1, "rail": 3}, {"t": "1961-01", "value": 6, "vehicles": 3, "money": 0, "stations": 1, "rail": 0}],
+                        "P": [{"t": "1961-01", "value": 7, "vehicles": 1, "money": 0, "stations": 1, "rail": 0}]}}
+        self.assertIn("T: no_trains: no train at the end of the match", battle.fitness_verdict(m, fit))
+        self.assertFalse(any(f.startswith("P: no_trains") for f in battle.fitness_verdict(m, fit)))
+        m["series"]["T"][-1]["rail"] = 2
+        self.assertFalse(any("no_trains" in f for f in battle.fitness_verdict(m, fit)))
+        m["series"]["T"] = []
+        self.assertIn("T: no_trains: no train at the end of the match", battle.fitness_verdict(m, fit))
+
+
 class FitnessRun(unittest.TestCase):
     """cmd_fitness end to end against a fake game binary that prints referee lines: the shared
     producer is printed and fails the check."""
@@ -111,7 +183,9 @@ class FitnessRun(unittest.TestCase):
             (repo / "ai" / "PrismaticAI").mkdir(parents=True)
             (repo / "referee" / "BattleReferee").mkdir(parents=True)
             lines = [ref(1960, 1, c, 10, veh=1) for c in range(3)] + \
-                    [ref(1961, 1, c, 20 + c, veh=2) for c in range(3)] + [shared(1960, 4, 7, "0,1")]
+                    [ref(1961, 1, c, 20 + c, veh=2) for c in range(3)] + [shared(1960, 4, 7, "0,1")] + \
+                    [trainless(1960, 1, 1, 4, [5, 6]), trainless(1960, 4, 1, 4, [5, 6]), trainless(1960, 7, 1, 4, [5, 6]),
+                     trainless(1961, 1, 1, 4, [5, 6, 7]), trainless(1961, 1, 2, 8, [1, 2, 3])]
             fake = repo / "build" / "openttd"
             fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\n")
             fake.chmod(0o755)
@@ -136,6 +210,10 @@ class FitnessRun(unittest.TestCase):
         self.assertEqual(code, 10, out.getvalue() + err.getvalue())
         self.assertIn("shared producer Coal Mine (industry 7) from 1960-04: P a, P b", out.getvalue())
         self.assertIn("shared_producer:Coal Mine (industry 7, from 1960-04): P a + P b", err.getvalue())
+        self.assertIn("P b                        rail stations   4, without a train   3 (1961-01)", out.getvalue())
+        self.assertIn("P b: trainless_stations:2 rail station(s) without a train from 1960-01 to 1961-01 "
+                      "(stations 5, 6; max 0)", err.getvalue())
+        self.assertNotIn("AAAHogEx: trainless", err.getvalue())
 
 
 class MatchContract(unittest.TestCase):
@@ -580,6 +658,50 @@ class Health(unittest.TestCase):
         rules = dict(self.RULES, hoard_window=4, hoard_factor=1.1, hoard_floor=100_000)
         self.assertEqual(battle.anomalies(poor[:6], 0, rules),
                          ["hoards:1955-01..1955-10:50000->110000@12v"])
+
+    def test_money_borrowed_to_build_is_not_hoarded(self):
+        # The fitness seed 930967890, PrismaticAI self-steward (fix/prismatic-steward-capital,
+        # 2026-11-23): 41-42 vehicles from 1964-04; the 1966-01 sample came while a rail line was
+        # being built on the whole 300k loan, so the bank balance read 321k -> 795k.
+        vehicles = [41, 42, 37, 36, 37, 36, 37, 37]
+        money = [320_770, 327_540, 90_175, 178_265, 194_779, 283_682, 348_182, 794_771]
+        loan = [0, 0, 0, 0, 0, 0, 0, 300_000]
+        built = [dict(s, loan=l) for s, l in zip(self.books(vehicles, money), loan)]
+        self.assertEqual(battle.anomalies(built, 0, self.RULES), [])
+        # The same books with the loan not logged (a record from before loan=) read it as a hoard.
+        self.assertEqual(battle.anomalies(self.books(vehicles, money), 0, self.RULES),
+                         ["hoards:1955-01..1956-10:320770->794771@41v"])
+        # A real hoard with no loan stays one: the owner's game, 0.6M -> 3.77M on 35-37 vehicles.
+        incident = [dict(s, loan=0) for s in self.books([35, 36, 37, 36] * 5, self.INCIDENT_MONEY)]
+        self.assertEqual(battle.anomalies(incident, 0, self.RULES),
+                         ["hoards:1955-01..1956-10:600000->1720000@35v"])
+        # And one that holds a loan throughout is judged on what it owns.
+        owed = [dict(s, loan=100_000) for s in self.books([37] * 20, self.INCIDENT_MONEY)]
+        self.assertEqual(battle.anomalies(owed, 0, self.RULES),
+                         ["hoards:1955-01..1956-10:500000->1620000@37v"])
+
+    def test_a_window_that_starts_in_debt_is_not_judged(self):
+        # Review of #244: 100k in the bank on a 300k loan, then 520k with no loan, is a company
+        # paying back its loan; "-200000->520000" passed the factor test for any rise.
+        vehicles = [20] * 8
+        money = [100_000, 150_000, 200_000, 250_000, 320_000, 400_000, 460_000, 520_000]
+        loan = [300_000, 300_000, 250_000, 200_000, 100_000, 50_000, 0, 0]
+        repaying = [dict(s, loan=l) for s, l in zip(self.books(vehicles, money), loan)]
+        self.assertEqual(battle.anomalies(repaying, 0, self.RULES), [])
+        # The same company holding on afterwards is caught by a window that starts above 0.
+        later = self.books([20] * 16, money + [600_000 + i * 150_000 for i in range(8)])
+        later = [dict(s, loan=l) for s, l in zip(later, loan + [0] * 8)]
+        self.assertEqual(battle.anomalies(later, 0, self.RULES),
+                         ["hoards:1955-10..1957-07:50000->900000@20v"])
+
+    def test_the_referee_line_carries_the_loan(self):
+        line = ("[2026-11-23 00:00:00] dbg: [script:1] [18] [E] REF Q date=1966-1 cid=0 value=1340672 "
+                "money=794771 loan=300000 income=189062 perf=303 vehicles=37 stations=40 name=A B")
+        series, _ = battle.parse_log(line + "\n" + ref(1966, 4, 1, 5))
+        self.assertEqual((series[0][0]["money"], series[0][0]["loan"]), (794771, 300000))
+        self.assertEqual(series[1][0]["loan"], 0)          # a line without loan= reads 0
+        src = (battle.REPO / "tools/research/ai-battle/referee/BattleReferee/main.nut").read_text()
+        self.assertIn('" loan=" + this.LoanOf(c)', src)
 
     def test_a_company_that_builds_stations_is_not_hoarding(self):
         # The planned fitness contestant (seed 930967890, 2026-11-22) kept 9 vehicles while its

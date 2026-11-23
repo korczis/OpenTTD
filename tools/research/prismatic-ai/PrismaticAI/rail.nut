@@ -3,8 +3,10 @@
  * industry to an accepting one (fr_*, the bot's own plan). One model, every number derived.
  *
  * Geometry a train can always run (RESEARCH-ONLY knowledge rail-lines-a-train-can-turn-on):
- * - Each station's axis points at the other end; its site is the flat buildable rectangle that
- *   accepts (or produces) the most cargo, the platforms plus their throat.
+ * - Each station's axis points at the other end where a site allows, else the other axis or the
+ *   reversed exit (BuildRailStationAt); its site is the buildable rectangle of the platforms plus
+ *   their throat that accepts (or produces) the most cargo, flat or, with build_on_slopes, on
+ *   foundations, and levelled only when no orientation has one.
  * - A terminus with `rail_platforms` platforms (default 2). With two, a two-tile throat merges them
  *   into the single line: a path signal on each platform's exit, a path signal facing the station
  *   on the line's first tile. Trains wait in a platform, never on the single track, so as many
@@ -103,18 +105,20 @@ function PrismaticAI::PieceBetween(tile, a, b) {
 	return 32;
 }
 
-/* Whether a track piece fits on a slope, as the game's GetRailFoundation decides with
- * build_on_slopes on (rail_cmd.cpp): any piece on flat land; a straight piece on any slope that is
- * not steep (inclined or levelled foundation); a corner piece only where it needs no foundation or
- * fits a levelled one (_valid_tracks_without_foundation, _valid_tracks_on_leveled_foundation,
- * indexed by the slope bits W 1, S 2, E 4, N 8). A steep slope takes no piece here. */
+/* Whether a track piece, or the pieces `piece` (track bits) of one tile together, fit on a slope,
+ * as the game's GetRailFoundation decides with build_on_slopes on (rail_cmd.cpp): anything on flat
+ * land; one straight piece on any slope that is not steep (inclined or levelled foundation);
+ * otherwise only pieces that all need no foundation or all fit one levelled foundation
+ * (_valid_tracks_without_foundation, _valid_tracks_on_leveled_foundation, indexed by the slope
+ * bits W 1, S 2, E 4, N 8). A steep slope takes no piece here. A throat's M carries a straight
+ * piece and a corner, and each alone can fit a slope where the two together do not. */
 function PrismaticAI::PieceFits(slope, piece) {
 	if (slope == AITile.SLOPE_FLAT) return true;
 	if (AITile.IsSteepSlope(slope)) return false;
 	if (piece == 1 || piece == 2) return true;
 	local without = [63, 32, 4, 1, 16, 0, 2, 8, 8, 2, 0, 16, 1, 4, 32];
 	local leveled = [0, 16, 8, 26, 32, 63, 41, 63, 4, 21, 63, 63, 38, 63, 63];
-	return ((without[slope] | leveled[slope]) & piece) == piece;
+	return (without[slope] & piece) == piece || (leveled[slope] & piece) == piece;
 }
 
 /* A* from `from` to `to` over the four neighbours. Costs are in thirds of a straight piece, the game's
@@ -413,12 +417,12 @@ function PrismaticAI::RailStationToJoin(origin, len) {
 	return PrismaticAI.OwnRailStationNear(origin, 10 + len);
 }
 
-/* A terminus near tile `origin` whose axis points at tile `other`: `platforms` platforms of `len`
- * tiles side by side and, with more than one, a two-tile throat that merges them into one line.
+/* A terminus near tile `origin` for a line to tile `other`: `platforms` platforms of `len` tiles side
+ * by side and, with more than one, a two-tile throat that merges them into one line.
  * `site` says what makes a good site: "accept" (cargo accepted, e.g. passengers in a town or coal at
  * a power station) or "produce" (cargo produced into the catchment, at a mine).
  *
- * Geometry, along the move `out` from the platforms' ends toward `other` (one platform is the main
+ * Geometry, along the move `out` from the platforms' ends toward the line (one platform is the main
  * one, the other lies `sd` beside it):
  *
  *     platform main  ... end_m | T1m  M   L0 -> the line
@@ -430,117 +434,311 @@ function PrismaticAI::RailStationToJoin(origin, len) {
  * (`end`) the tile the line search starts from. The bend is a diagonal, never 90 degrees. Without a
  * throat (one platform) `end` is the platform's end and `exit` the tile beyond it.
  *
+ * Where it stands (StationOrientations, StationSurvey): the axis pointing at `other` first, then
+ * the other axis (its exit toward `other`'s side first), then the first axis facing away. Each
+ * orientation offers the buildable rectangles whose platforms catch the cargo, most cargo first:
+ * flat ones, then, where construction.build_on_slopes allows it, sloped ones the game builds on
+ * foundations (FitsOnFoundations, then RailStationFits in test mode). Only when no orientation has
+ * such a site is one levelled (LevelRailStationSite). Sites used to be flat and on the first axis
+ * only: in the owner's hilly 1950 settings (seeds 15805, 2927, 31337, 4242; 2026-11-22) 14 of 23
+ * "no rail station site" had one here, on foundations on that axis (Findingville Coal Mine 7, seed
+ * 2927) or on the other axis (Chontbourne Power Station 44 flat, seed 2927; Drinbourne Oil Refinery
+ * 5 on foundations, seed 31337). Levelling was possible at 6 and refused each time for the
+ * RAIL_LEVEL_KEEP margin (funds 35k to 64k after the source station). The other 9 had no buildable
+ * catching rectangle with an exit in any orientation.
+ *
  * Returns {tile, end, exit, step, platforms, len, platform_rect, throat, backs} or null:
  * `platform_rect` is this station's own platforms ([corner, opposite corner]), `throat` the plain
  * track of its throat (RemoveRailStation removes both and nothing else), `backs` the [depot tile,
  * platform tile] pairs behind each platform's
  * dead end (BuildRailDepotBehind). A company train station already near `origin` gets these
- * platforms (RailStationToJoin) wherever a site fits the station spread; only when none does is a
- * separate station built, with a warning. */
+ * platforms (RailStationToJoin) wherever a site fits the station spread, in any orientation; only
+ * when none does is a separate station built, with a warning. */
 function PrismaticAI::BuildRailStationAt(origin, other, len, cargo, site, label, platforms = 1, hand = 0) {
-	local map_w = AIMap.GetMapSizeX();
-	local dx = AIMap.GetTileX(other) - AIMap.GetTileX(origin), dy = AIMap.GetTileY(other) - AIMap.GetTileY(origin);
-	local along_x = abs(dx) >= abs(dy);
-	local axis = along_x ? AIRail.RAILTRACK_NE_SW : AIRail.RAILTRACK_NW_SE;
-	local step = along_x ? 1 : map_w;          /* along a platform */
-	local side = along_x ? map_w : 1;          /* to the next platform: AIRail.BuildRailStation stacks them so */
-	local forward = along_x ? (dx >= 0) : (dy >= 0);
-	local out = forward ? step : -step;        /* from the platforms' ends toward `other` */
-	/* A double-track terminus (hand +1 at the source, -1 at the far end; DoubleTerminus) has two
-	 * more throat tiles, L0 and the junction A1, where the two one-way tracks meet. */
-	local throat = (hand != 0) ? 4 : ((platforms > 1) ? 2 : 0);
-	local lane = hand * PrismaticAI.QuarterTurn(out);
-	/* The site is the platforms and the throat: flat (ERR_FLAT_LAND_REQUIRED for a station, and a
-	 * corner on a slope may not fit) and buildable. */
-	local w = along_x ? len + throat : platforms, h = along_x ? platforms : len + throat;
-	local tiles = AITileList();
-	tiles.AddRectangle(AIMap.GetTileIndex(max(2, AIMap.GetTileX(origin) - 10), max(2, AIMap.GetTileY(origin) - 10)),
-		AIMap.GetTileIndex(min(AIMap.GetMapSizeX() - 3 - w, AIMap.GetTileX(origin) + 10), min(AIMap.GetMapSizeY() - 3 - h, AIMap.GetTileY(origin) + 10)));
-	tiles.Valuate(AITile.IsBuildableRectangle, w, h);
-	tiles.KeepValue(1);
-	/* What the station will catch: the platforms only, never the throat, which is plain track
-	 * (an industry beside the throat but out of the platforms' reach would pass otherwise). */
-	local sw = along_x ? len : platforms, sh = along_x ? platforms : len;
-	local offset = forward ? 0 : throat * step;
-	tiles.Valuate(PrismaticAI.PlatformCoverage, cargo, sw, sh, offset, site == "produce");
-	tiles.KeepAboveValue(site == "produce" ? 0 : 7);
-	/* Sites that are buildable and catch the cargo but are not flat: the last resort, levelled. */
-	local sloped = AITileList();
-	sloped.AddList(tiles);
-	tiles.Valuate(PrismaticAI.RectFlat, w, h);
-	tiles.KeepValue(1);
-	sloped.RemoveList(tiles);
-	sloped.Valuate(PrismaticAI.RectHeightRange, w, h);
-	sloped.KeepBelowValue(RAIL_LEVEL_STEP + 1);
 	local join = PrismaticAI.RailStationToJoin(origin, len);
-	local attempts = [];
-	if (join != null) {
-		local spread = AIGameSettings.IsValid("station.station_spread") ? AIGameSettings.GetValue("station.station_spread") : 12;
-		local near = AITileList();
-		near.AddList(tiles);
-		near.Valuate(PrismaticAI.FitsSpread, w, h, PrismaticAI.RailStationBox(join), spread);
-		near.KeepValue(1);
-		tiles.RemoveList(near);
-		/* Side by side first (JoinRank 0): one station with parallel platforms, a transfer yard
-		 * for every line of that industry, rather than platforms scattered across the spread. */
-		near.Valuate(PrismaticAI.JoinRank, w, h, PrismaticAI.RailStationBox(join));
-		near.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
-		attempts.append([near, join]);
-	}
-	tiles.Sort(AIList.SORT_BY_VALUE, AIList.SORT_DESCENDING);
-	attempts.append([tiles, AIStation.STATION_NEW]);
-	local tried = 0;
-	foreach (a in attempts) {
-		local list = a[0], into = a[1];
-		if (into == AIStation.STATION_NEW && join != null && !list.IsEmpty()) {
+	local box = (join == null) ? null : PrismaticAI.RailStationBox(join);
+	local slopes = PrismaticAI.BuildsOnSlopes();
+	local orients = PrismaticAI.StationOrientations(origin, other);
+	local hows = ["", ", on the other axis", ", on the other axis", ", its exit reversed"];
+	local surveys = [];
+	local budget = {tried = 0, probes = 0, levelled = 0};
+	/* Joining the station already there comes first, in every orientation; a new station next. */
+	local passes = [];
+	if (join != null) foreach (k, _ in orients) passes.append([k, join]);
+	foreach (k, _ in orients) passes.append([k, AIStation.STATION_NEW]);
+	local warned = false;
+	foreach (pass in passes) {
+		local k = pass[0], into = pass[1];
+		while (surveys.len() <= k) {
+			local o = orients[surveys.len()];
+			local shape = PrismaticAI.StationOrientation(o[0], o[1], len, platforms, hand);
+			shape.how <- hows[surveys.len()];
+			surveys.append(PrismaticAI.StationSurvey(origin, shape, cargo, site, slopes, box));
+		}
+		local s = surveys[k];
+		if (into == AIStation.STATION_NEW && join != null && !warned && s.flat.Count() + s.slope.Count() > 0) {
+			warned = true;
 			AILog.Warning("PrismaticAI: no site " + label + " joins " + AIStation.GetName(join) + "; a separate station");
 		}
-		for (local r = list.Begin(); !list.IsEnd() && tried < 20; r = list.Next()) {
-			/* The station's own corner: the throat lies on the `out` side of the platforms. */
-			local t = forward ? r : r + throat * step;
-			local g = PrismaticAI.TerminusGeometry(t, len, platforms, step, side, out, lane);
-			if (g == null) continue;
-			tried++;
-			AILog.Info("PrismaticAI: survey rail station " + label + " at tile " + t);
-			AIController.Sleep(PACE);
-			local rank = (into == AIStation.STATION_NEW) ? -1 : PrismaticAI.JoinRank(t, w, h, PrismaticAI.RailStationBox(into));
-			if (!AIRail.BuildRailStation(t, axis, platforms, len, into)) {
-				AILog.Warning("PrismaticAI: rail station at tile " + t + " refused: " + AIError.GetLastErrorString());
-				continue;
-			}
-			/* The platforms are one rectangle; the throat is plain track. They are removed apart: a
-			 * station tile is never demolished, because demolishing one removes every platform of
-			 * the station, a joined line's included (station_cmd.cpp RemoveRailStation). */
-			local corner = t + (platforms - 1) * side + (len - 1) * step;
-			local throat_tiles = [];
-			local rec = {tile = t, platform_rect = [t, corner], throat = throat_tiles, step = step};
-			if (platforms > 1 && !PrismaticAI.BuildThroat(g, throat_tiles)) {
-				AILog.Warning("PrismaticAI: throat of the station at tile " + t + " refused: " + AIError.GetLastErrorString());
-				PrismaticAI.RemoveRailStation(rec, len);
-				continue;
-			}
-			AILog.Info("PrismaticAI: built rail station " + label + " at tile " + t + ", " + platforms + " platform(s) of " + len
-				+ (into == AIStation.STATION_NEW ? "" : ", platforms of " + AIStation.GetName(into)
-					+ (rank == 0 ? " beside its others" : " (apart from its others)")));
-			local made = {tile = t, end = g.end, exit = g.exit, step = step, platforms = platforms, len = len,
-				platform_rect = [t, corner], throat = throat_tiles, backs = g.backs};
-			if (lane != 0) made.dbl <- g.dbl;
-			return made;
+		local lists = (into == AIStation.STATION_NEW) ? [s.flat, s.slope] : [s.near_flat, s.near_slope];
+		foreach (i, list in lists) {
+			local made = PrismaticAI.TryRailStationSites(list, s.o, into, len, platforms, label, i == 1, budget, box);
+			if (made != null) return made;
 		}
 	}
-	/* No flat site: level one. Without this, on OpenTTD seed 260603278 (GA g271.3, slot 3) ten of
-	 * the twelve own lines found no flat site at one end, and the company kept 2.1M idle for 15 years
-	 * on 3 trains. Only rectangles whose corners span at most RAIL_LEVEL_STEP height steps are
-	 * levelled (a bigger step moves corners outside the site, where houses and roads stop it), and
-	 * only while the money left after a fourfold margin on the test price still covers the line. */
-	sloped.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
-	local levelled = 0;
-	for (local r = sloped.Begin(); !sloped.IsEnd() && levelled < 3; r = sloped.Next()) {
-		local t = forward ? r : r + throat * step;
-		local g = PrismaticAI.TerminusGeometry(t, len, platforms, step, side, out, lane);
+	foreach (s in surveys) {
+		local made = PrismaticAI.LevelRailStationSite(s, len, platforms, label, budget);
+		if (made != null) return made;
+	}
+	local counts = "";
+	foreach (s in surveys) {
+		counts += (counts == "" ? "" : ", ") + s.o.name + " " + (s.flat.Count() + s.near_flat.Count()) + "/" +
+			(s.slope.Count() + s.near_slope.Count()) + "/" + s.level.Count();
+	}
+	AILog.Warning("PrismaticAI: no rail station site " + label + " (flat/foundation/levellable sites by orientation: " + counts +
+		"; " + budget.tried + " built and refused, " + budget.probes + " refused before building, levelling within " + RAIL_LEVEL_STEP + " height step(s))");
+	return null;
+}
+
+/* Whether the game builds rail stations and track on foundations (construction.build_on_slopes, on
+ * by default; a game without the setting is read as on). */
+function PrismaticAI::BuildsOnSlopes() {
+	local name = "construction.build_on_slopes";
+	return !AIGameSettings.IsValid(name) || AIGameSettings.GetValue(name) != 0;
+}
+
+/* The orientations a terminus near `origin` is tried in, as [along_x, forward] pairs: the axis that
+ * points at `other` with the exit toward it, the other axis with its exit toward `other`'s side and
+ * then away from it, and last the first axis with its exit away from `other` (the line turns round
+ * the station). */
+function PrismaticAI::StationOrientations(origin, other) {
+	local dx = AIMap.GetTileX(other) - AIMap.GetTileX(origin), dy = AIMap.GetTileY(other) - AIMap.GetTileY(origin);
+	local along_x = abs(dx) >= abs(dy);
+	local forward = along_x ? (dx >= 0) : (dy >= 0);
+	local cross = along_x ? (dy >= 0) : (dx >= 0);
+	return [[along_x, forward], [!along_x, cross], [!along_x, !cross], [along_x, !forward]];
+}
+
+/* The shape of a terminus of `platforms` platforms of `len` tiles in one orientation (`along_x`, the
+ * exit on the + side when `forward`): the move along a platform (`step`), to the next platform
+ * (`side`), toward the line (`out`), the double track's lane, the throat's length and the site's
+ * rectangle (w x h), and where in it the platforms lie (sw x sh at `offset`). */
+function PrismaticAI::StationOrientation(along_x, forward, len, platforms, hand) {
+	local map_w = AIMap.GetMapSizeX();
+	local step = along_x ? 1 : map_w;          /* along a platform */
+	local side = along_x ? map_w : 1;          /* to the next platform: AIRail.BuildRailStation stacks them so */
+	local out = forward ? step : -step;        /* from the platforms' ends toward the line */
+	/* A double-track terminus (hand +1 at the source, -1 at the far end; DoubleTerminus) has two
+	 * more throat tiles, L0 and the junction A1, where the two one-way tracks meet. The lane turns
+	 * with `out`, so the second track leaves on the same side of the line in every orientation. */
+	local throat = (hand != 0) ? 4 : ((platforms > 1) ? 2 : 0);
+	return {along_x = along_x, forward = forward, name = (along_x ? "x" : "y") + (forward ? "+" : "-"),
+		axis = along_x ? AIRail.RAILTRACK_NE_SW : AIRail.RAILTRACK_NW_SE, step = step, side = side, out = out,
+		lane = hand * PrismaticAI.QuarterTurn(out), throat = throat,
+		w = along_x ? len + throat : platforms, h = along_x ? platforms : len + throat,
+		sw = along_x ? len : platforms, sh = along_x ? platforms : len, offset = forward ? 0 : throat * step};
+}
+
+/* The sites of a terminus in orientation `o` within 10 tiles of `origin`: buildable rectangles of
+ * the platforms and the throat whose platforms catch the cargo (the throat is plain track: an
+ * industry beside the throat but out of the platforms' reach would pass otherwise), split into
+ * `flat`, `slope` (sloped, the station fits on foundations: FitsOnFoundations; empty when `slopes`
+ * is off) and, when a station box `box` is given, the `near_flat` and `near_slope` ones within the
+ * station spread of it, side by side first (JoinRank). Each list is sorted by the cargo caught, most
+ * first. `level` holds the sloped sites whose corners span at most RAIL_LEVEL_STEP height steps,
+ * lowest span first (LevelRailStationSite). */
+function PrismaticAI::StationSurvey(origin, o, cargo, site, slopes, box) {
+	local tiles = AITileList();
+	tiles.AddRectangle(AIMap.GetTileIndex(max(2, AIMap.GetTileX(origin) - 10), max(2, AIMap.GetTileY(origin) - 10)),
+		AIMap.GetTileIndex(min(AIMap.GetMapSizeX() - 3 - o.w, AIMap.GetTileX(origin) + 10), min(AIMap.GetMapSizeY() - 3 - o.h, AIMap.GetTileY(origin) + 10)));
+	tiles.Valuate(AITile.IsBuildableRectangle, o.w, o.h);
+	tiles.KeepValue(1);
+	tiles.Valuate(PrismaticAI.PlatformCoverage, cargo, o.sw, o.sh, o.offset, site == "produce");
+	tiles.KeepAboveValue(site == "produce" ? 0 : 7);
+	local sloped = AITileList();
+	sloped.AddList(tiles);
+	tiles.Valuate(PrismaticAI.RectFlat, o.w, o.h);
+	tiles.KeepValue(1);
+	sloped.RemoveList(tiles);
+	local level = AITileList();
+	level.AddList(sloped);
+	level.Valuate(PrismaticAI.RectHeightRange, o.w, o.h);
+	level.KeepBelowValue(RAIL_LEVEL_STEP + 1);
+	level.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
+	if (slopes) {
+		sloped.Valuate(PrismaticAI.FitsOnFoundations, o.sw, o.sh, o.offset, o.along_x);
+		sloped.KeepValue(1);
+	} else {
+		sloped.Clear();
+	}
+	local s = {o = o, flat = tiles, slope = sloped, near_flat = AITileList(), near_slope = AITileList(), level = level};
+	foreach (pair in [["flat", "near_flat"], ["slope", "near_slope"]]) {
+		local all = s[pair[0]], near = s[pair[1]];
+		if (box != null) {
+			local spread = AIGameSettings.IsValid("station.station_spread") ? AIGameSettings.GetValue("station.station_spread") : 12;
+			near.AddList(all);
+			near.Valuate(PrismaticAI.FitsSpread, o.w, o.h, box, spread);
+			near.KeepValue(1);
+			all.RemoveList(near);
+			/* Side by side first (JoinRank 0): one station with parallel platforms, a transfer yard
+			 * for every line of that industry, rather than platforms scattered across the spread. */
+			near.Valuate(PrismaticAI.JoinRank, o.w, o.h, box);
+			near.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
+		}
+		/* Most cargo first: the coverage again, since the flatness test replaced it as the value. */
+		all.Valuate(PrismaticAI.PlatformCoverage, cargo, o.sw, o.sh, o.offset, site == "produce");
+		all.Sort(AIList.SORT_BY_VALUE, AIList.SORT_DESCENDING);
+	}
+	return s;
+}
+
+/* 1 when the sw x sh platforms at `r` + `offset` (along x when `along_x`) can stand on foundations, by
+ * the game's rule for a rail station tile (station_cmd.cpp CheckBuildableTile with build_on_slopes):
+ * no steep slope, every tile's highest corner at one height, and a sloped tile raised at a corner of
+ * both edges the track leaves by (CanBuildDepotByTileh for both directions of the axis); 0 otherwise.
+ * A flat rectangle answers 1 as well. A valuator; RailStationFits asks the game itself before a build. */
+function PrismaticAI::FitsOnFoundations(r, sw, sh, offset, along_x) {
+	local mw = AIMap.GetMapSizeX();
+	local t0 = r + offset;
+	local top = AITile.GetMaxHeight(t0);
+	/* The corners of each edge the platform's track leaves by: NE (N, E) and SW (S, W) along x,
+	 * NW (N, W) and SE (S, E) along y (slope bits W 1, S 2, E 4, N 8). */
+	local a = along_x ? (AITile.SLOPE_N | AITile.SLOPE_E) : (AITile.SLOPE_N | AITile.SLOPE_W);
+	local b = along_x ? (AITile.SLOPE_S | AITile.SLOPE_W) : (AITile.SLOPE_S | AITile.SLOPE_E);
+	for (local y = 0; y < sh; y++) {
+		for (local x = 0; x < sw; x++) {
+			local t = t0 + y * mw + x;
+			local slope = AITile.GetSlope(t);
+			if (AITile.GetMaxHeight(t) != top) return 0;
+			if (slope == AITile.SLOPE_FLAT) continue;
+			if (AITile.IsSteepSlope(slope) || (slope & a) == 0 || (slope & b) == 0) return 0;
+		}
+	}
+	return 1;
+}
+
+/* Whether every tile of a terminus throat (TerminusGeometry `g`) takes its track: land the line
+ * may use (RailStepCost) carrying all its pieces together on its slope (PieceFits). The double
+ * track's spur tile S1 lies beside the site's rectangle, so nothing else looked at it. True
+ * without a throat. */
+function PrismaticAI::ThroatFits(g) {
+	if (g.throat == null) return true;
+	local bits = {};
+	foreach (pc in PrismaticAI.ThroatPieces(g)) {
+		local b = PrismaticAI.PieceBetween(pc[1], pc[0], pc[2]);
+		if (bits.rawin(pc[1])) bits[pc[1]] = bits[pc[1]] | b;
+		else bits[pc[1]] <- b;
+	}
+	foreach (t, b in bits) {
+		if (PrismaticAI.RailStepCost(t) < 0 || !PrismaticAI.PieceFits(AITile.GetSlope(t), b)) return false;
+	}
+	return true;
+}
+
+/* Whether the game builds a terminus at corner `t` (geometry `g`, TerminusGeometry) into station
+ * `into`: the platforms and every throat piece, asked in test mode. Its own AIAccounting keeps the
+ * test's estimate out of the costs an enclosing one counts (the engine adds it there). */
+function PrismaticAI::RailStationFits(t, g, axis, platforms, len, into) {
+	local ok = false;
+	{
+		local probe = AIAccounting();
+		local test = AITestMode();
+		ok = AIRail.BuildRailStation(t, axis, platforms, len, into);
+		if (ok && g.throat != null) {
+			foreach (pc in PrismaticAI.ThroatPieces(g)) {
+				if (!AIRail.BuildRail(pc[0], pc[1], pc[2])) { ok = false; break; }
+			}
+		}
+	}
+	return ok;
+}
+
+/* The track pieces of a terminus throat (TerminusGeometry), as [from, tile, to]: both platforms
+ * straight out onto T1m and T1s, the second bent onto the main row at M, and on a double track the
+ * junction A1 with its spur to S1. */
+function PrismaticAI::ThroatPieces(g) {
+	local th = g.throat;
+	local pieces = [[th.end_m, th.t1m, th.m], [th.t1m, th.m, th.l0], [th.end_s, th.t1s, th.m2],
+		[th.t1s, th.m2, th.m], [th.m2, th.m, th.l0]];
+	if ("dbl" in g) {
+		local d = g.dbl;
+		pieces.extend([[d.m, d.l0, d.a1], [d.l0, d.a1, d.a2], [d.l0, d.a1, d.s1], [d.a1, d.s1, d.b2]]);
+	}
+	return pieces;
+}
+
+/* Build a terminus on the first site of `list` (StationSurvey) in orientation `o` that the game
+ * takes, into station `into` (STATION_NEW or the station whose box is `box`). Every site's throat
+ * is checked against its slopes first (ThroatFits); with `foundations` the sites are sloped, and
+ * each is also asked in test mode (RailStationFits). A refused one so costs neither a station built
+ * and removed nor a pause. `budget` counts the sites built and refused (`tried`, at most 20 per
+ * terminus) and those refused before (`probes`). Returns the terminus (see BuildRailStationAt) or
+ * null. */
+function PrismaticAI::TryRailStationSites(list, o, into, len, platforms, label, foundations, budget, box) {
+	for (local r = list.Begin(); !list.IsEnd() && budget.tried < 20; r = list.Next()) {
+		/* The station's own corner: the throat lies on the `out` side of the platforms. */
+		local t = o.forward ? r : r + o.throat * o.step;
+		local g = PrismaticAI.TerminusGeometry(t, len, platforms, o.step, o.side, o.out, o.lane);
 		if (g == null) continue;
-		local far = AIMap.GetTileIndex(min(AIMap.GetMapSizeX() - 1, AIMap.GetTileX(r) + w),
-			min(AIMap.GetMapSizeY() - 1, AIMap.GetTileY(r) + h));
+		if (!PrismaticAI.ThroatFits(g) || (foundations && !PrismaticAI.RailStationFits(t, g, o.axis, platforms, len, into))) {
+			budget.probes++;
+			continue;
+		}
+		budget.tried++;
+		AILog.Info("PrismaticAI: survey rail station " + label + " at tile " + t);
+		AIController.Sleep(PACE);
+		local rank = (into == AIStation.STATION_NEW) ? -1 : PrismaticAI.JoinRank(t, o.w, o.h, box);
+		local made = PrismaticAI.RailStationOn(t, g, o, len, platforms, into, "");
+		if (made == null) continue;
+		AILog.Info("PrismaticAI: built rail station " + label + " at tile " + t + ", " + platforms + " platform(s) of " + len
+			+ ", exit " + o.name + o.how + (foundations ? ", on foundations" : "")
+			+ (into == AIStation.STATION_NEW ? "" : ", platforms of " + AIStation.GetName(into)
+				+ (rank == 0 ? " beside its others" : " (apart from its others)")));
+		return made;
+	}
+	return null;
+}
+
+/* Build the platforms at corner `t` (orientation `o`, geometry `g`) into station `into` and, with
+ * more than one platform, their throat. The platforms are one rectangle; the throat is plain track.
+ * They are removed apart when the throat is refused: a station tile is never demolished, because
+ * demolishing one removes every platform of the station, a joined line's included (station_cmd.cpp
+ * RemoveRailStation). `what` names the site in the warnings ("" or "levelled "). Returns the
+ * terminus or null. */
+function PrismaticAI::RailStationOn(t, g, o, len, platforms, into, what) {
+	if (!AIRail.BuildRailStation(t, o.axis, platforms, len, into)) {
+		AILog.Warning("PrismaticAI: " + what + "rail station at tile " + t + " refused: " + AIError.GetLastErrorString());
+		return null;
+	}
+	local corner = t + (platforms - 1) * o.side + (len - 1) * o.step;
+	local throat_tiles = [];
+	local rec = {tile = t, platform_rect = [t, corner], throat = throat_tiles, step = o.step};
+	if (platforms > 1 && !PrismaticAI.BuildThroat(g, throat_tiles)) {
+		AILog.Warning("PrismaticAI: throat of the " + what + "station at tile " + t + " refused: " + AIError.GetLastErrorString());
+		PrismaticAI.RemoveRailStation(rec, len);
+		return null;
+	}
+	local made = {tile = t, end = g.end, exit = g.exit, step = o.step, platforms = platforms, len = len,
+		platform_rect = [t, corner], throat = throat_tiles, backs = g.backs};
+	if (o.lane != 0) made.dbl <- g.dbl;
+	return made;
+}
+
+/* No site in any orientation: level one of survey `s` (a new station). Without this, on OpenTTD
+ * seed 260603278 (GA g271.3, slot 3) ten of the twelve own lines found no flat site at one end, and
+ * the company kept 2.1M idle for 15 years on 3 trains. Only rectangles whose corners span at most
+ * RAIL_LEVEL_STEP height steps are levelled (a bigger step moves corners outside the site, where
+ * houses and roads stop it), and only while the money left after a fourfold margin on the test
+ * price still covers the line; at most 3 per terminus (`budget.levelled`). Returns the terminus or
+ * null. */
+function PrismaticAI::LevelRailStationSite(s, len, platforms, label, budget) {
+	local o = s.o;
+	for (local r = s.level.Begin(); !s.level.IsEnd() && budget.levelled < 3; r = s.level.Next()) {
+		local t = o.forward ? r : r + o.throat * o.step;
+		local g = PrismaticAI.TerminusGeometry(t, len, platforms, o.step, o.side, o.out, o.lane);
+		if (g == null) continue;
+		local far = AIMap.GetTileIndex(min(AIMap.GetMapSizeX() - 1, AIMap.GetTileX(r) + o.w),
+			min(AIMap.GetMapSizeY() - 1, AIMap.GetTileY(r) + o.h));
 		local cost = 0;
 		{
 			local test = AITestMode();
@@ -550,29 +748,19 @@ function PrismaticAI::BuildRailStationAt(origin, other, len, cargo, site, label,
 		}
 		local funds = AICompany.GetBankBalance(AICompany.COMPANY_SELF) + AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
 		if (cost > RAIL_LEVEL_MAX || funds - 4 * cost < RAIL_LEVEL_KEEP) continue;
-		levelled++;
+		budget.levelled++;
 		local real = AIAccounting();
 		AILog.Info("PrismaticAI: levelling rail station site " + label + " at tile " + t + " (estimated " + cost + ")");
 		AIController.Sleep(PACE);
-		if (!AITile.LevelTiles(r, far) || !AIRail.BuildRailStation(t, axis, platforms, len, AIStation.STATION_NEW)) {
+		if (!AITile.LevelTiles(r, far)) {
 			AILog.Warning("PrismaticAI: levelled rail station site at tile " + t + " for " + real.GetCosts() + " and it was still refused: " + AIError.GetLastErrorString());
 			continue;
 		}
-		local corner = t + (platforms - 1) * side + (len - 1) * step;
-		local throat_tiles = [];
-		local rec = {tile = t, platform_rect = [t, corner], throat = throat_tiles, step = step};
-		if (platforms > 1 && !PrismaticAI.BuildThroat(g, throat_tiles)) {
-			AILog.Warning("PrismaticAI: throat of the levelled station at tile " + t + " refused: " + AIError.GetLastErrorString());
-			PrismaticAI.RemoveRailStation(rec, len);
-			continue;
-		}
-		AILog.Info("PrismaticAI: built rail station " + label + " at tile " + t + " after levelling it for " + real.GetCosts() + ", " + platforms + " platform(s) of " + len);
-		local made = {tile = t, end = g.end, exit = g.exit, step = step, platforms = platforms, len = len,
-			platform_rect = [t, corner], throat = throat_tiles, backs = g.backs};
-		if (lane != 0) made.dbl <- g.dbl;
+		local made = PrismaticAI.RailStationOn(t, g, o, len, platforms, AIStation.STATION_NEW, "levelled ");
+		if (made == null) continue;
+		AILog.Info("PrismaticAI: built rail station " + label + " at tile " + t + " after levelling it for " + real.GetCosts() + ", " + platforms + " platform(s) of " + len + ", exit " + o.name + o.how);
 		return made;
 	}
-	AILog.Warning("PrismaticAI: no rail station site " + label + " (" + sloped.Count() + " sloped site(s) within " + RAIL_LEVEL_STEP + " height step(s))");
 	return null;
 }
 
@@ -644,19 +832,14 @@ function PrismaticAI::TerminusGeometry(t, len, platforms, step, side, out, lane 
  * refuses a piece. */
 function PrismaticAI::BuildThroat(g, built) {
 	local th = g.throat;
-	local pieces = [[th.end_m, th.t1m, th.m], [th.t1m, th.m, th.l0], [th.end_s, th.t1s, th.m2],
-		[th.t1s, th.m2, th.m], [th.m2, th.m, th.l0]];
-	foreach (pc in pieces) {
+	foreach (i, pc in PrismaticAI.ThroatPieces(g)) {
 		if (!AIRail.BuildRail(pc[0], pc[1], pc[2])) return false;
-		built.push(pc[1]);
+		/* A1 takes two pieces (6 and 7, from 0, in ThroatPieces); each tile is recorded once, as
+		 * soon as it holds track. */
+		if (i != 7) built.push(pc[1]);
 	}
 	if ("dbl" in g) {
 		local d = g.dbl;
-		/* A1 takes two pieces; each tile is recorded once, as soon as it holds track. */
-		foreach (i, pc in [[d.m, d.l0, d.a1], [d.l0, d.a1, d.a2], [d.l0, d.a1, d.s1], [d.a1, d.s1, d.b2]]) {
-			if (!AIRail.BuildRail(pc[0], pc[1], pc[2])) return false;
-			if (i != 2) built.push(pc[1]);
-		}
 		AILog.Info("PrismaticAI: built the double-track junction at tile " + d.a1 + ", tracks leave at tiles " + d.a2 + " and " + d.b2);
 	}
 	/* AIRail.BuildSignal(tile, front) signals the trains that come from `front` (script_rail.cpp
@@ -874,6 +1057,83 @@ function PrismaticAI::RemoveRailStation(st, len) {
 	for (local i = 0; i < len; i++) AITile.DemolishTile(st.tile + i * step);
 }
 
+/* A line that will run no train leaves no station: both of its termini go (RemoveRailStation); the
+ * track already laid stays. A station left standing costs upkeep, earns nothing, and keeps the
+ * bot's next own line away from its producer (NextOwnFreightLine skips a producer with a rail
+ * station of ours near it). In the owner's live game (seed 15805) 10 of company 0's 12 rail
+ * stations had no train by 1958 (research/incident-2026-11-23-trainless-lines.md). */
+function PrismaticAI::AbandonLineStations(sa, sb, len, label, why) {
+	AILog.Warning("PrismaticAI: rail line " + label + " given up (" + why + "); its two stations are removed");
+	PrismaticAI.RemoveRailStation(sa, len);
+	PrismaticAI.RemoveRailStation(sb, len);
+}
+
+/* A finished line whose first train was not bought keeps its place: it goes into RAIL_LINES with no
+ * train and logs its record (so the Rhai rail monitor reports it `unserved`), and KeepLinesServed
+ * buys its first train once the bank holds the reserve. Before, the line returned 0 and was
+ * forgotten: in the owner's live game two finished iron ore lines (180 and 123 rail pieces, four
+ * stations, two depots) stood without a train for years while 535k lay in the bank. Returns 1. */
+function PrismaticAI::KeepTrainlessLine(line) {
+	RAIL_LINES.push(line);
+	AILog.Warning("PrismaticAI: rail line " + line.label + " is built but its first train was not bought (" +
+		line.train_fail + "); it waits for one");
+	AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
+	return 1;
+}
+
+/* Whether a failed BuildTrain (`line.train_fail`) leaves a line a later train can serve: money, or
+ * no engine for the cargo yet. A wagon that carries nothing or orders the game refuses would fail
+ * the same way again on the same line. */
+function PrismaticAI::TrainCanComeLater(line) {
+	return ("train_fail" in line) && (line.train_fail == "cash" || line.train_fail == "engine");
+}
+
+/* The depot of a line just laid between the termini `sa` and `sb` along `laid`: behind a platform of
+ * either, else beside the track. {depot (a tile, or null), cash (true when it was refused for money,
+ * the test hook included)}. After RailCashWait the track is laid, and the depot met the same shortage
+ * that the train did (#240, seed 15805): a laid line must not be dropped for it. */
+function PrismaticAI::LineDepot(sa, sb, laid) {
+	if (PrismaticAI.TestRefuseDepot()) return {depot = null, cash = true};
+	local depot = PrismaticAI.BuildRailDepotBehind(sa);
+	if (depot == null) depot = PrismaticAI.BuildRailDepotBehind(sb);
+	if (depot == null) depot = PrismaticAI.BuildRailDepotBeside(laid);
+	return {depot = depot, cash = depot == null && AIError.GetLastError() == AIError.ERR_NOT_ENOUGH_CASH};
+}
+
+/* A line laid whose depot was refused for money: kept like a line whose train was (KeepTrainlessLine),
+ * with depot -1 and `depot_pending`; KeepLinesServed builds the depot, then the first train, once
+ * the bank holds both. */
+function PrismaticAI::KeepDepotlessLine(line) {
+	line.depot_pending <- true;
+	line.train_fail <- "cash";
+	AILog.Warning("PrismaticAI: rail line " + line.label + " is laid but its depot was refused for money; it waits for one");
+	return PrismaticAI.KeepTrainlessLine(line);
+}
+
+/* Builds the depot of a kept line that has none (KeepDepotlessLine), in its own rail type, behind a
+ * platform of its stations or beside its track; true when it stands. */
+function PrismaticAI::BuildPendingDepot(line) {
+	AIRail.SetCurrentRailType(line.railtype);
+	local d = null;
+	foreach (st in line.stations) if (d == null) d = PrismaticAI.BuildRailDepotBehind(st);
+	if (d == null && line.path.len() > 2) d = PrismaticAI.BuildRailDepotBeside(line.path);
+	if (d == null) return false;
+	line.depot = d;
+	delete line.depot_pending;
+	AILog.Info("PrismaticAI: line " + line.label + " got its depot at tile " + d);
+	return true;
+}
+
+/* test_trainless (RESEARCH-ONLY, info.nut): every other new line's depot is refused as for money. */
+TEST_DEPOT_TURN <- 0;
+function PrismaticAI::TestRefuseDepot() {
+	if (AIController.GetSetting("test_trainless") == 0) return false;
+	TEST_DEPOT_TURN++;
+	if (TEST_DEPOT_TURN % 2 == 1) return false;
+	AILog.Warning("PrismaticAI: rail depot not built: refused by test_trainless");
+	return true;
+}
+
 /* The line between two termini, its depot and one train for `cargo`. The first stop loads with
  * `first_flags` (full load at a mine; none for passengers). Returns 1 when a train runs, else 0. A
  * finished line logs its record (lines.nut LineRecord): its geometry for the Rhai steward, which
@@ -889,25 +1149,34 @@ function PrismaticAI::BuildRailLineAndTrain(sa, sb, len, cargo, wagons, first_fl
 	}
 	/* What was actually laid: a re-plan around a refused piece changes the route. */
 	local laid = PrismaticAI.BuildRailAlong(path, sa.end, sb.end, 2, throat_b, throat_a);
-	if (laid == null) return 0;
+	if (laid == null) { PrismaticAI.AbandonLineStations(sa, sb, len, label, "the track could not be laid"); return 0; }
 	local broken = PrismaticAI.VerifyRailLine(laid, sa.end, sb.end);
 	if (broken != -1) {
 		AILog.Warning("PrismaticAI: rail line " + label + " is broken at tile " + broken + "; no train on a line it cannot run");
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "broken at tile " + broken);
 		return 0;
 	}
 	AILog.Info("PrismaticAI: rail line " + label + " done, " + laid.len() + " tiles");
-	local depot = PrismaticAI.BuildRailDepotBehind(sa);
-	if (depot == null) depot = PrismaticAI.BuildRailDepotBehind(sb);
-	if (depot == null) depot = PrismaticAI.BuildRailDepotBeside(laid);
-	if (depot == null) { AILog.Warning("PrismaticAI: no rail depot behind a platform or beside the line"); return 0; }
+	local ld = PrismaticAI.LineDepot(sa, sb, laid);
+	if (ld.depot == null && !ld.cash) {
+		AILog.Warning("PrismaticAI: no rail depot behind a platform or beside the line");
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "no depot");
+		return 0;
+	}
+	local depot = (ld.depot == null) ? -1 : ld.depot;
 	local platforms = min(("platforms" in sa) ? sa.platforms : 1, ("platforms" in sb) ? sb.platforms : 1);
 	/* Everything the line owns (its stations' own platforms and throats, its track, its depot), so
 	 * closing it (lines.nut CloseLine) clears it to the last tile and nothing of another line. */
 	local line = {a = sa.tile, b = sb.tile, depot = depot, cargo = cargo, wagons = wagons, flags = first_flags,
 		label = label, railtype = AIRail.GetCurrentRailType(), restored = 0, len = len, trains_max = platforms,
 		path = laid, stations = [sa, sb], closed = false};
+	if (depot == -1) return PrismaticAI.KeepDepotlessLine(line);
 	local train = PrismaticAI.BuildTrain(line);
-	if (train == -1) return 0;
+	if (train == -1) {
+		if (PrismaticAI.TrainCanComeLater(line)) return PrismaticAI.KeepTrainlessLine(line);
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "no train can run on it: " + line.train_fail);
+		return 0;
+	}
 	RAIL_LINES.push(line);
 	AILog.Info("PrismaticAI: built a rail route " + label + " with a train of " + AIVehicle.GetNumWagons(train) + " (" + AIEngine.GetName(AIVehicle.GetEngineType(train)) + ")");
 	AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
@@ -1028,14 +1297,17 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 		return -1;
 	}
 	local acc_a = AIAccounting();
-	local laid = PrismaticAI.BuildRailAlong(path, sa.end, sb.end, 2, true, true);
+	/* One wait for money (RailCashWait) for both tracks of the line, not RAIL_CASH_WAIT_DAYS each. */
+	local cash = {days = 0};
+	local laid = PrismaticAI.BuildRailAlong(path, sa.end, sb.end, 2, true, true, cash);
 	local cost_a = acc_a.GetCosts();
-	if (laid == null) return 0;
+	if (laid == null) { PrismaticAI.AbandonLineStations(sa, sb, len, label, "the track could not be laid"); return 0; }
 	local broken = PrismaticAI.VerifyRailLine(laid, sa.end, sb.end);
 	if (broken == -1) broken = PrismaticAI.VerifyJunction(da, false);
 	if (broken == -1) broken = PrismaticAI.VerifyJunction(db, false);
 	if (broken != -1) {
 		AILog.Warning("PrismaticAI: rail line " + label + " is broken at tile " + broken + "; no train on a line it cannot run");
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "broken at tile " + broken);
 		return 0;
 	}
 	/* Track B only when, after it, the money still buys the train: track B costs about what track A
@@ -1054,7 +1326,7 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 	/* Track B runs beside track A: where it is found, its search took 0.88 to 1.09 times track A's
 	 * nodes (the fitness match above, four double lines), so twice that is its budget. */
 	local path2 = afford_b ? PrismaticAI.FindRailPath(da.b2, db.b2, da.s1, db.s1, taken, da.lane, true, true, 2 * nodes_a) : null;
-	if (path2 != null) laid2 = PrismaticAI.BuildRailAlong(path2, da.s1, db.s1, 2, true, true);
+	if (path2 != null) laid2 = PrismaticAI.BuildRailAlong(path2, da.s1, db.s1, 2, true, true, cash);
 	if (laid2 != null) {
 		broken = PrismaticAI.VerifyRailLine(laid2, da.s1, db.s1);
 		if (broken == -1) broken = PrismaticAI.VerifyJunction(da, true);
@@ -1071,6 +1343,7 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 		local sig_b = PrismaticAI.PlaceLaneSignals(laid2, da.s1, db.s1, false);
 		if (sig_a == 0 || sig_b == 0) {
 			AILog.Warning("PrismaticAI: no one-way signal on a track of " + label + " (" + sig_a + ", " + sig_b + "); no train on it");
+			PrismaticAI.AbandonLineStations(sa, sb, len, label, "no one-way signal");
 			return 0;
 		}
 		trains_max = platforms + min(sig_a, sig_b);
@@ -1082,17 +1355,25 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 		AILog.Warning("PrismaticAI: no second track for " + label + "; it runs single track, " + platforms + " trains");
 	}
 	AILog.Info("PrismaticAI: rail line " + label + " done, " + laid.len() + " tiles");
-	local depot = PrismaticAI.BuildRailDepotBehind(sa);
-	if (depot == null) depot = PrismaticAI.BuildRailDepotBehind(sb);
-	if (depot == null) depot = PrismaticAI.BuildRailDepotBeside(laid);
-	if (depot == null) { AILog.Warning("PrismaticAI: no rail depot behind a platform or beside the line"); return 0; }
+	local ld = PrismaticAI.LineDepot(sa, sb, laid);
+	if (ld.depot == null && !ld.cash) {
+		AILog.Warning("PrismaticAI: no rail depot behind a platform or beside the line");
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "no depot");
+		return 0;
+	}
+	local depot = (ld.depot == null) ? -1 : ld.depot;
 	/* wagons 0: every train as long as the platform. */
 	local line = {a = sa.tile, b = sb.tile, depot = depot, cargo = cargo, wagons = 0, flags = first_flags,
 		label = label, railtype = AIRail.GetCurrentRailType(), restored = 0, len = len, trains_max = trains_max,
 		path = laid, stations = [sa, sb], closed = false, platforms = platforms};
 	if (laid2 != null) line.path2 <- laid2;
+	if (depot == -1) return PrismaticAI.KeepDepotlessLine(line);
 	local train = PrismaticAI.BuildTrain(line);
-	if (train == -1) return 0;
+	if (train == -1) {
+		if (PrismaticAI.TrainCanComeLater(line)) return PrismaticAI.KeepTrainlessLine(line);
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "no train can run on it: " + line.train_fail);
+		return 0;
+	}
 	RAIL_LINES.push(line);
 	AILog.Info("PrismaticAI: built a rail route " + label + " with a train of " + AIVehicle.GetNumWagons(train) + " (" + AIEngine.GetName(AIVehicle.GetEngineType(train)) + ")");
 	AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
@@ -1129,10 +1410,26 @@ function PrismaticAI::PickRailEngines(railtype, cargo) {
  * sixteenths a tile, AIVehicle.GetLength), orders to both stations (the first with the line's load
  * flags), started. Returns the train or -1. */
 function PrismaticAI::BuildTrain(line) {
+	/* test_trainless (RESEARCH-ONLY, lines.nut): a new line's first train is refused as for money. */
+	if (!("first" in line) && !("test_refused" in line) && AIController.GetSetting("test_trainless") > 0) {
+		line.test_refused <- true;
+		line.train_fail <- "cash";
+		AILog.Warning("PrismaticAI: locomotive not bought: refused by test_trainless");
+		return -1;
+	}
 	local e = PrismaticAI.PickRailEngines(line.railtype, line.cargo);
-	if (e.loco == -1 || e.wagon == -1) { AILog.Warning("PrismaticAI: no locomotive or wagon for " + AICargo.GetCargoLabel(line.cargo)); return -1; }
+	if (e.loco == -1 || e.wagon == -1) {
+		line.train_fail <- "engine";
+		AILog.Warning("PrismaticAI: no locomotive or wagon for " + AICargo.GetCargoLabel(line.cargo));
+		return -1;
+	}
 	local train = AIVehicle.BuildVehicle(line.depot, e.loco);
-	if (!AIVehicle.IsValidVehicle(train)) { AILog.Warning("PrismaticAI: locomotive not bought: " + AIError.GetLastErrorString()); return -1; }
+	/* Why a train was not bought, for the line it was bought for (rail.nut TrainCanComeLater). */
+	if (!AIVehicle.IsValidVehicle(train)) {
+		line.train_fail <- (AIError.GetLastError() == AIError.ERR_NOT_ENOUGH_CASH) ? "cash" : AIError.GetLastErrorString();
+		AILog.Warning("PrismaticAI: locomotive not bought: " + AIError.GetLastErrorString());
+		return -1;
+	}
 	local max_len = (("len" in line) ? line.len : 3) * 16;
 	for (local i = 0; line.wagons <= 0 || i < line.wagons; i++) {
 		if (!PrismaticAI.AddWagon(train, line.depot, e.wagon, line.cargo, max_len)) break;
@@ -1140,6 +1437,8 @@ function PrismaticAI::BuildTrain(line) {
 	/* A train that carries nothing earns nothing: a NewGRF may refuse every wagon or refit. */
 	if (AIVehicle.GetCapacity(train, line.cargo) <= 0) {
 		AILog.Warning("PrismaticAI: no wagon of " + AIEngine.GetName(e.wagon) + " would carry " + AICargo.GetCargoLabel(line.cargo) + " behind " + AIEngine.GetName(e.loco) + "; the locomotive is sold");
+		/* No wagon for money is a money failure (the loop above stops at the first refused wagon). */
+		line.train_fail <- (AIError.GetLastError() == AIError.ERR_NOT_ENOUGH_CASH) ? "cash" : "wagon";
 		AIVehicle.SellVehicle(train);
 		return -1;
 	}
@@ -1148,10 +1447,12 @@ function PrismaticAI::BuildTrain(line) {
 		AILog.Warning("PrismaticAI: train for " + line.label + " got no orders to tiles " + line.a + " and " + line.b + ": " +
 			AIError.GetLastErrorString() + "; the train is sold");
 		AIVehicle.SellVehicle(train);
+		line.train_fail <- "orders";
 		return -1;
 	}
 	/* The line's trains are this one and its clones (shared orders, lines.nut TrainsOf). */
 	line.first <- train;
+	if ("train_fail" in line) delete line.train_fail;
 	AIVehicle.StartStopVehicle(train);
 	return train;
 }
@@ -1205,6 +1506,15 @@ function PrismaticAI::PlatformPlan(cargo, supply, dist, platforms, override_len,
 	return {len = len, wagons = (override_wagons > 0) ? override_wagons : 0, wagons_planned = wagons, trip_days = trip_days, why = why};
 }
 
+/* What a first train of `line` costs now: its locomotive and as many wagons as its platform holds
+ * (BuildTrain); 0 when the line has no engine yet (BuildTrain then says why). */
+function PrismaticAI::FirstTrainPrice(line) {
+	local e = PrismaticAI.PickRailEngines(line.railtype, line.cargo);
+	if (e.loco == -1 || e.wagon == -1) return 0;
+	local wagons = line.wagons > 0 ? line.wagons : 2 * (("len" in line) ? line.len : 3);
+	return AIEngine.GetPrice(e.loco) + wagons * AIEngine.GetPrice(e.wagon);
+}
+
 /* Every rail line the bot built keeps a train: one that was lost (a crash at a level crossing, a
  * sale) is replaced in the line's depot, at most twice per line, so a line that keeps losing its
  * train for money reasons is not rebuilt forever. Old trains are renewed by the company's own
@@ -1218,10 +1528,29 @@ function PrismaticAI::KeepLinesServed(reserve) {
 		/* Its own trains only (lines.nut TrainsOf): a line sharing both stations with another is not
 		 * served by the other's trains. */
 		local served = PrismaticAI.TrainsOf(line).len() > 0;
-		if (served || line.depot == -1) continue; /* -1: a line rebuilt from the map with no depot near it */
+		if (served) continue;
 		if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) < reserve) return;
+		/* -1: a line rebuilt from the map with no depot near it, or one whose depot was refused for
+		 * money (KeepDepotlessLine), which gets it once the bank holds the depot and the train. */
+		if (line.depot == -1) {
+			if (!("depot_pending" in line)) continue;
+			local need = reserve + PrismaticAI.FirstTrainPrice(line) + AIRail.GetBuildCost(line.railtype, AIRail.BT_DEPOT);
+			if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) < need || !PrismaticAI.BuildPendingDepot(line)) continue;
+		}
+		/* A line that never ran a train (KeepTrainlessLine, AdoptTrainlessLines) waits until the bank
+		 * holds the train's price above the reserve, so it is not refused for money every heartbeat;
+		 * its first train is no replacement. */
+		local first_train = !("first" in line);
+		/* test_trainless=2 (RESEARCH-ONLY): a refused line waits for TestForgetTrainless and the adoption. */
+		if (first_train && ("test_refused" in line) && !("adopted" in line) && AIController.GetSetting("test_trainless") >= 2) continue;
+		if (first_train && AICompany.GetBankBalance(AICompany.COMPANY_SELF) < reserve + PrismaticAI.FirstTrainPrice(line)) continue;
 		local train = PrismaticAI.BuildTrain(line);
 		if (train == -1) continue;
+		if (first_train) {
+			AILog.Info("PrismaticAI: line " + line.label + " got its first train (" + AIEngine.GetName(AIVehicle.GetEngineType(train)) + ")");
+			AILog.Info(PrismaticAI.LineRecord(i + 1, line));
+			continue;
+		}
 		line.restored++;
 		AILog.Info("PrismaticAI: line " + line.label + " had no train; a new one runs (" + AIEngine.GetName(AIVehicle.GetEngineType(train)) +
 			", replacement " + line.restored + " of 2)");
@@ -1304,7 +1633,13 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
 	/* Two companies that chose one producer in the same days both passed the check above: in the
 	 * fitness check's sibling match (seed 930967890) both PrismaticAI companies picked Wontford Coal
 	 * Mine in their first heartbeat, the second's track ran into the first's and its line failed.
-	 * With both source stations standing, the company of the higher id yields, before any track. */
+	 * With both source stations standing, the company of the higher id yields, before any track.
+	 * It settles only a race where both stations stand when the later check runs: the company of
+	 * the higher id may finish its station before the other's site search ends, see no rival and
+	 * keep it, while the lower one then sees a higher rival and keeps its own too. Waiting 10 days
+	 * before the check closed that window but delayed every line: on the fitness seed 930967890
+	 * the six PrismaticAI lineups summed 7.87M with the wait against 9.36M without, so it is not
+	 * done (research/incident-2026-11-22-sibling-industries.md, still open). */
 	local rival = PrismaticAI.ForeignRailStationAt(p);
 	if (rival != null && rival < AICompany.ResolveCompanyID(AICompany.COMPANY_SELF)) {
 		AILog.Warning("PrismaticAI: freight line " + label + " given up: company " + (rival + 1) +
@@ -1348,27 +1683,32 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 	/* Transit time at the speed of a typical early steam engine: about 100 km/h, some 3.7 tiles a day. */
 	local tiles_a_day = 3.7;
 	local near = rich ? RICH_MIN_TILES : 100, far = rich ? RICH_MAX_TILES : 260;
+	/* Why nothing was found, said once a game year (NO_OWN_LINE_YEAR): without it a bot that found
+	 * no candidate went silent, as company 0 of the owner's live game (seed 15805) did for years. */
+	local why = {producers = 0, ours = 0, claimed = 0, small = 0, served = 0, no_acceptor = 0, tried = 0};
 	foreach (p, _ in AIIndustryList()) {
 		if (AIIndustry.IsBuiltOnWater(p)) continue;
-		if (PrismaticAI.OwnRailStationNear(AIIndustry.GetLocation(p), 8) != null) continue;
+		why.producers++;
+		if (PrismaticAI.OwnRailStationNear(AIIndustry.GetLocation(p), 8) != null) { why.ours++; continue; }
 		/* Another company's rail station already claims it, in every mode (ForeignRailStationAt). */
-		if (PrismaticAI.ForeignRailStationAt(p) != null) continue;
+		if (PrismaticAI.ForeignRailStationAt(p) != null) { why.claimed++; continue; }
 		foreach (c, _ in AICargoList_IndustryProducing(p)) {
 			if (!AICargo.IsFreight(c)) continue;
 			local prod = AIIndustry.GetLastMonthProduction(p, c);
-			if (prod < 40) continue;
+			if (prod < 40) { why.small++; continue; }
 			if (AIIndustry.GetLastMonthTransported(p, c) > 0) {
-				if (!rich) continue;
+				if (!rich) { why.served++; continue; }
 				local served = AIIndustry.GetLastMonthTransportedPercentage(p, c);
-				if (served >= RICH_SERVED_BELOW) continue;
+				if (served >= RICH_SERVED_BELOW) { why.served++; continue; }
 				prod = prod * (100 - served) / 100;
 				if (prod < 40) continue;
 			}
 			local accs = AIIndustryList_CargoAccepting(c);
 			accs.Valuate(AIIndustry.GetDistanceManhattanToTile, AIIndustry.GetLocation(p));
 			accs.KeepBetweenValue(near - 1, far + 1);
+			if (accs.IsEmpty()) why.no_acceptor++;
 			foreach (q, dist in accs) {
-				if (tried.rawin(p + "-" + q + "-" + c)) continue;
+				if (tried.rawin(p + "-" + q + "-" + c)) { why.tried++; continue; }
 				local days = (dist / tiles_a_day).tointeger() + 1;
 				local income = AICargo.GetCargoIncome(c, dist, days);
 				/* Multi-source (rail_feed): the unserved producers of the same cargo a station at p
@@ -1382,5 +1722,16 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 			}
 		}
 	}
+	local year = AIDate.GetYear(AIDate.GetCurrentDate());
+	if (best == null && NO_OWN_LINE_YEAR != year) {
+		NO_OWN_LINE_YEAR = year;
+		AILog.Info("PrismaticAI: no own freight line: " + why.producers + " producers on land, " + why.ours +
+			" ours, " + why.claimed + " claimed by another company's rail station, cargoes: " + why.small +
+			" under 40 a month, " + why.served + " transported by others" + (rich ? " (rich: past RICH_SERVED_BELOW)" : "") +
+			", " + why.no_acceptor + " with no acceptor " + near + "-" + far + " tiles away, " + why.tried + " pairs tried");
+	}
 	return best;
 }
+
+/* The game year NextOwnFreightLine last said why it found nothing. */
+NO_OWN_LINE_YEAR <- -1;

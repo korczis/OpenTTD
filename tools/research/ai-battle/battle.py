@@ -99,6 +99,7 @@ MODES = ("rail", "road", "air", "water")
 SQ_ERROR = re.compile(r"\[script:\d\] \[(\d+)\] \[S\] ")
 # The referee's shared producers: an industry whose output rail stations of several companies catch.
 REF_SHARED = re.compile(r"REF S date=(\d+)-(\d+) ind=(\d+) owners=([\d,]+) name=(.*)$")
+REF_TRAINLESS = re.compile(r"REF T date=(\d+)-(\d+) cid=(\d+) rail_stations=(\d+) trainless=(\d+) ids=([\d,]*)")
 
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
             "-o", "ControlMaster=auto", "-o", "ControlPersist=120",
@@ -1201,7 +1202,8 @@ def parse_log(text: str) -> tuple[dict, dict]:
             y, mo, cid, fields, name = m.groups()
             sample = {"t": f"{y}-{int(mo):02d}", "name": name.strip()}
             sample.update({k: int(v) for k, v in REF_FIELD.findall(fields)})
-            for k in ("value", "money", "income", "perf", "vehicles", "stations"):
+            # loan: since the referee logs it (2026-11-23); older logs and records read 0.
+            for k in ("value", "money", "loan", "income", "perf", "vehicles", "stations"):
                 sample.setdefault(k, 0)
             by_key[(int(cid), int(y), int(mo))] = sample
             continue
@@ -1228,6 +1230,48 @@ def parse_shared(text: str) -> dict[int, dict]:
                                          "first": f"{y}-{int(mo):02d}"})
         e["owners"] |= {int(o) for o in owners.split(",") if o}
     return shared
+
+
+def parse_trainless(text: str) -> dict[int, list[dict]]:
+    """{company id: [{"date", "rail", "trainless", "ids"}, ...] in report order} from a match log's
+    REF T lines: per quarter, a company's rail stations, how many of them no train of its own calls
+    at, and which (a set of station ids)."""
+    out: dict[int, list[dict]] = {}
+    for line in text.splitlines():
+        m = REF_TRAINLESS.search(line)
+        if not m:
+            continue
+        y, mo, cid, rail, bare = map(int, m.groups()[:5])
+        ids = {int(i) for i in m.group(6).split(",") if i}
+        out.setdefault(cid, []).append({"date": f"{y}-{mo:02d}", "rail": rail, "trainless": bare, "ids": ids})
+    return out
+
+
+def trainless_stations(m: dict, rules: dict) -> list[str]:
+    """The fitness failures of PrismaticAI companies that keep rail stations no train of theirs calls
+    at (`m["trainless"]` from parse_trainless, keyed by company id in start order): more than
+    `trainless_max` (default 0) stations that were trainless in each of the last `trainless_reports`
+    (default 4, a game year) quarterly reports. The same station for a year, so the termini of a line
+    still being laid do not count: on the fitness seed a double-track line took three quarters from
+    its stations to its first train. In the owner's live game of seed 15805 10 of company 0's 12 rail
+    stations had no train by 1958, two of them the termini of finished lines whose locomotive was
+    refused for money (research/incident-2026-11-23-trainless-lines.md). A contestant in
+    `trainless_skip` is not judged: the test_trainless lineup refuses each line's first train on
+    purpose and is judged by `must_run_trains` instead."""
+    limit, n = rules.get("trainless_max", 0), rules.get("trainless_reports", 4)
+    fails = []
+    for i, c in enumerate(m["lineup"]):
+        if not c["ai"].startswith("PrismaticAI") or c["key"] in rules.get("trainless_skip", []):
+            continue
+        last = m.get("trainless", {}).get(i, [])[-n:]
+        if len(last) < n:
+            continue
+        kept = set.intersection(*(r["ids"] for r in last))
+        if len(kept) > limit:
+            fails.append(f"{c['key']}: trainless_stations:{len(kept)} rail station(s) without a train from "
+                         f"{last[0]['date']} to {last[-1]['date']} (stations {', '.join(map(str, sorted(kept)))}; "
+                         f"max {limit})")
+    return fails
 
 
 def sibling_producers(m: dict) -> list[str]:
@@ -2510,17 +2554,36 @@ def fleet_peak_final(series: list[dict]) -> tuple[int, int]:
 def hoarding(series: list[dict], rules: dict) -> str | None:
     """The first window of `hoard_window` quarterly samples (default 8, two game years) in which the
     fleet stays flat or shrinks (its maximum is at most `hoard_fleet_slack` above the count at the
-    window's start), and so do its stations (nothing is built), while the bank balance rises at least `hoard_factor`-fold (default 2) and ends
-    at or above `hoard_floor` (default 500000), as "<t0>..<t1>:<money0>-><money1>@<vehicles>v".
-    In the owner's live co-play game (2026-11-22) company 0 kept 35-37 vehicles from 1955 to 1960
-    while its balance grew from 0.6M to 3.77M, and no other anomaly fired. Every window is judged,
-    not only the last, so the fitness check sees a hoard the bot later spent its way out of."""
+    window's start), and so do its stations (nothing is built), while its money net of the loan
+    (the bank balance less the loan, both from the referee) rises at least `hoard_factor`-fold
+    (default 2) and ends at or above `hoard_floor` (default 500000), as
+    "<t0>..<t1>:<money0>-><money1>@<vehicles>v" with the net money. In the owner's live co-play
+    game (2026-11-22) company 0 kept 35-37 vehicles from 1955 to 1960 while its balance grew from
+    0.6M to 3.77M, and no other anomaly fired. Every window is judged, not only the last, so the
+    fitness check sees a hoard the bot later spent its way out of. The bank balance alone counted
+    borrowed money as hoarded: on the fitness seed 930967890 the self-steward contestant's last
+    sample (1966-01) came while a new rail line was being built on the whole loan, 348k in 1965-10
+    and 795k then, and the check read 321k -> 795k as a hoard. A sample without a loan (a log or
+    record from before the referee logged it) counts the loan as 0. A window that starts with net
+    money at or below 0 is skipped: a factor of a non-positive start says nothing, and such a
+    company is paying back its loan. Judging net money means that, for a company holding the same
+    loan L throughout, the factor test reads bank_1 >= factor * bank_0 - (factor - 1) * L in bank
+    terms (looser) and the floor reads bank_1 >= floor + L (stricter). That is intended: the test
+    judges what the company owns."""
     window = rules.get("hoard_window", 8)
     factor, floor = rules.get("hoard_factor", 2.0), rules.get("hoard_floor", 500_000)
     slack = rules.get("hoard_fleet_slack", 0.1)
     for i in range(len(series) - window + 1):
         w = series[i:i + window]
-        v0, m0, m1 = w[0]["vehicles"], w[0].get("money", 0), w[-1].get("money", 0)
+        v0 = w[0]["vehicles"]
+        m0 = w[0].get("money", 0) - w[0].get("loan", 0)
+        m1 = w[-1].get("money", 0) - w[-1].get("loan", 0)
+        # A window that starts in debt (net money at most 0) is not judged. Any rise is then at
+        # least "factor-fold", so only the floor would decide, and a company paying back its loan
+        # (100k on a 300k loan, then 520k with none) would read as a hoard. A company that goes on
+        # holding its money is caught by the next window that starts above 0.
+        if m0 <= 0:
+            continue
         # Building is spending: a company whose stations grow while its fleet waits is laying
         # lines (the planned fitness contestant, 9 vehicles, 283k -> 697k, one rail line a
         # heartbeat), not hoarding. Samples without a station count judge the fleet alone.
@@ -2570,6 +2633,14 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
             bad = [b for b in bad if not b.startswith("hoards")]
         fails += [f"{c['key']}: {b}" for b in bad]
     fails += sibling_producers(m)
+    fails += trainless_stations(m, fit["rules"])
+    # A contestant held to run trains ends with at least one: the test_trainless lineup refuses every
+    # new line's first train, so a train at the end proves KeepTrainlessLine, the adoption and
+    # KeepLinesServed's first train (research/incident-2026-11-23-trainless-lines.md).
+    for c in m["lineup"]:
+        s = m["series"].get(c["key"], [])
+        if c["key"] in fit.get("must_run_trains", []) and (s[-1].get("rail", 0) if s else 0) < 1:
+            fails.append(f"{c['key']}: no_trains: no train at the end of the match")
     # The owner's order (2026-11-19): PrismaticAI is never last. By final value on the fitness seed.
     finals = sorted(((s[-1]["value"] if s else 0), k) for k, s in
                     ((c["key"], m["series"].get(c["key"], [])) for c in m["lineup"]))
@@ -2637,6 +2708,7 @@ def cmd_fitness(cfg: dict) -> int:
                  "errors": {lineup[c]["key"]: n for c, n in errors.items() if c < len(lineup)}}
             m["status"] = match_status(m, proc.returncode)
             m["shared"] = parse_shared(out)
+            m["trainless"] = parse_trainless(out)
             for c in lineup:
                 s = m["series"].get(c["key"], [])
                 peak, final = fleet_peak_final(s)
@@ -2647,6 +2719,10 @@ def cmd_fitness(cfg: dict) -> int:
                 owners = ", ".join(lineup[o]["key"] if o < len(lineup) else f"company {o}"
                                    for o in sorted(e["owners"]))
                 print(f"fitness[{i}]: shared producer {e['name']} (industry {ind}) from {e['first']}: {owners}")
+            for cid, reps in sorted(m["trainless"].items()):
+                if cid < len(lineup) and reps and lineup[cid]["ai"].startswith("PrismaticAI"):
+                    print(f"fitness[{i}]: {lineup[cid]['key']:26} rail stations {reps[-1]['rail']:>3}, "
+                          f"without a train {reps[-1]['trainless']:>3} ({reps[-1]['date']})")
             fails += [f"[{i}] {f}" for f in fitness_verdict(m, fit)]
     for f in fails:
         print(f"fitness: FAIL {f}", file=sys.stderr)
