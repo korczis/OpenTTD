@@ -1,9 +1,11 @@
 # Design note: the owner's companies settle their approvals by a countdown
 
-**RESEARCH-ONLY. Status: reviewed by a peer session, revised; not implemented.** It went to review
-before any code, under the owner's order of 2026-11-23 to consult other models and peers first.
-Peer session openttd-36 reviewed it (below). Codex and Gemini have not: sending repository content
-to external models was refused to this session, and the owner decides whether they review it.
+**RESEARCH-ONLY. Status: revision 2, not implemented.** It went to review before any code,
+under the owner's order of 2026-11-23 to consult other models and peers first. Peer session
+openttd-36 reviewed it. A three-pass analysis (analysis, adversarial check, synthesis) then corrected
+it, and "Revision 2" below is authoritative where it differs from the sections above it. Codex and
+Gemini have not reviewed it: sending repository content to external models was refused to this
+session, and the owner decides whether they should.
 
 ## The owner's decision
 
@@ -115,3 +117,65 @@ conclusion that adopts this.
    is the existing `ApproveById` path's validation enough?
 5. Anything in the determinism or network model (the deadline is settled on the server's main
    thread, the client only displays it) that this breaks?
+
+## Revision 2 (after the three-pass analysis and openttd-36's store measurements)
+
+**Correction to "Why it matters".** Pending re-plans were not the binding cause of the 15805 loss.
+The bot had run out of candidates: a rival's rail station hides a producer for good
+(`ForeignRailStationAt`, before the rich test), and the loan policy froze construction on 47.9% of
+the days of 1950-52. The countdown makes a plan reach the bot. It does not close the gap by itself.
+
+**Corrections to the design:**
+
+1. **The countdown has a floor in wall time.** 30 game days pass in about 60 seconds of wall time.
+   openttd-36 measured a median of 60.2 s in run 31337 and 59.9 s in run 12609, from filed to
+   retired. A countdown in game days alone would fire before the owner could read it. The countdown
+   is `max(N game days, M real seconds)`, shown as a bar that empties in real time, like the ask
+   window's.
+2. **One approval per re-plan, through `ai.set_settings`, not batch ids.** `ai.set_settings`
+   validates every key and applies them all in one main-thread call
+   (`prismatic_mcp_ai.cpp:268-300`). Today the panel files one `ai.set_setting` per key, in
+   alphabetical order (`panel_bot.rs:402-407`, `build_plan.rhai:66`). Under `keep` only an
+   alphabetical prefix of a plan ever got through: 26 of 756 in run 12609, never the rail core.
+   `panel_decision.rs:765-770` already uses the atomic tool. This reverses the earlier "batch ids,
+   set_settings not needed".
+3. **Supersession exists on master, and its semantics need fixing.** `detail::Supersedes`
+   (`prismatic_mcp_detail.h:596-601`, `prismatic_mcp_server.cpp:1133-1142`, `855a9c83dc`) denies an
+   older pending approval when any one key overlaps. So a later one-key manual change withdraws a
+   whole re-plan. The rule becomes: a newer whole plan replaces an older whole plan, and a manual
+   change of one key is refused while a plan holding that key is pending (and says why).
+4. **An approval binds one session of one world.** `_approvals` is not saved, and `ClearApprovals`
+   runs on every reset (`prismatic_mcp_server.cpp:1562-1575`, `detail.h:62-70`). The countdown, a
+   hold and the captured company end with a load, and the re-planner files again. This is by
+   design and is documented, not changed.
+5. **A plan must never turn the autopilot floors off.** Any `fr_*` slot sets `planned` and drops
+   the floors (`main.nut:393-402`). The plan pending at 03:29 on 2026-11-23 would have cut
+   `own_lines` from 18 to 4 and `line_budget` from 50000 to 30000. Until the bot keeps its floors
+   under a plan (branch `fix/prismatic-planned-and-early-rail`), a plan that lowers a growth cap below
+   its floor never settles by default; it waits for the owner.
+6. **The scope governs every settle path.** The panel's blanket auto-approve executed `ai.start`
+   #721 ("auto-approve, no person", 1954-05-19), which founded a PrismaticAI company nobody ordered.
+   The captured-company scope applies to the deadline, the panel's auto-approve and Rhai alike.
+   `ai.start` and `ai.stop` never settle by default.
+7. **Compare-and-set at settlement.** `ApproveById` checks only `StillFresh`, and `set_setting` has
+   no compare-and-set. A plan computed against values that have since changed is retired as stale.
+8. **The owner secret is a precondition.** Until #242, the panel refused `/api/approve` and
+   `/api/auto-approve` ("no owner secret"), and chat was the only working channel.
+
+**The order before a default of approve may be switched on:**
+
+1. The bot keeps its floors under a plan (`fix/prismatic-planned-and-early-rail`).
+2. The re-planner files one `ai.set_settings` per re-plan.
+3. Compare-and-set and plan-level supersession are implemented and tested in
+   `mcp-approval-check`: a half plan never settles, a load drops pending approvals, and a one-key
+   change cannot kill a plan.
+4. The captured-company scope applies on every settle path, the panel's auto-approve included.
+5. The countdown is visible in the control window, with its wall-time floor and a server-side hold.
+6. Held-start pairs show that the autopilot with default-approved re-plans does not lose to the
+   autopilot alone (rule `project.a-tuning-claim-needs-held-start-pairs`).
+7. The owner switches it on.
+
+**Questions only the owner can answer:**
+
+- Should a default of approve apply to re-plans in every game, or be opted into per game?
+- May a plan that lowers a growth cap ever settle by default?
