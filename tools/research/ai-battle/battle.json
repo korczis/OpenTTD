@@ -76,7 +76,12 @@
       "hoard_window": 8,
       "hoard_factor": 2.0,
       "hoard_floor": 500000,
-      "hoard_fleet_slack": 0.1
+      "hoard_fleet_slack": 0.1,
+      "trainless_max": 0,
+      "trainless_reports": 4,
+      "trainless_skip": [
+        "PrismaticAI trainless test"
+      ]
     },
     "must_be_healthy": [
       "PrismaticAI",
@@ -91,6 +96,9 @@
     "never_last": [
       "PrismaticAI",
       "PrismaticAI self-steward"
+    ],
+    "must_run_trains": [
+      "PrismaticAI trainless test"
     ],
     "lineups": [
       [
@@ -172,6 +180,22 @@
         },
         {
           "ai": "LuDiAI AfterFix"
+        }
+      ],
+      [
+        {
+          "ai": "PrismaticAI",
+          "label": "PrismaticAI trainless test",
+          "settings": "aggressiveness=100,max_routes=30,intercity=1,own_lines=8,cash_reserve=5000,test_trainless=2"
+        },
+        {
+          "ai": "AAAHogEx"
+        },
+        {
+          "ai": "LuDiAI AfterFix"
+        },
+        {
+          "ai": "AdmiralAI"
         }
       ]
     ]

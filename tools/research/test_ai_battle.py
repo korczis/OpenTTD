@@ -99,6 +99,78 @@ class SharedProducers(unittest.TestCase):
                       battle.fitness_verdict(m, fit))
 
 
+def trainless(y, mo, cid, rail, ids):
+    return (f"dbg: [script] REF T date={y}-{mo} cid={cid} rail_stations={rail} trainless={len(ids)} "
+            f"ids={','.join(map(str, ids))}")
+
+
+class TrainlessStations(unittest.TestCase):
+    """The referee's REF T lines and the fitness failure of a PrismaticAI company that keeps the same
+    rail stations without a train of its own for a year (research/incident-2026-11-23-trainless-lines.md)."""
+
+    def test_parse_keeps_report_order_and_station_ids_per_company(self):
+        text = "\n".join([trainless(1960, 4, 0, 4, [3, 7]), ref(1960, 4, 0, 1), trainless(1960, 4, 1, 9, []),
+                          trainless(1960, 7, 0, 6, [3, 7, 9]),
+                          "dbg: REF T date=1960-7 cid=x rail_stations=1 trainless=1 ids=1"])
+        got = battle.parse_trainless(text)
+        self.assertEqual(sorted(got), [0, 1])
+        self.assertEqual(got[0], [{"date": "1960-04", "rail": 4, "trainless": 2, "ids": {3, 7}},
+                                  {"date": "1960-07", "rail": 6, "trainless": 3, "ids": {3, 7, 9}}])
+        self.assertEqual(got[1][0]["ids"], set())
+        self.assertEqual(battle.parse_trainless("no referee here"), {})
+
+    def lineup(self):
+        return [{"ai": "PrismaticAI", "key": "P"}, {"ai": "AAAHogEx", "key": "AAAHogEx"},
+                {"ai": "PrismaticAI", "key": "P2"}]
+
+    def reports(self, *ids):
+        return [{"date": f"{1960 + i // 4}-{3 * (i % 4) + 1:02d}", "rail": 12, "trainless": len(s), "ids": set(s)}
+                for i, s in enumerate(ids)]
+
+    def test_the_same_station_trainless_for_a_year_fails_a_line_being_laid_does_not(self):
+        kept = self.reports([1], [5, 6], [5, 6, 8], [5, 6], [5, 6, 9])
+        # The live game's pattern: two termini of a finished line keep no train. P2's stations are
+        # those of lines being laid, a different pair every few quarters, as on the fitness seed.
+        laying = self.reports([170, 171], [170, 171], [170, 171], [192, 193], [192, 193])
+        m = {"lineup": self.lineup(), "trainless": {0: kept, 1: self.reports([4], [4], [4], [4]), 2: laying}}
+        want = "P: trainless_stations:2 rail station(s) without a train from 1960-04 to 1961-01 (stations 5, 6; max 0)"
+        self.assertEqual(battle.trainless_stations(m, {}), [want])
+        self.assertEqual(battle.trainless_stations(m, {"trainless_max": 2}), [])
+        # The test hook's own lineup keeps stations trainless on purpose and is not judged here.
+        self.assertEqual(battle.trainless_stations(m, {"trainless_skip": ["P"]}), [])
+        self.assertEqual(battle.trainless_stations({"lineup": self.lineup(), "trainless": {0: kept[:3]}}, {}), [])
+        # Fewer reports than a year: not judged; a shorter window from the rules: judged on it.
+        self.assertEqual(battle.trainless_stations({"lineup": self.lineup(), "trainless": {0: kept[1:4]}},
+                                                   {"trainless_reports": 3})[0].split(":")[1], " trainless_stations")
+        self.assertEqual(battle.trainless_stations({"lineup": self.lineup()}, {}), [])
+        fit = {"rules": {}, "must_be_healthy": []}
+        m.update(status="done", errors={}, series={"P": [], "AAAHogEx": [], "P2": []})
+        self.assertIn(want, battle.fitness_verdict(m, fit))
+
+    def test_the_fitness_config_declares_the_rule(self):
+        cfg = json.loads((Path(battle.__file__).parent / "battle.json").read_text())
+        self.assertEqual((cfg["fitness"]["rules"]["trainless_max"], cfg["fitness"]["rules"]["trainless_reports"]), (0, 4))
+        # The recovery's own lineup is held to run trains, and its settings switch the test hook on.
+        self.assertEqual(cfg["fitness"]["must_run_trains"], ["PrismaticAI trainless test"])
+        self.assertEqual(cfg["fitness"]["rules"]["trainless_skip"], ["PrismaticAI trainless test"])
+        test = [c for lu in cfg["fitness"]["lineups"] for c in lu if c.get("label") == "PrismaticAI trainless test"]
+        self.assertEqual(len(test), 1)
+        self.assertIn("test_trainless=2", test[0]["settings"])
+
+    def test_a_contestant_held_to_run_trains_fails_without_one(self):
+        lineup = [{"ai": "PrismaticAI", "key": "T"}, {"ai": "PrismaticAI", "key": "P"}]
+        fit = {"rules": {}, "must_be_healthy": [], "must_run_trains": ["T"]}
+        m = {"lineup": lineup, "status": "done", "errors": {},
+             "series": {"T": [{"t": "1960-01", "value": 5, "vehicles": 3, "money": 0, "stations": 1, "rail": 3}, {"t": "1961-01", "value": 6, "vehicles": 3, "money": 0, "stations": 1, "rail": 0}],
+                        "P": [{"t": "1961-01", "value": 7, "vehicles": 1, "money": 0, "stations": 1, "rail": 0}]}}
+        self.assertIn("T: no_trains: no train at the end of the match", battle.fitness_verdict(m, fit))
+        self.assertFalse(any(f.startswith("P: no_trains") for f in battle.fitness_verdict(m, fit)))
+        m["series"]["T"][-1]["rail"] = 2
+        self.assertFalse(any("no_trains" in f for f in battle.fitness_verdict(m, fit)))
+        m["series"]["T"] = []
+        self.assertIn("T: no_trains: no train at the end of the match", battle.fitness_verdict(m, fit))
+
+
 class FitnessRun(unittest.TestCase):
     """cmd_fitness end to end against a fake game binary that prints referee lines: the shared
     producer is printed and fails the check."""
@@ -111,7 +183,9 @@ class FitnessRun(unittest.TestCase):
             (repo / "ai" / "PrismaticAI").mkdir(parents=True)
             (repo / "referee" / "BattleReferee").mkdir(parents=True)
             lines = [ref(1960, 1, c, 10, veh=1) for c in range(3)] + \
-                    [ref(1961, 1, c, 20 + c, veh=2) for c in range(3)] + [shared(1960, 4, 7, "0,1")]
+                    [ref(1961, 1, c, 20 + c, veh=2) for c in range(3)] + [shared(1960, 4, 7, "0,1")] + \
+                    [trainless(1960, 1, 1, 4, [5, 6]), trainless(1960, 4, 1, 4, [5, 6]), trainless(1960, 7, 1, 4, [5, 6]),
+                     trainless(1961, 1, 1, 4, [5, 6, 7]), trainless(1961, 1, 2, 8, [1, 2, 3])]
             fake = repo / "build" / "openttd"
             fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\n")
             fake.chmod(0o755)
@@ -136,6 +210,10 @@ class FitnessRun(unittest.TestCase):
         self.assertEqual(code, 10, out.getvalue() + err.getvalue())
         self.assertIn("shared producer Coal Mine (industry 7) from 1960-04: P a, P b", out.getvalue())
         self.assertIn("shared_producer:Coal Mine (industry 7, from 1960-04): P a + P b", err.getvalue())
+        self.assertIn("P b                        rail stations   4, without a train   3 (1961-01)", out.getvalue())
+        self.assertIn("P b: trainless_stations:2 rail station(s) without a train from 1960-01 to 1961-01 "
+                      "(stations 5, 6; max 0)", err.getvalue())
+        self.assertNotIn("AAAHogEx: trainless", err.getvalue())
 
 
 class MatchContract(unittest.TestCase):

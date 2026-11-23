@@ -874,6 +874,83 @@ function PrismaticAI::RemoveRailStation(st, len) {
 	for (local i = 0; i < len; i++) AITile.DemolishTile(st.tile + i * step);
 }
 
+/* A line that will run no train leaves no station: both of its termini go (RemoveRailStation); the
+ * track already laid stays. A station left standing costs upkeep, earns nothing, and keeps the
+ * bot's next own line away from its producer (NextOwnFreightLine skips a producer with a rail
+ * station of ours near it). In the owner's live game (seed 15805) 10 of company 0's 12 rail
+ * stations had no train by 1958 (research/incident-2026-11-23-trainless-lines.md). */
+function PrismaticAI::AbandonLineStations(sa, sb, len, label, why) {
+	AILog.Warning("PrismaticAI: rail line " + label + " given up (" + why + "); its two stations are removed");
+	PrismaticAI.RemoveRailStation(sa, len);
+	PrismaticAI.RemoveRailStation(sb, len);
+}
+
+/* A finished line whose first train was not bought keeps its place: it goes into RAIL_LINES with no
+ * train and logs its record (so the Rhai rail monitor reports it `unserved`), and KeepLinesServed
+ * buys its first train once the bank holds the reserve. Before, the line returned 0 and was
+ * forgotten: in the owner's live game two finished iron ore lines (180 and 123 rail pieces, four
+ * stations, two depots) stood without a train for years while 535k lay in the bank. Returns 1. */
+function PrismaticAI::KeepTrainlessLine(line) {
+	RAIL_LINES.push(line);
+	AILog.Warning("PrismaticAI: rail line " + line.label + " is built but its first train was not bought (" +
+		line.train_fail + "); it waits for one");
+	AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
+	return 1;
+}
+
+/* Whether a failed BuildTrain (`line.train_fail`) leaves a line a later train can serve: money, or
+ * no engine for the cargo yet. A wagon that carries nothing or orders the game refuses would fail
+ * the same way again on the same line. */
+function PrismaticAI::TrainCanComeLater(line) {
+	return ("train_fail" in line) && (line.train_fail == "cash" || line.train_fail == "engine");
+}
+
+/* The depot of a line just laid between the termini `sa` and `sb` along `laid`: behind a platform of
+ * either, else beside the track. {depot (a tile, or null), cash (true when it was refused for money,
+ * the test hook included)}. After RailCashWait the track is laid, and the depot met the same shortage
+ * that the train did (#240, seed 15805): a laid line must not be dropped for it. */
+function PrismaticAI::LineDepot(sa, sb, laid) {
+	if (PrismaticAI.TestRefuseDepot()) return {depot = null, cash = true};
+	local depot = PrismaticAI.BuildRailDepotBehind(sa);
+	if (depot == null) depot = PrismaticAI.BuildRailDepotBehind(sb);
+	if (depot == null) depot = PrismaticAI.BuildRailDepotBeside(laid);
+	return {depot = depot, cash = depot == null && AIError.GetLastError() == AIError.ERR_NOT_ENOUGH_CASH};
+}
+
+/* A line laid whose depot was refused for money: kept like a line whose train was (KeepTrainlessLine),
+ * with depot -1 and `depot_pending`; KeepLinesServed builds the depot, then the first train, once
+ * the bank holds both. */
+function PrismaticAI::KeepDepotlessLine(line) {
+	line.depot_pending <- true;
+	line.train_fail <- "cash";
+	AILog.Warning("PrismaticAI: rail line " + line.label + " is laid but its depot was refused for money; it waits for one");
+	return PrismaticAI.KeepTrainlessLine(line);
+}
+
+/* Builds the depot of a kept line that has none (KeepDepotlessLine), in its own rail type, behind a
+ * platform of its stations or beside its track; true when it stands. */
+function PrismaticAI::BuildPendingDepot(line) {
+	AIRail.SetCurrentRailType(line.railtype);
+	local d = null;
+	foreach (st in line.stations) if (d == null) d = PrismaticAI.BuildRailDepotBehind(st);
+	if (d == null && line.path.len() > 2) d = PrismaticAI.BuildRailDepotBeside(line.path);
+	if (d == null) return false;
+	line.depot = d;
+	delete line.depot_pending;
+	AILog.Info("PrismaticAI: line " + line.label + " got its depot at tile " + d);
+	return true;
+}
+
+/* test_trainless (RESEARCH-ONLY, info.nut): every other new line's depot is refused as for money. */
+TEST_DEPOT_TURN <- 0;
+function PrismaticAI::TestRefuseDepot() {
+	if (AIController.GetSetting("test_trainless") == 0) return false;
+	TEST_DEPOT_TURN++;
+	if (TEST_DEPOT_TURN % 2 == 1) return false;
+	AILog.Warning("PrismaticAI: rail depot not built: refused by test_trainless");
+	return true;
+}
+
 /* The line between two termini, its depot and one train for `cargo`. The first stop loads with
  * `first_flags` (full load at a mine; none for passengers). Returns 1 when a train runs, else 0. A
  * finished line logs its record (lines.nut LineRecord): its geometry for the Rhai steward, which
@@ -889,25 +966,34 @@ function PrismaticAI::BuildRailLineAndTrain(sa, sb, len, cargo, wagons, first_fl
 	}
 	/* What was actually laid: a re-plan around a refused piece changes the route. */
 	local laid = PrismaticAI.BuildRailAlong(path, sa.end, sb.end, 2, throat_b, throat_a);
-	if (laid == null) return 0;
+	if (laid == null) { PrismaticAI.AbandonLineStations(sa, sb, len, label, "the track could not be laid"); return 0; }
 	local broken = PrismaticAI.VerifyRailLine(laid, sa.end, sb.end);
 	if (broken != -1) {
 		AILog.Warning("PrismaticAI: rail line " + label + " is broken at tile " + broken + "; no train on a line it cannot run");
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "broken at tile " + broken);
 		return 0;
 	}
 	AILog.Info("PrismaticAI: rail line " + label + " done, " + laid.len() + " tiles");
-	local depot = PrismaticAI.BuildRailDepotBehind(sa);
-	if (depot == null) depot = PrismaticAI.BuildRailDepotBehind(sb);
-	if (depot == null) depot = PrismaticAI.BuildRailDepotBeside(laid);
-	if (depot == null) { AILog.Warning("PrismaticAI: no rail depot behind a platform or beside the line"); return 0; }
+	local ld = PrismaticAI.LineDepot(sa, sb, laid);
+	if (ld.depot == null && !ld.cash) {
+		AILog.Warning("PrismaticAI: no rail depot behind a platform or beside the line");
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "no depot");
+		return 0;
+	}
+	local depot = (ld.depot == null) ? -1 : ld.depot;
 	local platforms = min(("platforms" in sa) ? sa.platforms : 1, ("platforms" in sb) ? sb.platforms : 1);
 	/* Everything the line owns (its stations' own platforms and throats, its track, its depot), so
 	 * closing it (lines.nut CloseLine) clears it to the last tile and nothing of another line. */
 	local line = {a = sa.tile, b = sb.tile, depot = depot, cargo = cargo, wagons = wagons, flags = first_flags,
 		label = label, railtype = AIRail.GetCurrentRailType(), restored = 0, len = len, trains_max = platforms,
 		path = laid, stations = [sa, sb], closed = false};
+	if (depot == -1) return PrismaticAI.KeepDepotlessLine(line);
 	local train = PrismaticAI.BuildTrain(line);
-	if (train == -1) return 0;
+	if (train == -1) {
+		if (PrismaticAI.TrainCanComeLater(line)) return PrismaticAI.KeepTrainlessLine(line);
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "no train can run on it: " + line.train_fail);
+		return 0;
+	}
 	RAIL_LINES.push(line);
 	AILog.Info("PrismaticAI: built a rail route " + label + " with a train of " + AIVehicle.GetNumWagons(train) + " (" + AIEngine.GetName(AIVehicle.GetEngineType(train)) + ")");
 	AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
@@ -1030,12 +1116,13 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 	local acc_a = AIAccounting();
 	local laid = PrismaticAI.BuildRailAlong(path, sa.end, sb.end, 2, true, true);
 	local cost_a = acc_a.GetCosts();
-	if (laid == null) return 0;
+	if (laid == null) { PrismaticAI.AbandonLineStations(sa, sb, len, label, "the track could not be laid"); return 0; }
 	local broken = PrismaticAI.VerifyRailLine(laid, sa.end, sb.end);
 	if (broken == -1) broken = PrismaticAI.VerifyJunction(da, false);
 	if (broken == -1) broken = PrismaticAI.VerifyJunction(db, false);
 	if (broken != -1) {
 		AILog.Warning("PrismaticAI: rail line " + label + " is broken at tile " + broken + "; no train on a line it cannot run");
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "broken at tile " + broken);
 		return 0;
 	}
 	/* Track B only when, after it, the money still buys the train: track B costs about what track A
@@ -1071,6 +1158,7 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 		local sig_b = PrismaticAI.PlaceLaneSignals(laid2, da.s1, db.s1, false);
 		if (sig_a == 0 || sig_b == 0) {
 			AILog.Warning("PrismaticAI: no one-way signal on a track of " + label + " (" + sig_a + ", " + sig_b + "); no train on it");
+			PrismaticAI.AbandonLineStations(sa, sb, len, label, "no one-way signal");
 			return 0;
 		}
 		trains_max = platforms + min(sig_a, sig_b);
@@ -1082,17 +1170,25 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 		AILog.Warning("PrismaticAI: no second track for " + label + "; it runs single track, " + platforms + " trains");
 	}
 	AILog.Info("PrismaticAI: rail line " + label + " done, " + laid.len() + " tiles");
-	local depot = PrismaticAI.BuildRailDepotBehind(sa);
-	if (depot == null) depot = PrismaticAI.BuildRailDepotBehind(sb);
-	if (depot == null) depot = PrismaticAI.BuildRailDepotBeside(laid);
-	if (depot == null) { AILog.Warning("PrismaticAI: no rail depot behind a platform or beside the line"); return 0; }
+	local ld = PrismaticAI.LineDepot(sa, sb, laid);
+	if (ld.depot == null && !ld.cash) {
+		AILog.Warning("PrismaticAI: no rail depot behind a platform or beside the line");
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "no depot");
+		return 0;
+	}
+	local depot = (ld.depot == null) ? -1 : ld.depot;
 	/* wagons 0: every train as long as the platform. */
 	local line = {a = sa.tile, b = sb.tile, depot = depot, cargo = cargo, wagons = 0, flags = first_flags,
 		label = label, railtype = AIRail.GetCurrentRailType(), restored = 0, len = len, trains_max = trains_max,
 		path = laid, stations = [sa, sb], closed = false, platforms = platforms};
 	if (laid2 != null) line.path2 <- laid2;
+	if (depot == -1) return PrismaticAI.KeepDepotlessLine(line);
 	local train = PrismaticAI.BuildTrain(line);
-	if (train == -1) return 0;
+	if (train == -1) {
+		if (PrismaticAI.TrainCanComeLater(line)) return PrismaticAI.KeepTrainlessLine(line);
+		PrismaticAI.AbandonLineStations(sa, sb, len, label, "no train can run on it: " + line.train_fail);
+		return 0;
+	}
 	RAIL_LINES.push(line);
 	AILog.Info("PrismaticAI: built a rail route " + label + " with a train of " + AIVehicle.GetNumWagons(train) + " (" + AIEngine.GetName(AIVehicle.GetEngineType(train)) + ")");
 	AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
@@ -1129,10 +1225,26 @@ function PrismaticAI::PickRailEngines(railtype, cargo) {
  * sixteenths a tile, AIVehicle.GetLength), orders to both stations (the first with the line's load
  * flags), started. Returns the train or -1. */
 function PrismaticAI::BuildTrain(line) {
+	/* test_trainless (RESEARCH-ONLY, lines.nut): a new line's first train is refused as for money. */
+	if (!("first" in line) && !("test_refused" in line) && AIController.GetSetting("test_trainless") > 0) {
+		line.test_refused <- true;
+		line.train_fail <- "cash";
+		AILog.Warning("PrismaticAI: locomotive not bought: refused by test_trainless");
+		return -1;
+	}
 	local e = PrismaticAI.PickRailEngines(line.railtype, line.cargo);
-	if (e.loco == -1 || e.wagon == -1) { AILog.Warning("PrismaticAI: no locomotive or wagon for " + AICargo.GetCargoLabel(line.cargo)); return -1; }
+	if (e.loco == -1 || e.wagon == -1) {
+		line.train_fail <- "engine";
+		AILog.Warning("PrismaticAI: no locomotive or wagon for " + AICargo.GetCargoLabel(line.cargo));
+		return -1;
+	}
 	local train = AIVehicle.BuildVehicle(line.depot, e.loco);
-	if (!AIVehicle.IsValidVehicle(train)) { AILog.Warning("PrismaticAI: locomotive not bought: " + AIError.GetLastErrorString()); return -1; }
+	/* Why a train was not bought, for the line it was bought for (rail.nut TrainCanComeLater). */
+	if (!AIVehicle.IsValidVehicle(train)) {
+		line.train_fail <- (AIError.GetLastError() == AIError.ERR_NOT_ENOUGH_CASH) ? "cash" : AIError.GetLastErrorString();
+		AILog.Warning("PrismaticAI: locomotive not bought: " + AIError.GetLastErrorString());
+		return -1;
+	}
 	local max_len = (("len" in line) ? line.len : 3) * 16;
 	for (local i = 0; line.wagons <= 0 || i < line.wagons; i++) {
 		if (!PrismaticAI.AddWagon(train, line.depot, e.wagon, line.cargo, max_len)) break;
@@ -1140,6 +1252,8 @@ function PrismaticAI::BuildTrain(line) {
 	/* A train that carries nothing earns nothing: a NewGRF may refuse every wagon or refit. */
 	if (AIVehicle.GetCapacity(train, line.cargo) <= 0) {
 		AILog.Warning("PrismaticAI: no wagon of " + AIEngine.GetName(e.wagon) + " would carry " + AICargo.GetCargoLabel(line.cargo) + " behind " + AIEngine.GetName(e.loco) + "; the locomotive is sold");
+		/* No wagon for money is a money failure (the loop above stops at the first refused wagon). */
+		line.train_fail <- (AIError.GetLastError() == AIError.ERR_NOT_ENOUGH_CASH) ? "cash" : "wagon";
 		AIVehicle.SellVehicle(train);
 		return -1;
 	}
@@ -1148,10 +1262,12 @@ function PrismaticAI::BuildTrain(line) {
 		AILog.Warning("PrismaticAI: train for " + line.label + " got no orders to tiles " + line.a + " and " + line.b + ": " +
 			AIError.GetLastErrorString() + "; the train is sold");
 		AIVehicle.SellVehicle(train);
+		line.train_fail <- "orders";
 		return -1;
 	}
 	/* The line's trains are this one and its clones (shared orders, lines.nut TrainsOf). */
 	line.first <- train;
+	if ("train_fail" in line) delete line.train_fail;
 	AIVehicle.StartStopVehicle(train);
 	return train;
 }
@@ -1205,6 +1321,15 @@ function PrismaticAI::PlatformPlan(cargo, supply, dist, platforms, override_len,
 	return {len = len, wagons = (override_wagons > 0) ? override_wagons : 0, wagons_planned = wagons, trip_days = trip_days, why = why};
 }
 
+/* What a first train of `line` costs now: its locomotive and as many wagons as its platform holds
+ * (BuildTrain); 0 when the line has no engine yet (BuildTrain then says why). */
+function PrismaticAI::TrainPrice(line) {
+	local e = PrismaticAI.PickRailEngines(line.railtype, line.cargo);
+	if (e.loco == -1 || e.wagon == -1) return 0;
+	local wagons = line.wagons > 0 ? line.wagons : 2 * (("len" in line) ? line.len : 3);
+	return AIEngine.GetPrice(e.loco) + wagons * AIEngine.GetPrice(e.wagon);
+}
+
 /* Every rail line the bot built keeps a train: one that was lost (a crash at a level crossing, a
  * sale) is replaced in the line's depot, at most twice per line, so a line that keeps losing its
  * train for money reasons is not rebuilt forever. Old trains are renewed by the company's own
@@ -1218,10 +1343,29 @@ function PrismaticAI::KeepLinesServed(reserve) {
 		/* Its own trains only (lines.nut TrainsOf): a line sharing both stations with another is not
 		 * served by the other's trains. */
 		local served = PrismaticAI.TrainsOf(line).len() > 0;
-		if (served || line.depot == -1) continue; /* -1: a line rebuilt from the map with no depot near it */
+		if (served) continue;
 		if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) < reserve) return;
+		/* -1: a line rebuilt from the map with no depot near it, or one whose depot was refused for
+		 * money (KeepDepotlessLine), which gets it once the bank holds the depot and the train. */
+		if (line.depot == -1) {
+			if (!("depot_pending" in line)) continue;
+			local need = reserve + PrismaticAI.TrainPrice(line) + AIRail.GetBuildCost(line.railtype, AIRail.BT_DEPOT);
+			if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) < need || !PrismaticAI.BuildPendingDepot(line)) continue;
+		}
+		/* A line that never ran a train (KeepTrainlessLine, AdoptTrainlessLines) waits until the bank
+		 * holds the train's price above the reserve, so it is not refused for money every heartbeat;
+		 * its first train is no replacement. */
+		local first_train = !("first" in line);
+		/* test_trainless=2 (RESEARCH-ONLY): a refused line waits for TestForgetTrainless and the adoption. */
+		if (first_train && ("test_refused" in line) && !("adopted" in line) && AIController.GetSetting("test_trainless") >= 2) continue;
+		if (first_train && AICompany.GetBankBalance(AICompany.COMPANY_SELF) < reserve + PrismaticAI.TrainPrice(line)) continue;
 		local train = PrismaticAI.BuildTrain(line);
 		if (train == -1) continue;
+		if (first_train) {
+			AILog.Info("PrismaticAI: line " + line.label + " got its first train (" + AIEngine.GetName(AIVehicle.GetEngineType(train)) + ")");
+			AILog.Info(PrismaticAI.LineRecord(i + 1, line));
+			continue;
+		}
 		line.restored++;
 		AILog.Info("PrismaticAI: line " + line.label + " had no train; a new one runs (" + AIEngine.GetName(AIVehicle.GetEngineType(train)) +
 			", replacement " + line.restored + " of 2)");

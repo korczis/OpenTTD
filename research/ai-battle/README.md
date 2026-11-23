@@ -315,6 +315,21 @@ The first editions showed two failures. The battle now catches both by itself.
   <key> + <key>` when two of the owners are PrismaticAI. Four PrismaticAI companies of the owner's
   live game had stalled on exactly this
   ([incident 2026-11-22](../incident-2026-11-22-sibling-industries.md)).
+- **Rail stations without a train (2026-11-23).** Each quarter the referee prints
+  `REF T date=<y>-<m> cid=<n> rail_stations=<n> trainless=<n> ids=<station id>,...` for every
+  company with a rail station: the ones no train of its own has orders to, read in deity mode. They
+  are the termini of lines that never got a train or were given up half laid. `battle.py fitness`
+  prints each PrismaticAI's count. It fails with `trainless_stations:<n> rail station(s) without a
+  train from <quarter> to <quarter> (stations ...; max <trainless_max>)` when the same stations
+  stayed trainless through the last `trainless_reports` (4) reports, so a line still being laid
+  does not count. The sixth lineup, `PrismaticAI trainless test` (setting `test_trainless=2`),
+  refuses every new line's first train and forgets the line a month later. It is in
+  `must_run_trains` and fails with `no_trains` when it ends without a train, so every run of the
+  check proves the bot's recovery (KeepTrainlessLine, KeepDepotlessLine, AdoptTrainlessLines,
+  KeepLinesServed). It is in `rules.trainless_skip`, because it keeps stations trainless on purpose. On
+  the fitness seed master failed `trainless_stations` in all five PrismaticAI lineups, with 1 to 6
+  stations kept a year
+  ([incident 2026-11-23](../incident-2026-11-23-trainless-lines.md)).
 
 **A planned bot that hoards (2026-11-22).** In the owner's live co-play game, company 0 was a
 planned PrismaticAI (`b.planned` in `main.nut`: the panel had set its rail pair). It kept 35-37

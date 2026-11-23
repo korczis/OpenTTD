@@ -45,6 +45,18 @@ tree and one binary, so it can run on every change to the bot.
   every healthy one); the list is read there, not repeated here, and a contestant joins it once
   the fitness seed shows it spending (research/ai-battle/README.md keeps the evidence). Do not
   remove a contestant from `must_not_hoard` to make a change pass.
+- a PrismaticAI company kept more than `fitness.rules.trainless_max` rail stations without a
+  train of its own through each of the last `trainless_reports` quarterly reports: the same
+  stations for a game year, counted from the game in deity mode by the referee (`REF T`;
+  `trainless_stations`). In the owner's live game of seed 15805 two finished lines stood without
+  a train for a decade (research/incident-2026-11-23-trainless-lines.md). Do not raise
+  `trainless_max`, or add a contestant to `trainless_skip` (only the test hook's own lineup is
+  there), to make a change pass.
+- a contestant listed in `fitness.must_run_trains` ended the match with no train (`no_trains`).
+  The lineup `PrismaticAI trainless test` (setting `test_trainless=2`) refuses the first train
+  of every new line and forgets the line each month. Only the bot's own recovery
+  (KeepTrainlessLine, AdoptTrainlessLines, KeepLinesServed) can give it a train, so the check
+  runs that recovery on every change.
 
 The gate fails with it.
 

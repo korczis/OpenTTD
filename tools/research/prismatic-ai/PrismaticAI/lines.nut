@@ -207,3 +207,129 @@ function PrismaticAI::ReconcileLines(reserve) {
 		}
 	}
 }
+
+/* Industries further than this (tiles, to their location) are not looked at for a station: past any
+ * industry's size plus the station spread the game allows by default (12) and the catchment. */
+const ADOPT_INDUSTRY_REACH = 32;
+
+/* Adopting trainless lines: a pair of our rail stations, at least one of them with no train of ours
+ * calling (the other may be a station a served line joined), that no line of RAIL_LINES runs between
+ * and no train of ours serves both of. The first station's catchment holds a producer of a freight
+ * cargo, the second's an industry that accepts it (CaughtIndustry), the two are joined by our own track (RailWalk, events.nut), and a joined rail depot is near
+ * one of them (RestoreDepot, DepotJoined). Such a pair is a finished line that lost its train before
+ * KeepTrainlessLine existed, or one a restart forgot: it goes into RAIL_LINES with no train, and
+ * KeepLinesServed buys its first train once the bank holds the train's price. In the owner's live
+ * game (seed 15805) two finished iron ore lines stood like this from 1952 and 1953 while 535k lay in
+ * the bank by 1962 (research/incident-2026-11-23-trainless-lines.md). A pair the walk cannot join is
+ * left alone; a train that still gets lost is handled as on any line (events.nut: sold, the line
+ * halted). Runs from Start after Restore and once a game year (AdoptKey). Returns the lines adopted. */
+function PrismaticAI::AdoptTrainlessLines() {
+	local pairs = {}, depots = {};
+	foreach (line in RAIL_LINES) {
+		local a = AIStation.GetStationID(line.a), b = AIStation.GetStationID(line.b);
+		pairs[a + "-" + b] <- true;
+		pairs[b + "-" + a] <- true;
+		if (line.depot >= 0) depots[line.depot] <- true;
+	}
+	/* Our rail stations by their first platform tile, with the rail vehicles of ours that call. */
+	local all = [], orphans = 0;
+	foreach (st, _ in AIStationList(AIStation.STATION_TRAIN)) {
+		local tiles = AITileList_StationType(st, AIStation.STATION_TRAIN);
+		if (tiles.IsEmpty()) continue;
+		local calls = AIVehicleList_Station(st);
+		calls.Valuate(AIVehicle.GetVehicleType);
+		calls.KeepValue(AIVehicle.VT_RAIL);
+		all.push({st = st, tile = tiles.Begin(), calls = calls});
+		if (calls.IsEmpty()) orphans++;
+	}
+	if (orphans == 0) return 0;
+	local adopted = 0, used = {};
+	foreach (src in all) {
+		if (used.rawin(src.st)) continue;
+		foreach (c, _ in AICargoList()) {
+			if (!AICargo.IsFreight(c) || used.rawin(src.st)) continue;
+			local p = PrismaticAI.CaughtIndustry(AIIndustryList_CargoProducing(c), src, true);
+			if (p == -1) continue;
+			foreach (dst in all) {
+				if (dst.st == src.st || used.rawin(dst.st) || pairs.rawin(src.st + "-" + dst.st)) continue;
+				if (!src.calls.IsEmpty() && !dst.calls.IsEmpty()) continue;
+				/* A train of ours that calls at both already serves the pair. */
+				local both = false;
+				foreach (v, _ in src.calls) if (dst.calls.HasItem(v)) { both = true; break; }
+				if (both) continue;
+				local q = PrismaticAI.CaughtIndustry(AIIndustryList_CargoAccepting(c), dst, false);
+				if (q == -1 || q == p) continue;
+				if (!PrismaticAI.RailWalk(src.tile, dst.tile).joined) continue;
+				local depot = PrismaticAI.RestoreDepot(src.tile, dst.tile, depots);
+				if (depot == -1 || !PrismaticAI.DepotJoined(depot)) continue;
+				local pa = PrismaticAI.RestorePlatform(src.tile), pb = PrismaticAI.RestorePlatform(dst.tile);
+				local platforms = max(1, min(min(pa.rows, pb.rows), 2));
+				local line = {a = src.tile, b = dst.tile, depot = depot, cargo = c, wagons = 0,
+					flags = AIOrder.OF_FULL_LOAD_ANY, railtype = AIRail.GetRailType(src.tile), restored = 0,
+					len = max(1, min(pa.len, pb.len)), trains_max = platforms, platforms = platforms,
+					path = [], stations = [], closed = false, from = p, to = q, adopted = true,
+					label = AICargo.GetCargoLabel(c) + " " + AIIndustry.GetName(p) + " - " + AIIndustry.GetName(q)};
+				RAIL_LINES.push(line);
+				depots[depot] <- true;
+				pairs[src.st + "-" + dst.st] <- true;
+				pairs[dst.st + "-" + src.st] <- true;
+				/* An orphan joins one line; a station a served line joined may join more. */
+				if (src.calls.IsEmpty()) used[src.st] <- true;
+				if (dst.calls.IsEmpty()) used[dst.st] <- true;
+				this.freight_tried[p + "-" + q + "-" + c] <- true;
+				adopted++;
+				AILog.Warning("PrismaticAI: adopted trainless rail line " + line.label + " (stations " + src.st + " and " +
+					dst.st + ", depot " + depot + "); it waits for its first train");
+				AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
+				break;
+			}
+		}
+	}
+	return adopted;
+}
+
+/* The industry of `list` that the rail station `stn` ({st, tile}) serves: whose producing tiles
+ * (`producing`) or accepting tiles the station's catchment covers, the nearest first; -1 when none.
+ * By catchment and not by distance: a station can stand 19 tiles from its industry's location
+ * (the industry's north corner), past RESTORE_INDUSTRY_REACH, and still serve it (fitness seed
+ * 930967890, Pronhattan Forest). */
+function PrismaticAI::CaughtIndustry(list, stn, producing) {
+	local radius = AIStation.GetCoverageRadius(AIStation.STATION_TRAIN);
+	list.Valuate(AIIndustry.GetDistanceManhattanToTile, stn.tile);
+	list.KeepBelowValue(ADOPT_INDUSTRY_REACH + 1);
+	list.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
+	foreach (i, _ in list) {
+		local tiles = producing ? AITileList_IndustryProducing(i, radius) : AITileList_IndustryAccepting(i, radius);
+		foreach (t, _ in tiles) {
+			if (AIRail.IsRailStationTile(t) && AIStation.GetStationID(t) == stn.st) return i;
+		}
+	}
+	return -1;
+}
+
+/* test_trainless=2 (RESEARCH-ONLY, info.nut): once a game month, before AdoptTrainlessLines, the bot
+ * forgets its lines that never ran a train, as a restart from the map would (restore.nut rebuilds a
+ * line only from its trains). Their stations, track and depot stay, so the adoption must find them
+ * again on the map. Returns the number of lines forgotten. */
+function PrismaticAI::TestForgetTrainless() {
+	if (AIController.GetSetting("test_trainless") < 2) return 0;
+	local keep = [], forgot = 0;
+	foreach (line in RAIL_LINES) {
+		/* A line still waiting for its depot has none for the adoption to find (open finding of
+		 * research/incident-2026-11-23-trainless-lines.md): it is kept. */
+		if (!("first" in line) && !line.closed && !("adopted" in line) && !("depot_pending" in line)) { forgot++; continue; }
+		keep.push(line);
+	}
+	if (forgot == 0) return 0;
+	RAIL_LINES.clear();
+	foreach (line in keep) RAIL_LINES.push(line);
+	AILog.Warning("PrismaticAI: test_trainless forgot " + forgot + " trainless line(s)");
+	return forgot;
+}
+
+/* The period AdoptTrainlessLines runs once in: the game year, or the game month with
+ * test_trainless=2 (RESEARCH-ONLY), so a forgotten line waits a month and not a year. */
+function PrismaticAI::AdoptKey() {
+	if (AIController.GetSetting("test_trainless") >= 2) return PrismaticAI.MonthKey();
+	return AIDate.GetYear(AIDate.GetCurrentDate());
+}
