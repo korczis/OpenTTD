@@ -50,6 +50,7 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 | yield gates (#243, `load_add_min=50`, `road_yield=20`, as merged) vs `dbd39147ee` | 24 | -22.6% | 4 (219 planes against 488) |
 | `load_add_min=0` vs 50, on `11411cdc4d` | 24 | +29.6% | 22 (0.88 to 2.03; 332 more planes) |
 | `load_add_min=0, road_yield=0` vs both on, on `11411cdc4d` | 24 | +21.3% | 20 |
+| `air_yield_routes=0` or `16` vs 8, with `load_add_min=0` | 24 | 0.0% (byte-identical: never fires) | - |
 
 # How to apply it
 
