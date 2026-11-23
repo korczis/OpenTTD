@@ -100,6 +100,27 @@ class RefsTest(unittest.TestCase):
         self.assertIn("src/nowhere is not a directory", out)
         self.assertIn("tracks 'lib/**' matches no tracked file", out)
 
+    def test_front_matter_file_values_must_resolve(self) -> None:
+        # A curated record kept relating to its candidate after the candidate was promoted (moved to
+        # curated/): majordomus only warned, and the reader was sent to a file that no longer exists.
+        self.write(".ai/repo/knowledge/k.md", "---\nid: k\nprovenance:\n  derived_from:\n"
+                   "    - file:src/net/server.cpp\n    - \"file:src/core\"\n    - issue:I0001\n"
+                   "relations:\n  - type: relates_to\n    target: file:research/gone.md  # moved\n"
+                   "  - type: documents\n    target: file:tools/x.sh\n---\n\nBody `file:src/nope.cpp`.\n")
+        repo = refs.Repo.load(self.root)
+        got = {(r.line, r.label(), r.kind) for r in refs.scan(repo, ".ai/repo/knowledge/k.md")}
+        self.assertEqual(got, {(5, "src/net/server.cpp", "file"), (6, "src/core", "dir"),
+                               (10, "research/gone.md", "file"), (12, "tools/x.sh", "file")})
+        code, out = self.run_cli("check")
+        self.assertEqual(code, 1)
+        self.assertIn(".ai/repo/knowledge/k.md:10: research/gone.md is not a tracked file", out)
+        self.assertNotIn("src/nope.cpp", out)
+        self.write(".ai/repo/knowledge/k.md", "---\nid: k\nstatus: superseded\n"
+                   "relations:\n  - target: file:research/gone.md\n---\n")
+        self.assertEqual(self.run_cli("check")[0], 0)
+        self.write(".ai/repo/knowledge/k.md", "no front matter: file:research/gone.md\n")
+        self.assertEqual(self.run_cli("check")[0], 0)
+
     def test_untracked_new_record_is_checked_before_git_add(self) -> None:
         self.write(".ai/repo/new/README.md", "`src/net/server.cpp:Missing`\n")
         code, out = self.run_cli("check")
