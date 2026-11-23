@@ -108,7 +108,11 @@ holds. Codex reviewed the design before implementation; its changes are listed i
   companies). `gap_watch` reads the policy from `openttd://approvals` when it files, and names it
   in the owner's line; it never assumes `keep`.
 - **Effectiveness** is not measured: no paired-seed run compares a bot with `gap_watch` proposals
-  against one without. The thresholds (`SHARE_DROP` 0.05, `IDLE_FACTOR` 2, `PERSIST` 3) are
+  against one without. The share-drop threshold comes from the shared key
+  `derived.gap_watch.share_drop` when the self-evaluation service publishes it (the 75th
+  percentile of 6-month drops over the store's runs, 0.0118 on the :8800 store), else `SHARE_DROP`
+  0.05. The failure-regime detector's rules (`regime.rules`) judge 24-month trends, a different
+  statistic, so they are not used for this flag. `IDLE_FACTOR` 2 and `PERSIST` 3 remain
   hypotheses, not calibrated values.
 - **Host PAUSED/STOP files** (rule `project.long-runs-are-owned-bounded-and-stoppable`): Rhai in
   the panel has no file access, so the stop and pause switches are shared keys any session can set.

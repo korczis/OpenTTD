@@ -57,9 +57,13 @@ const ROUND_S = 20;
 // months: every other event counts for the month the last game.month opened.
 const KINDS = "ai.log,panel.mcp,decision.recorded,game.month";
 const PAGES = 10;
-// Game months the trend is judged over, and the thresholds of the flags.
+// Game months the trend is judged over, and the thresholds of the flags. SHARE_DROP is the cold
+// start only: the threshold is the shared key derived.gap_watch.share_drop when it holds a value in
+// 0..1 (the 75th percentile of 6-month drops of value / leader value over the store's runs,
+// published by the self-evaluation service), and gap.<company>.thresholds names which one was used.
 const WINDOW = 6;
 const SHARE_DROP = 0.05;
+const DERIVED_SHARE_DROP = "derived.gap_watch.share_drop";
 const IDLE_FACTOR = 2;
 const MIN_FILED = 10;
 const LAND_RATE = 0.5;
@@ -299,10 +303,21 @@ fn measure(rp, wd, ours, theirs, bot, tally, batches, month, partial_seen) {
 // A ratio as a whole percentage.
 fn pct(x) { (x * 100.0).round().to_int() }
 
+// The share-drop threshold, pure: the derived key's value (a number, or a map with value or p75)
+// when it lies in 0..1, else SHARE_DROP; with its source.
+fn thresholds_of(derived) {
+    let v = derived;
+    if type_of(v) == "map" { v = v.value ?? v.p75; }
+    if type_of(v) == "i64" { v = v.to_float(); }
+    if type_of(v) == "f64" && v >= 0.0 && v <= 1.0 { return #{ share_drop: v, source: global::DERIVED_SHARE_DROP }; }
+    #{ share_drop: global::SHARE_DROP, source: "SHARE_DROP (cold start)" }
+}
+
 // The month's flags, pure, each with its reason.
 fn flags_of(m) {
     let out = #{};
-    if m.leader != () && m.months >= 2 && (m.share_drop >= global::SHARE_DROP || (m.leader_vehicles_change > 0.0 && m.vehicles_change <= 0.0)) {
+    let drop_at = (m.thresholds ?? #{}).share_drop ?? global::SHARE_DROP;
+    if m.leader != () && m.months >= 2 && (m.share_drop >= drop_at || (m.leader_vehicles_change > 0.0 && m.vehicles_change <= 0.0)) {
         let now = if m.share.is_empty() { "unknown" } else { `${pct(m.share[m.share.len() - 1].share)} %` };
         out.losing_ground = `${now} of ${m.leader.name}'s value (${if m.share_drop >= 0.0 { "down" } else { "up" }} ${pct(m.share_drop.abs())} points); vehicles ${m.vehicles_change.to_int()} against their ${m.leader_vehicles_change.to_int()} over ${m.months} month(s)`;
     }
@@ -504,6 +519,7 @@ fn month_of_company(b, month, tallies, executed_all, pending, paused) {
     for p in pending { pending_ids.push(p.id); }
     let batches = plan_batches(months, executed_all, pending_ids);
     let m = measure(rp, wd, ours, theirs, b, tally, batches, month, prev.partial_seen ?? []);
+    m.thresholds = thresholds_of(shared_get(global::DERIVED_SHARE_DROP));
     let flags = flags_of(m);
     let streaks = streaks_of(prev.streaks ?? #{}, flags);
     let levers = levers_of(b, streaks, m.competition, tally);
@@ -543,7 +559,7 @@ fn month_of_company(b, month, tallies, executed_all, pending, paused) {
     value.company = b.id; value.name = b.name; value.flags = flags; value.streaks = streaks;
     value.level = level; value.levers = levers; value.held = held; value.proposal = proposal;
     value.said = kept; value.paused = paused; value.partial_seen = m.plans.partial_months; value.declined = declined; value.proposing = proposing();
-    value.reads = [`replan.${b.id}`, `watchdog.${b.id}`, "store:company_samples", "bus:" + global::KINDS, "api_bots", "status.pending"];
+    value.reads = [`replan.${b.id}`, `watchdog.${b.id}`, global::DERIVED_SHARE_DROP, "store:company_samples", "bus:" + global::KINDS, "api_bots", "status.pending"];
     shared_set(key, value);
     print(`gap_watch ${month} company ${b.id + 1}: level ${level}, flags ${flags.keys()}, ${if held == () { "proposed" } else { `held: ${held}` }}`);
     value

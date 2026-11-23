@@ -124,7 +124,10 @@ does:
 - **Once a game month** it sets flags, each with its reason: `losing_ground`, `idle_capital` (cash
   above the reserve), `unused_credit` (loan below the highest seen while the leader borrows),
   `stalled`, `plans_not_landing`, `collateral`, `replan_silent` and `unknown` (missing inputs are
-  never "on track"). It keeps how many months in a row each flag held, and after a restart it
+  never "on track"). The share-drop threshold is the shared key `derived.gap_watch.share_drop`
+  when it holds a value in 0..1, else `SHARE_DROP` (0.05) as the cold start;
+  `gap.<company>.thresholds` names the one used. It keeps how many months in a row each flag
+  held, and after a restart it
   skips the months the replayed bus shows that it judged already.
 - **It acts through the existing channels only:** the blackboard key `gap.<company>` (on the bus
   and in the store); one console line and one news item when a flag has held two months or the

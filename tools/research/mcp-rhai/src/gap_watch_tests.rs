@@ -232,7 +232,8 @@ fn gap_watch_flags_tells_once_proposes_one_bounded_plan_and_tracks_its_outcome()
     assert_eq!(g["streaks"], json!({"idle_capital": 5, "losing_ground": 5, "unused_credit": 5}));
     assert_eq!(g["leader"], json!({"company": 1, "name": "Leader", "value": 1_200_000}));
     assert_eq!(g["months"], json!(6), "the newest run only, WINDOW months");
-    assert_eq!(g["reads"].as_array().unwrap().len(), 6);
+    assert_eq!(g["reads"].as_array().unwrap().len(), 7);
+    assert_eq!(g["thresholds"], json!({"share_drop": 0.05, "source": "SHARE_DROP (cold start)"}));
     assert_eq!(g["proposing"], json!(true));
 
     // The first month's tally and its collateral damage, from the bot's own lines.
@@ -249,9 +250,12 @@ fn gap_watch_flags_tells_once_proposes_one_bounded_plan_and_tracks_its_outcome()
 /// reasons, and level 1 (nothing said yet).
 #[test]
 fn gap_watch_first_month_tallies_the_bots_lines_and_finds_collateral() {
-    let seen = run(2, PROPOSE, |_| json!([]), &[("replan.0", replan_key()), ("watchdog.0", json!({"stalled": true, "quiet_days": 70, "threshold_days": 60, "reasons": ["money 9000 is below the line budget 30000"]}))]);
+    let seen = run(2, PROPOSE, |_| json!([]), &[("derived.gap_watch.share_drop", json!({"p75": 0.0118, "p90": 0.0428})),
+                                                ("replan.0", replan_key()), ("watchdog.0", json!({"stalled": true, "quiet_days": 70, "threshold_days": 60, "reasons": ["money 9000 is below the line budget 30000"]}))]);
     let g = &seen.shared["gap.0"];
     assert_eq!(g["month"], json!("1953-01"));
+    assert_eq!(g["thresholds"], json!({"share_drop": 0.0118, "source": "derived.gap_watch.share_drop"}),
+               "the derived threshold wins over the cold-start constant");
     assert_eq!(g["builds"], json!({"claimed_by_others": 19, "executed": [], "failed": 0, "filed": [7, 8], "frozen": 0,
                                    "no_route": 0, "refused": 1, "removed": 1, "repaid": 20000, "wasted_levelling": 8735}));
     assert_eq!(g["plans"], json!({"executed": 1, "filed": 2, "partial": ["1953-01: 1 of 2"], "partial_months": ["1953-01"]}));
@@ -340,7 +344,9 @@ fn gap_watch_levers_holds_and_outcomes_are_pure() {
          tally_event(#{}, #{ kind: "panel.mcp", data: #{ text: "openttd.ai.set_setting({}) -> pending approval #3" } }, "1953-01").len(),
          tally_event(#{}, #{ kind: "other.kind", game_date: "1953-01-01", data: #{} }, "").len(),
          tally_event(#{}, #{ kind: "ai.log", game_date: "1953-02-03", data: #{ company: 0, text: "PrismaticAI: x" } }, "1953-01")["0"].keys(),
-         month_text(()), month_text("1953-04-01")]
+         month_text(()), month_text("1953-04-01"),
+         thresholds_of(0.02).share_drop, thresholds_of(1).source, thresholds_of(#{ value: 0.03 }).share_drop,
+         thresholds_of(3.0).source, thresholds_of("x").share_drop, thresholds_of(()).source]
     "#);
     assert_eq!(v, vec![
         "[\"air_routes_max=10\"]", // air_grow_money is positive (a step size), max_routes is above its default,
@@ -360,6 +366,8 @@ fn gap_watch_levers_holds_and_outcomes_are_pure() {
         "1", "0", "0", "0",
         "[\"1953-02\"]", // an envelope's own date wins over the bus's month
         "", "1953-04",
+        "0.02", "derived.gap_watch.share_drop", "0.03",
+        "SHARE_DROP (cold start)", "0.05", "SHARE_DROP (cold start)",
     ]);
 }
 
