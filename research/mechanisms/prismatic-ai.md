@@ -153,6 +153,49 @@ start year with bigger towns, like the 1979 co-play game, where planes fly 56% f
 planes should go instead (fresh town pairs against more hub routes); and the 9 of 50 planes broken
 down in the co-play game.
 
+## Road and air yield
+
+Measured on 2026-11-22 with `battle.py ablate`, six years from 1950, the live game's settings
+(the `live=` string of that day: `air_routes_max=2`, `invest_air_cap=10`, `invest_road_cap=12`,
+`invest_ppv_div=6`, `max_routes=30`), against AAAHogEx, LuDiAI AfterFix, CivilAI and AdmiralAI,
+one binary (`build/openttd` sha1 `94de29ae5b`) for both trees. Each row is a **single match**,
+not a held-start pair (rule `project.a-tuning-claim-needs-held-start-pairs`), so the table is
+evidence for the mechanism, not a tuning claim. Values are the referee's REF Q line of 1956-01.
+
+| Seed | Tree | Company value | Road vehicles | Road profit/yr | Planes | Air profit/yr | Rail profit/yr | Money | Our value / AAAHogEx's |
+|---|---|---|---|---|---|---|---|---|---|
+| 15805 | master | 810,604 | 26 | 11,500 | 15 | 122,842 | 227,908 | 22,624 | 23.8% |
+| 15805 | yield | 1,067,159 (+31.6%) | 15 | 6,040 | 14 | 159,569 | 245,768 | 267,062 | 22.6% |
+| 2927 | master | 1,491,647 | 32 | 6,472 | 16 | 182,228 | 388,189 | 732,594 | 23.9% |
+| 2927 | yield | 1,807,500 (+21.2%) | 4 | 4,507 | 29 | 374,407 | 367,812 | 834,612 | 40.4% |
+| 31337 | master | 2,147,290 | 35 | 12,581 | 18 | 171,057 | 427,666 | 1,394,490 | 49.4% |
+| 31337 | yield | 2,362,747 (+10.0%) | 3 | 1,662 | 36 | 399,847 | 571,836 | 862,040 | 86.2% |
+| 4242 | master | 2,183,221 | 36 | 15,141 | 18 | 196,011 | 510,339 | 1,437,029 | 45.7% |
+| 4242 | yield | 1,897,566 (-13.1%) | 15 | 18,174 | 25 | 365,615 | 259,648 | 744,945 | 58.0% |
+
+Geometric mean +11.1%. Air profit rose on every seed (1.3x to 2.3x). On seed 4242 the loss is
+rail: the bot's own freight lines picked other industries (lines 3, 5 and 6 differ, and 10
+attempts were refused against master's 4), which the yield change does not decide but shifts in
+time; such shifts are the chaos of single replays (knowledge
+`a-bot-change-that-moves-money-in-every-game-replays-as-chaos`). AAAHogEx's own value differs
+between the two trees' games for the same reason.
+
+What the logs showed on master: `InvestSurplus` took the first air route of seed 15805 from 5
+planes earning 106,795 a year to 6 earning 87,026 and on to 10 planes, and added buses earning
+951 to 2,790 a year each; the heartbeat built 14 to 23 bus routes a game. The yield tree's road
+report shows why buses do not pay: a bus inside one town (10-11 tiles between its stops) earned
+38 to 536 a year on a price of 4,921, an intercity bus (26-52 tiles) 460 to 3,048.
+
+The fitness check (`battle.py fitness`, seed 930967890, from 1960, default settings) passes on
+both trees, with mixed values: -6.2%, +28.0%, +62.3%, -4.4%, -8.9% and -29.0% for its six
+PrismaticAI contestants (geometric mean +3.1%). On that map our planes fly 2-8% full and lose
+money in some years. master kept adding planes and held 0.88M; the yield tree added none and held
+1.46M idle by 1966. Company value counts a vehicle at its depreciated price, so on a map where
+nothing earns, a vehicle bought with idle money still raises value at the six-year mark.
+
+Not measured: held-start pairs; each gate alone; a later start year with bigger towns; whether
+idle money should relax `load_add_min`.
+
 ## Where it lives
 
 | File | What it holds |
@@ -162,7 +205,7 @@ down in the co-play game.
 | [`PrismaticAI/rail.nut`](../../tools/research/prismatic-ai/PrismaticAI/rail.nut) | termini, the A* line search, laying, the walk check, depots, trains |
 | [`PrismaticAI/lines.nut`](../../tools/research/prismatic-ai/PrismaticAI/lines.nut) | line slots, the record, `ReconcileLines` |
 | [`PrismaticAI/events.nut`](../../tools/research/prismatic-ai/PrismaticAI/events.nut) | the game's events: lost and unprofitable vehicles, line repair, vehicles with no orders |
-| [`PrismaticAI/fleet.nut`](../../tools/research/prismatic-ai/PrismaticAI/fleet.nut) | road, air and ship capacity from waiting cargo and the link graph |
+| [`PrismaticAI/fleet.nut`](../../tools/research/prismatic-ai/PrismaticAI/fleet.nut) | road, air and ship capacity from waiting cargo and the link graph; the yield gates (`RouteLoad`, `RoadPays`) and the road report |
 | [`PrismaticAI/ships.nut`](../../tools/research/prismatic-ai/PrismaticAI/ships.nut) | ship routes behind `ships_max`: candidates, dock sites, the water path check, docks, depot, ships |
 | [`PrismaticAI/roadstop.nut`](../../tools/research/prismatic-ai/PrismaticAI/roadstop.nut), [`intercity.nut`](../../tools/research/prismatic-ai/PrismaticAI/intercity.nut), [`air.nut`](../../tools/research/prismatic-ai/PrismaticAI/air.nut) | bus stops and depots, intercity roads, airports |
 | [`install`](../../tools/research/prismatic-ai/install) | links the bot into the personal `ai/` folder; `--check` verifies it |

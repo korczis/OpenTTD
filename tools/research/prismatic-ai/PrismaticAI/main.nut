@@ -598,7 +598,7 @@ function PrismaticAI::Start() {
 				money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 			}
 		}
-		if (!frozen && this.routes < b.max_routes && money > b.cash_reserve) {
+		if (!frozen && this.routes < b.max_routes && money > b.cash_reserve && PrismaticAI.RoadPays()) {
 			local pair = (b.intercity == 1) ? PrismaticAI.BuildIntercityRoute(b.aggressiveness, this.used_towns) : null;
 			if (pair != null) {
 				this.used_towns[pair[0]] <- true;
