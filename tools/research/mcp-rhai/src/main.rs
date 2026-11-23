@@ -4,7 +4,14 @@
 //! JSON-RPC, resources, OpenTTD console commands, and the approval-gated pause. It talks to the
 //! panel's loopback API, so it never sees the bearer token.
 //!
-//! Usage: mcp-rhai [--panel http://127.0.0.1:8800] [--hub URL] (<script.rhai> | -e '<script>')
+//! Usage: mcp-rhai [--panel http://127.0.0.1:8800] [--hub URL]
+//!                 [--exit-with-parent] [--give-up SECS] [--pidfile PATH] (<script.rhai> | -e '<script>')
+//!
+//! A helper that loops for ever (director, narrator, steward, ask relay) never outlives what it
+//! serves (src/daemon.rs): with --exit-with-parent it stops when the process that started it is gone,
+//! with --give-up it stops when the panel's /api/status has not answered for that many seconds, both
+//! with exit status 4; --pidfile refuses a second copy (exit status 5) and is removed when it stops.
+//! Found 2026-11-23: helpers ran 6.5 h under pid 1 after their stack had stopped.
 //!
 //! Functions a script gets:
 //!   rpc(method)  rpc(method, params)  -> map   raw MCP JSON-RPC answer
@@ -575,12 +582,114 @@ pub(crate) fn host(base: &str, hub: Option<&str>) -> Engine {
     engine
 }
 
+const USAGE: &str =
+    "usage: mcp-rhai [--panel URL] [--hub URL] [--exit-with-parent] [--give-up SECS] [--pidfile PATH] (<script.rhai> | -e '<script>')";
+
+/// What keeps a helper from outliving what it serves: its parent, the panel answering, its pidfile.
+#[derive(Debug, Default, PartialEq)]
+struct Guard {
+    exit_with_parent: bool,
+    give_up: Option<Duration>,
+    pidfile: Option<std::path::PathBuf>,
+}
+
+impl Guard {
+    /// Take --exit-with-parent, --give-up SECS and --pidfile PATH out of `args`.
+    fn take(args: &mut Vec<String>) -> Result<Guard, String> {
+        let mut g = Guard::default();
+        if let Some(i) = args.iter().position(|a| a == "--exit-with-parent") {
+            args.remove(i);
+            g.exit_with_parent = true;
+        }
+        if let Some(i) = args.iter().position(|a| a == "--give-up") {
+            let secs = args.get(i + 1).and_then(|v| v.parse::<f64>().ok()).filter(|v| *v > 0.0 && v.is_finite())
+                .ok_or("--give-up needs a number of seconds above 0")?;
+            args.drain(i..=i + 1);
+            g.give_up = Some(Duration::from_secs_f64(secs));
+        }
+        if let Some(i) = args.iter().position(|a| a == "--pidfile") {
+            let path = args.get(i + 1).filter(|p| !p.is_empty()).ok_or("--pidfile needs a path")?.clone();
+            args.drain(i..=i + 1);
+            g.pidfile = Some(path.into());
+        }
+        Ok(g)
+    }
+}
+
+/// The pidfile this helper holds, released by `stop` (process::exit runs no destructors).
+static PIDFILE: std::sync::Mutex<Option<board::daemon::Pidfile>> = std::sync::Mutex::new(None);
+
+/// Release the pidfile, say why on stderr when there is a reason, and exit with `code`.
+fn stop(code: i32, why: Option<&str>) -> ! {
+    if let Some(why) = why {
+        eprintln!("mcp-rhai: {why}");
+    }
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    drop(PIDFILE.lock().map(|mut p| p.take()));
+    std::process::exit(code)
+}
+
+/// Why a guarded helper stops now: the first thing its watch finds gone, else a panel that has not
+/// answered for `give_up` (`down`: how long it has failed without an answer in between).
+fn stop_reason(gone: Option<String>, give_up: Option<Duration>, down: Option<Duration>, base: &str) -> Option<String> {
+    if let Some(g) = gone {
+        return Some(format!("{g}; stopping"));
+    }
+    match (give_up, down) {
+        (Some(limit), Some(d)) if d >= limit => {
+            Some(format!("the panel {base} has not answered for {} s; stopping", d.as_secs()))
+        }
+        _ => None,
+    }
+}
+
+/// Claim the pidfile and start the watch thread that stops this process (exit 4) when its parent
+/// is gone or the panel stopped answering. Nothing at all without a guard flag.
+fn guard(g: &Guard, base: &str) {
+    use board::daemon::{Backoff, Pidfile, Watch};
+    use std::time::Instant;
+    if let Some(path) = &g.pidfile {
+        match Pidfile::claim(path) {
+            Ok(p) => *PIDFILE.lock().unwrap_or_else(|e| e.into_inner()) = Some(p),
+            Err(e) => stop(5, Some(&e)),
+        }
+    }
+    if !g.exit_with_parent && g.give_up.is_none() {
+        return;
+    }
+    let watch = if g.exit_with_parent { Watch::default().with_parent() } else { Watch::default() };
+    let (give_up, base) = (g.give_up, base.to_string());
+    std::thread::spawn(move || {
+        let mut tries = Backoff::new(Duration::from_millis(500), Duration::from_secs(5));
+        loop {
+            let now = Instant::now();
+            if give_up.is_some() && tries.ready(now) {
+                match ureq::get(&format!("{base}/api/status")).timeout(Duration::from_secs(3)).call() {
+                    Ok(_) | Err(ureq::Error::Status(..)) => tries.succeeded(),
+                    Err(_) => tries.failed(now),
+                }
+            }
+            if let Some(why) = stop_reason(watch.gone(), give_up, tries.down_for(Instant::now()), &base) {
+                stop(4, Some(&why));
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    });
+}
+
 fn main() {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("usage: mcp-rhai [--panel URL] [--hub URL] (<script.rhai> | -e '<script>')");
+        println!("{USAGE}");
         return;
     }
+    let guarded = match Guard::take(&mut args) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("mcp-rhai: {e}");
+            std::process::exit(2);
+        }
+    };
     let mut base = "http://127.0.0.1:8800".to_string();
     if let Some(i) = args.iter().position(|a| a == "--panel") {
         if i + 1 >= args.len() {
@@ -609,23 +718,52 @@ fn main() {
             }
         },
         _ => {
-            eprintln!("usage: mcp-rhai [--panel URL] [--hub URL] (<script.rhai> | -e '<script>')");
+            eprintln!("{USAGE}");
             std::process::exit(2);
         }
     };
+    guard(&guarded, &base);
     let engine = host(&base, hub.as_deref());
     match engine.eval::<Dynamic>(&script) {
         Ok(v) if !v.is_unit() => println!("{v}"),
         Ok(_) => {}
-        Err(e) => {
-            eprintln!("mcp-rhai: {e}");
-            std::process::exit(1);
-        }
+        Err(e) => stop(1, Some(&e.to_string())),
     }
+    stop(0, None)
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_guard_flags_are_taken_out_of_the_arguments() {
+        use super::Guard;
+        let mut a: Vec<String> = ["--panel", "u", "--exit-with-parent", "--give-up", "20", "--pidfile", "/t/x.pid", "s.rhai"]
+            .map(String::from).to_vec();
+        let g = Guard::take(&mut a).unwrap();
+        assert_eq!(g, Guard { exit_with_parent: true, give_up: Some(std::time::Duration::from_secs(20)), pidfile: Some("/t/x.pid".into()) });
+        assert_eq!(a, ["--panel", "u", "s.rhai"]);
+        let mut none: Vec<String> = vec!["-e".into(), "1".into()];
+        assert_eq!(Guard::take(&mut none).unwrap(), Guard::default());
+        for bad in [&["--give-up"][..], &["--give-up", "0"], &["--give-up", "x"], &["--pidfile"], &["--pidfile", ""]] {
+            let mut a: Vec<String> = bad.iter().map(|s| s.to_string()).collect();
+            assert!(Guard::take(&mut a).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_guard_stops_on_a_gone_parent_or_a_panel_silent_past_its_limit() {
+        use super::stop_reason;
+        use std::time::Duration;
+        let s = Duration::from_secs;
+        assert_eq!(stop_reason(None, None, Some(s(999)), "u"), None, "no --give-up: a silent panel is no reason");
+        assert_eq!(stop_reason(None, Some(s(20)), None, "u"), None, "the panel answers");
+        assert_eq!(stop_reason(None, Some(s(20)), Some(s(19)), "u"), None);
+        assert_eq!(stop_reason(None, Some(s(20)), Some(s(20)), "http://p").as_deref(),
+                   Some("the panel http://p has not answered for 20 s; stopping"));
+        assert_eq!(stop_reason(Some("its parent (pid 7) is gone".into()), Some(s(20)), None, "u").as_deref(),
+                   Some("its parent (pid 7) is gone; stopping"));
+    }
+
     #[test]
     fn a_script_cannot_approve_or_switch_auto_approve_on() {
         // Port 9 (discard) answers nothing: a refusal that needed the panel would be a connection error.

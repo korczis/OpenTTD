@@ -187,6 +187,8 @@ cleanup() {
     pkill -P "$p" 2>/dev/null || true   # the supervised child first, then its supervisor loop
     kill "$p" 2>/dev/null || true
   done
+  # A helper whose supervisor is already gone is still named by its pidfile.
+  declare -F rhai_helpers_stop >/dev/null && rhai_helpers_stop
   [[ -n "$PANEL_PID" ]] && kill -TERM "$PANEL_PID" 2>/dev/null || true
   wait 2>/dev/null || true
   rm -rf "$TMP"
@@ -358,33 +360,25 @@ if [[ "$GUI" == 1 ]]; then
       echo "mcp-e2e: --coplay: the owner's client did not join within 60 s; no approver registered (approve in the panel)" >&2
     fi
   fi
-  RHAI="$ROOT_DIR/tools/research/mcp-rhai/target/release/mcp-rhai"
+  RHAI="$ROOT_DIR/tools/research/mcp-rhai/target/release/mcp-rhai" RHAI_PIDDIR="$TMP"
+  # shellcheck source=lib/rhai-helper.sh
+  . "$ROOT_DIR/tools/research/lib/rhai-helper.sh"
   if [[ "$DIRECTOR" == 1 && -x "$RHAI" ]]; then
     for ((i = 0; i < 60; i++)); do [[ -s "$VIEW_TOKEN" ]] && break; sleep 1; done
     if [[ -s "$VIEW_TOKEN" ]]; then
       echo "==> director (camera), narrator (chat and news), steward (asks you in the game) and ask relay (answers you)"
-      # Supervised the same way: a helper that stops is started again.
-      ( while kill -0 "$PANEL_PID" 2>/dev/null; do
-          MCP_VIEW_TOKEN="$VIEW_TOKEN" "$RHAI" --panel "$URL" "$PANEL_DIR/rhai/director.rhai" >> "$TMP/director.log" 2>&1
-          sleep 3
-        done ) &
+      # Supervised the same way: a helper that stops is started again, while the panel and this
+      # script run; each one stops itself when its panel or its supervisor is gone and holds a
+      # pidfile in $TMP (tools/research/lib/rhai-helper.sh).
+      rhai_helper director "$TMP/director.log" "$PANEL_PID" "$URL" "$PANEL_DIR/rhai/director.rhai" MCP_VIEW_TOKEN="$VIEW_TOKEN"
       HELPER_PIDS+=($!)
-      ( while kill -0 "$PANEL_PID" 2>/dev/null; do
-          MCP_PANEL_URL="$URL" "$RHAI" --panel "$URL" "$PANEL_DIR/rhai/narrator.rhai" >> "$TMP/narrator.log" 2>&1
-          sleep 3
-        done ) &
+      rhai_helper narrator "$TMP/narrator.log" "$PANEL_PID" "$URL" "$PANEL_DIR/rhai/narrator.rhai" MCP_PANEL_URL="$URL"
       HELPER_PIDS+=($!)
-      ( while kill -0 "$PANEL_PID" 2>/dev/null; do
-          "$RHAI" --panel "$URL" "$PANEL_DIR/rhai/steward.rhai" >> "$TMP/steward.log" 2>&1
-          sleep 3
-        done ) &
+      rhai_helper steward "$TMP/steward.log" "$PANEL_PID" "$URL" "$PANEL_DIR/rhai/steward.rhai"
       HELPER_PIDS+=($!)
       # What the owner asks in the game (the toolbar's Ask item, or plan/ask/do in the ~ console)
       # is queued in the client's openttd://ui/requests; the relay answers it through the planner.
-      ( while kill -0 "$PANEL_PID" 2>/dev/null; do
-          MCP_VIEW_TOKEN="$VIEW_TOKEN" "$RHAI" --panel "$URL" "$PANEL_DIR/rhai/ask_relay.rhai" >> "$TMP/ask_relay.log" 2>&1
-          sleep 3
-        done ) &
+      rhai_helper ask_relay "$TMP/ask_relay.log" "$PANEL_PID" "$URL" "$PANEL_DIR/rhai/ask_relay.rhai" MCP_VIEW_TOKEN="$VIEW_TOKEN"
       HELPER_PIDS+=($!)
       echo "    logs: $TMP/director.log $TMP/narrator.log $TMP/steward.log $TMP/ask_relay.log"
     else

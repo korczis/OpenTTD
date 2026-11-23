@@ -100,7 +100,7 @@ check "the console request is queued as kind 'ask' with the typed text (kind=$(f
   "$([[ "$(field "$reqs" kind)" == ask ]] && echo 1 || echo 0)"
 
 echo "==> the ask relay answers through the planner"
-MCP_VIEW_TOKEN="$TOKEN" "$RHAI" --panel "$URL" "$ROOT_DIR/tools/research/mcp-panel/rhai/ask_relay.rhai" > "$WORK/relay.log" 2>&1 &
+MCP_VIEW_TOKEN="$TOKEN" "$RHAI" --panel "$URL" --exit-with-parent --give-up 20 "$ROOT_DIR/tools/research/mcp-panel/rhai/ask_relay.rhai" > "$WORK/relay.log" 2>&1 &
 PIDS+=($!)
 answer=""
 for ((i = 0; i < 90; i++)); do
