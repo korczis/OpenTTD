@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# RESEARCH-ONLY. Rehearses tools/research/battlebrain-cutover offline, end to end, against the
+# stand-in game of the live path (panel.rs `fake_game`, the one the rollback test of I0117 round 2
+# uses) behind real panels: the ignored test `panel::tests::the_cutover_rehearsal_stand_in` of the
+# mcp-panel test binary serves them on random loopback ports. No game, no :8800, no port this
+# check did not start.
+#
+# Two worlds of that stand-in: `ahead` (the snapshot's tick + 74) and `behind` (one tick before
+# the snapshot: an earlier save reloaded). The planner is the recorded capture
+# coplay-8800-1963-02-22 read at one tick (a stand-in for `mcp-plan --capture`, which the stand-in
+# game cannot feed; the real mcp-plan is run against it once, and refused). Scenarios:
+#   - the full happy path: hold, capture, snapshot, decide, serve-and-pull (it stops at the
+#     owner's approval and prints `prismatic_mcp approve <id>`), record (not observable yet),
+#     rollback (keyed <key>:rollback, also stopping at the approval), release; every phase run
+#     twice where the runbook allows it, and the second run changes nothing;
+#   - HOLD: decide with --margin 5 writes no directive, serve-and-pull refuses, record keeps it;
+#   - a 409 on hold: another writer holds planner.<c>; adopting needs the writer and revision;
+#   - world_changed: a decision pulled in the `behind` world is refused (409) and recorded;
+#   - the refusals of each phase (usage, an unreachable panel, a changed capture, a stale read).
+# Every line of the script must run: each run is traced (xtrace to a file, PS4 with the line) and
+# the check fails on any executable line no scenario ran (the coverage report lists them).
+#
+# Usage: tools/research/battlebrain-cutover-check [--keep]   (--keep: keep the run directory)
+#        exit 0 PASS, 1 FAIL, 3 no build
+# shellcheck disable=SC2016 # the checks of expect are evaluated when they run
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CRATE="$ROOT_DIR/tools/research/mcp-rhai"
+SCRIPT="$ROOT_DIR/tools/research/battlebrain-cutover"
+FIX="$ROOT_DIR/tools/research/schema/fixtures/battlebrain/captures/coplay-8800-1963-02-22"
+TARGET="${CARGO_TARGET_DIR:-$CRATE/target}"
+KEEP=0
+[[ "${1:-}" == --keep ]] && KEEP=1
+
+echo "==> building battlebrain, mcp-plan and the mcp-panel test binary (incremental, offline)"
+cargo build --release --locked --offline --manifest-path "$CRATE/Cargo.toml" --bin battlebrain --bin mcp-plan \
+  || { echo "battlebrain-cutover-check: cargo build failed" >&2; exit 3; }
+STANDIN="$(cargo test --release --locked --offline --no-run --manifest-path "$CRATE/Cargo.toml" --bin mcp-panel \
+  --message-format=json | jq -r 'select(.reason == "compiler-artifact" and .profile.test and .target.name == "mcp-panel") | .executable')"
+[[ -x "$STANDIN" ]] || { echo "battlebrain-cutover-check: no mcp-panel test binary" >&2; exit 3; }
+REAL_BB="$TARGET/release/battlebrain"
+REAL_PLAN="$TARGET/release/mcp-plan"
+
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/battlebrain-cutover-check.XXXXXX")"
+mkdir -p "$TMP/standin" "$TMP/out" "$TMP/bin" "$TMP/state"
+TRACE="$TMP/trace.txt"
+: > "$TRACE"
+STANDIN_PID=""
+cleanup() {
+  touch "$TMP/standin/stop"
+  [[ -n "$STANDIN_PID" ]] && { kill "$STANDIN_PID" 2>/dev/null || true; wait "$STANDIN_PID" 2>/dev/null || true; }
+  if [[ $KEEP == 1 ]]; then echo "==> kept $TMP"; else rm -rf "$TMP"; fi
+}
+trap cleanup EXIT INT TERM
+
+FAILS=0
+pass() { echo "PASS $*"; }
+fail() { echo "FAIL $*"; FAILS=$((FAILS + 1)); }
+expect() { if eval "$2"; then pass "$1"; else fail "$1 ($2)"; fi; }
+
+# The worlds, at the recorded capture's first tick.
+T="$(jq -r .window.tick_from "$FIX/capture.json")"
+D="$(jq -r .window.date_from "$FIX/capture.json")"
+WORLDS="ahead=$((T + 74)),1963-02-23;behind=$((T - 1)),$D"
+echo "==> stand-in: $STANDIN --ignored --exact panel::tests::the_cutover_rehearsal_stand_in ($WORLDS)"
+BATTLEBRAIN_STANDIN_DIR="$TMP/standin" BATTLEBRAIN_STANDIN_WORLDS="$WORLDS" \
+  "$STANDIN" --ignored --exact panel::tests::the_cutover_rehearsal_stand_in > "$TMP/standin.log" 2>&1 &
+STANDIN_PID=$!
+for ((i = 0; i < 100; i++)); do [[ -f "$TMP/standin/behind.url" ]] && break; sleep 0.1; done
+AHEAD="$(cat "$TMP/standin/ahead.url")"
+BEHIND="$(cat "$TMP/standin/behind.url")"
+echo "==> panels: ahead $AHEAD, behind $BEHIND"
+
+# The planner's stand-in: the recorded capture, its window at one tick (MODE=incoherent: as recorded).
+cat > "$TMP/bin/mcp-plan-recorded" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "$*" >> "$PLAN_ARGS"
+while [[ $# -gt 0 ]]; do [[ "$1" == --capture ]] && dir="$2"; shift; done
+jq -r '.resources[] | select(.ok) | .file' "$FIX/capture.json" | while read -r f; do cp "$FIX/$f" "$dir/$f"; done
+if [[ "${MODE:-}" == incoherent ]]; then cp "$FIX/capture.json" "$dir/capture.json"; else
+  jq '.window.tick_to = .window.tick_from | .window.date_to = .window.date_from | .window.coherent = true' \
+    "$FIX/capture.json" > "$dir/capture.json"; fi
+cat "$FIX/plan.json"
+SH
+# battlebrain, its serve a second late (the pull is asked again until it listens).
+printf '#!/usr/bin/env bash\n[[ "$1" == serve ]] && sleep 1\nexec "%s" "$@"\n' "$REAL_BB" > "$TMP/bin/battlebrain-late"
+chmod +x "$TMP/bin/mcp-plan-recorded" "$TMP/bin/battlebrain-late"
+export FIX PLAN_ARGS="$TMP/plan-args.txt"
+export BATTLEBRAIN="$REAL_BB" MCP_PLAN="$TMP/bin/mcp-plan-recorded" BATTLEBRAIN_STATE_DIR="$TMP/state"
+
+# One traced run of the script: WANT_EXIT NAME ARGS...; its output in $TMP/out/NAME.{out,err}.
+run() {
+  local want="$1" name="$2" rc=0
+  shift 2
+  env PS4='+${BASH_SOURCE##*/}:${LINENO}: ' BASH_XTRACEFD=7 SHELLOPTS=xtrace \
+    "$SCRIPT" "$@" > "$TMP/out/$name.out" 2> "$TMP/out/$name.err" 7>> "$TRACE" || rc=$?
+  if [[ "$rc" == "$want" ]]; then pass "$name: exit $rc"; else
+    fail "$name: exit $rc, wanted $want: $(tail -c 400 "$TMP/out/$name.err")"; fi
+}
+out() { cat "$TMP/out/$1.out" "$TMP/out/$1.err"; }
+has() { out "$1" | grep -q -- "$2"; }
+
+A=(--panel "$AHEAD" --company 1)
+R1="$TMP/r1"
+
+echo "--- usage and an unreachable panel"
+run 2 no-panel hold --dir "$R1" --company 1
+run 2 no-company hold --panel "$AHEAD" --dir "$R1"
+run 2 bad-option hold "${A[@]}" --dir "$R1" --bogus 1
+run 2 bad-phase approve "${A[@]}" --dir "$R1"
+CLOSED="$(python3 -I -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+run 1 unreachable hold --panel "http://127.0.0.1:$CLOSED" --company 1 --dir "$TMP/r0"
+expect "an unreachable panel is named" 'has unreachable "cannot be reached"'
+run 1 bad-writer hold "${A[@]}" --dir "$TMP/r0" --writer "$(printf 'w%.0s' {1..70})"
+expect "a writer the panel refuses (400) is reported" 'has bad-writer "HTTP 400"'
+
+echo "--- the happy path (ahead)"
+run 1 capture-before-hold capture "${A[@]}" --dir "$R1"
+expect "a phase out of order names the one before it" 'has capture-before-hold "run \`hold\` first"'
+run 0 hold hold "${A[@]}" --dir "$R1"
+expect "hold took planner.1 at rev 1" '[[ "$(jq -r .rev "$R1/hold.json")" == 1 ]]'
+run 0 hold-again hold "${A[@]}" --dir "$R1"
+expect "a second hold writes nothing" 'has hold-again "nothing written"'
+run 0 capture capture "${A[@]}" --dir "$R1"
+expect "capture ran mcp-plan as the runbook says" \
+  'grep -qx -- "--panel $AHEAD --limit 40 --track 16 --capture $R1/capture" "$PLAN_ARGS"'
+run 0 capture-again capture "${A[@]}" --dir "$R1"
+expect "a second capture reads nothing" '[[ "$(wc -l < "$PLAN_ARGS")" -eq 1 ]] && has capture-again "taken already"'
+run 1 snapshot-no-instance snapshot "${A[@]}" --dir "$R1"
+run 0 snapshot snapshot "${A[@]}" --dir "$R1" --instance rehearsal-a
+run 0 snapshot-again snapshot "${A[@]}" --dir "$R1" --instance rehearsal-a
+run 1 snapshot-other snapshot "${A[@]}" --dir "$R1" --instance rehearsal-b
+expect "a different snapshot in the same run is refused" 'has snapshot-other "a run has one snapshot"'
+run 1 decide-behind decide --panel "$BEHIND" --company 1 --dir "$R1"
+expect "companies read behind the snapshot are refused (stale_companies)" 'has decide-behind stale_companies'
+run 0 decide decide "${A[@]}" --dir "$R1"
+expect "the decision is one line, keyed by instance, company and date" \
+  '[[ "$(jq -r .decision.idempotency_key "$R1/decision.directive.json")" == "rehearsal-a:1:$D:freight-line" ]]'
+expect "the directive sets planned_freight_only=1 and one slot" \
+  'jq -e ".settings | startswith(\"planned_freight_only=1,fr_from=\")" "$R1/decision.directive.json" >/dev/null'
+run 0 decide-again decide "${A[@]}" --dir "$R1"
+expect "a second decide reads nothing" 'has decide-again "nothing read again"'
+run 0 pull serve-and-pull "${A[@]}" --dir "$R1"
+expect "the pull stops at the owner's approval" 'has pull "prismatic_mcp approve 41" && has pull "STOP"'
+expect "the directive was served once" 'grep -q "\"ok\":true" "$R1/decision.serve.log"'
+run 0 pull-again serve-and-pull "${A[@]}" --dir "$R1"
+expect "a second pull serves nothing" 'has pull-again "nothing served again" && has pull-again "approve 41"'
+run 1 record-early record "${A[@]}" --dir "$R1"
+expect "record refuses before the settings are observable" 'has record-early "not observable yet"'
+# A pull whose key the panel answered already: replayed, nothing applied, serve never asked.
+R14="$TMP/r14"
+mkdir -p "$R14"
+cp "$R1/hold.json" "$R1/decision.directive.json" "$R14/"
+BATTLEBRAIN_STATE_DIR="$TMP/state-replay" run 0 pull-replayed serve-and-pull "${A[@]}" --dir "$R14"
+expect "a replayed pull names the same approval and served nothing" \
+  'jq -e ".replayed == true" "$R14/decision.pull.json" >/dev/null && ! grep -q "\"ok\":true" "$R14/decision.serve.log"'
+BATTLEBRAIN="$TMP/bin/battlebrain-late" run 0 rollback rollback "${A[@]}" --dir "$R1"
+expect "the rollback is keyed <key>:rollback and stops at its approval" \
+  '[[ "$(jq -r .decision.idempotency_key "$R1/rollback.directive.json")" == "rehearsal-a:1:$D:freight-line:rollback" ]] && has rollback "prismatic_mcp approve 42"'
+run 0 rollback-again rollback "${A[@]}" --dir "$R1"
+run 1 record-rollback record "${A[@]}" --dir "$R1"
+run 0 release release "${A[@]}" --dir "$R1"
+run 0 release-again release "${A[@]}" --dir "$R1"
+expect "planner.1 is free again" '[[ "$(curl -s -o /dev/null -w "%{http_code}" "$AHEAD/api/rhai/shared?key=planner.1")" == 404 ]]'
+
+echo "--- HOLD (ahead, --margin 5)"
+R2="$TMP/r2"
+run 0 hold-2 hold "${A[@]}" --dir "$R2"
+run 0 capture-2 capture "${A[@]}" --dir "$R2"
+run 0 snapshot-2 snapshot "${A[@]}" --dir "$R2" --instance rehearsal-hold
+run 0 decide-hold decide "${A[@]}" --dir "$R2" --margin 5 --reserve 0
+expect "HOLD writes no directive" 'has decide-hold HOLD && [[ ! -f "$R2/decision.directive.json" ]]'
+run 1 pull-hold serve-and-pull "${A[@]}" --dir "$R2"
+expect "a HOLD has nothing to pull" 'has pull-hold "nothing to pull"'
+run 1 pull-before-decide serve-and-pull "${A[@]}" --dir "$TMP/r-empty"
+run 0 record-hold record "${A[@]}" --dir "$R2"
+expect "the HOLD is recorded with its decision" 'jq -e ".result == \"hold\" and (.decision.type == \"decision\")" "$R2/record.json" >/dev/null'
+run 0 release-2 release "${A[@]}" --dir "$R2"
+
+echo "--- a 409 on hold"
+R3A="$TMP/r3a" R3B="$TMP/r3b" R3C="$TMP/r3c"
+run 0 hold-a hold "${A[@]}" --dir "$R3A" --writer writer-a
+run 1 hold-b hold "${A[@]}" --dir "$R3B" --writer writer-b
+expect "the 409 names the holder and stops" 'has hold-b "409" && has hold-b writer-a'
+run 1 adopt-wrong-writer hold "${A[@]}" --dir "$R3B" --writer writer-b --adopt-rev 1
+run 0 adopt hold "${A[@]}" --dir "$R3C" --writer writer-a --adopt-rev 1
+run 0 release-c release "${A[@]}" --dir "$R3C" --writer writer-a
+run 1 release-a release "${A[@]}" --dir "$R3A" --writer writer-a
+expect "a release of a key no longer this run's is refused (409)" 'has release-a "HTTP 409"'
+
+echo "--- world_changed (decided ahead, pulled behind)"
+R4="$TMP/r4"
+run 0 hold-4 hold "${A[@]}" --dir "$R4"
+MODE=incoherent run 1 capture-incoherent capture "${A[@]}" --dir "$R4"
+expect "an incoherent capture is refused and set aside" 'has capture-incoherent "not coherent" && ls -d "$R4"/capture.incoherent.* >/dev/null'
+MCP_PLAN="$REAL_PLAN" run 1 capture-real capture "${A[@]}" --dir "$R4"
+expect "the real mcp-plan cannot plan the stand-in game, and the capture is refused" \
+  'has capture-real "capture: " && ! [[ -f "$R4/capture/capture.json" ]]'
+run 0 capture-4 capture "${A[@]}" --dir "$R4"
+run 0 snapshot-4 snapshot "${A[@]}" --dir "$R4" --instance rehearsal-w
+run 0 decide-4 decide "${A[@]}" --dir "$R4"
+run 1 pull-behind serve-and-pull --panel "$BEHIND" --company 1 --dir "$R4"
+expect "the pull is refused: world_changed" \
+  '[[ "$(jq -r .http_status "$R4/decision.pull.json")" == 409 ]] && has pull-behind "behind the snapshot"'
+run 1 pull-behind-again serve-and-pull --panel "$BEHIND" --company 1 --dir "$R4"
+run 0 record-refused record --panel "$BEHIND" --company 1 --dir "$R4"
+expect "the outcome record says refused and validates" \
+  'jq -e ".body.result == \"refused\"" "$R4/outcome.json" >/dev/null && "$REAL_BB" validate "$R4/outcome.json" >/dev/null'
+run 0 release-4 release "${A[@]}" --dir "$R4"
+run 1 rollback-unheld rollback "${A[@]}" --dir "$R4"
+expect "a pull without the key held is refused" 'has rollback-unheld "is not held by"'
+
+echo "--- refusals of single phases"
+R5="$TMP/r5"
+mkdir -p "$R5/capture"
+cp "$R4/hold.json" "$R5/"
+cp "$FIX/capture.json" "$R5/capture/"
+run 1 capture-recorded-incoherent capture "${A[@]}" --dir "$R5"
+cp -R "$R4/capture/." "$R5/capture/"
+echo '{}' > "$R5/capture/towns.json"
+run 1 snapshot-changed snapshot "${A[@]}" --dir "$R5" --instance rehearsal-x
+expect "a changed capture file is refused (digest_mismatch)" 'has snapshot-changed digest_mismatch'
+cp "$R4/snapshot.json" "$R5/"
+run 1 rollback-scope rollback --panel "$AHEAD" --company 2 --dir "$R5"
+echo '{}' > "$R5/decision.directive.json"
+run 1 pull-no-key serve-and-pull "${A[@]}" --dir "$R5"
+
+echo "--- the script never approves, and reached no port but the stand-in's"
+expect "no call to /api/approve or /api/auto-approve" '! grep -E "curl .*/api/(approve|auto-approve)" "$TRACE" | grep -q .'
+expect "nothing reached :8800" '! grep -q "127.0.0.1:8800" "$TRACE"'
+curl -s "$AHEAD/api/status" > "$TMP/status.json"
+expect "approvals 41 and 42 still pending in the stand-in (nobody approved)" \
+  'jq -e "[.pending[].id] | (index(41) != null and index(42) != null)" "$TMP/status.json" >/dev/null'
+
+echo "--- coverage: every executable line of the script ran"
+python3 -I - "$SCRIPT" "$TRACE" > "$TMP/coverage.txt" <<'PY' || true
+import re, sys
+src, trace = open(sys.argv[1]).read().split("\n"), open(sys.argv[2], errors="replace").read()
+hit = {int(n) for n in re.findall(r"^\++battlebrain-cutover:(\d+): ", trace, re.M)}
+STRUCT = re.compile(r"^(fi|done|esac|else|then|do|\}|;;|\{|\))$|^[A-Za-z_][A-Za-z0-9_]*\(\) \{$")
+groups, cur, state = [], [], "n"
+for no, line in enumerate(src, 1):
+    i, code = 0, False
+    while i < len(line):
+        c = line[i]
+        if state == "n":
+            if c == "#" and (i == 0 or line[i - 1] in " \t;"): break
+            if c == "'": state = "s"
+            elif c == '"': state = "d"
+            elif c == "\\": i += 1
+            if not c.isspace(): code = True
+        elif state == "s":
+            if c == "'": state = "n"
+        elif state == "d":
+            if c == "\\": i += 1
+            elif c == '"': state = "n"
+        i += 1
+    if code or cur: cur.append(no)
+    if cur and state == "n" and not line.rstrip().endswith("\\"):
+        groups.append(cur); cur = []
+exe = [g for g in groups if not (len(g) == 1 and STRUCT.match(src[g[0] - 1].strip()))]
+exe = [g for g in exe if not src[g[0] - 1].startswith("#!")]
+missed = [g for g in exe if not hit.intersection(g)]
+print(f"{len(exe) - len(missed)}/{len(exe)} executable lines (statements) of {sys.argv[1].rsplit('/', 1)[-1]} ran")
+for g in missed: print(f"  NOT RUN line {g[0]}: {src[g[0] - 1].strip()}")
+PY
+cat "$TMP/coverage.txt"
+expect "every executable line ran" '! grep -q "NOT RUN" "$TMP/coverage.txt" && grep -q "executable lines" "$TMP/coverage.txt"'
+
+echo
+if [[ $FAILS -eq 0 ]]; then echo "battlebrain-cutover-check: PASS"; else echo "battlebrain-cutover-check: FAIL ($FAILS)"; exit 1; fi

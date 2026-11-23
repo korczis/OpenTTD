@@ -60,6 +60,12 @@ Full rationale: [`research/rail-steward.md`](../../../research/rail-steward.md),
   platforms into the single line, with a path signal on each platform's exit. A train leaves only
   when it can reserve its way into a free platform at the other end, so up to `trains_max`
   trains share one track without a passing loop.
+- **A terminus finds a site on hilly land** (`BuildRailStationAt`). It tries the axis toward the
+  other end, then the other axis, then the reversed exit. In each it takes the catching site
+  with the most cargo: flat first, then sloped land the game builds on with foundations
+  (`construction.build_on_slopes`; `FitsOnFoundations`, then a test-mode build). It levels a
+  site only when no orientation has one. Sites used to be flat and on one axis only, and in the
+  owner's hilly 1950 settings about half of the failed own lines ended there.
 - **The laid line is walked** (`VerifyRailLine`) before any train is bought. A missing piece is
   laid again, and a line that stays broken gets no train.
 - **Every wagon is checked.** A wagon the game will not refit or couple (a NewGRF rule) is sold
