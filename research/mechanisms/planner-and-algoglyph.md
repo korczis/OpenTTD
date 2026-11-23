@@ -205,6 +205,24 @@ more than the model's own lines scored the same way (196,456). The verdict was `
 bus mode. Company 1 earned 1.54 times ours per aircraft. Air stays out of the outcome plan because
 its option is six aircraft and two airports for about 195k, scored over a 24-month payback.
 
+The value of `outcome.<company>` is a contract: a gap watcher, the strategy review (ADR 0042),
+a digest and the bot's self-evaluation read it. A field is added, never renamed or removed:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `company` | integer | the company assessed (0-based) |
+| `verdict` | `mismatch` \| `watch` \| `consistent` \| `insufficient` | the overall answer |
+| `why` | string | the verdict in one sentence |
+| `signals[]` | `{kind, severity, why, ...}` | `kind` is `overpredicted_mode_planned` (with `mode`, `planned_lines`, `prior`, `median`, `lines.ours`, `lines.others`), `outcome_plan_differs` (with `model`, `outcome` mode mixes, `model_score_under_prior`, `outcome_score`, `gain`) or `leader_out_earns` (with `type`, `leader`, `ours`, `edge`); `severity` is `mismatch` or `watch` |
+| `modes.<mode>` | `{ours: {lines, median}, others: {lines, median}, n_eff, median, prior}` | the action-outcome join per mode: our lines and the others' realised / predicted, and the prior; `modes.default` is `{n_eff, median, prior, why}` |
+| `plan.model`, `plan.outcome` | `{solver, total_score, investment_k, budget_k, lines[], mix{mode: n}}`; `plan.model.score_under_prior` | the plan's portfolio and the one chosen again with the prior; `plan.rescore` says it is a sensitivity |
+| `mix[]` | `{type, ours: {vehicles, counted, per_vehicle_year}, leader: {company, name, vehicles, counted, per_vehicle_year} or null}` | our fleet per vehicle type against the best other company |
+| `proposal` | `{params: {calibration: {mode: factor, default}}, applied: false, how}` | what a calibrated run would use; never applied here |
+| `rule`, `rule_params`, `authority` | string, object, string | how the prior is formed, its constants, and the boundary |
+| `game` | `{seed, date, tick}` | the game the answer was read from: compare it before trusting the answer |
+| `portfolio_seq` | integer or null | the `plan.portfolio` event it belongs to |
+| `producer` | string | `mcp-plan --outcome (src/outcome.rs), via panel_bot.rs:planned` |
+
 Why the three-seed held-start A/B of calibration averaged about zero:
 
 - The arms barely differed. Both handed the bot the same freight lines; only the uncalibrated arm
