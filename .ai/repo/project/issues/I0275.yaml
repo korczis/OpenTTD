@@ -1,0 +1,28 @@
+id: I0275
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "Proposals filed, approved, denied and retired by deadline are counted once, from the approval core's decision events"
+slug: one-proposal-ledger
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: openttd-2e (approval core events), J (plans_not_landing), O (deadline-settled count). gap_watch's plans_not_landing and the digest's 'approvals the deadline settled without the owner' read the same decision events (settled_by included) through one named store query; neither keeps its own count from console or chat lines."
+why: "A month of retired replans looked like a quiet month; two counts of the same thing will disagree."
+scope:
+- "tools/research/mcp-rhai/sql/queries"
+- "tools/research/mcp-panel/rhai/gap_watch.rhai"
+- "tools/research/mcp-panel/rhai/digest.rhai"
+- "research/mechanisms/approval-gate.md"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0270
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "on one stubbed event stream gap_watch and the digest report the same filed, executed and retired counts (script test)"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

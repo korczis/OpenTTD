@@ -1,0 +1,26 @@
+id: I0273
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "Idle capital uses spendable cash, and its lever is the in-bot allocator's declared reserve or line budget"
+slug: idle-capital-lever-for-the-allocator
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: J (gap_watch idle_capital), I (fix/prismatic-capital-allocator declares the settings), openttd-2e (approval core). Compute idle capital as cash - reserve - committed (builds in progress) against the line budget, with a loan outstanding. Once agent I declares the allocator's reserve and budget in info.nut, add them to gap_watch's LEVERS with the code that reads them, proposed like any lever (owner-only, one at a time, DECLINED, COOLDOWN_MONTHS). The bot decides what to buy."
+why: "372k cash sat idle on a 300k loan while the leader expanded."
+scope:
+- "tools/research/mcp-panel/rhai/gap_watch.rhai"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0272
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "a fixture with spendable cash above the budget and a loan for PERSIST months yields one lever proposal naming the allocator setting; committed spending lowers the idle amount (script test)"
+- "the lever never names an fr_* slot (B2)"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

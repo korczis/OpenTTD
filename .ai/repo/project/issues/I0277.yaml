@@ -1,0 +1,27 @@
+id: I0277
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "Calibration becomes an owner-approved runtime switch, proposed with its evidence"
+slug: calibration-is-an-owner-switch
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: M (planner), the owner (decides), openttd-2e (approval path). Replace the start-time PRISMATIC_PLAN_CALIBRATION environment switch with a runtime setting the planner reads each run. When outcome.<company>'s per-mode ratios stay outside their interval for two quarters, the review proposes switching it as one approval-gated plan carrying the ratios. A default changes only through held-start pairs over three seeds (ADR 0034 point 6)."
+why: "Calibration is off by default and changing it needs a panel restart."
+scope:
+- "tools/research/mcp-rhai/src/panel_bot.rs"
+- "tools/research/mcp-rhai/src/calibrate.rs"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0276
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "the switch takes effect at the next planner run without a restart (unit test)"
+- "a proposal carries the per-mode ratios it rests on"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-plan --bin mcp-panel"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

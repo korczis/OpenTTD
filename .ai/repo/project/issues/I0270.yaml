@@ -1,0 +1,28 @@
+id: I0270
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "The strategy blackboard is one declared contract: one writer per key, one envelope, and a test that fails on an undeclared key, a second writer or an orphan reader"
+slug: strategy-blackboard-contract
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: openttd-51 (panel; the table lives beside the panel's shared store), with J, M, O, R as writers. Declare in code the table of ADR 0042 section 2 (replan, planner, watchdog, gap, gap_watch.*, outcome, eval, derived, evolve.proposal, digest, strategy.*), each with its writer, cadence and readers, and the envelope {company, period, game_date, writer, version, reads, unknown}; derive its documentation. A test scans every Rhai service's shared_set/shared_get and the Rust writers (panel_bot outcome) and fails on a key outside the table, a second writer, or a reader of a key nobody writes."
+why: "The services were built in parallel; the digest already reads gap_watch.<company> while gap_watch writes gap.<company>, and planner_mismatch while the planner writes outcome.<company>."
+scope:
+- "tools/research/mcp-rhai/src/panel.rs"
+- "tools/research/mcp-rhai/src/strategy_contract.rs"
+- "research/mechanisms/strategist-and-blackboard.md"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on: []
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "the test fails on master-plus-branches as they stand (gap_watch.<company>, planner_mismatch) and passes once the digest reads gap.<company> and outcome.<company>"
+- "every key in the table names exactly one writer and its envelope fields"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+- "tools/gate.sh change"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

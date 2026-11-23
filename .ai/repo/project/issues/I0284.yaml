@@ -1,0 +1,33 @@
+id: I0284
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "A replay of game 12609's recorded store through the cycle flags the aircraft gap and the idle capital in the first quarter they were visible, and stays quiet on controls"
+slug: replay-flags-game-12609
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: J, with S's regimes and H's P&L analysis (doc/live-game-12609-economics) as the expected answer. Export the game's store (a read-only copy; the live game is never touched) to a fixture, run replan's competition, gap_watch, outcome and the regime detector over it month by month, and assert the alarms and their first quarter against H's analysis. Control fixtures: a known stable loser already answered, healthy growth, PrismaticAI leading. This is the cycle's acceptance test."
+why: "The owner's question is why nothing detected this game; the cycle is proven on it or it is not proven."
+scope:
+- "tools/research/mcp-panel/test"
+- "tools/research/test_regimes.py"
+- "research/results"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0271
+- I0272
+- I0273
+- I0275
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "the replay raises the aircraft gap and the idle-capital alarms, each with its first quarter"
+- "the control fixtures raise no action-taking alarm, and the false-alarm count is reported"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+- "python3 -m unittest tools/research/test_regimes.py"
+- "tools/gate.sh change"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

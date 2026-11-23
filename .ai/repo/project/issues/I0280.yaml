@@ -1,0 +1,30 @@
+id: I0280
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "The owner digest reads every contract key and links each number to it"
+slug: digest-reads-the-contract
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: O (feature/strategy-digest). digest.rhai reads gap.<company> (flags, levers, requests, idle capital), outcome.<company>, eval.poor, evolve.proposal.<company>, the regime records and the live export, in the cadences of ADR 0042 section 8; every figure links to its key; thresholds still at their bootstrap are listed."
+why: "The digest is the one channel to the owner; a figure it cannot source is not shown as ok."
+scope:
+- "tools/research/mcp-panel/rhai/digest.rhai"
+- "tools/research/mcp-panel/static/digest.html"
+- "tools/research/mcp-digest-check"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0270
+- I0275
+- I0276
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "the digest renders from a fixture of contract keys alone, and every figure links to its key (end-to-end check in a real browser)"
+validation:
+- "tools/research/mcp-digest-check"
+- "tools/research/mcp-ui-crawl-check"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

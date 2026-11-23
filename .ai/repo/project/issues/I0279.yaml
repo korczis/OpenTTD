@@ -1,0 +1,27 @@
+id: I0279
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "battle-brain's prediction for the live configuration is checked against the live outcome each quarter before any live row trains it"
+slug: battle-brain-validated-on-live-outcomes
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: N, with the battle-brain owner. Score the live configuration with battle-brain (the repository's one neural network, an Axon MLP ensemble) and publish predicted share, spread and observed share with the quarter export; training on live rows stays off until that error is known over several games."
+why: "The owner asked for the neural networks to be updated; the one that exists has never been checked against a live game."
+scope:
+- "tools/research/battle-brain/brain"
+- "tools/research/battle-brain/brain.exs"
+- "research/battle-brain.md"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0278
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "the quarter export carries battle-brain's predicted share with its spread and the observed share, or says why it could not run"
+validation:
+- "python3 -m unittest tools/research/test_ai_battle.py"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

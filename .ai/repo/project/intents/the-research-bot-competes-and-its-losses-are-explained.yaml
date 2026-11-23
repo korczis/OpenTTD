@@ -10,6 +10,7 @@ non_goals:
 milestones:
 - prismatic-ai-grows-its-fleet-and-survives-its-own-failures
 - evaluations-are-fair-pre-registered-and-paired
+- the-strategy-is-reviewed-on-a-cadence
 satisfaction:
 - id: prismatic-ai-grows-and-recovers
   criterion: "PrismaticAI's fleet grows while its money does: every fitness lineup, self-steward included, is held to the hoard check and passes it; a failed build leaves no orphan station and is not retried; a save and load mid-run neither builds a line twice nor repeats a fleet move"
@@ -19,5 +20,9 @@ satisfaction:
   criterion: "Every comparative claim about PrismaticAI, the planner, AlgoGlyph or Prismatic cites a protocol committed under research/experiments/ before its first run (arms, frozen revisions, paired and held-out seeds, horizon, repeats, metrics, exclusion rule), runs as held-start pairs with repeats, and reports per metric a paired effect with an interval and every failed or excluded run"
   evidence: command
   ref: "tools/research/preregistration check research/experiments (written by I0161)"
+- id: a-gap-to-the-leader-is-detected-and-answered
+  criterion: "A replay of a live game's recorded store through the strategy review cycle (ADR 0042) flags the gap to the leader by vehicle type and idle capital in the first quarter they were visible, files a request its executor answers, and raises no action-taking alarm on the control fixtures"
+  evidence: command
+  ref: "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel (the replay test written by I0284)"
 created_at: 2026-11-22
-updated_at: '2026-11-22'
+updated_at: '2026-11-23'

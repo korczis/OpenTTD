@@ -1,0 +1,26 @@
+id: I0281
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "A contract writer that stops writing is reported from the age of its key, by R's evaluation and in the digest"
+slug: silent-writers-are-reported
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: R (service_eval.rhai), O (digest). For every key of the contract, compare its last write (game date and wall clock) with its declared cadence; a key overdue by more than one period while the game runs marks its writer in eval.<service> and in the digest's failed section. A paused game is not a dead writer."
+why: "A detector that is not running detects nothing."
+scope:
+- "tools/research/mcp-panel/rhai/service_eval.rhai"
+- "tools/research/mcp-panel/rhai/digest.rhai"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0270
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "a stubbed gap.<company> two game months old while the game runs is reported once; the same key in a paused game is not (script test)"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

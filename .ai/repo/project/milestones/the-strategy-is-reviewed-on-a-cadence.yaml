@@ -1,0 +1,22 @@
+id: the-strategy-is-reviewed-on-a-cadence
+title: "The strategy is reviewed on the game's week, month and quarter, and a gap to the leader becomes a proposal, a learning row and an owner digest"
+slug: the-strategy-is-reviewed-on-a-cadence
+order: 220
+priority: p1
+problem: "In the live game of seed 12609 (1953) PrismaticAI's value is about 0.84M against AAAHogEx's 1.58M; about 80% of the profit gap is aircraft, the company holds about 372k cash on a 300k loan, and its trains earn about 2.2x more each than AAAHogEx's but it runs fewer. Every ingredient of a review exists and none closes the loop: replan.rhai's competition block (tools/research/mcp-panel/rhai/replan.rhai competition()) is descriptive and its verdict judges only the planner's portfolio payback with typed constants (MIN_PAYS, HORIZON_MONTHS); the approval deadline retires unanswered proposals with verdict keep and nobody counts them; watchdog.rhai detects stalls, not under-performance; calibration is off; Battlebrain is not live; the GA and battle-brain (the repository's one neural network) learn from headless battles only; no cadence is longer than a month and no summary tells the owner the strategy is losing."
+outcome: "The services that already judge and report (replan, watchdog, gap_watch, outcome, service_eval, digest, the regime detector, live export, evolve) follow one blackboard contract: one owner per key, one envelope, checked by a test. Thresholds have one source per kind (regimes.json, derived.* baselines, declared owner policy). A lasting gap becomes a replan request with a lifecycle or a bounded owner-only lever, labelled live rows for the GA and a battle-brain validation, and the owner sees it in the week, month and quarter digest. A replay of game 12609's store flags the aircraft gap and the idle capital in the first quarter they were visible."
+acceptance_criteria:
+- "the contract table names one writer for every strategy key, and a test fails on an undeclared key, a second writer or a reader of a key nobody writes"
+- "regime thresholds are read from regimes.json by both the fitness check and the live services; baselines come from derived.*; every remaining constant is a declared bootstrap or owner policy"
+- "replan answers gap.<company>.requests with accepted or declined and a reason; an unanswered request escalates in the digest"
+- "the proposal ledger is computed once from the approval core's decision events"
+- "live rows are labelled and never change a default; battle-brain's live prediction error is in the quarter digest"
+- "the replay of game 12609's store flags the aircraft gap and the idle capital, and its control fixtures raise no action-taking alarm"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+- "python3 -m unittest tools/research/test_ai_battle.py"
+- "tools/gate.sh change"
+- "tools/surfaces/surfaces check"
+evidence_required: []
+created_at: '2026-11-23'
+updated_at: '2026-11-23'
