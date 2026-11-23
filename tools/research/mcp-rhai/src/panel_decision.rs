@@ -206,8 +206,26 @@ pub fn last() -> (u64, Option<Observation>) {
     (g.0, g.1.clone())
 }
 
+/// What a live decision needs of the game (`game_time`, `apply_live`): the panel's Game, and in
+/// the tests a game the test scripts, so every refusal and every answer of `apply_live` is run.
+pub trait LiveGame {
+    fn resource(&self, uri: &str) -> Result<Value, String>;
+    fn tool(&self, name: &str, arguments: Value) -> Result<Value, String>;
+    fn tool_names(&self) -> std::collections::HashSet<String>;
+    fn event(&self, kind: &str, text: &str);
+    fn plan(&self, kind: &str, data: Value) -> Option<u64>;
+}
+
+impl LiveGame for Arc<Game> {
+    fn resource(&self, uri: &str) -> Result<Value, String> { Game::resource(self, uri) }
+    fn tool(&self, name: &str, arguments: Value) -> Result<Value, String> { Game::tool(self, name, arguments) }
+    fn tool_names(&self) -> std::collections::HashSet<String> { Game::tool_names(self) }
+    fn event(&self, kind: &str, text: &str) { Game::event(self, kind, text) }
+    fn plan(&self, kind: &str, data: Value) -> Option<u64> { Game::plan(self, kind, data) }
+}
+
 /// The game's tick and date now (openttd://game/state).
-pub fn game_time(g: &Arc<Game>) -> Result<(i64, Value), String> {
+pub fn game_time<G: LiveGame>(g: &G) -> Result<(i64, Value), String> {
     let st = g.resource("openttd://game/state")?;
     let tick = st.get("game_tick").and_then(Value::as_i64).ok_or("openttd://game/state has no game_tick")?;
     Ok((tick, st.get("game_date").cloned().unwrap_or(Value::Null)))
@@ -724,7 +742,7 @@ pub fn live_world(block: &Value, now_tick: i64, companies: &Value, company: i64)
 /// not behind the decision's snapshot, the company an AI company now), then the stale date in game
 /// time, then that the game offers openttd.ai.set_settings; only then does every setting go under
 /// one approval that expires with the decision. Recorded as plan.directive like every directive.
-fn apply_live(g: &Arc<Game>, url: &str, raw: &Value, d: &Directive, ignored: &[String], key: Option<&str>) -> Result<(u16, Value), String> {
+fn apply_live<G: LiveGame>(g: &G, url: &str, raw: &Value, d: &Directive, ignored: &[String], key: Option<&str>) -> Result<(u16, Value), String> {
     let refuse = |status: u16, outcome: &str, why: String| -> Result<(u16, Value), String> {
         g.event("ai", &format!("Battlebrain's live decision ({url}) is not applied: {why}"));
         let errors = vec![why.clone()];
@@ -964,6 +982,138 @@ mod tests {
     }
 
     use super::*;
+
+    /// A game the test scripts for `apply_live`: its companies (in the game's own envelope, as the
+    /// panel's `fake_game` serves them), tools, state and the answer of openttd.ai.set_settings,
+    /// recording every event, plan and call it is given.
+    struct Scripted {
+        companies: Result<Value, String>,
+        tools: Vec<&'static str>,
+        state: Result<Value, String>,
+        answer: Result<Value, String>,
+        events: Mutex<Vec<String>>,
+        plans: Mutex<Vec<Value>>,
+        calls: Mutex<Vec<Value>>,
+    }
+
+    impl LiveGame for Scripted {
+        fn resource(&self, uri: &str) -> Result<Value, String> {
+            if uri == "openttd://companies" { self.companies.clone() } else { self.state.clone() }
+        }
+        fn tool(&self, name: &str, arguments: Value) -> Result<Value, String> {
+            self.calls.lock().unwrap().push(json!({"name": name, "arguments": arguments}));
+            self.answer.clone()
+        }
+        fn tool_names(&self) -> std::collections::HashSet<String> {
+            self.tools.iter().map(|t| t.to_string()).collect()
+        }
+        fn event(&self, _kind: &str, text: &str) {
+            self.events.lock().unwrap().push(text.to_string());
+        }
+        fn plan(&self, _kind: &str, data: Value) -> Option<u64> {
+            let mut p = self.plans.lock().unwrap();
+            p.push(data);
+            Some(70_000 + p.len() as u64)
+        }
+    }
+
+    fn scripted() -> Scripted {
+        Scripted {
+            // prismatic_mcp_server.cpp: env["data"] = {companies}.
+            companies: Ok(json!({"game_tick": 1000, "data": {"companies": [{"id": 0, "is_ai": false}, {"id": 3, "is_ai": true}]}})),
+            tools: vec!["openttd.ai.set_settings"],
+            state: Ok(json!({"game_tick": 1000, "game_date": "1963-03-01"})),
+            answer: Ok(json!({"status": "executed", "verdict": "VERIFIED_SUCCESS"})),
+            events: Mutex::new(vec![]), plans: Mutex::new(vec![]), calls: Mutex::new(vec![]),
+        }
+    }
+
+    /// A live decision directive for `company` (None: one that names an AI to start instead), made
+    /// on a snapshot at the scripted game's tick.
+    fn live(company: Option<i64>, valid_until: &str) -> Value {
+        live_at(company, valid_until, 1000)
+    }
+
+    fn live_at(company: Option<i64>, valid_until: &str, snapshot_tick: i64) -> Value {
+        let s = "planned_freight_only=1,fr_from=41";
+        let mut raw = json!({"settings": s, "decision": {"schema": "battlebrain-decision/v2", "decision": format!("bb:{}", "1".repeat(64)),
+            "snapshot_digest": format!("sha256:{}", "2".repeat(64)), "idempotency_key": "k-live", "policy": "freight-margin@2",
+            "valid_until": valid_until, "mode": "live", "settings_digest": crate::battlebrain_contract::settings_digest(s),
+            "snapshot_tick": snapshot_tick}});
+        match company { Some(c) => raw["company_id"] = json!(c), None => raw["ai"] = json!("PrismaticAI") }
+        raw
+    }
+
+    fn run_live(g: &Scripted, raw: &Value) -> Result<(u16, Value), String> {
+        let (d, ignored) = directive(raw).unwrap();
+        apply_live(g, "http://x/decision", raw, &d, &ignored, Some("k-live"))
+    }
+
+    #[test]
+    fn a_live_decision_is_applied_under_one_expiring_approval_or_refused_with_its_reason() {
+        // Applied: one openttd.ai.set_settings call with every setting, expiring with the stale date.
+        let g = scripted();
+        let (code, out) = run_live(&g, &live(Some(3), "1963-03-02")).unwrap();
+        assert_eq!(code, 200, "{out}");
+        assert_eq!((out["applied"].clone(), out["expires_tick"].clone()), (json!("openttd.ai.set_settings"), json!(1000 + 2 * DAY_TICKS)));
+        let calls = g.calls.lock().unwrap().clone();
+        assert_eq!(calls, vec![json!({"name": "openttd.ai.set_settings", "arguments": {"company": 3, "expires_tick": 1000 + 2 * DAY_TICKS,
+                                                                                          "settings": {"planned_freight_only": 1, "fr_from": 41}}})]);
+        let plans = g.plans.lock().unwrap().clone();
+        assert_eq!((plans.len(), plans[0]["inputs"]["live"]["key"].clone()), (1, json!("k-live")));
+        assert!(g.events.lock().unwrap()[0].starts_with("Battlebrain decided (http://x/decision): company 3: 2 setting(s) under one approval"));
+        // The call fails: 502 with the step.
+        let g = Scripted { answer: Err("the game's MCP server is not reachable".into()), ..scripted() };
+        let (code, out) = run_live(&g, &live(Some(3), "1963-03-02")).unwrap();
+        assert_eq!(code, 502);
+        assert!(out["error"].as_str().unwrap().contains("not reachable"), "{out}");
+        // Each refusal: its status, its outcome in plan.directive, its sentence, and no call.
+        let refused = |g: Scripted, raw: Value, status: u16, outcome: &str| {
+            let (code, out) = run_live(&g, &raw).unwrap();
+            assert_eq!(code, status, "{outcome}: {out}");
+            assert_eq!(g.plans.lock().unwrap()[0]["choice"]["outcome"], outcome);
+            assert_eq!(g.plans.lock().unwrap()[0]["choice"]["accepted"], false);
+            assert!(g.events.lock().unwrap()[0].contains("is not applied"), "{outcome}");
+            assert!(g.calls.lock().unwrap().is_empty(), "{outcome}: nothing reaches the game");
+            out
+        };
+        refused(scripted(), live(None, "1963-03-02"), 422, "invalid_decision_block");
+        let owner = refused(scripted(), live(Some(0), "1963-03-02"), 409, "not_an_ai_company");
+        assert_eq!(owner["error"], "company 0 is not an AI company now");
+        // A game behind the decision's snapshot: another world or an earlier save reloaded.
+        let behind = refused(scripted(), live_at(Some(3), "1963-03-02", 1001), 409, "world_changed");
+        assert!(behind["error"].as_str().unwrap().contains("behind the snapshot"), "{behind}");
+        // The world is checked first (B6): before the stale date and before the game's tools.
+        refused(Scripted { tools: vec![], ..scripted() }, live_at(Some(3), "1963-02-28", 1001), 409, "world_changed");
+        let all = refused(Scripted { tools: vec![], ..scripted() }, live_at(Some(0), "1963-02-28", 1001), 409, "world_changed");
+        assert!(all["error"].as_str().unwrap().contains("; company 0 is not an AI company now"), "every reason is reported: {all}");
+        refused(Scripted { tools: vec![], ..scripted() }, live(Some(0), "1963-02-28"), 409, "not_an_ai_company");
+        // The stale date before the game's tools.
+        refused(Scripted { tools: vec![], ..scripted() }, live(Some(3), "1963-02-28"), 409, "stale_decision");
+        refused(Scripted { tools: vec!["openttd.ai.set_setting"], ..scripted() }, live(Some(3), "1963-03-02"), 409, "no_atomic_apply");
+        refused(scripted(), live(Some(3), "1963-02-28"), 409, "stale_decision");
+        refused(Scripted { state: Ok(json!({"game_tick": 1000, "game_date": null})), ..scripted() }, live(Some(3), "1963-03-02"), 409, "stale_decision");
+        // A game that cannot be read is an error, not a refusal: the caller answers it.
+        let unreadable = Scripted { companies: Err("MCP server not up yet".into()), ..scripted() };
+        assert_eq!(run_live(&unreadable, &live(Some(3), "1963-03-02")).unwrap_err(), "MCP server not up yet");
+        let no_tick = Scripted { state: Ok(json!({"game_date": "1963-03-01"})), ..scripted() };
+        assert!(run_live(&no_tick, &live(Some(3), "1963-03-02")).unwrap_err().contains("no game_tick"));
+    }
+
+    #[test]
+    fn the_panels_game_is_a_live_game_and_says_when_it_is_not_up() {
+        let args = crate::panel::parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", "9"].map(String::from)).unwrap();
+        let g = Game::new(args);
+        assert_eq!(LiveGame::resource(&g, "openttd://game/state").unwrap_err(), "MCP server not up yet");
+        assert_eq!(LiveGame::tool(&g, "openttd.ai.set_settings", json!({})).unwrap_err(), "MCP server not up yet");
+        assert!(LiveGame::tool_names(&g).is_empty());
+        let since = g.bus.seq();
+        LiveGame::event(&g, "ai", "a line");
+        // A kind outside the declared table: refused before the mesh mirror (whose own test owns
+        // its environment), with a panel.server line.
+        assert!(LiveGame::plan(&g, "plan.undeclared", json!({})).is_none());
+        assert_eq!(g.bus.seq(), since + 2, "the event and the refusal are both published");
+    }
 
     fn cos(rows: &[(i64, bool, &str, i64)]) -> Value {
         Value::Array(rows.iter().map(|(id, ai, name, money)| json!({"id": id, "is_ai": ai, "name": name, "money": money})).collect())

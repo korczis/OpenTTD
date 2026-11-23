@@ -1348,27 +1348,32 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 	/* Transit time at the speed of a typical early steam engine: about 100 km/h, some 3.7 tiles a day. */
 	local tiles_a_day = 3.7;
 	local near = rich ? RICH_MIN_TILES : 100, far = rich ? RICH_MAX_TILES : 260;
+	/* Why nothing was found, said once a game year (NO_OWN_LINE_YEAR): without it a bot that found
+	 * no candidate went silent, as company 0 of the owner's live game (seed 15805) did for years. */
+	local why = {producers = 0, ours = 0, claimed = 0, small = 0, served = 0, no_acceptor = 0, tried = 0};
 	foreach (p, _ in AIIndustryList()) {
 		if (AIIndustry.IsBuiltOnWater(p)) continue;
-		if (PrismaticAI.OwnRailStationNear(AIIndustry.GetLocation(p), 8) != null) continue;
+		why.producers++;
+		if (PrismaticAI.OwnRailStationNear(AIIndustry.GetLocation(p), 8) != null) { why.ours++; continue; }
 		/* Another company's rail station already claims it, in every mode (ForeignRailStationAt). */
-		if (PrismaticAI.ForeignRailStationAt(p) != null) continue;
+		if (PrismaticAI.ForeignRailStationAt(p) != null) { why.claimed++; continue; }
 		foreach (c, _ in AICargoList_IndustryProducing(p)) {
 			if (!AICargo.IsFreight(c)) continue;
 			local prod = AIIndustry.GetLastMonthProduction(p, c);
-			if (prod < 40) continue;
+			if (prod < 40) { why.small++; continue; }
 			if (AIIndustry.GetLastMonthTransported(p, c) > 0) {
-				if (!rich) continue;
+				if (!rich) { why.served++; continue; }
 				local served = AIIndustry.GetLastMonthTransportedPercentage(p, c);
-				if (served >= RICH_SERVED_BELOW) continue;
+				if (served >= RICH_SERVED_BELOW) { why.served++; continue; }
 				prod = prod * (100 - served) / 100;
 				if (prod < 40) continue;
 			}
 			local accs = AIIndustryList_CargoAccepting(c);
 			accs.Valuate(AIIndustry.GetDistanceManhattanToTile, AIIndustry.GetLocation(p));
 			accs.KeepBetweenValue(near - 1, far + 1);
+			if (accs.IsEmpty()) why.no_acceptor++;
 			foreach (q, dist in accs) {
-				if (tried.rawin(p + "-" + q + "-" + c)) continue;
+				if (tried.rawin(p + "-" + q + "-" + c)) { why.tried++; continue; }
 				local days = (dist / tiles_a_day).tointeger() + 1;
 				local income = AICargo.GetCargoIncome(c, dist, days);
 				/* Multi-source (rail_feed): the unserved producers of the same cargo a station at p
@@ -1382,5 +1387,16 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 			}
 		}
 	}
+	local year = AIDate.GetYear(AIDate.GetCurrentDate());
+	if (best == null && NO_OWN_LINE_YEAR != year) {
+		NO_OWN_LINE_YEAR = year;
+		AILog.Info("PrismaticAI: no own freight line: " + why.producers + " producers on land, " + why.ours +
+			" ours, " + why.claimed + " claimed by another company's rail station, cargoes: " + why.small +
+			" under 40 a month, " + why.served + " transported by others" + (rich ? " (rich: past RICH_SERVED_BELOW)" : "") +
+			", " + why.no_acceptor + " with no acceptor " + near + "-" + far + " tiles away, " + why.tried + " pairs tried");
+	}
 	return best;
 }
+
+/* The game year NextOwnFreightLine last said why it found nothing. */
+NO_OWN_LINE_YEAR <- -1;

@@ -407,7 +407,7 @@ fn b6_the_executor_checks_block_and_freshness_before_any_step() {
     let first_step = ["set_bot_setting(", "start_bot(", "\"openttd.ai.reload\""].iter().filter_map(|n| body.find(n)).min().expect("pull_with acts");
     assert!(gate < fresh && fresh < first_step, "B6: pull_with must check the decision block, then freshness, before any step");
     assert!(gate < live, "B6: a live decision reaches apply_live only after decision_gate");
-    let body = body_of("fn apply_live(");
+    let body = body_of("fn apply_live<");
     let at = |n: &str| body.find(n).unwrap_or_else(|| panic!("apply_live no longer calls {n}"));
     let (world, stale, act) = (at("live_world("), at("live_expiry("), at("g.tool(\"openttd.ai.set_settings\""));
     assert!(world < stale && stale < act, "B6: apply_live must check the world, then the stale date, before set_settings");
