@@ -12,7 +12,6 @@ import { ecInit, maximizable, chartCard, PALETTE, UI, CLS, $, esc, api, INK, AXI
 
 /** The page's echarts, read when a chart is drawn (a test installs its fake after importing). */
 const echartsNow = () => globalThis.echarts;
-export const REPO_URL = 'https://github.com/korczis/OpenTTD';
 
 /** The registry: every chart of the bench pages, the address keys it reads and where a click goes. */
 export const CHARTS = [
@@ -27,7 +26,7 @@ export const COLUMNS = [
   { key: 'median', label: 'Median', num: true },
   { key: 'stddev', label: '± stddev', num: true },
   { key: 'samples', label: 'Samples', num: true },
-  { key: 'change', label: 'vs previous', num: true },
+  { key: 'change', label: 'vs previous', num: true, title: 'Against the newest earlier record of the same host and crate' },
 ];
 
 /* ---- address state ------------------------------------------------------------------------- */
@@ -61,7 +60,15 @@ export const pct = (ratio) => (ratio === null || ratio === undefined ? '-' : `${
 export const benchHref = (id) => '/bench/' + String(id).split('/').map(encodeURIComponent).join('/');
 /** The record's own view on the list page. */
 export const recordHref = (id) => '/bench?rec=' + encodeURIComponent(id);
-export const commitUrl = (rev) => `${REPO_URL}/commit/${encodeURIComponent(rev)}`;
+/** A rev's commit page in the repository's web view (GET /api/bench `repo_url`, derived from its
+ *  origin remote), or null when the panel knows none. */
+export const commitUrl = (rev, repo) => (repo ? `${repo}/commit/${encodeURIComponent(rev)}` : null);
+/** A rev, linked to its commit when there is a commit page. */
+const revLink = (rev, repo, cls = 'hover:underline font-mono') => {
+  const url = commitUrl(rev, repo);
+  const text = esc(String(rev).slice(0, 10));
+  return url ? `<a class="${cls}" href="${esc(url)}" rel="noopener">${text}</a>` : `<span class="font-mono">${text}</span>`;
+};
 /** 2026-11-22T23:15:00+00:00 -> 2026-11-22 23:15 (the record's own clock). */
 export const shortTime = (iso) => {
   const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(iso || '');
@@ -79,10 +86,13 @@ const nameOf = (b) => b.name ?? String(b.id).split('/').slice(1).join('/');
 /* ---- records (pure) ------------------------------------------------------------------------ */
 /** The record the address picks (rec), else the newest (records are oldest first). */
 export const selected = (records, rec) => records.find((r) => r.id === rec) || records.at(-1) || null;
-/** The record before one, or null for the first. */
+/** Whether two records measured on one machine and one crate, so their numbers compare. */
+export const comparable = (a, b) => (a?.host?.name ?? null) === (b?.host?.name ?? null) && (a?.crate ?? null) === (b?.crate ?? null);
+/** The newest record before one of the same host and crate, or null: another machine's numbers
+ *  are no change of this one's. */
 export function previous(records, record) {
-  const i = records.indexOf(record);
-  return i > 0 ? records[i - 1] : null;
+  for (let i = records.indexOf(record) - 1; i >= 0; i--) if (comparable(records[i], record)) return records[i];
+  return null;
 }
 /** The groups of a record's benches, sorted. */
 export const groups = (record) => [...new Set((record?.benches || []).map(groupOf))].sort();
@@ -212,13 +222,13 @@ export function regressionsHtml(record) {
 
 /** The record's provenance: rev (linked to its commit), host, toolchain, crate, baseline; a dirty
  *  tree is a warning, since the numbers are then not of the rev alone. */
-export function recordHtml(record, { narrow = false } = {}) {
+export function recordHtml(record, { narrow = false, repo = null } = {}) {
   const h = record.host || {};
   const base = record.baseline?.id;
   const regs = regressionsOf(record);
   return `${record.tree_dirty ? callout('yellow', `<span class="font-medium">Dirty tree.</span> This record was measured with uncommitted changes on top of rev ${esc(String(record.rev).slice(0, 10))}: its numbers are not of that commit alone.`) : ''}
     <dl class="grid gap-3 ${narrow ? 'grid-cols-2 lg:grid-cols-3 2xl:grid-cols-2' : 'grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6'}">
-      ${stat('Revision', String(record.rev).slice(0, 10), record.tree_dirty ? 'tree dirty' : 'clean tree', commitUrl(record.rev))}
+      ${stat('Revision', String(record.rev).slice(0, 10), record.tree_dirty ? 'tree dirty' : 'clean tree', commitUrl(record.rev, repo) || '')}
       ${stat('Generated', shortTime(record.generated_at), record.generated_at)}
       ${stat('Host', h.name || '-', [h.os, h.cpus ? `${h.cpus} CPUs` : ''].filter(Boolean).join(' · '))}
       ${stat('Toolchain', record.toolchain || '-', `profile ${record.profile || '-'}`)}
@@ -226,6 +236,9 @@ export function recordHtml(record, { narrow = false } = {}) {
       ${stat('Baseline', base || 'none', base ? `${regs.length} regression${regs.length === 1 ? '' : 's'}` : 'the first record of its series', base ? recordHref(base) : '')}
     </dl>`;
 }
+
+/** The page when GET /api/bench failed: what it answered (the kit's toast says it too). */
+export const loadError = (d) => `<div id="bench-error" class="${CLS.card}">The benchmark records did not load: ${esc(d.error || `HTTP ${d.status}`)}.</div>`;
 
 /** The page when no record exists yet, with every file the panel refused and why. */
 export function emptyHtml(d) {
@@ -248,7 +261,7 @@ export function skippedHtml(skipped) {
 export async function listPage() {
   const state = getState();
   const d = await api('/api/bench');
-  if (!d.ok) { $('page').innerHTML = `<div class="${CLS.card}">The benchmark records did not load: ${esc(d.error || `HTTP ${d.status}`)}.</div>`; return; }
+  if (!d.ok) { $('page').innerHTML = loadError(d); return; }
   const records = d.records || [];
   if (!records.length) { $('page').innerHTML = emptyHtml(d); return; }
   $('page').innerHTML = `
@@ -292,7 +305,7 @@ export async function listPage() {
     const desc = state.sort.startsWith('-');
     $('bench-head').innerHTML = COLUMNS.map((c) => {
       const on = c.key === key;
-      return `<th scope="col" class="px-3 py-2${c.num ? ' text-right' : ''}"${on ? ` aria-sort="${desc ? 'descending' : 'ascending'}"` : ''}><button type="button" data-sort="${c.key}" title="Sort by ${esc(c.label)}" class="inline-flex items-center gap-1 uppercase hover:text-gray-900 dark:hover:text-white">${esc(c.label)}<span aria-hidden="true">${on ? (desc ? '▼' : '▲') : '↕'}</span></button></th>`;
+      return `<th scope="col" class="px-3 py-2${c.num ? ' text-right' : ''}"${on ? ` aria-sort="${desc ? 'descending' : 'ascending'}"` : ''}><button type="button" data-sort="${c.key}" title="Sort by ${esc(c.label)}${c.title ? `: ${esc(c.title)}` : ''}" class="inline-flex items-center gap-1 uppercase hover:text-gray-900 dark:hover:text-white">${esc(c.label)}<span aria-hidden="true">${on ? (desc ? '▼' : '▲') : '↕'}</span></button></th>`;
     }).join('');
   };
   const table = () => {
@@ -316,7 +329,7 @@ export async function listPage() {
     const r = record();
     $('rec').value = r.id;
     $('bench-record-id').textContent = r.id;
-    $('bench-record').innerHTML = recordHtml(r);
+    $('bench-record').innerHTML = recordHtml(r, { repo: d.repo_url });
     $('bench-regressions').innerHTML = regressionsHtml(r);
     groupSelect();
   };
@@ -349,6 +362,7 @@ export async function listPage() {
 export async function benchPage(id) {
   const state = getState();
   const d = await api('/api/bench');
+  if (!d.ok) { $('page').innerHTML = loadError(d); return; }
   const records = d.records || [];
   const points = history(records, id);
   if (!points.length) {
@@ -394,19 +408,20 @@ export async function benchPage(id) {
     const p = point();
     const b = p.bench;
     const i = points.indexOf(p);
-    const before = i > 0 ? points[i - 1].bench : null;
+    const prior = points.slice(0, i).reverse().find((x) => comparable(x.record, p.record));
+    const before = prior ? prior.bench : null;
     const change = before && before.median ? b.median / before.median : null;
     $('bench-stats').innerHTML = [
       stat('Median', human(b.median, b.unit), `mean ${human(b.mean, b.unit)} · ± ${human(b.stddev, b.unit)}`),
       stat('Min – max', `${human(b.min, b.unit)} – ${human(b.max, b.unit)}`, `${b.samples ?? '-'} samples${b.throughput ? ' · ' + throughputText(b.throughput) : ''}`),
-      stat('vs previous record', pct(change), before ? `was ${human(before.median, before.unit)}` : 'the first record that measured it'),
+      stat('vs previous record', pct(change), before ? `was ${human(before.median, before.unit)} on ${prior.record.host?.name || 'the same host'}` : 'the first record of this host and crate that measured it'),
       stat('Record', shortTime(p.record.generated_at), p.record.id, recordHref(p.record.id)),
     ].join('');
     $('bench-regression').innerHTML = p.regression ? regressionsHtml({ ...p.record, baseline: { ...p.record.baseline, regressions: [p.regression] } }) : '';
-    $('bench-selected').innerHTML = `${recordHtml(p.record, { narrow: true })}<a class="inline-block mt-3 text-sm ${LINK}" href="${esc(recordHref(p.record.id))}">Every bench of this record</a>`;
+    $('bench-selected').innerHTML = `${recordHtml(p.record, { narrow: true, repo: d.repo_url })}<a class="inline-block mt-3 text-sm ${LINK}" href="${esc(recordHref(p.record.id))}">Every bench of this record</a>`;
     $('bench-records').innerHTML = points.slice().reverse().map((x) => `<tr class="border-b dark:border-gray-700${x === p ? ' bg-gray-100 dark:bg-gray-700' : ''}"${x === p ? ' aria-current="true"' : ''}>
       <td class="px-3 py-2 whitespace-nowrap"><a href="?rec=${encodeURIComponent(x.record.id)}" data-rec="${esc(x.record.id)}" class="${LINK}">${esc(shortTime(x.record.generated_at))}</a></td>
-      <td class="px-3 py-2"><a class="hover:underline font-mono" href="${esc(commitUrl(x.record.rev))}" rel="noopener">${esc(String(x.record.rev).slice(0, 10))}</a>${x.record.tree_dirty ? ' ' + badge('dirty', 'yellow') : ''}</td>
+      <td class="px-3 py-2">${revLink(x.record.rev, d.repo_url)}${x.record.tree_dirty ? ' ' + badge('dirty', 'yellow') : ''}</td>
       <td class="px-3 py-2 text-right font-medium text-gray-900 dark:text-white whitespace-nowrap">${esc(human(x.bench.median, x.bench.unit))}</td>
       <td class="px-3 py-2 text-right whitespace-nowrap">± ${esc(human(x.bench.stddev, x.bench.unit))}</td>
       <td class="px-3 py-2 text-right whitespace-nowrap">${esc(human(x.bench.min, x.bench.unit))} – ${esc(human(x.bench.max, x.bench.unit))}</td>

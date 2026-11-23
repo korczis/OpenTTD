@@ -39,6 +39,11 @@ pub fn valid_id(id: &str) -> bool {
 /// Seconds since 1970 of an RFC 3339 time (`2026-11-22T23:15:00+00:00`, `...Z`, fractions
 /// allowed), so records written with different offsets still sort by when they were made.
 pub fn epoch(s: &str) -> Option<i64> {
+    // Every slice below is by byte offset: a non-ASCII byte anywhere is no RFC 3339 time, and is
+    // refused before a slice could land inside a character (and panic every /api/bench request).
+    if !s.is_ascii() {
+        return None;
+    }
     let b = s.as_bytes();
     if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || !matches!(b[10], b'T' | b't' | b' ') || b[13] != b':' || b[16] != b':' {
         return None;
@@ -139,6 +144,26 @@ pub fn load(dir: &Path) -> (Vec<Value>, Vec<Value>) {
     (records, skipped)
 }
 
+/// The web page of a git remote on GitHub (`git@github.com:o/r.git`, `https://github.com/o/r.git`,
+/// `ssh://git@github.com/o/r`): `https://github.com/o/r`, where `/commit/<rev>` is a commit. Another
+/// host has no known commit page: None.
+pub fn web_url(remote: &str) -> Option<String> {
+    let r = remote.trim();
+    let path = r.strip_prefix("git@github.com:")
+        .or_else(|| r.strip_prefix("https://github.com/"))
+        .or_else(|| r.strip_prefix("ssh://git@github.com/"))?;
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let ok = path.split('/').count() == 2 && path.split('/').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)));
+    ok.then(|| format!("https://github.com/{path}"))
+}
+
+/// The commit pages of the repository the panel serves, from its `origin` remote (None without one).
+pub fn repo_url() -> Option<String> {
+    let out = std::process::Command::new("git").arg("-C").arg(repo()).args(["remote", "get-url", "origin"]).output().ok()?;
+    out.status.success().then(|| web_url(&String::from_utf8_lossy(&out.stdout))).flatten()
+}
+
 /// The answer of GET /api/bench (every record) or GET /api/bench?id= (one), from a directory.
 pub fn answer(dir: &Path, id: Option<&str>) -> (u16, Value) {
     let (records, skipped) = load(dir);
@@ -153,7 +178,7 @@ pub fn answer(dir: &Path, id: Option<&str>) -> (u16, Value) {
     }
     let latest = records.last().map(|r| r["id"].clone()).unwrap_or(Value::Null);
     (200, json!({"schema": SCHEMA, "count": records.len(), "latest_id": latest, "records": records, "skipped": skipped,
-                 "dir": dir.strip_prefix(repo()).unwrap_or(dir).display().to_string()}))
+                 "dir": dir.strip_prefix(repo()).unwrap_or(dir).display().to_string(), "repo_url": repo_url()}))
 }
 
 pub fn h_bench(_: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
@@ -215,7 +240,8 @@ mod tests {
         assert_eq!(epoch("2026-11-22T23:15:00+00:00"), Some(1_795_389_300));
         assert_eq!(epoch("2026-11-23T00:15:00+01:00"), epoch("2026-11-22T23:15:00Z"), "an offset is applied");
         assert_eq!(epoch("2026-11-22T23:15:00.250-02:30"), Some(1_795_389_300 + 9000));
-        for bad in ["", "2026-11-22", "2026-13-01T00:00:00Z", "2026-11-22T23:15:00", "2026-11-22T23:15:00.Z", "2026-11-22T23:15:00+0100"] {
+        for bad in ["", "2026-11-22", "2026-13-01T00:00:00Z", "2026-11-22T23:15:00", "2026-11-22T23:15:00.Z", "2026-11-22T23:15:00+0100",
+                    "2026-11-22T23:15:00ä1:00", "2026-11-22T23:15:00+ä:0", "2026-11-22T23:15:00.5ä1:00", "2026-11-2ä23:15:00Z"] {
             assert_eq!(epoch(bad), None, "{bad}");
         }
         assert!(valid_id("bench-20261122T231500-ab12cd34"));
@@ -226,6 +252,12 @@ mod tests {
         assert_eq!(human(4_560_000.0, "ns"), "4.56 ms");
         assert_eq!(human(1.2e9, "ns"), "1.20 s");
         assert_eq!(human(3.0, "ops"), "3 ops");
+        assert_eq!(web_url("git@github.com:korczis/OpenTTD.git\n").as_deref(), Some("https://github.com/korczis/OpenTTD"));
+        assert_eq!(web_url("https://github.com/korczis/OpenTTD").as_deref(), Some("https://github.com/korczis/OpenTTD"));
+        assert_eq!(web_url("ssh://git@github.com/o/r.git/").as_deref(), Some("https://github.com/o/r"));
+        for other in ["git@gitlab.com:o/r.git", "https://github.com/o", "https://github.com/o/r/x", "https://github.com/o/r\"x", ""] {
+            assert_eq!(web_url(other), None, "{other}");
+        }
         assert_eq!(dir_from(None), repo().join("research/results"));
         assert_eq!(dir_from(Some("".into())), repo().join("research/results"));
         assert_eq!(dir_from(Some("/x".into())), PathBuf::from("/x"));
@@ -259,6 +291,7 @@ mod tests {
         assert_eq!(ids, ["bench-20261120T101500-aa11bb22", "bench-20261121T101500-cc33dd44", "bench-20261122T231500-ab12cd34"]);
         assert_eq!(v["count"], json!(3));
         assert_eq!(v["latest_id"], json!("bench-20261122T231500-ab12cd34"));
+        assert_eq!(v["repo_url"], json!(repo_url()), "the commit pages come from the origin remote");
         let skipped = v["skipped"].as_array().unwrap();
         assert_eq!(skipped.len(), 2, "{skipped:?}");
         assert!(skipped.iter().any(|s| s["file"] == json!("bench-20261119T000000-0badc0de.json") && s["error"].as_str().unwrap().starts_with("schema")));
@@ -270,6 +303,17 @@ mod tests {
         assert_eq!(answer(&fixtures(), Some("bench-20991231T000000-00000000")).0, 404);
         assert_eq!(answer(&fixtures(), Some("../x")).0, 400);
         assert_eq!(answer(&fixtures(), Some("")).0, 200, "an empty id lists every record");
+
+        // A record whose time carries a non-ASCII byte is skipped with its reason; the listing stands.
+        let odd = std::env::temp_dir().join(format!("panel-bench-odd-{}", std::process::id()));
+        std::fs::create_dir_all(&odd).unwrap();
+        let mut r: Value = serde_json::from_str(&std::fs::read_to_string(fixtures().join("bench-20261121T101500-cc33dd44.json")).unwrap()).unwrap();
+        r["generated_at"] = json!("2026-11-22T23:15:00ä1:00");
+        std::fs::write(odd.join("bench-20261122T231500-0dd00000.json"), r.to_string()).unwrap();
+        let (code, v) = answer(&odd, None);
+        assert_eq!((code, v["count"].clone()), (200, json!(0)));
+        assert!(v["skipped"][0]["error"].as_str().unwrap().starts_with("generated_at"), "{v}");
+        std::fs::remove_dir_all(&odd).unwrap();
 
         let empty = std::env::temp_dir().join(format!("panel-bench-empty-{}", std::process::id()));
         std::fs::create_dir_all(&empty).unwrap();

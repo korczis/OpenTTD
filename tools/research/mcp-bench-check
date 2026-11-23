@@ -151,7 +151,9 @@ try {
     await page.keyboard.press('Escape');
 
     const missing = await page.goto(`${base}/bench/no/such-bench`);
-    check('an unknown bench answers 404 and says so', missing.status() === 404 && /No record measured the bench/.test(await page.locator('#page').innerText()), String(missing.status()));
+    // The page fills #page once GET /api/bench answers, after the load event goto waits for.
+    const says = await page.waitForFunction(() => /No record measured the bench/.test(document.getElementById('page')?.innerText || ''), null, { timeout: 15000 }).then(() => true).catch(() => false);
+    check('an unknown bench answers 404 and says so', missing.status() === 404 && says, String(missing.status()));
   }
 
   // Phone width: no sideways scroll.

@@ -292,7 +292,9 @@ the run's chart follows the measure in the address.
 reads every one of them, checks each against the schema, and answers them oldest first by
 `generated_at`, with `latest_id` and `count`. A file that is not a valid record is not dropped
 silently: it is listed under `skipped` with its reason, and the page shows that list.
-`GET /api/bench?id=<record>` answers one record. The route is a row of the panel's table, so
+`GET /api/bench?id=<record>` answers one record. `repo_url` is the repository's web page, derived
+from its `origin` remote (null for a remote off GitHub); a rev links to its commit there, and is
+plain text without one. The route is a row of the panel's table, so
 OpenAPI, Swagger UI, the hub and Rhai derive it. `MCP_BENCH_DIR` points the panel at another
 directory; the browser check uses it for the fixtures in `tools/research/mcp-panel/test/fixtures/bench`.
 
@@ -302,7 +304,8 @@ The page shows the newest record, or the one `?rec=` names:
 - the rev, linked to its GitHub commit, with the host, the toolchain, the profile, the crate and the
   baseline record; a dirty tree is a warning, because its numbers are not of that commit alone;
 - a table of every bench: median in its own unit (ns, µs, ms, s), ± stddev, samples, and the change
-  against the previous record. The group, a text filter and the sorted column are in the address
+  against the newest earlier record of the same host and crate (another machine's numbers are no
+  change of this one's). The group, a text filter and the sorted column are in the address
   (`group`, `q`, `sort`);
 - every listed bench's median across the records as a multiple of its first, so a bench of
   nanoseconds and one of milliseconds share an axis. A line leads to its bench.

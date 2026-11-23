@@ -20,7 +20,7 @@ const files = fs.readdirSync(FIXTURES).filter((f) => /^bench-.*\.json$/.test(f))
 const parsed = files.map((f) => { try { return JSON.parse(fs.readFileSync(path.join(FIXTURES, f), 'utf8')); } catch { return null; } });
 const records = parsed.filter((r) => r && r.schema === 'rust-bench/v1').sort((a, b) => Date.parse(a.generated_at) - Date.parse(b.generated_at));
 const answer = {
-  schema: 'rust-bench/v1', count: records.length, latest_id: records.at(-1).id, records, dir: 'research/results',
+  schema: 'rust-bench/v1', count: records.length, latest_id: records.at(-1).id, records, dir: 'research/results', repo_url: 'https://github.com/korczis/OpenTTD',
   skipped: files.filter((_, i) => !parsed[i] || parsed[i].schema !== 'rust-bench/v1').map((file) => ({ file, error: 'schema: off the contract' })),
 };
 let served = answer;
@@ -65,7 +65,8 @@ test('durations read in their own unit; ratios as changes; links escape each ste
   assert.equal(bench.pct(null), '-');
   assert.equal(bench.benchHref('planner/plan fixture?x'), '/bench/planner/plan%20fixture%3Fx');
   assert.equal(bench.recordHref('bench-1-a'), '/bench?rec=bench-1-a');
-  assert.equal(bench.commitUrl('abc'), 'https://github.com/korczis/OpenTTD/commit/abc');
+  assert.equal(bench.commitUrl('abc', 'https://github.com/o/r'), 'https://github.com/o/r/commit/abc');
+  assert.equal(bench.commitUrl('abc', null), null, 'no commit page without a known remote');
   assert.equal(bench.shortTime('2026-11-22T23:15:00+00:00'), '2026-11-22 23:15');
   assert.equal(bench.shortTime('later'), 'later');
   assert.equal(bench.throughputText({ elements: 64 }), '64 elements');
@@ -98,6 +99,13 @@ test('rows: change against the previous record, the regression flagged, filtered
   assert.equal(bench.selected(records, 'nope'), records.at(-1));
   assert.equal(bench.selected([], ''), null);
   assert.equal(bench.previous(records, records[0]), null);
+  // Another machine's record is skipped: its numbers are no change of this one's.
+  const other = { ...records[1], id: 'bench-x-other', host: { name: 'elsewhere' } };
+  const mixed = [records[0], other, records[2]];
+  assert.equal(bench.previous(mixed, records[2]), records[0]);
+  assert.equal(bench.previous(mixed, other), null);
+  assert.ok(!bench.comparable(records[0], { ...records[0], crate: 'tools/other' }), 'another crate does not compare');
+  assert.ok(bench.comparable({}, {}), 'two records without host or crate compare');
   assert.deepEqual(bench.rows({ benches: [{ id: 'solo', median: 1, unit: 'ns' }] }, null).map((b) => [b.group, b.name]), [['solo', '']], 'a bench without group and name derives them from its id');
 });
 
@@ -250,6 +258,17 @@ test('/bench: a group in the address the record lacks is kept; a failed load say
   served = respond({ error: 'boom' }, { status: 500 });
   await bench.listPage();
   assert.match($('page').innerHTML, /did not load: boom/);
+  env.location.href = 'http://127.0.0.1:8800/bench/planner/plan_fixture';
+  await bench.benchPage('planner/plan_fixture');
+  assert.match($('page').innerHTML, /did not load: boom/, 'a bench page shows the failure, not "no record"');
+  assert.doesNotMatch($('page').innerHTML, /No record measured/);
+  served = { ...answer, repo_url: null };
+  await bench.benchPage('planner/plan_fixture');
+  assert.doesNotMatch($('bench-records').innerHTML, /\/commit\//, 'without a remote a rev is not a link');
+  assert.match($('bench-records').innerHTML, /<span class="font-mono">1111111111<\/span>/);
+  env.location.href = 'http://127.0.0.1:8800/bench';
+  await bench.listPage();
+  assert.doesNotMatch($('bench-record').innerHTML, /\/commit\//);
   served = { schema: 'rust-bench/v1', count: 0, latest_id: null, records: [], skipped: [], dir: 'research/results' };
   await bench.listPage();
   assert.match($('page').innerHTML, /No benchmark record yet/);
@@ -277,7 +296,7 @@ test('/bench/<group>/<name>: stats, history chart, record rows and the selection
   c.handlers.click({ data: { name: records[0].id } });
   assert.equal(param('rec'), records[0].id);
   assert.match($('bench-stats').innerHTML, /90\.0 ns/);
-  assert.match($('bench-stats').innerHTML, /the first record that measured it/);
+  assert.match($('bench-stats').innerHTML, /the first record of this host and crate that measured it/);
   assert.equal($('bench-regression').innerHTML, '');
   assert.equal(chart('bench-history').getOption().series[2].data[0].symbolSize, 16);
   c.handlers.click({ name: 'not-a-record' });
