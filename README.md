@@ -790,7 +790,7 @@ from the code. The right-hand column says what was counted.
 | **24** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
 | **46** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **60** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **61** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **22** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **38** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
@@ -801,7 +801,7 @@ from the code. The right-hand column says what was counted.
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 60
+    "research tools and checks (tools/research/, shell and Python)" : 61
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 13
     "Rhai scripts that drive a live game (director, narrator, steward, …)" : 22
 ```
@@ -1363,6 +1363,7 @@ itself (generated):
 | [Co-play: the owner and the bot in one company](research/coplay.md) | RESEARCH-ONLY, UNSTABLE. A server-side join policy behind OPTION_RESEARCH_INSTRUMENTATION. Default off. |
 | [Duel evidence audit and a frozen duel set](research/duel-evidence-audit.md) | RESEARCH-ONLY. What the recorded duels (research/results/duel-.json) hold constant and what they let vary, and one set of duels run with every input frozen and named. Tool: tools/research/mcp-duel; scoreboard:... |
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |
+| [Failure regimes](research/failure-regimes.md) | RESEARCH-ONLY. A failure regime is a failure that lasts: a company that stops expanding while its rivals grow, falls behind the strongest rival faster than the rest of the field, runs a mode whose vehicles lose... |
 | [Incident 2026-11-19 to 11-22: an unowned AI battle held three machines, and master's CI broke twice](research/incident-2026-11-19-ai-battle-overload.md) | Post-mortem. Two failures overlapped. For three days the AI battle tournament held this Mac and the Linux build host at their limits, and nobody on either machine could tell whose processes they were. In the same... |
 | [Incident 2026-11-22: four PrismaticAI companies of one map built on the same mines](research/incident-2026-11-22-sibling-industries.md) | Post-mortem. In the owner's live 8-company game on :8800 (seed 2927, master c5bf32182a), four companies ran PrismaticAI: 0, 1, 6 and 7. Two or more of them built rail lines from the same mine or forest, so each such... |
 | [Incident 2026-11-23: PrismaticAI ran one train for eight years in the owner's live game](research/incident-2026-11-23-live-game-15805.md) | Post-mortem. In the owner's live 8-company game on :8800 (seed 15805, start 1950, binary 20261122-master-g6d1eda39e1), company 0 runs PrismaticAI and the owner co-plays it. By the end of 1957 AAAHogEx was worth... |
