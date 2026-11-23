@@ -47,9 +47,14 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 | `rich_air=0`: rich growth and pressure leave the air caps alone, vs `rich_air=1` | 6 | +35.5% | 6 |
 | `rich_growth=0` (hoards; fails `fitness.must_not_hoard`) vs `rich_air=0` | 6 | +6.6% | 4 |
 | `rich_air=1` with `air_add_waiting=150` or `300` vs `rich_air=0` (both thresholds byte-identical: the planes come from new air routes, not from more planes per route) | 6 | -10.2% | 2 |
+| yield gates (#243, `load_add_min=50`, `road_yield=20`, as merged) vs `dbd39147ee` | 24 | -22.6% | 4 (219 planes against 488) |
+| `load_add_min=0` vs 50, on `11411cdc4d` | 24 | +29.6% | 22 (0.88 to 2.03; 332 more planes) |
+| `load_add_min=0, road_yield=0` vs both on, on `11411cdc4d` | 24 | +21.3% | 20 |
 
 # How to apply it
 
+- Do not hold planes back by load: `load_add_min=50` (no plane more on a route under half full)
+  cost 29.6% over 24 matches. A plane that flies part empty still earns on these maps.
 - Do not expect caps (own lines, road or air fleet) to close the gap: none of them binds, because the
   bot runs out of profitable things to build first. The lever is breadth: more candidate lines
   (the planner) and sources chosen as clusters.
