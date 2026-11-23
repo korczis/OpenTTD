@@ -3660,7 +3660,7 @@ mod tests {
                        ("GET", "/api/scoreboard"), ("POST", "/api/scoreboard")] {
             assert!(rs.iter().any(|r| r.method == m && r.path == p), "{m} {p}");
         }
-        assert!(rs.iter().filter(|r| !r.needs_mcp).all(|r| ["/api/status", "/api/log", "/api/events", "/api/console", "/api/auto-approve",
+        assert!(rs.iter().filter(|r| !r.needs_mcp).all(|r| ["/api/status", "/api/log", "/api/events", "/api/console", "/api/auto-approve", "/api/owner/login", "/api/owner/logout",
             "/api/start-ai", "/api/bots/start", "/api/ui/classes", "/api/view/attach", "/api/view/tool", "/api/rhai",
             "/api/content", "/api/content/download", "/api/overview/history", "/api/results", "/api/result", "/api/duel", "/api/scoreboard", "/api/calibration",
             "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query", "/api/db/named",
