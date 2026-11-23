@@ -19,11 +19,19 @@
  *   REF S date=<y>-<m> ind=<industry id> owners=<cid>,<cid>[,...] name=<industry name>
  * Two lines at one producer split its output by station rating; the orchestrator fails the fitness
  * check when two of them are PrismaticAI's (research/incident-2026-11-22-sibling-industries.md).
+ *
+ * Trainless rail stations, one line per company with a rail station, after the shared producers:
+ *   REF T date=<y>-<m> cid=<n> rail_stations=<n> trainless=<n> ids=<station id>,<station id>[,...]
+ * trainless counts the company's rail stations that no train of its own has orders to: the termini
+ * of lines that never got a train or were given up half laid; ids names them (empty when none). The
+ * orchestrator fails the fitness check when a PrismaticAI company keeps the same ones for a year, so
+ * a line still being laid does not count (research/incident-2026-11-23-trainless-lines.md).
  */
 class BattleReferee extends GSController {
 	function Start();
 	function Report();
 	function ReportShared(d);
+	function ReportTrainless(d);
 	function LoanOf(c);
 }
 
@@ -33,6 +41,28 @@ function BattleReferee::LoanOf(c)
 {
 	local mode = GSCompanyMode(c);
 	return GSCompany.GetLoanAmount();
+}
+
+function BattleReferee::ReportTrainless(d)
+{
+	local rail = {}, bare = {}, ids = {};
+	foreach (st, _ in GSStationList(GSStation.STATION_TRAIN)) {
+		local o = GSStation.GetOwner(st);
+		rail[o] <- (rail.rawin(o) ? rail[o] : 0) + 1;
+		/* The trains of the station's own company that have orders to it (deity mode sees all). */
+		local trains = GSVehicleList_Station(st);
+		trains.Valuate(GSVehicle.GetVehicleType);
+		trains.KeepValue(GSVehicle.VT_RAIL);
+		trains.Valuate(GSVehicle.GetOwner);
+		trains.KeepValue(o);
+		if (!trains.IsEmpty()) continue;
+		bare[o] <- (bare.rawin(o) ? bare[o] : 0) + 1;
+		ids[o] <- (ids.rawin(o) ? ids[o] + "," : "") + st;
+	}
+	foreach (o, n in rail) {
+		GSLog.Error("REF T date=" + GSDate.GetYear(d) + "-" + GSDate.GetMonth(d) + " cid=" + o
+			+ " rail_stations=" + n + " trainless=" + (bare.rawin(o) ? bare[o] : 0) + " ids=" + (ids.rawin(o) ? ids[o] : ""));
+	}
 }
 
 function BattleReferee::ReportShared(d)
@@ -107,6 +137,7 @@ function BattleReferee::Report()
 			+ " name=" + GSCompany.GetName(c));
 	}
 	this.ReportShared(d);
+	this.ReportTrainless(d);
 }
 
 function BattleReferee::Start()

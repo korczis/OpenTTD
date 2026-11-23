@@ -12,8 +12,10 @@
 //   lost         the pathfinder found no way to the train's destination (openttd://vehicles lost):
 //                a broken line or a turn the train may not take; such a train earns nothing
 //   unserved     a line the bot built has no train
+//   trainless_station  a rail station of the company no train calls at (a line that failed before
+//                its train, or was given up half laid; rail_lib trainless_stations)
 //   warning      the bot's own rail warnings since the last round: no rail path, a broken line, a
-//                refused throat or piece, no depot (ai.log)
+//                refused throat or piece, no depot, a locomotive not bought, a line given up (ai.log)
 //   broken_down  a train stopped by a breakdown now (openttd://vehicles broken_down)
 //   stopped      a train stopped outside a depot
 //   old          a train past its maximum age (autorenew should have replaced it)
@@ -78,7 +80,7 @@ fn rail_round(me, since) {
     for bot in api_bots().running ?? [] {
         if bot.ai != "PrismaticAI" { continue; }
         let lines = rl::lines_of(bot.id, records, vehicles, stations, map_w);
-        for p in rl::problems(bot.id, lines, vehicles, rl::rail_warnings(fresh)) {
+        for p in rl::report(bot.id, lines, vehicles, rl::rail_warnings(fresh), stations) {
             p.text = `${bot.name}: ${p.text}`;
             found.push(p);
         }

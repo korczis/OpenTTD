@@ -646,6 +646,16 @@ class PrismaticAI extends AIInfo {
 			easy_value = 8, medium_value = 8, hard_value = 8, custom_value = 8, step_size = 1,
 			flags = CONFIG_INGAME,
 		});
+		/* RESEARCH-ONLY test hook (rail.nut BuildTrain, TestRefuseDepot; lines.nut TestForgetTrainless): drives the paths a crowded map takes
+		 * only by chance, so the headless fitness check runs them on every change. */
+		AddSetting({
+			name = "test_trainless",
+			description = "RESEARCH-ONLY test hook. 1: the first train of every new rail line, and every other new line's depot, is refused as if for money, so the line waits trainless for KeepLinesServed to buy it; 2: as 1, and once a game month the bot forgets its lines that still have no train, as a restart would, so AdoptTrainlessLines (monthly in this mode, yearly otherwise) takes them back from the map. 0 (default): off.",
+			min_value = 0, max_value = 2,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			step_size = 1,
+			flags = CONFIG_NONE,
+		});
 	}
 }
 

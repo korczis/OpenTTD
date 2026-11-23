@@ -49,6 +49,7 @@ class PrismaticAI extends AIController {
 	own_built = 0; /* freight lines the bot planned itself and built (own_lines caps them) */
 	own_failed = 0; /* own freight lines in a row that were not built (OWN_FAIL_PAUSE) */
 	own_failed_year = 0; /* the game year own_failed counts for */
+	adopt_year = -1; /* the period AdoptTrainlessLines last ran in (lines.nut AdoptKey) */
 	rescued_at = -1; /* the date StayAfloat last borrowed to keep the company alive */
 	was_frozen = false; /* whether the last heartbeat froze construction (BuildFrozen) */
 	selling = null; /* vehicle id -> true while it drives to its depot to be sold */
@@ -438,6 +439,10 @@ function PrismaticAI::Start() {
 	 * its lines, routes and tried plans from its save, or else from the map (restore.nut): without
 	 * this it would build the planner's lines a second time next to the ones it runs. */
 	this.Restore(PrismaticAI.Behaviour());
+	/* A finished line that lost its first train before a restart, or before the bot kept such lines
+	 * (rail.nut KeepTrainlessLine), is taken back as a line; then once a game year (lines.nut). */
+	this.adopt_year = PrismaticAI.AdoptKey();
+	this.AdoptTrainlessLines();
 
 	local last = "";
 	local disclosed = false;
@@ -638,7 +643,16 @@ function PrismaticAI::Start() {
 			this.GrowCatchment(b);
 			this.BuildStatues(b);
 		}
-		/* Every rail line keeps a train: one lost at a level crossing or sold is replaced. */
+		/* Adopting builds nothing (lines.nut), so a frozen company does it too: the purchase that
+		 * follows waits for money in KeepLinesServed. */
+		if (PrismaticAI.AdoptKey() != this.adopt_year) {
+			this.adopt_year = PrismaticAI.AdoptKey();
+			PrismaticAI.TestForgetTrainless();
+			this.CloseHaltedLines();
+			this.AdoptTrainlessLines();
+		}
+		/* Every rail line keeps a train: one lost at a level crossing or sold is replaced, and a line
+		 * that never had one (KeepTrainlessLine, AdoptTrainlessLines) gets its first. */
 		PrismaticAI.KeepLinesServed(b.cash_reserve);
 		/* Each line runs what the steward's targets say (lines.nut), and its record is logged again
 		 * once a game month so a steward started late still finds it. */

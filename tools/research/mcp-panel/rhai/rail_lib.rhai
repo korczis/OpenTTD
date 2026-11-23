@@ -325,8 +325,44 @@ fn problems(company, lines, vehicles, warnings) {
         if !l.closed && l.trains.is_empty() { out.push(#{ kind: "unserved", id: l.slot, text: `line ${l.slot} ${l.label} has no train` }); }
     }
     for w in warnings { out.push(#{ kind: "warning", id: (), text: w }); }
-    let rank = #{ crashed: 0, lost: 1, unserved: 2, warning: 3, broken_down: 4, stopped: 5, old: 6 };
-    out.sort(|x, y| rank[x.kind] - rank[y.kind]);
+    out.sort(|x, y| problem_rank(x.kind) - problem_rank(y.kind));
+    out
+}
+
+/// Where a problem kind sorts in a report, worst first.
+fn problem_rank(kind) {
+    let rank = #{ crashed: 0, lost: 1, unserved: 2, trainless_station: 3, warning: 4, broken_down: 5, stopped: 6, old: 7 };
+    rank[kind] ?? 8
+}
+
+/// Every rail station of `company` that no train of the company has orders to: openttd://stations
+/// entries whose `facilities` hold "train", against the goto_station orders of its trains. Such a
+/// station is the terminus of a line that never got its train or was given up half laid: it costs
+/// upkeep, earns nothing, and keeps the bot's next own line away from its producer. The line
+/// records cannot show it, because a line that failed before its train logged no record. In the
+/// owner's live game of seed 15805 this monitor said "rail: no problems" while 10 of company 0's
+/// 12 rail stations had no train (research/incident-2026-11-23-trainless-lines.md).
+/// [#{kind: "trainless_station", id, text}].
+fn trainless_stations(company, stations, vehicles) {
+    let called = #{};
+    for v in vehicles {
+        if v.type != "train" || v.owner != company { continue; }
+        for st in order_stations(v) { called[`${st}`] = true; }
+    }
+    let out = [];
+    for st in stations {
+        if st.owner != company || !(st.facilities ?? []).contains("train") { continue; }
+        if called.contains(`${st.id}`) { continue; }
+        out.push(#{ kind: "trainless_station", id: st.id, text: `rail station ${st.id} ${st.name ?? ""} has no train calling` });
+    }
+    out
+}
+
+/// The monitor's whole report for `company`: problems (trains, lines, warnings) and the rail
+/// stations no train calls at, worst first.
+fn report(company, lines, vehicles, warnings, stations) {
+    let out = problems(company, lines, vehicles, warnings) + trainless_stations(company, stations, vehicles);
+    out.sort(|x, y| problem_rank(x.kind) - problem_rank(y.kind));
     out
 }
 
@@ -337,7 +373,8 @@ fn rail_warnings(events) {
     for e in events {
         let t = if e.data == () { "" } else { e.data.text ?? "" };
         if t.contains("no rail path") || t.contains(" is broken at tile ") || t.contains("rail at tile") && t.contains("failed")
-            || t.contains("throat of the station") || t.contains("no rail depot") {
+            || t.contains("throat of the station") || t.contains("no rail depot")
+            || t.contains("locomotive not bought") || t.contains("first train was not bought") || t.contains(" given up (") {
             out.push(t);
         }
     }

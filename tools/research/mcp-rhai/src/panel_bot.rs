@@ -551,14 +551,130 @@ fn why_unpriced(priced: &[Value]) -> String {
     seen.iter().map(|(w, n)| format!("{n}x {w}")).collect::<Vec<_>>().join("; ")
 }
 
+/// Whether the bot can build a rail line whose option is `opt`. PrismaticAI lays rail over buildable
+/// land, level crossings, bridges and tunnels (rail.nut FindRailPath), so any line track-planning
+/// found a route for is the bot's. When lines were priced (`priced_any`), an unpriced one is not
+/// handed over blind either: on seed 20208 an unpriced passenger line needed a bridge over a river
+/// and failed. Without AlgoGlyph (nothing priced) every line is tried as before.
+fn can_build(priced_any: bool, opt: &Value) -> bool {
+    match opt.get("track").filter(|t| t.as_object().map_or(false, |m| !m.is_empty())) {
+        None => !priced_any,
+        Some(t) => t["status"] == json!("found"),
+    }
+}
+
+fn score(c: &Value) -> f64 {
+    c["score"].as_f64().unwrap_or(0.0)
+}
+
+/// The option of a candidate's own mode.
+fn option_of(c: &Value) -> Value {
+    c["options"].as_array().into_iter().flatten().find(|o| o["mode"] == c["mode"]).cloned().unwrap_or(json!({}))
+}
+
+/// The planner's candidates in the order the bot is handed them: the portfolio's, then the spares
+/// (the freight and passenger-rail lists, best score first), and whether any line was priced.
+fn in_order(out: &Value) -> (Vec<Value>, Vec<Value>, bool) {
+    let chosen: Vec<Value> = out.pointer("/portfolio/chosen").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut spare: Vec<Value> = out["freight"].as_array().into_iter().flatten()
+        .chain(out.pointer("/by_mode/rail").and_then(Value::as_array).into_iter().flatten())
+        .filter(|c| !chosen.contains(c) && score(c) > 0.0).cloned().collect();
+    spare.sort_by(|a, b| score(b).total_cmp(&score(a)));
+    let priced_any = out.pointer("/line_costs/priced").and_then(Value::as_array).map_or(false, |p| !p.is_empty());
+    (chosen, spare, priced_any)
+}
+
+/// A freight rail candidate the bot can build, as (producer, acceptor, cargo); None for any other.
+fn freight_line(c: &Value, priced_any: bool) -> Option<(i64, i64, i64)> {
+    if c["kind"] != json!("freight") || c["mode"] != json!("freight_rail") || !can_build(priced_any, &option_of(c)) {
+        return None;
+    }
+    Some((num(&c["producer"]["id"])?, num(&c["acceptor"]["id"])?, py_int(&c["cargo_id"]).ok()?))
+}
+
+/// The companies with a rail station at a candidate's producer (mcp-plan's `producer.rail_stations`,
+/// cargo.rs `rail_claims`); none when the planner did not say.
+fn holders(c: &Value) -> Vec<i64> {
+    c["producer"]["rail_stations"].as_array().into_iter().flatten().filter_map(Value::as_i64).collect()
+}
+
+/// The companies a plan is for: every running company of the panel's AI `ai` (of any AI when `ai`
+/// is empty) whose AI declares the freight-line slots, so that the plan can steer it; sorted.
+pub fn plan_targets(running: &Value, ai: &str) -> Vec<i64> {
+    let mut ids: Vec<i64> = running.as_array().into_iter().flatten()
+        .filter(|r| r["running"] != json!(false) && (ai.is_empty() || r["ai"] == ai))
+        .filter(|r| r["settings"].as_array().into_iter().flatten()
+            .any(|s| s["name"].as_str().is_some_and(crate::panel_decision::is_freight_slot_setting)))
+        .filter_map(|r| r["id"].as_i64()).collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// Which company of `companies` (the running companies of one AI) is handed each producer, so that
+/// no two of them build from one mine (research/incident-2026-11-22-sibling-industries.md). The
+/// producers of every freight line the bot can build, by their best line's score (the lower id
+/// first on a tie), go round the companies: each to the one with the fewest lines so far (the lower
+/// id on a tie), never beyond MAX_FREIGHT_LINES. A producer where a company has a rail station goes
+/// to that company only, and to none when another company holds it too (rail.nut
+/// ForeignRailStationAt refuses it to everyone else). A producer no company is handed is left to a
+/// company not started yet (`settings_for` with None).
+pub fn assign_producers(out: &Value, companies: &[i64]) -> BTreeMap<i64, i64> {
+    let (chosen, spare, priced_any) = in_order(out);
+    let mut best: BTreeMap<i64, (f64, Vec<i64>)> = BTreeMap::new();
+    for c in chosen.iter().chain(spare.iter()) {
+        let Some((producer, _, _)) = freight_line(c, priced_any) else { continue };
+        let e = best.entry(producer).or_insert((f64::MIN, holders(c)));
+        e.0 = e.0.max(score(c));
+    }
+    let mut order: Vec<(i64, f64, Vec<i64>)> = best.into_iter().map(|(p, (s, h))| (p, s, h)).collect();
+    order.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    let (mut handed, mut lines) = (BTreeMap::new(), BTreeMap::<i64, usize>::new());
+    for (producer, _, held) in order {
+        let count = |c: &i64| lines.get(c).copied().unwrap_or(0);
+        let pick = companies.iter().copied()
+            .filter(|c| held.iter().all(|h| h == c) && count(c) < MAX_FREIGHT_LINES)
+            .min_by_key(|c| (count(c), *c));
+        if let Some(c) = pick {
+            handed.insert(producer, c);
+            *lines.entry(c).or_insert(0) += 1;
+        }
+    }
+    handed
+}
+
+/// Why the freight line `c` from `producer` is not for `company` (None: a company not started yet),
+/// or None when it is: another company has a rail station at the producer, or `assigned` hands the
+/// producer to another company of the AI, or to none.
+fn not_for(company: Option<i64>, producer: i64, c: &Value, assigned: &BTreeMap<i64, i64>) -> Option<String> {
+    let name = py_str(c["producer"].get("name"));
+    if let Some(h) = holders(c).into_iter().find(|h| Some(*h) != company) {
+        return Some(format!("company {h} already has a rail station at {name}"));
+    }
+    match (assigned.get(&producer), company) {
+        (Some(a), Some(me)) if *a == me => None,
+        (None, None) => None,
+        (Some(a), _) => Some(format!("{name} is handed to company {a} of the same AI")),
+        (None, Some(_)) => Some(format!("{name} is handed to no company of the AI: each it may go to has its lines")),
+    }
+}
+
 /// The bot's routes from the planner's portfolio within the budget, chosen from mcp-plan's answer:
 /// up to sixteen freight rail lines (fr_*, fr2_* .. fr16_*), one passenger rail pair (rail_a,
 /// rail_b) and one air pair (air_a, air_b, air_planes), with the events that explain each choice and
-/// the same choice as data.
+/// the same choice as data. Plans for a company not started yet that shares the map with no
+/// company of its AI: `settings_for` with no company and no producer handed out.
 pub fn settings_from_plan(out: &Value, event: &mut dyn FnMut(String)) -> Planned {
+    settings_for(out, None, &BTreeMap::new(), event)
+}
+
+/// `settings_from_plan` for `company` (None: a company not started yet), whose freight lines are
+/// only those from a producer `assigned` hands it (`assign_producers`) and no other company has a
+/// rail station at (`not_for`); a portfolio line left out is in `dropped` with the reason.
+pub fn settings_for(out: &Value, company: Option<i64>, assigned: &BTreeMap<i64, i64>, event: &mut dyn FnMut(String)) -> Planned {
     let empty = json!({});
     let pf = out.get("portfolio").filter(|v| v.is_object()).unwrap_or(&empty);
-    let chosen: Vec<Value> = pf["chosen"].as_array().cloned().unwrap_or_default();
+    let (chosen, spare, priced_any) = in_order(out);
     let (mut dropped, mut spares_used) = (Vec::new(), 0usize);
     let (mut passenger_rail, mut air) = (Value::Null, Value::Null);
     event(format!("planner portfolio by {}: {} investment(s), total score {}, {}k of {}k",
@@ -572,26 +688,11 @@ pub fn settings_from_plan(out: &Value, event: &mut dyn FnMut(String)) -> Planned
                           .collect::<Vec<_>>().join(", "),
                       if found.len() == priced.len() { String::new() } else { format!("; {} without a route dropped their rail option ({})", priced.len() - found.len(), why_unpriced(&priced)) }));
     }
-    let priced_any = !priced.is_empty();
     let portfolio = json!({"solver": pf.get("solver"), "chosen": chosen.iter().map(line_of).collect::<Vec<_>>(),
                            "total_score": pf.get("total_score"), "investment_k": pf.get("investment_k"), "budget_k": pf.get("budget_k"),
                            "priced": {"lines": priced.len(), "with_route": priced.iter().filter(|p| p["status"] == json!("found")).count()}});
-    // PrismaticAI lays rail over buildable land, level crossings, bridges and tunnels (rail.nut
-    // FindRailPath), so any line track-planning found a route for is the bot's. When lines were
-    // priced, an unpriced one is not handed over blind either: on seed 20208 an unpriced passenger
-    // line needed a bridge over a river and failed. Without AlgoGlyph (nothing priced) every line is
-    // tried as before.
-    let bot_can_build = |opt: &Value| match opt.get("track").filter(|t| t.as_object().map_or(false, |m| !m.is_empty())) {
-        None => !priced_any,
-        Some(t) => t["status"] == json!("found"),
-    };
-    let score = |c: &Value| c["score"].as_f64().unwrap_or(0.0);
-    // The portfolio first; a rail line the bot cannot build is replaced by the next priced or
-    // unpriced line of its kind that it can, from the planner's lists (best score first).
-    let mut spare: Vec<Value> = out["freight"].as_array().into_iter().flatten()
-        .chain(out.pointer("/by_mode/rail").and_then(Value::as_array).into_iter().flatten())
-        .filter(|c| !chosen.contains(c) && score(c) > 0.0).cloned().collect();
-    spare.sort_by(|a, b| score(b).total_cmp(&score(a)));
+    // The portfolio first; a rail line the bot cannot build (`can_build`) is replaced by the next
+    // priced or unpriced line of its kind that it can, from the planner's lists (best score first).
     let mut settings = Settings::default();
     let (mut freight_lines, mut producers) = (0usize, HashSet::new());
     // The freight lines chosen (portfolio first, then spares), set in order of score after the loop.
@@ -600,9 +701,9 @@ pub fn settings_from_plan(out: &Value, event: &mut dyn FnMut(String)) -> Planned
     for c in chosen.iter().chain(spare.iter()) {
         let mode = c["mode"].as_str().unwrap_or("");
         let in_chosen = chosen.contains(c);
-        let opt = c["options"].as_array().into_iter().flatten().find(|o| o["mode"] == json!(mode)).cloned().unwrap_or(json!({}));
+        let opt = option_of(c);
         let rail = mode == "rail" || mode == "freight_rail";
-        if rail && !bot_can_build(&opt) {
+        if rail && !can_build(priced_any, &opt) {
             if in_chosen {
                 let line = format!("{} - {}", py_str(get_or(c, "producer", get_or(c, "a", &empty)).get("name")),
                                    py_str(get_or(c, "acceptor", get_or(c, "b", &empty)).get("name")));
@@ -627,7 +728,15 @@ pub fn settings_from_plan(out: &Value, event: &mut dyn FnMut(String)) -> Planned
             // duel-20261117T041705), so a longer list is handed over and built as money comes in. The
             // game ignores a setting the AI does not declare (ScriptConfig::SetSetting), so an older bot
             // uses the first ones.
-            let (Some(producer), Some(acceptor), Ok(cargo)) = (num(&c["producer"]["id"]), num(&c["acceptor"]["id"]), py_int(&c["cargo_id"])) else { continue };
+            let Some((producer, acceptor, cargo)) = freight_line(c, priced_any) else { continue };
+            if let Some(why) = not_for(company, producer, c, assigned) {
+                if in_chosen {
+                    event(format!("planner: the freight line {} - {} is not handed over: {why}", py_str(c["producer"].get("name")),
+                                  py_str(c["acceptor"].get("name"))));
+                    dropped.push(json!({"line": line_of(c), "why": why}));
+                }
+                continue;
+            }
             if !producers.insert(producer) {
                 continue;
             }
@@ -879,6 +988,9 @@ pub fn unplanned_settings(extra: &str, say: &mut dyn FnMut(String)) -> Settings 
 /// (panel.ai) and as data (plan.portfolio, plan.bot_settings). None without a planner binary. When
 /// the planner fails (it cannot run, exits non-zero or answers no JSON) both events are still
 /// published, `portfolio.error` and `bot_settings.unplanned` say why, and the settings are empty.
+/// The settings are those of a company not started yet (the bot start's start_ai); each running
+/// company of the AI has a plan of its own in `bot_settings.companies` (`company_plans`), and no two
+/// of them, nor the new one, are handed one producer (`assign_producers`).
 /// PRISMATIC_PLANNER names another planner binary than the sibling mcp-plan (RESEARCH-ONLY: a
 /// planner under test, or a failing one to prove that a failure is reported).
 pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
@@ -911,13 +1023,19 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
     }
     let algoglyph = std::env::var("MCP_ALGOGLYPH_DIR").map_or(false, |d| !d.is_empty());
     let track = if algoglyph { track } else { 0 };
+    // The running companies of the AI, each planned on its own (`company_plans`); a producer where
+    // any other company has a rail station is no candidate (mcp-plan --for). None readable: the plan
+    // is for a company not started yet only, and every station holds its producer.
+    let targets = bots(g).map_or_else(|_| Vec::new(), |b| plan_targets(&b["running"], &g.args.ai));
+    let plan_for = targets.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
     // Forty candidates, so up to sixteen freight lines with distinct producers can be found (ten gave
     // three on seed 20208, thirty six on seed 31337).
     let mut argv = vec!["--panel".to_string(), g.panel_url(), "--limit".into(), "40".into(), "--params".into(), py_json(&params)];
     if track > 0 {
         argv.extend(["--track".to_string(), track.to_string()]);
     }
-    let request = json!({"budget": budget, "params": params, "limit": 40, "track": track});
+    argv.extend(["--for".to_string(), plan_for]);
+    let request = json!({"budget": budget, "params": params, "limit": 40, "track": track, "for": targets});
     let mut planner = json!({"exe": "mcp-plan", "args": argv[2..].to_vec(), "budget_from": "console: setting difficulty.max_loan",
                              "algoglyph": algoglyph});
     let out = match run(Command::new(&exe).args(&argv), None, Duration::from_secs(600), None) {
@@ -957,7 +1075,8 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
             return Some(p);
         }
     };
-    let mut p = settings_from_plan(&out, &mut |text| g.event("ai", &text));
+    let assigned = assign_producers(&out, &targets);
+    let mut p = settings_for(&out, None, &assigned, &mut |text| g.event("ai", &text));
     planner["kernel_runner"] = kernel_runner(&out, algoglyph);
     let seq = g.plan("plan.portfolio", portfolio_event(&out, &p, request, planner, &cal));
     // own_lines and rail_after from the stored duel outcomes (I0087), when the run turns the switch on;
@@ -979,14 +1098,11 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
         Err(e) => g.event("ai", &format!("bot settings from the run refused: {e}")),
     }
     let mut data = bot_settings_event(&mut p, &extra, seq, &from_duels);
-    // One author per freight-line slot: while a company the plan is for is planned by another
-    // writer (its planner key), the plan hands over no fr_* slot, and the event says why.
-    let held = planned_refusals(g);
-    let withheld = hold_freight_slots(&mut p.settings, &mut data["choice"], &held);
-    if !withheld.is_empty() {
-        let why: Vec<&str> = held.iter().filter_map(|h| h["why"].as_str()).collect();
-        g.event("ai", &format!("planner: {} freight-line setting(s) not handed over ({}): {}", withheld.len(), withheld.join(","), why.join("; ")));
-    }
+    // The settings above are for a company not started yet (start_ai), which no planner key holds;
+    // each running company of the AI gets its own plan beside them, under its own key.
+    let refusals = crate::rhai_shared::fr_refusals(PLANNED_WRITER);
+    let companies = company_plans(&out, &targets, &assigned, &refusals, &extra, seq, &from_duels, &mut |text| g.event("ai", &text));
+    data["choice"]["companies"] = json!(companies);
     with_calibration(&mut data, &cal);
     p.bot_settings = data["choice"].clone();
     g.plan("plan.bot_settings", data);
@@ -996,28 +1112,36 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
 /// The planned-settings path's name for the planner key `planner.<company>` (src/fr_author.rs).
 pub const PLANNED_WRITER: &str = "panel_bot";
 
-/// The refusals that hold the planned settings' freight-line slots (rhai_shared::fr_refusals,
-/// narrowed by `held_for`). No planner key set, the usual case: empty, and nothing more is read.
-/// When the running companies cannot be read, every refusal holds: the slots are not handed over.
-fn planned_refusals(g: &Arc<Game>) -> Vec<Value> {
-    let held = crate::rhai_shared::fr_refusals(PLANNED_WRITER);
-    if held.is_empty() {
-        return held;
-    }
-    match bots(g) {
-        Ok(b) => held_for(held, &b["running"], &g.args.ai),
-        Err(_) => held,
-    }
+/// The refusals (rhai_shared::fr_refusals) of `company`: each company has a plan of its own, so
+/// only its own planner key holds that plan's freight-line slots.
+pub fn held_for(held: &[Value], company: i64) -> Vec<Value> {
+    held.iter().filter(|h| h["company"].as_i64() == Some(company)).cloned().collect()
 }
 
-/// The refusals for a company the plan is for: one that runs the panel's AI `ai` (any AI company
-/// when `ai` is empty, or when the game does not name a company's AI). The plan is one set of
-/// settings for that AI, so a held company among them holds the plan's freight-line slots.
-pub fn held_for(held: Vec<Value>, running: &Value, ai: &str) -> Vec<Value> {
-    let targets: Vec<i64> = running.as_array().into_iter().flatten()
-        .filter(|r| ai.is_empty() || r["ai"].is_null() || r["ai"] == ai)
-        .filter_map(|r| r["id"].as_i64()).collect();
-    held.into_iter().filter(|h| h["company"].as_i64().is_some_and(|c| targets.contains(&c))).collect()
+/// One plan per running company of the AI (`targets`), from the one planner answer `out`: the
+/// freight lines `assigned` hands it (`settings_for`), the stored duel outcomes and the run's extra
+/// settings as the plan of a new company gets them, no freight-line slot while its own planner key
+/// names another writer (`hold_freight_slots`), and `company` named. One sentence each.
+#[allow(clippy::too_many_arguments)]
+pub fn company_plans(out: &Value, targets: &[i64], assigned: &BTreeMap<i64, i64>, refusals: &[Value], extra: &str,
+                     seq: Option<u64>, from_duels: &duel_outcomes::Derivation, event: &mut dyn FnMut(String)) -> Vec<Value> {
+    targets.iter().map(|&company| {
+        let mut q = settings_for(out, Some(company), assigned, &mut |_| {});
+        if from_duels.record["used"] == true {
+            apply_from_duels(&mut q, from_duels, &mut |_| {});
+        }
+        let mut choice = bot_settings_event(&mut q, extra, seq, from_duels)["choice"].take();
+        let held = held_for(refusals, company);
+        let withheld = hold_freight_slots(&mut q.settings, &mut choice, &held);
+        let from: Vec<String> = choice["freight"].as_array().into_iter().flatten().map(|l| py_str(l.get("from_name"))).collect();
+        let why: Vec<&str> = held.iter().filter_map(|h| h["why"].as_str()).collect();
+        event(format!("planner: company {company}: {} freight line(s){}, {} portfolio line(s) left out{}", from.len(),
+                      if from.is_empty() { String::new() } else { format!(" from {}", from.join(", ")) },
+                      choice["dropped"].as_array().map_or(0, Vec::len),
+                      if withheld.is_empty() { String::new() } else { format!("; {} freight-line setting(s) not handed over: {}", withheld.len(), why.join("; ")) }));
+        choice["company"] = json!(company);
+        choice
+    }).collect()
 }
 
 /// Take every freight-line slot (fr_*, fr2_* .. fr16_*) out of `settings` while `held` names a
@@ -1458,16 +1582,130 @@ mod tests {
         assert!(settings_of_call("openttd.ai.start", &json!({"settings": {"fr_to": 2}})).is_empty(), "a new AI company is no running bot's slot");
     }
 
-    /// The plan is for the panel's AI: a held company that runs another AI does not hold it, one
-    /// that runs it (or runs an AI the game does not name) does.
+    /// Each company has a plan of its own: only its own planner key holds it.
     #[test]
-    fn only_a_company_of_the_planned_ai_holds_the_plan() {
+    fn only_a_companys_own_key_holds_its_plan() {
         let r = |c: i64| crate::rhai_shared::fr_author::refusal(Some(&json!("battlebrain")), c, PLANNED_WRITER).unwrap();
-        let running = json!([{"id": 0, "ai": "PrismaticAI"}, {"id": 1, "ai": "AdmiralAI"}, {"id": 2, "ai": null}]);
-        let held: Vec<i64> = held_for(vec![r(0), r(1), r(2), r(5)], &running, "PrismaticAI").iter()
-            .map(|h| h["company"].as_i64().unwrap()).collect();
-        assert_eq!(held, [0, 2]);
-        assert_eq!(held_for(vec![r(1)], &running, "").len(), 1, "no AI named: every AI company");
-        assert!(held_for(vec![r(5)], &running, "PrismaticAI").is_empty(), "a company that does not run is no target");
+        let held = [r(0), r(2), r(5)];
+        assert_eq!(held_for(&held, 2), [r(2)]);
+        assert!(held_for(&held, 1).is_empty());
+    }
+
+    /// The companies a plan is for: running companies of the panel's AI whose AI declares the
+    /// freight-line slots, sorted, each once; with no AI named, any AI that declares them.
+    #[test]
+    fn the_plan_is_for_every_running_company_of_the_ai_that_declares_the_slots() {
+        let slots = json!([{"name": "rail_a"}, {"name": "fr_from"}]);
+        let running = json!([{"id": 6, "ai": "PrismaticAI", "running": true, "settings": slots},
+                             {"id": 0, "ai": "PrismaticAI", "settings": slots},
+                             {"id": 2, "ai": "AAAHogEx", "running": true, "settings": [{"name": "rail_a"}]},
+                             {"id": 3, "ai": "PrismaticAI", "running": false, "settings": slots},
+                             {"id": 4, "ai": "Variant", "running": true, "settings": slots},
+                             {"id": 6, "ai": "PrismaticAI", "settings": slots},
+                             {"id": 7, "ai": null, "settings": []}]);
+        assert_eq!(plan_targets(&running, "PrismaticAI"), [0, 6]);
+        assert_eq!(plan_targets(&running, ""), [0, 4, 6], "no AI named: any AI that declares the slots");
+        assert!(plan_targets(&json!({"error": "no list"}), "PrismaticAI").is_empty());
+    }
+
+    /// A freight line from producer `p` scoring `score`, the rail stations at it held by `held`.
+    fn held_line(p: i64, score: f64, held: &[i64]) -> Value {
+        json!({"kind": "freight", "mode": "freight_rail", "score": score, "cargo": "Coal", "cargo_id": 1, "distance": 40,
+               "producer": {"id": format!("industry:{p}"), "name": format!("Mine {p}"), "rail_stations": held},
+               "acceptor": {"id": "industry:99", "name": "Plant"},
+               "options": [{"mode": "freight_rail", "monthly_profit": 500, "track": {"status": "found"}}]})
+    }
+
+    /// The planner's answer for two PrismaticAI companies 0 and 6 on a map where company 6 has a rail
+    /// station at mine 3, AAAHogEx (2) at mine 4, and both siblings at mine 5.
+    fn sibling_answer() -> Value {
+        let lines = vec![held_line(1, 10.0, &[]), held_line(2, 9.0, &[]), held_line(3, 8.0, &[6]), held_line(4, 7.0, &[2]),
+                         held_line(5, 6.0, &[0, 6]), held_line(6, 5.0, &[]), held_line(8, 4.0, &[]), held_line(7, 4.0, &[]),
+                         held_line(1, 3.0, &[])];
+        json!({"portfolio": {"solver": "knapsack-dp", "chosen": [lines[0].clone(), lines[1].clone(), lines[3].clone()]},
+               "line_costs": {"priced": [{"status": "found", "pieces": 30, "money": 1000.0}]}, "freight": lines})
+    }
+
+    /// Two companies of one AI never get one producer: the best producer goes to the lower id, the
+    /// next to the other, then round by the lines each has (the lower id on a tie, the lower producer
+    /// id on equal scores). A producer one company holds goes to it alone; one a rival or both hold
+    /// goes to none. The answer does not depend on the order of the planner's lists.
+    #[test]
+    fn two_companies_of_one_ai_are_handed_different_producers_best_first() {
+        let out = sibling_answer();
+        let want: BTreeMap<i64, i64> = [(1, 0), (2, 6), (3, 6), (6, 0), (7, 0), (8, 6)].into_iter().collect();
+        assert_eq!(assign_producers(&out, &[0, 6]), want);
+        assert_eq!(assign_producers(&out, &[6, 0]), want, "the order of the companies does not matter");
+        let mut shuffled = out.clone();
+        shuffled["freight"].as_array_mut().unwrap().reverse();
+        assert_eq!(assign_producers(&shuffled, &[0, 6]), want, "nor the order of the lists");
+        // One company: no more than the bot's slots; the rest is left to a company not started yet.
+        let many = json!({"freight": (1..=17).map(|p| held_line(p, 100.0 - p as f64, &[])).collect::<Vec<_>>()});
+        let one = assign_producers(&many, &[0]);
+        assert_eq!(one.len(), MAX_FREIGHT_LINES);
+        assert!(!one.contains_key(&17));
+        assert!(assign_producers(&many, &[]).is_empty());
+    }
+
+    /// Each company's settings hold only the producers it is handed, and a portfolio line it is not
+    /// handed is dropped with the reason; a company not started yet gets what no company holds or is
+    /// handed.
+    #[test]
+    fn each_company_is_handed_only_its_own_producers_and_told_why_not_the_others() {
+        let out = sibling_answer();
+        let assigned = assign_producers(&out, &[0, 6]);
+        let froms = |p: &Planned| -> Vec<i64> {
+            p.bot_settings["freight"].as_array().unwrap().iter().map(|l| l["from"].as_i64().unwrap()).collect()
+        };
+        let mut said = Vec::new();
+        let zero = settings_for(&out, Some(0), &assigned, &mut |e| said.push(e));
+        assert_eq!(froms(&zero), [1, 6, 7]);
+        let six = settings_for(&out, Some(6), &assigned, &mut |_| {});
+        assert_eq!(froms(&six), [2, 3, 8]);
+        let why: Vec<&str> = zero.bot_settings["dropped"].as_array().unwrap().iter().map(|d| d["why"].as_str().unwrap()).collect();
+        assert_eq!(why, ["Mine 2 is handed to company 6 of the same AI", "company 2 already has a rail station at Mine 4"]);
+        assert!(said.contains(&"planner: the freight line Mine 4 - Plant is not handed over: company 2 already has a rail station at Mine 4".to_string()));
+        let flat = settings_json(&zero.settings).1;
+        assert!(flat.contains("fr_from=1,") && flat.contains("fr2_from=6,") && flat.contains("fr3_from=7,"), "{flat}");
+        // A company not started yet: every producer is held or handed out.
+        assert!(froms(&settings_for(&out, None, &assigned, &mut |_| {})).is_empty());
+        // Seventeen producers for one company: the last is left to a new company, and the portfolio's
+        // line from it says why the running company does not get it.
+        let lines: Vec<Value> = (1..=17).map(|p| held_line(p, 100.0 - p as f64, &[])).collect();
+        let many = json!({"portfolio": {"chosen": [lines[16].clone()]}, "freight": lines});
+        let assigned = assign_producers(&many, &[0]);
+        let full = settings_for(&many, Some(0), &assigned, &mut |_| {});
+        assert_eq!(full.bot_settings["freight"].as_array().unwrap().len(), MAX_FREIGHT_LINES);
+        assert_eq!(full.bot_settings["dropped"][0]["why"], "Mine 17 is handed to no company of the AI: each it may go to has its lines");
+        assert_eq!(froms(&settings_for(&many, None, &assigned, &mut |_| {})), [17]);
+        // Without holders or companies (a planner that does not say) every line stays, as before.
+        assert_eq!(froms(&settings_from_plan(&json!({"freight": [held_line(4, 7.0, &[])]}), &mut |_| {})), [4]);
+    }
+
+    /// One plan per company, from one answer: each names its company, holds its own lines, takes the
+    /// stored duel outcomes and the run's extra settings, and only its own planner key withholds its
+    /// freight-line slots; one sentence each.
+    #[test]
+    fn every_running_company_gets_a_plan_of_its_own() {
+        let out = sibling_answer();
+        let assigned = assign_producers(&out, &[0, 6]);
+        let d = duel_outcomes::from_duels(true, 2, OWN_LINES as i64, None, |_| Ok(outcome_rows()));
+        assert_eq!(d.record["used"], true);
+        let refusal = crate::rhai_shared::fr_author::refusal(Some(&json!("battlebrain")), 6, PLANNED_WRITER).unwrap();
+        let mut said = Vec::new();
+        let plans = company_plans(&out, &[0, 6], &assigned, &[refusal], "line_budget=5", Some(9), &d, &mut |e| said.push(e));
+        assert_eq!(plans.len(), 2);
+        assert_eq!((plans[0]["company"].clone(), plans[1]["company"].clone()), (json!(0), json!(6)));
+        assert_eq!(plans[0]["settings"]["fr_from"], 1);
+        assert_eq!(plans[0]["settings"]["own_lines"], 16, "the stored duel outcomes, as for a new company");
+        assert_eq!(plans[0]["settings"]["line_budget"], 5, "the run's extra settings too");
+        assert!(plans[0]["held"].is_null());
+        assert!(plans[1]["settings"].get("fr_from").is_none(), "company 6's key names battlebrain: {}", plans[1]["settings"]);
+        assert_eq!(plans[1]["held"]["by"][0]["company"], 6);
+        assert_eq!(plans[1]["freight"][0]["from"], 2, "the plan still says what it would hand over");
+        assert_eq!(said[0], "planner: company 0: 3 freight line(s) from Mine 1, Mine 6, Mine 7, 2 portfolio line(s) left out");
+        assert!(said[1].starts_with("planner: company 6: 3 freight line(s) from Mine 2, Mine 3, Mine 8, 2 portfolio line(s) left out; 9 freight-line setting(s) not handed over: company 6's"), "{}", said[1]);
+        let none = duel_outcomes::from_duels(false, 0, OWN_LINES as i64, None, |_| unreachable!());
+        assert!(company_plans(&out, &[], &assigned, &[], "", None, &none, &mut |_| {}).is_empty());
     }
 }

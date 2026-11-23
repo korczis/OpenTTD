@@ -36,6 +36,10 @@ pub struct Options {
     pub invest: bool,
     /// Answer only the transport-investment kernel input.
     pub invest_inputs: bool,
+    /// The companies the plan is for (mcp-plan `--for`): a freight candidate whose producer another
+    /// company holds with a rail station is left out (cargo.rs `with_claims`). None: every
+    /// candidate stays, its holders named.
+    pub plan_for: Option<Vec<i64>>,
 }
 
 /// One planner run. `read(name)` answers the data of resource `openttd://<name>`; every AlgoGlyph
@@ -43,7 +47,8 @@ pub struct Options {
 pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &Kernels) -> Result<Value, String> {
     let limit = o.limit;
     let towns = read("towns")?;
-    let g = crate::graph::derive_with_ways(&read("map")?, &towns, &read("stations")?, &read("map/ways").unwrap_or(Value::Null))?;
+    let (map, stations, ways) = (read("map")?, read("stations")?, read("map/ways").unwrap_or(Value::Null));
+    let g = crate::graph::derive_with_ways(&map, &towns, &stations, &ways)?;
     // Live vehicles when the game offers openttd://engines; the plan says so when it does not.
     let engines = read("engines").unwrap_or(Value::Null);
     // Construction costs follow the game's prices now (openttd://economy/prices) where it offers
@@ -53,11 +58,15 @@ pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &
     let mut out = crate::plan::plan(&towns, &g, limit, &params, &engines)?;
     // Freight from the world graph's industries, and the portfolio over passengers and freight.
     let world = read("world/graph").unwrap_or(Value::Null);
-    let freight = crate::cargo::freight_pairs(&world, &engines, &out["params"], limit.max(10));
+    // A producer another company holds with a rail station is left out before the list is cut, so
+    // the rivals' mines do not take the places of the lines the bot may build.
+    let freight = crate::cargo::freight_pairs(&world, &engines, &out["params"], usize::MAX);
+    let (mut freight, claims) = crate::cargo::with_claims(freight, &crate::cargo::rail_claims(&world, &map, &ways), o.plan_for.as_deref());
+    freight.truncate(limit.max(10));
     out["freight"] = Value::Array(freight);
+    out["claims"] = claims;
     // Station sites for every rail candidate (freight and passengers), by the bot's own rule
     // (src/sites.rs), so an executor builds the plan without a rule of its own.
-    let map = read("map")?;
     let pos = |v: &Value| (v["x"].as_i64().unwrap_or(0), v["y"].as_i64().unwrap_or(0));
     let add_sites = |c: &mut Value| {
         let (a, b) = if c.get("producer").is_some() { (pos(&c["producer"]), pos(&c["acceptor"])) } else { (pos(&c["a"]), pos(&c["b"])) };
@@ -113,4 +122,51 @@ pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &
     if o.invest { out["investment"] = crate::invest::decide(&out, &engines, &towns, kernels); }
     out["model"] = json!("v4: v3 for passengers, freight pairs from the world graph's industries priced with each cargo's own payment rate and transit periods, and a portfolio chosen by knapsack within the budget");
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{json, Value};
+
+    /// One run on a small map with two coal mines, one held by company 2's rail station and one by
+    /// company 0's: planned for company 0 only the second mine's lines are candidates, and the plan's
+    /// `claims` names the one left out; without --for both stay, each naming its holder.
+    #[test]
+    fn a_plan_for_a_company_leaves_out_the_producers_another_company_holds() {
+        let (map, ways) = crate::cargo::testing::claims_map(&[(2, 2), (3, 2), (12, 2), (13, 2)], &[(7, 2, b'2'), (15, 3, b'0')], &[]);
+        let world = json!({"nodes": [
+            {"kind": "industry", "id": "industry:1", "name": "Mine A", "x": 2, "y": 2, "produces": [{"name": "Coal", "cargo": 1, "last_month": 180}]},
+            {"kind": "industry", "id": "industry:2", "name": "Mine B", "x": 12, "y": 2, "produces": [{"name": "Coal", "cargo": 1, "last_month": 180}]},
+            {"kind": "industry", "id": "industry:3", "name": "Plant", "x": 19, "y": 11, "accepts": [{"name": "Coal"}]}]});
+        let engines = json!({"cargos": [{"name": "Coal", "payment": 5916, "transit_periods": [7, 255]}], "engines": [
+            {"type": "rail", "name": "Loco", "capacity": 0, "effective_speed_kmh": 101, "price": 11000, "running_cost_per_year": 1300},
+            {"type": "rail", "name": "Hopper", "cargo": "Coal", "capacity": 30, "effective_speed_kmh": 0, "price": 1500, "running_cost_per_year": 120}]});
+        let read = |name: &str| -> Result<Value, String> {
+            match name {
+                "towns" => Ok(json!({"towns": []})),
+                "map" => Ok(map.clone()),
+                "map/ways" => Ok(ways.clone()),
+                "stations" => Ok(json!({"stations": []})),
+                "engines" => Ok(engines.clone()),
+                "world/graph" => Ok(world.clone()),
+                _ => Err(format!("{name}: not in this test")),
+            }
+        };
+        let kernels = crate::cargo::testing::kernels(|_, _| Err(crate::cargo::KernelFailure::Unset));
+        let opts = |plan_for: Option<Vec<i64>>| super::Options { limit: 5, params: json!({"modes": ["freight_rail"], "freight": {"bands": [5, 250]}}),
+                                                                 plan_for, ..Default::default() };
+        let from = |out: &Value| -> Vec<String> {
+            out["freight"].as_array().unwrap().iter().map(|c| c["producer"]["name"].as_str().unwrap().to_string()).collect()
+        };
+        let out = super::run(&read, &opts(Some(vec![0])), &kernels).unwrap();
+        assert_eq!(from(&out), ["Mine B"]);
+        assert_eq!(out["freight"][0]["producer"]["rail_stations"], json!([0]));
+        assert_eq!(out["claims"]["left_out"], json!([{"producer": "industry:1", "name": "Mine A", "companies": [2]}]));
+        assert!(out["portfolio"]["chosen"].as_array().unwrap().iter().all(|c| c["producer"]["name"] == "Mine B"));
+        let all = super::run(&read, &opts(None), &kernels).unwrap();
+        let mut names = from(&all);
+        names.sort();
+        assert_eq!(names, ["Mine A", "Mine B"]);
+        assert_eq!(all["claims"]["left_out"], json!([]));
+    }
 }
