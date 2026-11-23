@@ -109,6 +109,43 @@ class Standings(unittest.TestCase):
         self.assertIn(line, battle.render_ablation_md(record(imported=imp)))
 
 
+class AblateRun(unittest.TestCase):
+    """cmd_ablate end to end against a fake game binary that prints the referee lines of LOG: each
+    variant's row is built by ablation_row, standings included."""
+
+    def test_rows_of_a_fake_match_carry_standings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            repo = tmp / "repo"
+            (repo / "build").mkdir(parents=True)
+            (repo / "ai" / "PrismaticAI").mkdir(parents=True)
+            fake = repo / "build" / "openttd"
+            fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + LOG + "\nEOF\n")
+            fake.chmod(0o755)
+            arena = tmp / "cache" / "arena"
+            for d in ("baseset", "game", "ai/library"):
+                (arena / d).mkdir(parents=True)
+            cfg = {"cache": tmp / "cache", "prismatic": {"path": "ai/PrismaticAI"}, "match": MC}
+            old = battle.REPO
+            battle.REPO = repo
+            try:
+                code, out, _ = run_quiet(battle.cmd_ablate, cfg, 7, 2, ["base=x=1"], FIELD, False,
+                                         str(tmp / "logs"))
+            finally:
+                battle.REPO = old
+            self.assertEqual(code, 0)
+            self.assertIn("ablate: base         value          100", out)
+            self.assertIn("REF Q", (tmp / "logs" / "base.log").read_text())
+
+
+class Script(unittest.TestCase):
+    def test_the_script_runs_as_a_command(self):
+        done = subprocess.run([sys.executable, "-B", str(HERE / "strategy-surfaces"), "--help"],
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0)
+        self.assertIn("strategy-evals", done.stdout)
+
+
 class Evaluations(unittest.TestCase):
     def test_rows_rank_rival_and_gap_are_derived(self):
         rows = ss.eval_rows([("a.json", record(rid="a")), ("b.json", record(rid="b", standings=False))])
