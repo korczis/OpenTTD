@@ -38,11 +38,40 @@ is removed and replaced in the same slot stays open until `deny` or `clear`.
 `tools/research/mcp-e2e --coplay` does all of it. It reads the running bot's company from the game
 (`/api/bots`), opens it through the panel's console, refuses to go on when the server does not
 confirm it, and has the GUI client join that company under the name `owner`. With `--arm-input` the
-panel and scripts can still press the client's widgets.
+panel and scripts can still press the client's widgets. That client then is not an approver (see
+"Who approves").
+
+### Who approves
+
+The owner decided on 2026-11-22 (recorded with `majordomus decision`). The owner's own client runs
+unarmed and is registered on the server as an approver. An agent that co-plays does it through a
+client of its own, and that client is armed and never an approver. Identities decide, not input
+paths: no check inside the process tells a person's click from synthetic input at the OS level, but
+the server's approver list (`prismatic_mcp approvers`, ADR 0038) holds keys, and only the owner's
+key is on it.
+
+`mcp-e2e --coplay` registers the client named `owner` once it has joined
+(`prismatic_mcp approvers add <client id>` through the panel's console). The key is stored, so a
+restart of the client keeps it. With `--arm-input` it registers nothing and says so, and the owner
+approves in the panel (`/?owner=<secret>`). An armed client may still look at the queue and deny,
+but it never approves: both the client and the server refuse it.
 
 The same change fixes the client supervisor in `mcp-e2e`. Under `set -e`, a crashed client
 (`wait` returning 134) ended the restart loop, so the client was never restarted (seen
 2026-11-22, an abort in libiconv at Cocoa start-up).
+
+## Services
+
+`mcp-e2e --coplay` starts the panel services that a co-play game runs, so nobody has to post them by
+hand:
+
+- `arena` fills the other seven companies ([live-arena.md](live-arena.md)).
+- `replan` re-plans the bot every game month ([Planner and AlgoGlyph](mechanisms/planner-and-algoglyph.md#replanning-while-the-game-runs)).
+- `watchdog` says when a company has built nothing for longer than its data-tuned threshold, and
+  what holds it ([The progress watchdog](mechanisms/rhai-scripting.md#the-progress-watchdog)).
+
+`MCP_SERVICES` names another list, and an empty value starts none. A service that does not start is
+reported on stderr, and the stack runs on without it.
 
 ## Validation
 
@@ -70,7 +99,7 @@ the owner's game:
    (`<tmp>/save/<name>.sav`), and that directory is removed when the panel stops. Copy the file to
    `~/Documents/OpenTTD/save/` first.
 2. Stop the stack (Ctrl-C on `mcp-e2e`, or SIGINT to the panel).
-3. Start it from the savegame: `tools/research/mcp-e2e --arm-input --coplay --load <file>`. The panel
+3. Start it from the savegame: `tools/research/mcp-e2e --coplay --load <file>`. The panel
    passes `-g <file>` to the server instead of `-G <seed>`. It starts no new bot, because the saved AI
    companies play on, each restarted by the game from its saved data. `--coplay` opens the company
    the game reports for the bot and joins the client to it, as on a new world. The arena counts the
@@ -85,6 +114,17 @@ the news-refs branch. All 8 companies came back with their names, money and loan
 `/api/bots` listed all 8 AIs running: PrismaticAI four times, AAAHogEx, LuDiAI AfterFix, CivilAI
 and AdmiralAI. No new bot was started. The client half (`--coplay` after `--load`): NOT RUN on
 that check.
+
+### After a load
+
+A `load` on the server restarts its game, and every client reconnects in the same process. Upstream
+it rejoins as a spectator (`NetworkClientConnectGame(last_joined, COMPANY_SPECTATOR)` in
+`src/openttd.cpp`). In the game of 2026-11-22 the owner therefore landed among the spectators after
+each deploy and had to be moved back by hand (`move 3 1`). In a research build a client that played
+a company now asks for that company again (`ResearchRejoinCompany`,
+`src/network/core/network_game_info.cpp`). The co-play opening is server state that a load does not
+clear, so the server admits the owner into the co-play company as it did on the first join. A client
+that was a spectator rejoins as one.
 
 ## Limits
 

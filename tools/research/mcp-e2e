@@ -35,7 +35,8 @@
 #                                forced on every start, so no saved choice changes it; e.g. NoirGFX)]
 #                               [--coplay (the GUI client plays the bot's company together with the
 #                                bot instead of watching: the server opens it with `research_coplay
-#                                allow`, the client joins it, research/coplay.md)]
+#                                allow`, the client joins it, and the co-play services start:
+#                                $MCP_SERVICES, default "arena replan watchdog"; research/coplay.md)]
 #                               [--load FILE (start from a savegame instead of a new world: its AI
 #                                companies play on and no new bot is started; with --coplay the
 #                                client joins the bot company the game reports; research/coplay.md)]
@@ -313,6 +314,29 @@ if [[ "$GUI" == 1 ]]; then
     done
   ) &
   GUI_PID=$!
+  # Who approves in a co-play game (research/coplay.md "Who approves"; the owner's decision of
+  # 2026-11-22): the owner's own client, unarmed, registered on the server as an approver, so the
+  # control window, the toolbar, the console and the chat decide for it. An armed client takes
+  # scripted input, so it is never registered: with --arm-input the owner approves in the panel.
+  if [[ "$COPLAY" == 1 && "$ARM_INPUT" == 1 ]]; then
+    echo "    --arm-input: the owner's client takes scripted input, so it is not an approver; approve in the panel ($URL)"
+  elif [[ "$COPLAY" == 1 ]]; then
+    OWNER_ID=""
+    for ((i = 0; i < 60; i++)); do
+      OWNER_ID="$(curl -s -X POST -H 'Content-Type: application/json' -d '{"command":"clients"}' "$URL/api/console" \
+        | jq -r '.output[]?' 2>/dev/null | sed -nE "s/^Client #([0-9]+) +name: 'owner' .*/\1/p" || true)"
+      OWNER_ID="${OWNER_ID%%$'\n'*}"
+      [[ -n "$OWNER_ID" ]] && break
+      sleep 1
+    done
+    if [[ -n "$OWNER_ID" ]]; then
+      REG="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"command\":\"prismatic_mcp approvers add $OWNER_ID\"}" "$URL/api/console" \
+        | jq -r '[.output[]? | select(test("approver"))] | last // empty' 2>/dev/null || true)"
+      echo "==> approver: the owner's client #$OWNER_ID (${REG:-no answer})"
+    else
+      echo "mcp-e2e: --coplay: the owner's client did not join within 60 s; no approver registered (approve in the panel)" >&2
+    fi
+  fi
   RHAI="$ROOT_DIR/tools/research/mcp-rhai/target/release/mcp-rhai"
   if [[ "$DIRECTOR" == 1 && -x "$RHAI" ]]; then
     for ((i = 0; i < 60; i++)); do [[ -s "$VIEW_TOKEN" ]] && break; sleep 1; done
@@ -373,6 +397,16 @@ if [[ "$GUI" == 0 && "$NULL_CLIENT" == 1 ]]; then
     done
   ) &
   GUI_PID=$!
+fi
+
+# The services a co-play game runs (research/coplay.md "Services"): the arena fills the other
+# companies, replan re-plans the bot every game month, the watchdog says when a company stalls and
+# why. Started here, never by hand; MCP_SERVICES names another list (empty: none).
+if [[ "$COPLAY" == 1 ]]; then
+  for svc in ${MCP_SERVICES-arena replan watchdog}; do
+    out="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"name\":\"$svc\"}" "$URL/api/services/start" || true)"
+    if grep -q '"running": true' <<<"$out"; then echo "==> service $svc started"; else echo "mcp-e2e: service $svc did not start: ${out:-no answer}" >&2; fi
+  done
 fi
 
 echo "==> running. Ctrl-C stops everything."

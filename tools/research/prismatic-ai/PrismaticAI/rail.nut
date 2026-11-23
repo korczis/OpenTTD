@@ -217,6 +217,13 @@ function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, fro
 				if (bridge == -1) continue;
 				local ok = false;
 				{
+					/* The probe's own accounting. The game adds a test-mode estimate to the costs an
+					 * AIAccounting counts (ScriptObject::DoCommand), and a nested one restores its
+					 * caller's count on exit. Without it every probe of a re-plan while track A was
+					 * laid counted as track A's cost: on the fitness seed 930967890 a 229-tile line
+					 * "cost about 1630003" with funds of 157584, so the second track was refused and
+					 * the line ran single track with two trains. */
+					local probe = AIAccounting();
 					local test = AITestMode();
 					ok = AIBridge.BuildBridge(AIVehicle.VT_RAIL, bridge, ahead, h2);
 				}
@@ -243,6 +250,7 @@ function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, fro
 					(PrismaticAI.RailStepCost(far + in_dir) >= 0 || far + in_dir == to)) {
 				local ok = false;
 				{
+					local probe = AIAccounting();   /* as the bridge probe above */
 					local test = AITestMode();
 					ok = AITunnel.BuildTunnel(AIVehicle.VT_RAIL, ahead);
 				}
@@ -330,6 +338,36 @@ function PrismaticAI::OwnRailStationNear(origin, reach) {
 	list.KeepBelowValue(reach + 1);
 	list.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
 	return list.IsEmpty() ? null : list.Begin();
+}
+
+/* Another company that already holds a rail station catching the production of industry `p`, or
+ * null. A source station is the claim on a producer: two lines at one mine split its output by
+ * station rating, so the second line pays its full cost for about half the cargo. In the owner's
+ * live game of 2026-11-22 four PrismaticAI companies of one map chose their lines with the same
+ * deterministic score, and companies 0 and 1, 6 and 7, 1 and 6 each built a line from the same
+ * mine or forest: all four stopped growing in 1952 while AAAHogEx reached 2.2M
+ * (research/incident-2026-11-22-sibling-industries.md). The older filters missed it: the bot's own
+ * stations only (OwnRailStationNear), and cargo transported last month, which stays 0 for the
+ * months a rival lays its track. Any owner counts here, a sibling of the same AI or a rival.
+ * Raw industries only (mines, forests, farms, wells): they accept nothing, so a station catching
+ * one picks up from it. A processing industry (sawmill, factory, steel mill) also has the stations
+ * that deliver to it, and an AI cannot read another company's station ratings to tell them apart;
+ * for those the transported filter of NextOwnFreightLine stays the only test, and null is
+ * answered. */
+function PrismaticAI::ForeignRailStationAt(p) {
+	if (!AIIndustryType.IsRawIndustry(AIIndustry.GetIndustryType(p))) return null;
+	local me = AICompany.ResolveCompanyID(AICompany.COMPANY_SELF);
+	local tiles = AITileList_IndustryProducing(p, AIStation.GetCoverageRadius(AIStation.STATION_TRAIN));
+	tiles.Valuate(AIRail.IsRailStationTile);
+	tiles.KeepValue(1);
+	/* The lowest such company id, so two companies that claim one producer at once settle it the
+	 * same way (BuildFreightRailRoute: the higher id yields). */
+	local holder = null;
+	foreach (t, _ in tiles) {
+		local o = AITile.GetOwner(t);
+		if (o != me && (holder == null || o < holder)) holder = o;
+	}
+	return holder;
 }
 
 /* The bounding box of a station's rail tiles: [x0, y0, x1, y1]. */
@@ -651,20 +689,53 @@ function PrismaticAI::BridgeType(a, b) {
 	return list.Begin();
 }
 
+/* Days a line being laid may wait in all for the money of its next piece (RailCashWait). */
+RAIL_CASH_WAIT_DAYS <- 120;
+
+/* After a piece refused for ERR_NOT_ENOUGH_CASH: borrow up to the limit, then wait a day at a time
+ * for the income of the lines already running, and build the piece again (`kind` "rail" with the
+ * tiles a, b, c; "bridge" with the type a and heads b, c; "tunnel" from the portal a) until it is
+ * built or the line has waited RAIL_CASH_WAIT_DAYS in all (`budget.days`, shared by the line's
+ * pieces). True when the piece was built. A re-plan around the tile cannot help: money is short,
+ * not land. Before this, the owner's live game of 2026-11-22 (seed 15805) logged six
+ * "rail at tile N failed: ERR_NOT_ENOUGH_CASH" in its first three years: each line was re-planned
+ * twice, then given up with its track already laid and paid for. */
+function PrismaticAI::RailCashWait(budget, kind, a, b = 0, c = 0) {
+	if (AIError.GetLastError() != AIError.ERR_NOT_ENOUGH_CASH) return false;
+	local start = budget.days;
+	while (budget.days < RAIL_CASH_WAIT_DAYS) {
+		AICompany.SetLoanAmount(AICompany.GetMaxLoanAmount());
+		local ok = false;
+		if (kind == "rail") ok = AIRail.BuildRail(a, b, c);
+		else if (kind == "bridge") ok = AIBridge.BuildBridge(AIVehicle.VT_RAIL, a, b, c);
+		else ok = AITunnel.BuildTunnel(AIVehicle.VT_RAIL, a);
+		if (ok) {
+			if (budget.days > start) AILog.Info("PrismaticAI: waited " + (budget.days - start) + " day(s) for the money of the next rail piece");
+			return true;
+		}
+		if (AIError.GetLastError() != AIError.ERR_NOT_ENOUGH_CASH) return false;
+		AIController.Sleep(74);
+		budget.days++;
+	}
+	AILog.Warning("PrismaticAI: still short of money after waiting " + budget.days + " day(s) for a rail line");
+	return false;
+}
+
 /* Lays `path` piece by piece between the station end tiles `a_end` and `b_end`. Returns the tiles
  * actually laid, or null. A piece the game refuses (a house, a rival's track or a vehicle took the
  * tile since the search, ERR_AREA_NOT_CLEAR) is not the end of the line: from the last laid tile the
  * search runs again around the refused one, the last piece is relaid toward the new route, and the
  * rest follows (at most `replans` times). On seed 31337 a 212-tile coal line was dropped this way. */
-function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straight = false, from_straight = false) {
+function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straight = false, from_straight = false, cash = null) {
 	local n = path.len();
 	local corners = 0;
+	if (cash == null) cash = {days = 0};
 	for (local i = 0; i < n; i++) {
 		/* Two portals in a row that are not neighbours and a tunnel joins: the tunnel FindRailPath
 		 * planned (the game digs from the first to the far end it finds itself). */
 		if (i + 1 < n && AIMap.DistanceManhattan(path[i], path[i + 1]) > 1 &&
 				AITile.GetSlope(path[i]) != AITile.SLOPE_FLAT && AITunnel.GetOtherTunnelEnd(path[i]) == path[i + 1]) {
-			if (!AITunnel.BuildTunnel(AIVehicle.VT_RAIL, path[i])) {
+			if (!AITunnel.BuildTunnel(AIVehicle.VT_RAIL, path[i]) && !PrismaticAI.RailCashWait(cash, "tunnel", path[i])) {
 				AILog.Warning("PrismaticAI: rail tunnel from tile " + path[i] + " to " + path[i + 1] + " failed: " + AIError.GetLastErrorString());
 				return null;
 			}
@@ -675,7 +746,8 @@ function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straigh
 		/* Two heads in a row that are not neighbours: the bridge FindRailPath planned between them. */
 		if (i + 1 < n && AIMap.DistanceManhattan(path[i], path[i + 1]) > 1) {
 			local bridge = PrismaticAI.BridgeType(path[i], path[i + 1]);
-			if (bridge == -1 || !AIBridge.BuildBridge(AIVehicle.VT_RAIL, bridge, path[i], path[i + 1])) {
+			if (bridge == -1 || (!AIBridge.BuildBridge(AIVehicle.VT_RAIL, bridge, path[i], path[i + 1]) &&
+					!PrismaticAI.RailCashWait(cash, "bridge", bridge, path[i], path[i + 1]))) {
 				AILog.Warning("PrismaticAI: rail bridge from tile " + path[i] + " to " + path[i + 1] + " failed: " + AIError.GetLastErrorString());
 				return null;
 			}
@@ -686,7 +758,7 @@ function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straigh
 		local prev = (i == 0) ? a_end : path[i - 1];
 		local next = (i == n - 1) ? b_end : path[i + 1];
 		if (next - path[i] != path[i] - prev) corners++;
-		if (!AIRail.BuildRail(prev, path[i], next)) {
+		if (!AIRail.BuildRail(prev, path[i], next) && !PrismaticAI.RailCashWait(cash, "rail", prev, path[i], next)) {
 			AILog.Warning("PrismaticAI: rail at tile " + path[i] + " failed: " + AIError.GetLastErrorString());
 			if (replans <= 0 || i < 1) return null;
 			local f = path[i - 1], e = (i == 1) ? a_end : path[i - 2], g = path[i];
@@ -703,7 +775,7 @@ function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straigh
 			/* The piece on f still points at g; it is relaid toward the new route's first step. */
 			AIRail.RemoveRail(e, f, g);
 			AILog.Info("PrismaticAI: re-planned from tile " + f + " around tile " + g + ", " + rest.len() + " tiles to go");
-			local tail = PrismaticAI.BuildRailAlong(rest, e, b_end, replans - 1, to_straight, from_straight && i == 1);
+			local tail = PrismaticAI.BuildRailAlong(rest, e, b_end, replans - 1, to_straight, from_straight && i == 1, cash);
 			if (tail == null) return null;
 			local laid = path.slice(0, i - 1);
 			laid.extend(tail);
@@ -1210,6 +1282,15 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
 	local label = AICargo.GetCargoLabel(cargo) + " " + AIIndustry.GetName(p) + " - " + AIIndustry.GetName(q);
 	local dist = AIMap.DistanceManhattan(pl, ql);
 	AILog.Info("PrismaticAI: planner freight by rail: " + label + " (" + dist + " tiles)");
+	/* Checked here, right before the source station is built, so it holds for the planner's lines
+	 * (fr_*), the bot's own and the steward's alike, and for a rival that claimed the producer
+	 * after the line was chosen. */
+	local holder = PrismaticAI.ForeignRailStationAt(p);
+	if (holder != null) {
+		AILog.Warning("PrismaticAI: freight line " + label + " skipped: company " + (holder + 1) +
+			" already has a rail station at " + AIIndustry.GetName(p));
+		return 0;
+	}
 	/* What a served station gets of the production: the station rating, about 70% once trains call
 	 * regularly. */
 	local supply = AIIndustry.GetLastMonthProduction(p, cargo) * 70 / 100;
@@ -1220,6 +1301,17 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
 	AILog.Info("PrismaticAI: rail plan " + label + ": " + plan.why + (double ? ", double track" : ""));
 	local sa = PrismaticAI.BuildRailStationAt(pl, ql, plan.len, cargo, "produce", "at " + AIIndustry.GetName(p), platforms, double ? 1 : 0);
 	if (sa == null) return 0;
+	/* Two companies that chose one producer in the same days both passed the check above: in the
+	 * fitness check's sibling match (seed 930967890) both PrismaticAI companies picked Wontford Coal
+	 * Mine in their first heartbeat, the second's track ran into the first's and its line failed.
+	 * With both source stations standing, the company of the higher id yields, before any track. */
+	local rival = PrismaticAI.ForeignRailStationAt(p);
+	if (rival != null && rival < AICompany.ResolveCompanyID(AICompany.COMPANY_SELF)) {
+		AILog.Warning("PrismaticAI: freight line " + label + " given up: company " + (rival + 1) +
+			" built a rail station at " + AIIndustry.GetName(p) + " in the same days");
+		PrismaticAI.RemoveRailStation(sa, plan.len);
+		return 0;
+	}
 	local sb = PrismaticAI.BuildRailStationAt(ql, pl, plan.len, cargo, "accept", "at " + AIIndustry.GetName(q), platforms, double ? -1 : 0);
 	if (sb == null) { PrismaticAI.RemoveRailStation(sa, plan.len); return 0; }
 	local built = double ? PrismaticAI.BuildDoubleRailLineAndTrain(sa, sb, plan.len, cargo, AIOrder.OF_FULL_LOAD_ANY, label)
@@ -1259,6 +1351,8 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 	foreach (p, _ in AIIndustryList()) {
 		if (AIIndustry.IsBuiltOnWater(p)) continue;
 		if (PrismaticAI.OwnRailStationNear(AIIndustry.GetLocation(p), 8) != null) continue;
+		/* Another company's rail station already claims it, in every mode (ForeignRailStationAt). */
+		if (PrismaticAI.ForeignRailStationAt(p) != null) continue;
 		foreach (c, _ in AICargoList_IndustryProducing(p)) {
 			if (!AICargo.IsFreight(c)) continue;
 			local prod = AIIndustry.GetLastMonthProduction(p, c);

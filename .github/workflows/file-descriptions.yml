@@ -1,7 +1,13 @@
 name: File descriptions
 
 on:
+  # Only the files this check reads: a pull request that touches none of them would queue a
+  # runner for a check that cannot change (tools/surfaces/test_checker_workflows.py).
   pull_request:
+    paths:
+    - 'src/**'
+    - '.github/file-descriptions.py'
+    - '.github/workflows/file-descriptions.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -89,8 +89,8 @@ bool HoldsPending(uint64_t id);
  * '!approvals [page]' answers the company's pending approvals, one machine-readable line each
  * ("[approvals] {json}") and a last count line; '!approve <id>' and '!deny <id>' (one id per line)
  * decide through ApproveById/DenyById when detail::DecideChat allows it: an approval naming the
- * client's company, of a company-scoped action, approved by a registered approver or a key of that
- * company's allow list, and not from injected input. `replies` go to the asker alone, each within
+ * client's company, of a company-scoped action, approved only by a key the server's operator
+ * registered (never by a company's allow list), and not from injected input. `replies` go to the asker alone, each within
  * the chat length.
  * @return false when the line is not one of these (it is chat as usual).
  */
@@ -104,6 +104,15 @@ bool AddApprover(std::string_view key);
 std::string RemoveApprover(std::string_view key_or_prefix);
 /** Deny a pending mutation by id. */
 bool DenyById(uint64_t id, std::string &message);
+/**
+ * The approval deadline: after `days` game days unanswered (0: off) a pending approval is settled
+ * with the operator's standing verdict, "keep" (retire it, enacting nothing; the default) or
+ * "approve" (execute it when a chat approver could decide it, else retire it). False and a usage
+ * line in `message` for a malformed policy; else the policy now in force.
+ */
+bool SetApprovalDeadline(std::string_view days, std::string_view verdict, std::string &message);
+/** The approval deadline in force, as one console line. */
+std::string DescribeApprovalDeadline();
 /** Machine-readable summary of the decision/provenance trace for the console. */
 std::string DecisionTrace(int max_rows);
 

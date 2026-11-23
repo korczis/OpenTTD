@@ -1709,10 +1709,24 @@ The window has no state or list of its own: `openttd.ui.control` (read-only, in 
 dedicated server included) answers the same `Panel::Snapshot()` it draws, so an MCP client, a Rhai
 script and the owner see one thing. `openttd.ui.menu.run {index: 0}` opens it.
 
-Limit: the approvals listed are the queue of the process the window runs in. In a game the owner
-hosts on a dedicated server, the owner's GUI client is another process; its window lists that
-client's queue, and the server's queue is read with `openttd.ui.control` on the server's MCP
-endpoint (or the panel) until approvals reach the client.
+**On a network client the window shows the server's queue.** The client's own MCP server holds
+none of the server's approvals, so in a game the owner plays on a dedicated server the window lists
+the server's queue for the owner's company:
+
+- **Refresh.** Every 5 s the client sends the server `!approvals` privately and reads the
+  `[approvals] {json}` lines of the answer (`detail::ServerApprovalsReader`). The answer to the
+  client's own ask is read, not printed in the chat.
+- **Decisions open the window.** An approval the client has not seen yet opens the window, so a
+  decision that waits (a replan proposal, the answer to `ask` / `do` / `plan`) appears as a
+  decision with Approve and Deny, never as news.
+- **Approve and Deny.** They still run the console's command, which sends `!approve <id>` or
+  `!deny <id>` to the server. There only a registered approver's key approves (`prismatic_mcp
+  approvers`, ADR 0038; [coplay.md](coplay.md) "Who approves"), and the answer comes back as a
+  private message.
+- **Operator rows.** A row the chat may not decide ends with "(the server's operator decides)".
+
+`openttd.ui.control` on the client's MCP answers the same snapshot, the server's rows marked
+`on_server: true`.
 
 ## The world as data: map, stations, road graph
 

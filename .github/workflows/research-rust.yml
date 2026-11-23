@@ -3,14 +3,39 @@ name: Research Rust
 # Fork-owned workflow, not part of upstream's CI. Runs the mcp-rhai tests that carry the Battlebrain
 # boundaries (rule project.decision-authority-boundaries, B1-B8 in src/authority_boundaries.rs),
 # the decision contract and executor (battlebrain_contract.rs, bin/battlebrain.rs,
-# panel_decision.rs) and the knapsack checks (cargo.rs), so a pull request cannot merge with them
-# failing. The job always reports, so "Research Rust tests" can be a required check: when no path
+# panel_decision.rs), the knapsack checks (cargo.rs) and the cutover rehearsal
+# (tools/research/battlebrain-cutover-check), so a pull request cannot merge with them failing.
+# The job always reports, so "Research Rust tests" can be a required check: when no path
 # the tests compile or read changed, it succeeds without building (.ai/repo/workflows/delivery.md).
 
 on:
   push:
     branches: [master]
+  # The same paths as the job's own change check below, so a pull request that touches none of
+  # them queues no runner (tools/surfaces/test_checker_workflows.py keeps the two lists equal).
   pull_request:
+    paths:
+    - 'tools/research/mcp-rhai/**'
+    - 'tools/research/schema/**'
+    - 'tools/research/prismatic-ai/**'
+    - 'tools/research/real-world/**'
+    - 'tools/research/mcp-panel/**'
+    - 'tools/research/town-model/**'
+    - 'research/results/**'
+    - 'research/battlebrain/**'
+    - 'research/prismatic-bridge/**'
+    - 'research/mechanisms/**'
+    - '.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds.md'
+    - 'src/window_type.h'
+    - '.github/workflows/research-rust.yml'
+    - '.gitmodules'
+    - 'tools/research/vendor/**'
+    - 'tools/research/algoglyph-pin'
+    - 'tools/research/test_algoglyph_pin.py'
+    - 'tools/research/battlebrain-cutover'
+    - 'tools/research/battlebrain-cutover-check'
+    - 'tools/research/mcp-fake-game'
+    - 'tools/research/mcp-approval-ui-check'
   # Manual runs. No CI job pushes to a pull request's branch any more (surfaces.yml, the note
   # above `pages`), so nothing dispatches this workflow there.
   workflow_dispatch:
@@ -73,8 +98,9 @@ jobs:
           pattern+='|research/(results|battlebrain|prismatic-bridge|mechanisms)/'
           pattern+='|\.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds\.md$'
           pattern+='|tools/research/mcp-(fake-game|approval-ui-check)$'
+          pattern+='|tools/research/(battlebrain-cutover|battlebrain-cutover-check)$'
           pattern+='|src/window_type\.h$|\.github/workflows/research-rust\.yml$'
-          pattern+='|\.gitmodules$|tools/research/vendor/|tools/research/(test_)?algoglyph[-_]pin(\.py)?$)'
+          pattern+='|\.gitmodules$|tools/research/vendor/|tools/research/(algoglyph-pin|test_algoglyph_pin\.py)$)'
           matched=$(git diff --name-only "$base" HEAD | grep -E "$pattern" || true)
           if [ -n "$matched" ]; then
             echo "Changed since $base:"
@@ -164,3 +190,10 @@ jobs:
           cargo build --release --locked --offline --manifest-path "$MANIFEST" --bin mcp-panel
           npm ci --no-audit --no-fund --prefix tools/research/mcp-panel
           tools/research/mcp-approval-ui-check
+
+      # The cutover runbook's script, rehearsed against the live path's stand-in game (panel.rs
+      # fake_game behind real panels on loopback ports); it fails on any line of the script that
+      # no scenario ran (research/battlebrain/cutover.md). Reuses the target built above.
+      - name: Battlebrain cutover rehearsal (tools/research/battlebrain-cutover-check)
+        if: steps.changes.outputs.run == 'true'
+        run: tools/research/battlebrain-cutover-check

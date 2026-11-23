@@ -76,6 +76,36 @@ mod store_sql;
 mod http_stub;
 #[path = "../panel_town.rs"]
 mod panel_town;
+#[path = "../panel_strategy.rs"]
+mod panel_strategy;
+// The planner, in process for the strategist (src/panel_strategy.rs, src/plan_pipeline.rs): the same
+// modules mcp-plan links, of which the panel uses only what a planner run reaches.
+#[path = "../plan_pipeline.rs"]
+mod plan_pipeline;
+#[path = "../graph.rs"]
+#[allow(dead_code)]
+mod graph;
+#[path = "../plan.rs"]
+#[allow(dead_code)]
+mod plan;
+#[path = "../cargo.rs"]
+#[allow(dead_code)]
+mod cargo;
+#[path = "../sites.rs"]
+#[allow(dead_code)]
+mod sites;
+#[path = "../invest.rs"]
+#[allow(dead_code)]
+mod invest;
+#[path = "../linecost.rs"]
+#[allow(dead_code)]
+mod linecost;
+#[path = "../yards.rs"]
+#[allow(dead_code)]
+mod yards;
+// hub_algoglyph.rs is the hub's module here (hub::algoglyph): a second copy would run its tests twice
+// at once over one scratch directory.
+use hub::algoglyph as hub_algoglyph;
 #[path = "../panel_battle.rs"]
 mod panel_battle;
 
@@ -195,6 +225,9 @@ fn main() {
         eprintln!("mcp-panel: {e}");
         std::process::exit(1);
     }
+    // The strategist recomputes the long-term plan in the background and keeps the blackboard
+    // (src/panel_strategy.rs); PRISMATIC_STRATEGIST=0 turns it off.
+    panel_strategy::start(game.clone());
     let p = Arc::new(panel::Panel { game: game.clone(), routes: panel::routes() });
     std::thread::spawn(move || panel::serve(listener, p));
     println!("mcp-panel: http://127.0.0.1:{}/  (game server 127.0.0.1:{}, MCP {})", args.panel_port, args.game_port, game.endpoint());
@@ -213,6 +246,7 @@ fn main() {
     panel::registry_remove(&format!("client-{}", args.panel_port));
     // The panel's subprocesses (the bot's planner, an intent, a plan) stop with it, before the game:
     // a planner left running was re-parented to PID 1 and kept calling a panel that was gone.
+    panel_strategy::stop();
     let helpers = panel::stop_children(Duration::from_secs(3));
     if helpers > 0 {
         println!("mcp-panel: stopped {helpers} subprocess(es)");
