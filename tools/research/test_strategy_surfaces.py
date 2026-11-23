@@ -73,6 +73,10 @@ class Standings(unittest.TestCase):
         self.assertEqual((row["value"], row["field_best"], row["rail"], row["errors"]), (100, 400, 1, 1))
         self.assertEqual([(e["key"], e["value"]) for e in row["standings"]],
                          [("pai", 100), ("Hog", 400), ("Admiral", 50)])
+        first = row["standings"][1]
+        self.assertEqual((first["company"], first["vehicles"], first["rail"], first["water"], first["errors"]),
+                         (1, 14, 9, 0, 0))
+        self.assertEqual(row["standings"][0]["errors"], 1)
         later = battle.ablation_row("pai", "", 0, LOG, FIELD, 1)   # the variant started second
         self.assertEqual([e["key"] for e in later["standings"]], ["Hog", "pai", "Admiral"])
         self.assertEqual(later["value"], 400)

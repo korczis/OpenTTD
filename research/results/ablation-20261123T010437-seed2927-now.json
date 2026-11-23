@@ -40,44 +40,124 @@
    "t": "1960-01",
    "standings": [
     {
+     "company": 0,
      "key": "now",
      "value": 6630130,
-     "t": "1960-01"
+     "vehicles": 84,
+     "errors": 0,
+     "rail": 20,
+     "road": 12,
+     "air": 52,
+     "water": 0,
+     "prail": 515416,
+     "proad": 5060,
+     "pair": 709723,
+     "pwater": 0
     },
     {
+     "company": 1,
      "key": "AAAHogEx",
      "value": 20237533,
-     "t": "1960-01"
+     "vehicles": 271,
+     "errors": 0,
+     "rail": 85,
+     "road": 180,
+     "air": 6,
+     "water": 0,
+     "prail": 4929004,
+     "proad": 105797,
+     "pair": 189813,
+     "pwater": 0
     },
     {
+     "company": 2,
      "key": "LuDiAI AfterFix",
      "value": 1018226,
-     "t": "1960-01"
+     "vehicles": 165,
+     "errors": 0,
+     "rail": 0,
+     "road": 150,
+     "air": 12,
+     "water": 3,
+     "prail": 0,
+     "proad": 147073,
+     "pair": 62218,
+     "pwater": 16040
     },
     {
+     "company": 3,
      "key": "CivilAI",
      "value": 1,
-     "t": "1960-01"
+     "vehicles": 28,
+     "errors": 0,
+     "rail": 4,
+     "road": 23,
+     "air": 1,
+     "water": 0,
+     "prail": 19453,
+     "proad": 17505,
+     "pair": 11879,
+     "pwater": 0
     },
     {
+     "company": 4,
      "key": "AdmiralAI",
      "value": 1683107,
-     "t": "1960-01"
+     "vehicles": 230,
+     "errors": 0,
+     "rail": 4,
+     "road": 215,
+     "air": 11,
+     "water": 0,
+     "prail": 77876,
+     "proad": 210160,
+     "pair": 241276,
+     "pwater": 0
     },
     {
+     "company": 5,
      "key": "NoCAB",
      "value": 1,
-     "t": "1960-01"
+     "vehicles": 30,
+     "errors": 0,
+     "rail": 0,
+     "road": 30,
+     "air": 0,
+     "water": 0,
+     "prail": 0,
+     "proad": 22146,
+     "pair": 0,
+     "pwater": 0
     },
     {
+     "company": 6,
      "key": "DictatorAI",
      "value": 1,
-     "t": "1960-01"
+     "vehicles": 0,
+     "errors": 5,
+     "rail": 0,
+     "road": 0,
+     "air": 0,
+     "water": 0,
+     "prail": 0,
+     "proad": 0,
+     "pair": 0,
+     "pwater": 0
     },
     {
+     "company": 7,
      "key": "SimpleAI",
      "value": 1,
-     "t": "1960-01"
+     "vehicles": 0,
+     "errors": 5,
+     "rail": 0,
+     "road": 0,
+     "air": 0,
+     "water": 0,
+     "prail": 0,
+     "proad": 0,
+     "pair": 0,
+     "pwater": 0
     }
    ],
    "vs_first": 0.0

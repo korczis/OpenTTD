@@ -2384,8 +2384,9 @@ ABLATION_REQUIRED = {"schema": str, "id": str, "generated_at": str, "seed": int,
                      "field": list, "match_cfg": dict, "rev": str, "tree_dirty": bool, "rows": list}
 ABLATION_ROW = ("variant", "settings", "exit_code", "value", "money", "vehicles", "rail", "road", "air",
                 "errors", "field_best", "t", "vs_first")
-# Optional per row (records from 2026-11-23 on): `standings`, the final company value of every company
-# of the variant's match keyed as its lineup names it, so a reader derives rank and strongest rival.
+# Optional per row (records from 2026-11-23 on): `standings`, every company of the variant's match in
+# company-id order, keyed as its lineup names it, with its final value (and fleet, profit and errors),
+# so a reader derives rank and strongest rival.
 # Optional per record: `imported`, the provenance of a record built after the run from its kept log.
 
 
@@ -2395,25 +2396,33 @@ def ablation_vs_first(rows: list[dict]) -> list[float]:
     return [round(r["value"] / base - 1, 4) for r in rows]
 
 
+MODE_KEYS = ("rail", "road", "air", "water", "prail", "proad", "pair", "pwater")
+
+
 def ablation_row(name: str, settings: str, exit_code: int | None, text: str, field: list[str],
                  slot: int) -> dict:
     """One variant's ablation row from its match log: its last quarterly referee sample, the best
-    opponent's final value, and `standings`, every company's last sample keyed as the lineup names
-    it (the opponents by AI, the variant by its name, at `slot`). `exit_code` is None when the run's
-    exit status was not kept (a record imported from a log)."""
+    opponent's final value, and `standings`, every company of the lineup in company-id order (the
+    opponents keyed by AI, the variant by its name, at `slot`) with its final value, fleet per mode,
+    last year's profit per mode and Squirrel errors; the shape openttd-36/P's `ablate_rows` records.
+    `exit_code` is None when the run's exit status was not kept (a record imported from a log)."""
     series, errors = parse_log(text)
     me = min(slot, len(field))
-    keys = list(field)
-    keys.insert(me, name)
+    lineup = list(field)
+    lineup.insert(me, name)
     mine = series.get(me, [])
     last = mine[-1] if mine else {}
     field_best = max((s[-1]["value"] for c, s in series.items() if c != me and s), default=0)
-    standings = [{"key": keys[c], "value": s[-1]["value"], "t": s[-1]["t"]}
-                 for c, s in sorted(series.items()) if s and c < len(keys)]
+    standings = []
+    for cid, key in enumerate(lineup):
+        f = (series.get(cid) or [{}])[-1]
+        standings.append({"company": cid, "key": key, "value": f.get("value", 0),
+                          "vehicles": f.get("vehicles", 0), "errors": errors.get(cid, 0),
+                          **{k: f.get(k, 0) for k in MODE_KEYS}})
     return {"variant": name, "settings": settings, "exit_code": exit_code,
             "value": last.get("value", 0), "money": last.get("money", 0),
             "vehicles": last.get("vehicles", 0), "rail": last.get("rail"), "road": last.get("road"),
-            "air": last.get("air"), "errors": errors.get(0, 0), "field_best": field_best,
+            "air": last.get("air"), "errors": errors.get(me, 0), "field_best": field_best,
             "t": last.get("t", ""), "standings": standings}
 
 
