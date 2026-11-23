@@ -82,7 +82,9 @@ export function inventory() {
     if (seen.has(key)) continue;
     seen.add(key);
     el.dataset.crawlKey = key;
-    out.push({ key, pattern, kind, selector, disabled: el.matches(':disabled') || !!el.closest('[aria-disabled="true"]'), // a disabled fieldset too, label: label(el), href: tag === 'a' ? el.href : '', external: tag === 'a' && el.origin !== location.origin });
+    // disabled: :disabled covers a control inside a disabled fieldset too.
+    out.push({ key, pattern, kind, selector, disabled: el.matches(':disabled') || !!el.closest('[aria-disabled="true"]'),
+      label: label(el), href: tag === 'a' ? el.href : '', external: tag === 'a' && el.origin !== location.origin });
   }
   return out;
 }

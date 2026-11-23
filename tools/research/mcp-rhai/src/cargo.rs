@@ -119,6 +119,107 @@ pub fn freight_pairs(world: &Value, engines: &Value, p: &Value, limit: usize) ->
     out
 }
 
+/// The reach of a rail station tile, as the bot reads it (rail.nut `ForeignRailStationAt`:
+/// AIStation.GetCoverageRadius(STATION_TRAIN)): CA_TRAIN with modified catchment, CA_UNMODIFIED
+/// without, both 4 in src/station_type.h.
+pub const RAIL_CATCHMENT: i64 = 4;
+
+/// How far from its location tile (the north corner of its area) an industry tile is looked for.
+const INDUSTRY_REACH: i64 = 16;
+
+/// What `rail_claims` reads and where it differs from the bot's rule, for the plan's `claims`.
+pub const CLAIM_RULE: &str = "a raw producer (produces cargo, accepts none) is held by every company with a rail station tile \
+    (openttd://map type S with track in openttd://map/ways) within 4 tiles of one of its tiles (rail.nut ForeignRailStationAt). \
+    Derived, not read: the game serves no industry id per tile, so each industry tile counts for the industry whose location \
+    tile lies nearest north of it; and no raw flag, so a processing industry that accepts nothing (the sub-tropical lumber mill) \
+    counts as raw, and a rail waypoint as a rail station";
+
+/// A company of openttd://map's owner encoding (0-9, then a-e), else None (T town, N none, W
+/// water, D deity, '.' not ownable).
+fn company_of(c: u8) -> Option<i64> {
+    match c {
+        b'0'..=b'9' => Some(i64::from(c - b'0')),
+        b'a'..=b'e' => Some(i64::from(c - b'a') + 10),
+        _ => None,
+    }
+}
+
+/// A world-graph id as a key: the string, or the JSON of a number.
+fn id_key(v: &Value) -> String {
+    v.as_str().map_or_else(|| v.to_string(), str::to_string)
+}
+
+/// The companies that hold each raw producer of openttd://world/graph with a rail station, by
+/// producer id and sorted: the planner's copy of the bot's rule (`CLAIM_RULE`). Err says what is
+/// missing to tell, and then nothing is claimed.
+pub fn rail_claims(world: &Value, map: &Value, ways: &Value) -> Result<std::collections::BTreeMap<String, Vec<i64>>, String> {
+    let rows = |v: &Value, k: &str, what: &str| -> Result<Vec<Vec<u8>>, String> {
+        v[k].as_array().map(|a| a.iter().map(|r| r.as_str().unwrap_or("").as_bytes().to_vec()).collect())
+            .ok_or_else(|| format!("{what} has no {k}"))
+    };
+    let types = rows(map, "types", "openttd://map")?;
+    let owners = rows(map, "owners", "openttd://map")?;
+    let rails = rows(ways, "rails", "openttd://map/ways (rail station tiles cannot be told from road stops)")?;
+    let at = |r: &[Vec<u8>], x: usize, y: usize| r.get(y).and_then(|row| row.get(x)).copied();
+    // Every rail station tile with its owner.
+    let mut stations = Vec::new();
+    for (y, row) in types.iter().enumerate() {
+        for (x, _) in row.iter().enumerate().filter(|(_, c)| **c == b'S') {
+            let track = rails.get(y).and_then(|r| r.get(2 * x..2 * x + 2)).and_then(|d| std::str::from_utf8(d).ok())
+                .and_then(|d| u8::from_str_radix(d, 16).ok()).unwrap_or(0);
+            if let (true, Some(owner)) = (track != 0, at(&owners, x, y).and_then(company_of)) {
+                stations.push((x as i64, y as i64, owner));
+            }
+        }
+    }
+    let industries: Vec<&Value> = world["nodes"].as_array().into_iter().flatten().filter(|n| n["kind"] == "industry").collect();
+    let loc = |n: &Value| (n["x"].as_i64().unwrap_or(-1), n["y"].as_i64().unwrap_or(-1));
+    // Each industry tile for the industry whose location is nearest north of it (`CLAIM_RULE`).
+    let mut tiles: Vec<Vec<(i64, i64)>> = vec![Vec::new(); industries.len()];
+    for (y, row) in types.iter().enumerate() {
+        for (x, _) in row.iter().enumerate().filter(|(_, c)| **c == b'I') {
+            let (x, y) = (x as i64, y as i64);
+            let owner = industries.iter().enumerate().map(|(i, n)| (i, loc(n)))
+                .filter(|(_, (lx, ly))| *lx <= x && *ly <= y && x - lx < INDUSTRY_REACH && y - ly < INDUSTRY_REACH)
+                .min_by_key(|(i, (lx, ly))| ((x - lx).max(y - ly), (x - lx) + (y - ly), *i));
+            if let Some((i, _)) = owner { tiles[i].push((x, y)); }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    for (i, n) in industries.iter().enumerate() {
+        let list = |k: &str| n[k].as_array().map_or(0, Vec::len);
+        if list("produces") == 0 || list("accepts") > 0 { continue; }
+        let mut held: Vec<i64> = stations.iter()
+            .filter(|(sx, sy, _)| tiles[i].iter().any(|(tx, ty)| (sx - tx).abs().max((sy - ty).abs()) <= RAIL_CATCHMENT))
+            .map(|s| s.2).collect();
+        held.sort();
+        held.dedup();
+        if !held.is_empty() { out.insert(id_key(&n["id"]), held); }
+    }
+    Ok(out)
+}
+
+/// The freight candidates with each producer's holders (`rail_claims`) as `producer.rail_stations`,
+/// and, with `plan_for` (the companies the plan is for), those whose producer a company outside it
+/// holds left out, as the bot would refuse them; then the plan's `claims` record.
+pub fn with_claims(freight: Vec<Value>, claims: &Result<std::collections::BTreeMap<String, Vec<i64>>, String>,
+                   plan_for: Option<&[i64]>) -> (Vec<Value>, Value) {
+    let none = std::collections::BTreeMap::new();
+    let held = claims.as_ref().unwrap_or(&none);
+    let mut left_out = std::collections::BTreeMap::new();
+    let kept = freight.into_iter().filter_map(|mut c| {
+        let by = held.get(&id_key(&c["producer"]["id"])).cloned().unwrap_or_default();
+        c["producer"]["rail_stations"] = json!(by);
+        let others: Vec<i64> = by.iter().copied().filter(|o| plan_for.is_some_and(|f| !f.contains(o))).collect();
+        if others.is_empty() { return Some(c); }
+        left_out.insert(id_key(&c["producer"]["id"]), json!({"producer": c["producer"]["id"], "name": c["producer"]["name"], "companies": others}));
+        None
+    }).collect();
+    let record = json!({"rule": CLAIM_RULE, "radius": RAIL_CATCHMENT, "plan_for": plan_for, "error": claims.as_ref().err(),
+                        "producers": held, "left_out": left_out.into_values().collect::<Vec<_>>()});
+    (kept, record)
+}
+
 /// The 0/1 knapsack the portfolio needs: maximise the sum of values with weights within capacity.
 fn knapsack_builtin(weights: &[usize], values: &[f64], capacity: usize) -> (f64, Vec<usize>) {
     let n = weights.len();
@@ -466,6 +567,18 @@ pub mod testing {
     use crate::battlebrain_contract as bb;
     use serde_json::Value;
 
+    /// A 20 x 12 map for the claims: `tiles` of type I, rail station tiles (S with track) and road
+    /// stops (S without) with their owner character, as openttd://map and openttd://map/ways serve them.
+    pub fn claims_map(industry: &[(usize, usize)], rail: &[(usize, usize, u8)], road: &[(usize, usize, u8)]) -> (Value, Value) {
+        let (w, h) = (20, 12);
+        let (mut types, mut owners, mut rails) = (vec![vec![b'C'; w]; h], vec![vec![b'N'; w]; h], vec![vec![b'0'; 2 * w]; h]);
+        for &(x, y) in industry { types[y][x] = b'I'; owners[y][x] = b'.'; }
+        for &(x, y, o) in rail.iter().chain(road) { types[y][x] = b'S'; owners[y][x] = o; }
+        for &(x, y, _) in rail { rails[y][2 * x + 1] = b'1'; }
+        let text = |rows: Vec<Vec<u8>>| rows.into_iter().map(|r| String::from_utf8(r).unwrap()).collect::<Vec<_>>();
+        (serde_json::json!({"width": w, "height": h, "types": text(types), "owners": text(owners)}), serde_json::json!({"rails": text(rails)}))
+    }
+
     pub fn fixture() -> Value {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/battlebrain/catalogue.json");
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
@@ -550,6 +663,72 @@ mod tests {
     }
     const PINNED_FREIGHT: &str = r#"[{"acceptor":{"id":2,"name":null,"x":95,"y":40},"cargo":"Coal","cargo_id":1,"distance":115.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":11325.0,"carried_per_month":3.0,"income_per_unit":75.74,"investment":15325.0,"mode":"truck","monthly_profit":55.0,"score":-14009.0,"transit_periods":28.5,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":12980.0,"carried_per_month":118.0,"income_per_unit":80.26,"investment":63980.0,"mode":"freight_rail","monthly_profit":9048.0,"score":153168.0,"transit_periods":14.6,"vehicles":{"capacity":120.0,"count":3.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":153168.0,"supply_per_month":126.0},{"acceptor":{"id":3,"name":null,"x":30,"y":20},"cargo":"Coal","cargo_id":1,"distance":30.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":3250.0,"carried_per_month":11.0,"income_per_unit":21.42,"investment":7250.0,"mode":"truck","monthly_profit":30.0,"score":-6519.0,"transit_periods":8.9,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":4480.0,"carried_per_month":109.0,"income_per_unit":21.58,"investment":21480.0,"mode":"freight_rail","monthly_profit":2202.0,"score":31361.0,"transit_periods":5.3,"vehicles":{"capacity":120.0,"count":1.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":31361.0,"supply_per_month":126.0}]"#;
     const PINNED_FREIGHT_CALIBRATED: &str = r#"[{"acceptor":{"id":2,"name":null,"x":95,"y":40},"cargo":"Coal","cargo_id":1,"distance":115.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":11325.0,"carried_per_month":3.0,"income_per_unit":75.74,"investment":15325.0,"mode":"truck","monthly_profit":44.0,"score":-14272.0,"transit_periods":28.5,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":12980.0,"carried_per_month":39.0,"income_per_unit":80.26,"investment":29980.0,"mode":"freight_rail","monthly_profit":3619.0,"score":56879.0,"transit_periods":14.6,"vehicles":{"capacity":120.0,"count":1.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":56879.0,"supply_per_month":126.0},{"acceptor":{"id":3,"name":null,"x":30,"y":20},"cargo":"Coal","cargo_id":1,"distance":30.0,"kind":"freight","mode":"freight_rail","options":[{"build_cost":3250.0,"carried_per_month":11.0,"income_per_unit":21.42,"investment":7250.0,"mode":"truck","monthly_profit":24.0,"score":-6665.0,"transit_periods":8.9,"vehicles":{"capacity":20.0,"count":1.0,"effective_speed_kmh":48.0,"name":"Truck"}},{"build_cost":4480.0,"carried_per_month":109.0,"income_per_unit":21.58,"investment":21480.0,"mode":"freight_rail","monthly_profit":2642.0,"score":41930.0,"transit_periods":5.3,"vehicles":{"capacity":120.0,"count":1.0,"effective_speed_kmh":101.0,"name":"Loco + 4 x Hopper"}}],"producer":{"id":1,"name":null,"x":10,"y":10},"score":41930.0,"supply_per_month":126.0}]"#;
+
+    /// The bot's rule (rail.nut ForeignRailStationAt) read from the map: a raw producer is held by
+    /// each company with a rail station tile within 4 tiles of one of its tiles; a road stop, a
+    /// station 5 tiles away and a processing industry hold nothing.
+    #[test]
+    fn rail_stations_near_a_raw_producer_hold_it_for_their_company() {
+        let world = json!({"nodes": [
+            {"kind": "industry", "id": "industry:1", "name": "Mine A", "x": 2, "y": 2, "produces": [{"name": "Coal"}], "accepts": []},
+            {"kind": "industry", "id": "industry:2", "name": "Mine B", "x": 12, "y": 2, "produces": [{"name": "Coal"}]},
+            {"kind": "industry", "id": "industry:3", "name": "Plant", "x": 2, "y": 8, "produces": [{"name": "Goods"}], "accepts": [{"name": "Coal"}]},
+            {"kind": "industry", "id": "industry:4", "name": "Mine D", "x": 12, "y": 8, "produces": [{"name": "Coal"}]},
+            {"kind": "town", "id": "town:0", "x": 0, "y": 0}]});
+        // Mine A's tiles reach (3, 3): company 2's platform 4 tiles east of (3, 2) catches it, and
+        // company 0's road stop beside it does not. Mine B: company 0 two tiles away, company 1 five
+        // (out of reach) and company 11 ('b'). The plant is processing; Mine D has no station.
+        let (map, ways) = testing::claims_map(&[(2, 2), (3, 2), (2, 3), (3, 3), (12, 2), (13, 2), (2, 8), (3, 8), (12, 8)],
+                                     &[(7, 2, b'2'), (15, 3, b'0'), (18, 2, b'1'), (17, 4, b'b'), (5, 8, b'3')], &[(4, 4, b'0')]);
+        let claims = super::rail_claims(&world, &map, &ways).unwrap();
+        assert_eq!(claims, [("industry:1".to_string(), vec![2]), ("industry:2".to_string(), vec![0, 11])].into_iter().collect());
+        let fr = |p: i64| json!({"producer": {"id": format!("industry:{p}"), "name": format!("P{p}")}, "score": 1.0});
+        let lines = vec![fr(1), fr(2), fr(3), fr(4)];
+        // Planned for companies 0 and 11: Mine A, which company 2 holds, is left out; the others stay,
+        // each naming who holds it.
+        let (kept, record) = super::with_claims(lines.clone(), &Ok(claims.clone()), Some(&[0, 11]));
+        let held: Vec<(String, Value)> = kept.iter().map(|c| (c["producer"]["name"].as_str().unwrap().to_string(), c["producer"]["rail_stations"].clone())).collect();
+        assert_eq!(held, [("P2".into(), json!([0, 11])), ("P3".into(), json!([])), ("P4".into(), json!([]))]);
+        assert_eq!(record["left_out"], json!([{"producer": "industry:1", "name": "P1", "companies": [2]}]));
+        assert_eq!((record["plan_for"].clone(), record["radius"].clone(), record["error"].clone()), (json!([0, 11]), json!(4), Value::Null));
+        assert!(record["rule"].as_str().unwrap().contains("ForeignRailStationAt"));
+        // A company not started yet (no company of its own): every held producer is left out.
+        let (kept, record) = super::with_claims(lines.clone(), &Ok(claims.clone()), Some(&[]));
+        assert_eq!(kept.len(), 2);
+        assert_eq!(record["left_out"].as_array().unwrap().len(), 2);
+        // Without --for nothing is left out, and the holders are named.
+        let (kept, _) = super::with_claims(lines.clone(), &Ok(claims), None);
+        assert_eq!(kept.len(), 4);
+        assert_eq!(kept[0]["producer"]["rail_stations"], json!([2]));
+        // Without the map's ways a rail platform cannot be told from a road stop: nothing is claimed,
+        // and the record says why.
+        let missing = super::rail_claims(&world, &map, &Value::Null);
+        assert!(missing.as_ref().unwrap_err().contains("openttd://map/ways"), "{missing:?}");
+        let (kept, record) = super::with_claims(lines, &missing, Some(&[]));
+        assert_eq!(kept.len(), 4);
+        assert!(record["error"].as_str().unwrap().contains("has no rails"));
+        assert!(super::rail_claims(&world, &json!({"owners": []}), &ways).unwrap_err().contains("openttd://map has no types"));
+    }
+
+    /// The owner characters of openttd://map: companies 0-9 and a-e; a town, none, water, the deity
+    /// and an unownable tile are no company.
+    #[test]
+    fn the_map_owner_code_names_companies_only() {
+        assert_eq!([b'0', b'9', b'a', b'e'].map(super::company_of), [Some(0), Some(9), Some(10), Some(14)]);
+        assert_eq!([b'f', b'T', b'N', b'W', b'D', b'.'].map(super::company_of), [None; 6]);
+    }
+
+    /// An industry tile counts for the industry whose location lies nearest north of it: two mines
+    /// side by side keep their own tiles, so a station by one does not hold the other.
+    #[test]
+    fn an_industry_tile_counts_for_the_nearest_location_north_of_it() {
+        let world = json!({"nodes": [
+            {"kind": "industry", "id": 1, "x": 2, "y": 2, "produces": [{"name": "Coal"}]},
+            {"kind": "industry", "id": 2, "x": 4, "y": 2, "produces": [{"name": "Coal"}]}]});
+        let (map, ways) = testing::claims_map(&[(2, 2), (3, 2), (4, 2), (5, 2), (6, 2)], &[(10, 2, b'5')], &[]);
+        let claims = super::rail_claims(&world, &map, &ways).unwrap();
+        assert_eq!(claims, [("2".to_string(), vec![5])].into_iter().collect(), "(6, 2) is mine 2's, 4 tiles from the platform");
+    }
 
     #[test]
     fn the_builtin_fallback_is_never_labelled_as_the_kernel() {
