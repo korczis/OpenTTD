@@ -119,6 +119,7 @@ const routes = (url, init) => {
     };
   if (url === '/api/content/download') return { ids: [11], output: ['heartbeat', 'downloaded 11'] };
   if (url === '/api/console') return { output: ['line one', 'line two'] };
+  if (url === '/api/deny') return { status: 'denied', approval_id: 3 };
   if (url === '/api/rpc') return { result: { tools: [] } };
   if (url.startsWith('/api/resource?')) return { data: { towns: 9 } };
   if (url === '/api/rhai/stream') {
@@ -151,6 +152,8 @@ test('the markup builders draw approvals, events, companies and decisions from t
   const p = app.pendingHtml(status.pending);
   assert.match(p, /data-approve="3"/);
   assert.ok(p.includes(UI.primary), "Approve is the shell's primary button");
+  assert.match(p, /data-deny="3"[^>]*>Deny</, 'each approval has its Deny');
+  assert.ok(p.includes(UI.secondary), "Deny is the shell's secondary button");
   assert.match(p, /openttd\.cmd\.BuildRoad\(\{&quot;tile&quot;:7\}\)/);
   assert.equal(app.pendingHtml([]), '<li>none</li>');
   assert.match(
@@ -306,6 +309,7 @@ test('the page fills itself: status, overview, cluster, news and questions', asy
 test('buttons call their routes: approve, pause, resume, AI, auto-approve', async () => {
   const btn = $('pending').querySelector('[data-approve]');
   await env.document.dispatch('click', { target: btn });
+  await env.document.dispatch('click', { target: $('pending').querySelector('[data-deny]') });
   await $('btn-pause').onclick();
   await $('btn-resume').onclick();
   await $('btn-ai').onclick();
@@ -314,6 +318,7 @@ test('buttons call their routes: approve, pause, resume, AI, auto-approve', asyn
   const sent = posts.map(([u, b]) => `${u} ${JSON.stringify(b)}`);
   for (const s of [
     '/api/approve {"id":3}',
+    '/api/deny {"id":3}',
     '/api/pause {"pause":true}',
     '/api/pause {"pause":false}',
     '/api/start-ai {}',
