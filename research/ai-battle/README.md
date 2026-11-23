@@ -299,10 +299,24 @@ The first editions showed two failures. The battle now catches both by itself.
   - `hoards:<t0>..<t1>:<money0>-><money1>@<vehicles>v`: over `anomaly_rules.hoard_window`
     quarterly samples (default 8, two game years) the fleet stayed flat or shrank (its maximum at
     most `hoard_fleet_slack`, default 0.1, above the count at the window's start), its stations did
-    too (a company laying lines is spending, not hoarding), while the bank
-    balance rose at least `hoard_factor`-fold (default 2) and ended at or above `hoard_floor`
-    (default 500000). Every window is judged, so the fitness check also sees a hoard the bot
-    later spent its way out of. The window is the first one that matched.
+    too (a company laying lines is spending, not hoarding), while its money net of the loan (the
+    referee's `money`, the bank balance, less its `loan`) rose at least `hoard_factor`-fold
+    (default 2) and ended at or above `hoard_floor` (default 500000). Every window is judged, so
+    the fitness check also sees a hoard the bot later spent its way out of. The window is the
+    first one that matched, and the money it shows is net of the loan. The bank balance alone
+    counted borrowed money as hoarded: on the fitness seed (930967890, 2026-11-23,
+    fix/prismatic-steward-capital) the self-steward contestant held 36-42 vehicles from 1964-04,
+    and its last sample (1966-01) came while a new rail line was being built on the whole 300k
+    loan, so the balance read 348k in 1965-10 and 795k then, and the check called 321k -> 795k a
+    hoard (about 1.5-fold net of the loan). A log or record from before the referee logged
+    `loan=` reads it as 0 (`parse_log`; test `test_money_borrowed_to_build_is_not_hoarded`). A
+    window whose net money starts at or below 0 is not judged. Any rise from there passes the
+    factor, so only the floor would decide, and a company paying back its loan (100k on a 300k
+    loan, then 520k with none) read as a hoard. A company that goes on holding its money is caught
+    by the next window that starts above 0 (test `test_a_window_that_starts_in_debt_is_not_judged`).
+    For a company holding the same loan L throughout, judging net money makes the factor test
+    looser in bank terms (bank_1 >= factor * bank_0 - (factor - 1) * L) and the floor stricter
+    (bank_1 >= floor + L). Both judge what the company owns.
 
   A new anomaly goes to the event log as an `ALERT` and onto the dashboard's alert panel. Records
   keep each standing's anomalies, and the leaderboard counts each contestant's anomalous matches.

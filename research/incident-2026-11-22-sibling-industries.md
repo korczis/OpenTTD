@@ -130,3 +130,11 @@ counts as raw.
 <!-- open-finding kind=partial -->
 A processing industry served by two PrismaticAI companies is still possible: only the
 transported-last-month filter covers it.
+
+<!-- open-finding kind=partial -->
+The same-days tie-break settles a race only when both source stations stand when the later check
+runs. If the company of the higher id finishes its station before the other's site search ends, it
+sees no rival and keeps it, and the lower one then sees a higher rival and keeps its own as well
+(found by review, 2026-11-23). PR #240's longer site search widens that window. Waiting 10 days
+before the check closed it but cost every line: on the fitness seed 930967890 the six PrismaticAI
+lineups summed 7.87M with the wait and 9.36M without.

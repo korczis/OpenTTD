@@ -62,6 +62,7 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/console` | `{"command"}` | one OpenTTD console line and its output |
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
 | `POST /api/approve` | `{"id"}` | the owner's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it, 504 when no decision came |
+| `POST /api/deny` | `{"id"}` | withdraw a pending decision through the same core (`prismatic_mcp deny <id>`): it enacts nothing, so no owner secret is needed. 200 with the approval now `denied`, 404 for one the server does not hold, 409 for one not pending, 504 when the server did not mark it denied. The home page's Deny button calls it |
 | `POST /api/auto-approve` | `{"on": bool}` | `on: true` needs the owner secret (401 without it); `on: false` is open to anyone |
 | `POST /api/rhai` | `{"script"}` | a Rhai script's output |
 | `POST /api/rhai/stream` | `{"script"}` | the same, streamed line by line (SSE `out`, `err`, `exit`) |
@@ -1614,6 +1615,17 @@ character, so a newline inside a value (an AI's settings, a content query) canno
 command. Approvals go through `POST /api/approve` with the owner secret, or through the game's own
 console. Withdrawing your own request (`deny`) is still allowed. `mcp-panel-check` tests both cases.
 
+### The panel's Approve and Deny, in Chrome
+
+`tools/research/mcp-approval-ui-check` runs the real `mcp-panel` against
+`tools/research/mcp-fake-game`, a stand-in for the dedicated server. It speaks the console on stdin
+and an MCP endpoint, and its one approval queue is seeded so that the page's buttons reach every
+answer: Approve gets 200 executed, 422 rejected, 504 with no decision, 409 consumed elsewhere and
+404 forgotten by the server; Deny gets 200 denied, 504, 409 and 404. Each answer must show on the
+page as a toast. The server's queue must then hold what the buttons did, and every line the change
+adds to `static/app.js` must have run in Chrome (its JS coverage). No process the run started may be
+left. It needs no game build, and the Research Rust workflow runs it on every change to the panel.
+
 ### Approval is bound to the owner
 
 Before 2026-11-22 the loopback API authenticated no one: any local process, script or agent could
@@ -1697,10 +1709,24 @@ The window has no state or list of its own: `openttd.ui.control` (read-only, in 
 dedicated server included) answers the same `Panel::Snapshot()` it draws, so an MCP client, a Rhai
 script and the owner see one thing. `openttd.ui.menu.run {index: 0}` opens it.
 
-Limit: the approvals listed are the queue of the process the window runs in. In a game the owner
-hosts on a dedicated server, the owner's GUI client is another process; its window lists that
-client's queue, and the server's queue is read with `openttd.ui.control` on the server's MCP
-endpoint (or the panel) until approvals reach the client.
+**On a network client the window shows the server's queue.** The client's own MCP server holds
+none of the server's approvals, so in a game the owner plays on a dedicated server the window lists
+the server's queue for the owner's company:
+
+- **Refresh.** Every 5 s the client sends the server `!approvals` privately and reads the
+  `[approvals] {json}` lines of the answer (`detail::ServerApprovalsReader`). The answer to the
+  client's own ask is read, not printed in the chat.
+- **Decisions open the window.** An approval the client has not seen yet opens the window, so a
+  decision that waits (a replan proposal, the answer to `ask` / `do` / `plan`) appears as a
+  decision with Approve and Deny, never as news.
+- **Approve and Deny.** They still run the console's command, which sends `!approve <id>` or
+  `!deny <id>` to the server. There only a registered approver's key approves (`prismatic_mcp
+  approvers`, ADR 0038; [coplay.md](coplay.md) "Who approves"), and the answer comes back as a
+  private message.
+- **Operator rows.** A row the chat may not decide ends with "(the server's operator decides)".
+
+`openttd.ui.control` on the client's MCP answers the same snapshot, the server's rows marked
+`on_server: true`.
 
 ## The world as data: map, stations, road graph
 

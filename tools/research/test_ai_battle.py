@@ -581,6 +581,50 @@ class Health(unittest.TestCase):
         self.assertEqual(battle.anomalies(poor[:6], 0, rules),
                          ["hoards:1955-01..1955-10:50000->110000@12v"])
 
+    def test_money_borrowed_to_build_is_not_hoarded(self):
+        # The fitness seed 930967890, PrismaticAI self-steward (fix/prismatic-steward-capital,
+        # 2026-11-23): 41-42 vehicles from 1964-04; the 1966-01 sample came while a rail line was
+        # being built on the whole 300k loan, so the bank balance read 321k -> 795k.
+        vehicles = [41, 42, 37, 36, 37, 36, 37, 37]
+        money = [320_770, 327_540, 90_175, 178_265, 194_779, 283_682, 348_182, 794_771]
+        loan = [0, 0, 0, 0, 0, 0, 0, 300_000]
+        built = [dict(s, loan=l) for s, l in zip(self.books(vehicles, money), loan)]
+        self.assertEqual(battle.anomalies(built, 0, self.RULES), [])
+        # The same books with the loan not logged (a record from before loan=) read it as a hoard.
+        self.assertEqual(battle.anomalies(self.books(vehicles, money), 0, self.RULES),
+                         ["hoards:1955-01..1956-10:320770->794771@41v"])
+        # A real hoard with no loan stays one: the owner's game, 0.6M -> 3.77M on 35-37 vehicles.
+        incident = [dict(s, loan=0) for s in self.books([35, 36, 37, 36] * 5, self.INCIDENT_MONEY)]
+        self.assertEqual(battle.anomalies(incident, 0, self.RULES),
+                         ["hoards:1955-01..1956-10:600000->1720000@35v"])
+        # And one that holds a loan throughout is judged on what it owns.
+        owed = [dict(s, loan=100_000) for s in self.books([37] * 20, self.INCIDENT_MONEY)]
+        self.assertEqual(battle.anomalies(owed, 0, self.RULES),
+                         ["hoards:1955-01..1956-10:500000->1620000@37v"])
+
+    def test_a_window_that_starts_in_debt_is_not_judged(self):
+        # Review of #244: 100k in the bank on a 300k loan, then 520k with no loan, is a company
+        # paying back its loan; "-200000->520000" passed the factor test for any rise.
+        vehicles = [20] * 8
+        money = [100_000, 150_000, 200_000, 250_000, 320_000, 400_000, 460_000, 520_000]
+        loan = [300_000, 300_000, 250_000, 200_000, 100_000, 50_000, 0, 0]
+        repaying = [dict(s, loan=l) for s, l in zip(self.books(vehicles, money), loan)]
+        self.assertEqual(battle.anomalies(repaying, 0, self.RULES), [])
+        # The same company holding on afterwards is caught by a window that starts above 0.
+        later = self.books([20] * 16, money + [600_000 + i * 150_000 for i in range(8)])
+        later = [dict(s, loan=l) for s, l in zip(later, loan + [0] * 8)]
+        self.assertEqual(battle.anomalies(later, 0, self.RULES),
+                         ["hoards:1955-10..1957-07:50000->900000@20v"])
+
+    def test_the_referee_line_carries_the_loan(self):
+        line = ("[2026-11-23 00:00:00] dbg: [script:1] [18] [E] REF Q date=1966-1 cid=0 value=1340672 "
+                "money=794771 loan=300000 income=189062 perf=303 vehicles=37 stations=40 name=A B")
+        series, _ = battle.parse_log(line + "\n" + ref(1966, 4, 1, 5))
+        self.assertEqual((series[0][0]["money"], series[0][0]["loan"]), (794771, 300000))
+        self.assertEqual(series[1][0]["loan"], 0)          # a line without loan= reads 0
+        src = (battle.REPO / "tools/research/ai-battle/referee/BattleReferee/main.nut").read_text()
+        self.assertIn('" loan=" + this.LoanOf(c)', src)
+
     def test_a_company_that_builds_stations_is_not_hoarding(self):
         # The planned fitness contestant (seed 930967890, 2026-11-22) kept 9 vehicles while its
         # money rose 283k -> 697k: it was laying one rail line per heartbeat, months each, so its

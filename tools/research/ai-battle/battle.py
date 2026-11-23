@@ -1201,7 +1201,8 @@ def parse_log(text: str) -> tuple[dict, dict]:
             y, mo, cid, fields, name = m.groups()
             sample = {"t": f"{y}-{int(mo):02d}", "name": name.strip()}
             sample.update({k: int(v) for k, v in REF_FIELD.findall(fields)})
-            for k in ("value", "money", "income", "perf", "vehicles", "stations"):
+            # loan: since the referee logs it (2026-11-23); older logs and records read 0.
+            for k in ("value", "money", "loan", "income", "perf", "vehicles", "stations"):
                 sample.setdefault(k, 0)
             by_key[(int(cid), int(y), int(mo))] = sample
             continue
@@ -2510,17 +2511,36 @@ def fleet_peak_final(series: list[dict]) -> tuple[int, int]:
 def hoarding(series: list[dict], rules: dict) -> str | None:
     """The first window of `hoard_window` quarterly samples (default 8, two game years) in which the
     fleet stays flat or shrinks (its maximum is at most `hoard_fleet_slack` above the count at the
-    window's start), and so do its stations (nothing is built), while the bank balance rises at least `hoard_factor`-fold (default 2) and ends
-    at or above `hoard_floor` (default 500000), as "<t0>..<t1>:<money0>-><money1>@<vehicles>v".
-    In the owner's live co-play game (2026-11-22) company 0 kept 35-37 vehicles from 1955 to 1960
-    while its balance grew from 0.6M to 3.77M, and no other anomaly fired. Every window is judged,
-    not only the last, so the fitness check sees a hoard the bot later spent its way out of."""
+    window's start), and so do its stations (nothing is built), while its money net of the loan
+    (the bank balance less the loan, both from the referee) rises at least `hoard_factor`-fold
+    (default 2) and ends at or above `hoard_floor` (default 500000), as
+    "<t0>..<t1>:<money0>-><money1>@<vehicles>v" with the net money. In the owner's live co-play
+    game (2026-11-22) company 0 kept 35-37 vehicles from 1955 to 1960 while its balance grew from
+    0.6M to 3.77M, and no other anomaly fired. Every window is judged, not only the last, so the
+    fitness check sees a hoard the bot later spent its way out of. The bank balance alone counted
+    borrowed money as hoarded: on the fitness seed 930967890 the self-steward contestant's last
+    sample (1966-01) came while a new rail line was being built on the whole loan, 348k in 1965-10
+    and 795k then, and the check read 321k -> 795k as a hoard. A sample without a loan (a log or
+    record from before the referee logged it) counts the loan as 0. A window that starts with net
+    money at or below 0 is skipped: a factor of a non-positive start says nothing, and such a
+    company is paying back its loan. Judging net money means that, for a company holding the same
+    loan L throughout, the factor test reads bank_1 >= factor * bank_0 - (factor - 1) * L in bank
+    terms (looser) and the floor reads bank_1 >= floor + L (stricter). That is intended: the test
+    judges what the company owns."""
     window = rules.get("hoard_window", 8)
     factor, floor = rules.get("hoard_factor", 2.0), rules.get("hoard_floor", 500_000)
     slack = rules.get("hoard_fleet_slack", 0.1)
     for i in range(len(series) - window + 1):
         w = series[i:i + window]
-        v0, m0, m1 = w[0]["vehicles"], w[0].get("money", 0), w[-1].get("money", 0)
+        v0 = w[0]["vehicles"]
+        m0 = w[0].get("money", 0) - w[0].get("loan", 0)
+        m1 = w[-1].get("money", 0) - w[-1].get("loan", 0)
+        # A window that starts in debt (net money at most 0) is not judged. Any rise is then at
+        # least "factor-fold", so only the floor would decide, and a company paying back its loan
+        # (100k on a 300k loan, then 520k with none) would read as a hoard. A company that goes on
+        # holding its money is caught by the next window that starts above 0.
+        if m0 <= 0:
+            continue
         # Building is spending: a company whose stations grow while its fleet waits is laying
         # lines (the planned fitness contestant, 9 vehicles, 283k -> 697k, one rail line a
         # heartbeat), not hoarding. Samples without a station count judge the fleet alone.

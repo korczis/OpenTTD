@@ -1,0 +1,330 @@
+{
+  "schema": "rust-bench/v1",
+  "id": "bench-20261122T231401-7d2c5d33",
+  "generated_at": "2026-11-22T23:14:01+00:00",
+  "rev": "7d2c5d33cf85f102897fcacedea58cae246d34a5",
+  "tree_dirty": false,
+  "host": {
+    "name": "macbook-pro",
+    "os": "macos",
+    "cpus": 18
+  },
+  "toolchain": "rustc 1.90.0",
+  "profile": "bench",
+  "crate": "tools/research/mcp-rhai",
+  "benches": [
+    {
+      "id": "cargo/freight_pairs",
+      "group": "cargo",
+      "name": "freight_pairs",
+      "unit": "ns",
+      "mean": 2169942.7813953487,
+      "median": 2101786.813953488,
+      "stddev": 169763.40998849666,
+      "min": 1941502.9069767443,
+      "max": 2531288.7674418604,
+      "samples": 20,
+      "throughput": null
+    },
+    {
+      "id": "cargo/portfolio_builtin",
+      "group": "cargo",
+      "name": "portfolio_builtin",
+      "unit": "ns",
+      "mean": 182476.3563207547,
+      "median": 179872.7594339623,
+      "stddev": 27129.241904284485,
+      "min": 147637.57735849055,
+      "max": 220783.96226415093,
+      "samples": 20,
+      "throughput": {
+        "kind": "elements",
+        "per_iteration": 35
+      }
+    },
+    {
+      "id": "json/parse_map",
+      "group": "json",
+      "name": "parse_map",
+      "unit": "ns",
+      "mean": 62467.49419889502,
+      "median": 62397.854205033764,
+      "stddev": 2492.312138761143,
+      "min": 58154.08225905464,
+      "max": 67948.12768569675,
+      "samples": 20,
+      "throughput": {
+        "kind": "bytes",
+        "per_iteration": 270758
+      }
+    },
+    {
+      "id": "json/parse_map_ways",
+      "group": "json",
+      "name": "parse_map_ways",
+      "unit": "ns",
+      "mean": 1400975.628082192,
+      "median": 1396695.493150685,
+      "stddev": 72069.39005677083,
+      "min": 1316656.9726027397,
+      "max": 1557115.301369863,
+      "samples": 20,
+      "throughput": {
+        "kind": "bytes",
+        "per_iteration": 731255
+      }
+    },
+    {
+      "id": "json/parse_world_graph",
+      "group": "json",
+      "name": "parse_world_graph",
+      "unit": "ns",
+      "mean": 1720859.1983333335,
+      "median": 1732622.5583333333,
+      "stddev": 74186.1460155722,
+      "min": 1610141.6666666667,
+      "max": 1827800.6833333333,
+      "samples": 20,
+      "throughput": {
+        "kind": "bytes",
+        "per_iteration": 672466
+      }
+    },
+    {
+      "id": "lines/price_rail_lines",
+      "group": "lines",
+      "name": "price_rail_lines",
+      "unit": "ns",
+      "mean": 6448692.83125,
+      "median": 6361140.59375,
+      "stddev": 193368.32181340724,
+      "min": 6194984.3125,
+      "max": 6941872.3125,
+      "samples": 20,
+      "throughput": {
+        "kind": "elements",
+        "per_iteration": 8
+      }
+    },
+    {
+      "id": "lines/prove_yards",
+      "group": "lines",
+      "name": "prove_yards",
+      "unit": "ns",
+      "mean": 4311234.981249999,
+      "median": 4217871.5,
+      "stddev": 227985.94816500947,
+      "min": 3993788.2083333335,
+      "max": 4653517.375,
+      "samples": 20,
+      "throughput": {
+        "kind": "elements",
+        "per_iteration": 19
+      }
+    },
+    {
+      "id": "lines/station_sites",
+      "group": "lines",
+      "name": "station_sites",
+      "unit": "ns",
+      "mean": 342681.20750853245,
+      "median": 341227.1757679181,
+      "stddev": 13171.318032119936,
+      "min": 331866.7508532423,
+      "max": 393837.31740614335,
+      "samples": 20,
+      "throughput": {
+        "kind": "elements",
+        "per_iteration": 20
+      }
+    },
+    {
+      "id": "planner/pipeline",
+      "group": "planner",
+      "name": "pipeline",
+      "unit": "ns",
+      "mean": 15682396.044999998,
+      "median": 15753937.5,
+      "stddev": 527886.0046186233,
+      "min": 14779895.9,
+      "max": 16500416.6,
+      "samples": 20,
+      "throughput": null
+    },
+    {
+      "id": "planner/pipeline_track_yards",
+      "group": "planner",
+      "name": "pipeline_track_yards",
+      "unit": "ns",
+      "mean": 35654222.07,
+      "median": 35631975.0,
+      "stddev": 1815312.4819231941,
+      "min": 32472583.4,
+      "max": 38777366.6,
+      "samples": 20,
+      "throughput": null
+    },
+    {
+      "id": "planner/plan_passengers",
+      "group": "planner",
+      "name": "plan_passengers",
+      "unit": "ns",
+      "mean": 2031608.2797468354,
+      "median": 1966048.5189873418,
+      "stddev": 169348.44075577788,
+      "min": 1861387.6582278481,
+      "max": 2518045.35443038,
+      "samples": 20,
+      "throughput": null
+    },
+    {
+      "id": "planner/road_graph",
+      "group": "planner",
+      "name": "road_graph",
+      "unit": "ns",
+      "mean": 6145823.367391305,
+      "median": 6044086.956521739,
+      "stddev": 219899.43976573597,
+      "min": 5889373.173913044,
+      "max": 6563840.565217392,
+      "samples": 20,
+      "throughput": null
+    },
+    {
+      "id": "rhai/compile_rail_lib",
+      "group": "rhai",
+      "name": "compile_rail_lib",
+      "unit": "ns",
+      "mean": 503180.6829842933,
+      "median": 505752.1832460733,
+      "stddev": 10969.112448638774,
+      "min": 481680.40837696334,
+      "max": 517478.40314136125,
+      "samples": 20,
+      "throughput": {
+        "kind": "bytes",
+        "per_iteration": 18427
+      }
+    },
+    {
+      "id": "rhai/compile_replan",
+      "group": "rhai",
+      "name": "compile_replan",
+      "unit": "ns",
+      "mean": 699973.3828947368,
+      "median": 687244.2467105263,
+      "stddev": 89689.02640117846,
+      "min": 580708.8815789474,
+      "max": 867772.7565789474,
+      "samples": 20,
+      "throughput": {
+        "kind": "bytes",
+        "per_iteration": 17495
+      }
+    },
+    {
+      "id": "rhai/compile_ttd",
+      "group": "rhai",
+      "name": "compile_ttd",
+      "unit": "ns",
+      "mean": 153083.43186119874,
+      "median": 153250.6238170347,
+      "stddev": 9704.298456190434,
+      "min": 140981.00788643534,
+      "max": 177917.78391167193,
+      "samples": 20,
+      "throughput": {
+        "kind": "bytes",
+        "per_iteration": 8224
+      }
+    },
+    {
+      "id": "rhai/director_coalesce",
+      "group": "rhai",
+      "name": "director_coalesce",
+      "unit": "ns",
+      "mean": 1758446.0805970146,
+      "median": 1770290.7313432836,
+      "stddev": 122298.82353259489,
+      "min": 1410699.6268656717,
+      "max": 1980911.6865671643,
+      "samples": 20,
+      "throughput": {
+        "kind": "elements",
+        "per_iteration": 120
+      }
+    },
+    {
+      "id": "rhai/rail_lib_lines",
+      "group": "rhai",
+      "name": "rail_lib_lines",
+      "unit": "ns",
+      "mean": 5023281.991176471,
+      "median": 4952502.470588235,
+      "stddev": 275162.673850455,
+      "min": 4689237.764705882,
+      "max": 5797693.647058823,
+      "samples": 20,
+      "throughput": {
+        "kind": "elements",
+        "per_iteration": 120
+      }
+    },
+    {
+      "id": "store/company_trend",
+      "group": "store",
+      "name": "company_trend",
+      "unit": "ns",
+      "mean": 3178580.2378787873,
+      "median": 3174494.9545454546,
+      "stddev": 147595.75798208735,
+      "min": 2887780.303030303,
+      "max": 3438291.6666666665,
+      "samples": 20,
+      "throughput": null
+    },
+    {
+      "id": "store/event_field",
+      "group": "store",
+      "name": "event_field",
+      "unit": "ns",
+      "mean": 395127.5483271375,
+      "median": 395127.5539033457,
+      "stddev": 17625.992444038682,
+      "min": 363310.2565055762,
+      "max": 420586.7434944238,
+      "samples": 20,
+      "throughput": null
+    },
+    {
+      "id": "store/kernel_window",
+      "group": "store",
+      "name": "kernel_window",
+      "unit": "ns",
+      "mean": 2478771.5733333332,
+      "median": 2515148.1555555556,
+      "stddev": 133873.71048307035,
+      "min": 2209768.533333333,
+      "max": 2708075.0,
+      "samples": 20,
+      "throughput": null
+    },
+    {
+      "id": "store/newest_events",
+      "group": "store",
+      "name": "newest_events",
+      "unit": "ns",
+      "mean": 1132939.344736842,
+      "median": 1139785.5263157894,
+      "stddev": 43767.532802897884,
+      "min": 1046877.2,
+      "max": 1234225.8842105262,
+      "samples": 20,
+      "throughput": null
+    }
+  ],
+  "baseline": {
+    "id": null,
+    "regressions": []
+  }
+}

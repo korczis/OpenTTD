@@ -104,6 +104,41 @@ function PrismaticAI::BestAirPair(list, b, reuse) {
 	return best;
 }
 
+/* Whether every air route we fly has planes a year old and they earned, last year, at least their
+ * price / invest_ppv_div a plane (setting air_yield_routes, autopilot.nut AutopilotAir). A fixed
+ * air_routes_max held the bot at two routes while its bank rose to 0.46-1.44M by 1956 and
+ * AAAHogEx flew 32-39 planes from many airports at about 22k a plane (headless matches of
+ * 2026-11-22, live settings, seeds 15805, 2927, 31337, 4242); our first routes earned 20-23k a
+ * plane at five planes each. A route is proven before the next is built (or, with money idle,
+ * the routes proven so far vouch for it), so a map where flying does not pay stops at
+ * air_routes_max. */
+function PrismaticAI::AirRoutesPay(b) {
+	local routes = {};
+	foreach (v, _ in AIVehicleList()) {
+		if (AIVehicle.GetVehicleType(v) != AIVehicle.VT_AIR || this.selling.rawin(v)) continue;
+		local k = PrismaticAI.RouteKey(v);
+		if (!routes.rawin(k)) routes[k] <- {judged = 0, profit = 0, price = 0};
+		if (AIVehicle.GetAge(v) < 365) continue;
+		local r = routes[k];
+		r.judged++;
+		r.profit += AIVehicle.GetProfitLastYear(v);
+		r.price += AIEngine.GetPrice(AIVehicle.GetEngineType(v));
+	}
+	local proven = 0;
+	foreach (k, r in routes) {
+		/* A route with no plane a year old yet waits for its proof, unless money is idle (b.rich,
+		 * rich.nut): then the routes already proven vouch for the next one. With a year per route
+		 * the bot still held 1.39M in the bank in 1956 on seed 31337. */
+		if (r.judged == 0) {
+			if (!b.rich) return false;
+			continue;
+		}
+		if (r.profit * max(1, b.invest_ppv_div) < r.price) return false;
+		proven++;
+	}
+	return proven > 0;
+}
+
 /* One autopilot air route per call, while fewer than `air_routes_max` exist and the money is
  * there. Returns true when it built one. */
 function PrismaticAI::AutopilotAir(b) {
@@ -116,6 +151,9 @@ function PrismaticAI::AutopilotAir(b) {
 	 * OpenTTD seed 930967890 (fleet 79, value ~ its cash), while AAAHogEx grew to 434 vehicles. */
 	local routes_max = b.air_routes_max;
 	if (b.air_grow_money > 0) routes_max += max(0, money - b.cash_reserve) / b.air_grow_money;
+	/* Air routes that pay fund the next one (air_yield_routes, AirRoutesPay). */
+	local yield_routes = max(0, AIController.GetSetting("air_yield_routes"));
+	if (this.auto_air >= routes_max && this.auto_air < b.air_routes_max + yield_routes && this.AirRoutesPay(b)) routes_max = this.auto_air + 1;
 	if (!b.grows || this.auto_air >= routes_max || this.air_failed >= AUTOPILOT_AIR_MAX_FAILS) return false;
 	local headroom = AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
 	/* The real price of the route: two airports, the planes, and a margin for levelling. Without
