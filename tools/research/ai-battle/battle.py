@@ -626,9 +626,9 @@ LIVE_SETTINGS_SCHEMA = "ai-live-settings/v1"
 # town and airport pairs) are instance data, not strategy: dropped from every live configuration.
 MAP_SETTING = re.compile(r"^(fr\d*_(from|to|cargo)|line\d+_(trains|wagons)|rail_[ab]|air_[ab])$")
 LIVE_DEFAULTS = {"reference": "AAAHogEx", "horizon_years": 4, "min_years": 2, "loss_ratio": 0.5,
-                 "paired_margin": 0.8, "veto_genes": 0, "seed_offspring": 1}
+                 "paired_margin": 0.8, "veto_genes": 0, "loss_veto_genes": 3, "seed_offspring": 1}
 START_AI = re.compile(r'^start_ai\s+(?:"([^"]+)"|(\S+))(?:\s+(\S*=\S*))?')
-SET_SETTING = re.compile(r"^openttd\.ai\.set_setting\((\{.*?\})\)")
+SET_SETTING = re.compile(r"^openttd\.ai\.set_setting\((\{.*?\})\)(?:.*?approval #(\d+))?")
 WATCHDOG = re.compile(r"(train|road|ship|aircraft|stations) (\d+)")
 LIVE_SQL = {
     "runs": "SELECT m.instance, m.seed, m.run_ms, min(m.month) AS first_month, max(m.month) AS last_month "
@@ -638,7 +638,7 @@ LIVE_SQL = {
     "series": "SELECT run_ms, company, name, month, value, money, loan, vehicles FROM company_month "
               "WHERE run_ms IN ({runs}) ORDER BY run_ms, company, month",
     "events": "SELECT run_ms, seq, game_date, kind, data->>'text' AS text, CAST(data AS VARCHAR) AS data "
-              "FROM run_events WHERE run_ms IN ({runs}) AND (kind = 'company.founded' OR (kind IN "
+              "FROM run_events WHERE run_ms IN ({runs}) AND (kind IN ('company.founded', 'decision.recorded') OR (kind IN "
               "('panel.ai', 'panel.console') AND (data->>'text') LIKE 'start_ai%') OR (kind = 'panel.mcp' "
               "AND (data->>'text') LIKE 'openttd.ai.set_setting(%')) ORDER BY run_ms, seq",
     "watchdog": "SELECT data->>'key' AS key, CAST(data->'value' AS VARCHAR) AS value FROM run_events "
@@ -728,16 +728,23 @@ def live_record(query, seed: int, source: str) -> dict:
         for m in sorted(months):
             last_of_year[m[:4]] = m
         yearly[c] = [dict(month=m, **months[m]) for m in sorted(last_of_year.values())]
-    founded, starts, requests = [], [], {}
+    founded, starts, requests, enacted = [], [], {}, {}
     for ev in fetched["events"]:
         if ev["kind"] == "company.founded":
             cid = json.loads(ev["data"])["id"]
             if cid not in founded:
                 founded.append(cid)
+        elif ev["kind"] == "decision.recorded":
+            # The approval server's verdict on an approval of this run: what it enacted, and when.
+            d = json.loads(ev["data"])
+            if d.get("action_type") == "ai.set_setting" and d.get("command_result") == "succeeded":
+                enacted[(ev["run_ms"], int(d["approval_id"]))] = ev["game_date"]
         elif ev["kind"] == "panel.mcp":
-            args = json.loads(SET_SETTING.match(ev["text"]).group(1))
+            m = SET_SETTING.match(ev["text"])
+            args = json.loads(m.group(1))
             requests.setdefault(int(args["company"]), []).append(
-                {"date": ev["game_date"], "name": args["name"], "value": int(args["value"])})
+                {"date": ev["game_date"], "name": args["name"], "value": int(args["value"]),
+                 "key": (ev["run_ms"], int(m.group(2))) if m.group(2) else None})
         else:
             m = START_AI.match(ev["text"])
             starts.append((m.group(1) or m.group(2), m.group(3) or ""))
@@ -749,8 +756,11 @@ def live_record(query, seed: int, source: str) -> dict:
         current, changes = dict(start), []
         for r in requests.get(cid, []):    # only a request that would change a setting counts
             if not MAP_SETTING.match(r["name"]) and current.get(r["name"]) != r["value"]:
-                current[r["name"]] = r["value"]
-                changes.append(r)
+                # Applied: the approval it waited for was enacted (decision.recorded, succeeded).
+                applied = enacted.get(r.pop("key"))
+                if applied:
+                    current[r["name"]] = r["value"]
+                changes.append(dict(r, applied=applied))
         companies.append({"company": cid, "name": names[cid], "ai": ai,
                           "settings_start": settings_str(start), "settings_requested": changes})
     mode_mix = {}
@@ -822,11 +832,12 @@ def live_genes(t: dict, settings: dict) -> dict:
 def live_entries(records: list[dict], t: dict) -> list[dict]:
     """Every PrismaticAI company of every live record, judged at a year end against the reference
     AI. A company is judged on one configuration only: its end is the last year end before its first
-    requested setting change (a request is not a confirmation, and a game that mixed configurations
-    proves none of them), at most `horizon_years` game years in and at least `min_years`. The
-    companies of one game share the earliest of their ends, so they are compared at the same date.
-    Lost: in a game with several judged PrismaticAI configurations, worth less than paired_margin x
-    the best of them; alone, worth less than loss_ratio x the reference AI."""
+    applied setting change (a request the approval server enacted; one never enacted changed
+    nothing), at most `horizon_years` game years in and at least `min_years`. The companies of one
+    game share the earliest of their ends, so they are compared at the same date. Lost: in a game
+    with several judged PrismaticAI configurations, worth less than paired_margin x the best of them
+    (vetoes genes within `veto_genes`); alone, worth less than loss_ratio x the reference AI (a loss
+    to the rival itself, which vetoes genes within `loss_veto_genes`)."""
     lc = live_cfg(t)
     out = []
     for rec in records:
@@ -837,7 +848,8 @@ def live_entries(records: list[dict], t: dict) -> list[dict]:
         for c in rec["companies"]:
             if c["ai"] != "PrismaticAI":
                 continue
-            changed = min((r["date"] or "9999")[:4] for r in c["settings_requested"]) if c["settings_requested"] else "9999"
+            # A request that was never enacted (unanswered, expired, denied) changed nothing.
+            changed = min((r["applied"][:4] for r in c["settings_requested"] if r.get("applied")), default="9999")
             end = min(y0 + lc["horizon_years"] - 1, int(changed) - 1)
             vals = {p["month"]: p["value"] for p in rec["series"][str(c["company"])]}
             reached = [y for y in range(y0, end + 1) if f"{y}-12" in vals and f"{y}-12" in ref_v]
@@ -858,10 +870,10 @@ def live_entries(records: list[dict], t: dict) -> list[dict]:
         for e in judged:
             e["paired"] = len(judged) > 1
             if e["paired"]:
-                e["lost"] = e["ratio"] < lc["paired_margin"] * best
+                e["lost"], e["radius"] = e["ratio"] < lc["paired_margin"] * best, lc["veto_genes"]
                 e["why"] = f"{e['ratio']:.3f} of {lc['reference']} at {at}, the game's best {best:.3f}"
             else:
-                e["lost"] = e["ratio"] < lc["loss_ratio"]
+                e["lost"], e["radius"] = e["ratio"] < lc["loss_ratio"], lc["loss_veto_genes"]
                 e["why"] = f"{e['ratio']:.3f} of {lc['reference']} at {at} (a loss is under {lc['loss_ratio']})"
         for e in game:
             del e["vals"]
@@ -871,9 +883,10 @@ def live_entries(records: list[dict], t: dict) -> list[dict]:
 
 def live_veto(t: dict, genes: dict, live: list[dict]) -> dict | None:
     """The live entry that lost with this configuration: genes equal to its genes except in at most
-    `veto_genes` genes (default 0: the exact configuration). None when no lost entry matches."""
-    n = live_cfg(t)["veto_genes"]
+    the entry's radius (live_entries: `veto_genes` for a paired loss, `loss_veto_genes` for a loss to
+    the reference AI). None when no lost entry matches."""
     for e in live:
+        n = e.get("radius", live_cfg(t)["veto_genes"])
         if e.get("lost") and sum(genes.get(g) != e["genes"][g] for g in e["genes"]) <= n:
             return e
     return None
@@ -895,37 +908,50 @@ def live_records(results: Path | None = None) -> list[dict]:
 
 
 def derive_live_settings(t: dict, battle_rec: dict | None, records: list[dict]) -> dict:
-    """The next live start's settings, derived from the records alone. Candidates are the PrismaticAI
-    configurations of the newest battle record, ranked by arena value relative to the reference AI;
-    a candidate that lost a live game is out (live_veto). Live-only configurations have no arena
-    evidence and are listed as seeds, not chosen."""
+    """The next live start's settings, derived from the records alone. Only a configuration with
+    live evidence is chosen: one that a live game judged and found not lost (live_entries), best
+    ratio to the reference first, unless another game's loss vetoes it (live_veto). The arena's
+    PrismaticAI configurations of the newest battle record are listed with their arena ratio and
+    their veto, as context; none is chosen on arena evidence alone. Nothing judged and not lost:
+    no settings (`chosen` null), so a start never falls back to info.nut's defaults unseen."""
     live = live_entries(records, t)
-    cands = []
+    ref_key = live_cfg(t)["reference"]
+    arena = []
     if battle_rec:
         board = {r["key"]: r for r in battle_rec["leaderboard"]}
-        ref = board.get(live_cfg(t)["reference"], {}).get("avg_value", 0)
+        ref = board.get(ref_key, {}).get("avg_value", 0)
         for c in battle_rec["contestants"]:
             row = board.get(c["key"], {})
             if c["ai"] != "PrismaticAI" or not row.get("played") or not ref:
                 continue
-            genes = live_genes(t, settings_dict(c.get("settings", "")))
-            veto = live_veto(t, genes, live)
-            cands.append({"candidate": c["key"], "settings": c.get("settings", ""),
+            veto = live_veto(t, live_genes(t, settings_dict(c.get("settings", ""))), live)
+            arena.append({"candidate": c["key"], "settings": c.get("settings", ""),
                           "arena_ratio": round(row["avg_value"] / ref, 4), "played": row["played"],
                           "vetoed_by": f"{veto['record']}:{veto['company']}" if veto else None})
-    cands.sort(key=lambda c: (-c["arena_ratio"], c["candidate"]))
+    arena.sort(key=lambda c: (-c["arena_ratio"], c["candidate"]))
+    cands = []
+    for e in sorted((e for e in live if e["evidence"] and not e["lost"]),
+                    key=lambda e: (-e["ratio"], e["record"], e["company"])):
+        veto = live_veto(t, e["genes"], live)
+        same = next((a for a in arena if live_genes(t, settings_dict(a["settings"])) == e["genes"]), None)
+        cands.append({"candidate": f"{e['record']}:{e['company']}", "settings": settings_str(settings_dict(e["settings"])),
+                      "live_ratio": e["ratio"], "at": e["at"], "why": e["why"],
+                      "arena": same["candidate"] if same else None,
+                      "vetoed_by": f"{veto['record']}:{veto['company']}" if veto else None})
     chosen = next((c for c in cands if not c["vetoed_by"]), None)
     return {"schema": LIVE_SETTINGS_SCHEMA,
             "derived_by": "tools/research/ai-battle/battle.py live-settings (battle.json tuning.live)",
             "rule": live_cfg(t), "battle_record": battle_rec["id"] if battle_rec else None,
             "live_records": [r["id"] for r in records],
             "chosen": chosen["candidate"] if chosen else None,
-            "settings": settings_str(settings_dict(chosen["settings"])) if chosen else None,
-            "candidates": cands,
-            "live": [{k: e.get(k) for k in ("record", "company", "at", "ratio", "evidence", "paired", "lost", "why",
-                                            "settings")} for e in live],
+            "settings": chosen["settings"] if chosen else None,
+            "reason": (f"the best configuration a live game judged and found not lost ({chosen['why']})"
+                       if chosen else "no configuration has live evidence of not losing: no live start is derived"),
+            "candidates": cands, "arena": arena,
+            "live": [{k: e.get(k) for k in ("record", "company", "at", "ratio", "evidence", "paired", "lost", "radius",
+                                            "why", "settings")} for e in live],
             "seeds": [s for _, s in live_seeds(t, live, [live_genes(t, settings_dict(c["settings"]))
-                                                         for c in cands])]}
+                                                         for c in arena])]}
 
 
 def live_settings_text(t: dict, results: Path | None = None) -> str:
@@ -960,7 +986,7 @@ def cmd_live_settings(write: bool) -> int:
     if write:
         (RESULTS_DIR / LIVE_SETTINGS).write_text(text)
     d = json.loads(text)
-    print(f"PRISMATIC_BOT_SETTINGS={d['settings'] or ''}  # {d['chosen']} of {d['battle_record']}")
+    print(f"PRISMATIC_BOT_SETTINGS={d['settings'] or ''}  # {d['chosen']}: {d['reason']}")
     return 0 if d["chosen"] else 10
 
 

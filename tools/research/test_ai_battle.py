@@ -1238,19 +1238,28 @@ def live_store():
                   {"run_ms": 300, "month": "1953-07", "name": "Someone else"}],
         "series": series,
         "events": [ev(100, 1, "company.founded", "1950-06-01", data={"id": 0}),
-                   ev(100, 2, "panel.ai", "1950-06-01", "start_ai PrismaticAI a=40,fr_from=3,b=x sent: the company"),
+                   ev(100, 2, "panel.ai", "1950-06-01", "start_ai PrismaticAI a=40,aggressiveness=40,fr_from=3,b=x sent: the company"),
                    ev(100, 3, "company.founded", "1950-06-02", data={"id": 1}),
                    ev(100, 4, "panel.console", "1950-06-02", 'start_ai "AAAHogEx"'),
                    ev(100, 5, "company.founded", "1950-06-03", data={"id": 2}),
-                   ev(100, 6, "panel.console", "1950-06-03", 'start_ai "PrismaticAI" a=70,b=8'),
+                   ev(100, 6, "panel.console", "1950-06-03", 'start_ai "PrismaticAI" a=70,b=8,aggressiveness=70'),
                    ev(100, 7, "company.founded", "1950-06-04", data={"id": 2}),
                    ev(100, 8, "company.founded", "1950-06-05", data={"id": 3}),
                    ev(100, 9, "panel.mcp", "1951-02-01",
                       'openttd.ai.set_setting({"company": 0, "name": "a", "value": 40}) -> pending approval #1'),
-                   ev(200, 10, "panel.mcp", "1953-02-01",
-                      'openttd.ai.set_setting({"company": 2, "name": "b", "value": 10}) -> pending approval #2'),
+                   # Never enacted (no decision): it changes nothing and does not end company 0's window.
+                   ev(100, 10, "panel.mcp", "1951-03-01",
+                      'openttd.ai.set_setting({"company": 0, "name": "a", "value": 90}) -> pending approval #4'),
                    ev(200, 11, "panel.mcp", "1953-02-01",
-                      'openttd.ai.set_setting({"company": 2, "name": "fr_to", "value": 3}) -> pending approval #3')],
+                      'openttd.ai.set_setting({"company": 2, "name": "b", "value": 10}) -> pending approval #2'),
+                   ev(200, 12, "panel.mcp", "1953-02-01",
+                      'openttd.ai.set_setting({"company": 2, "name": "fr_to", "value": 3}) -> pending approval #3'),
+                   ev(200, 13, "decision.recorded", "1953-02-02",
+                      data={"action_type": "ai.set_setting", "approval_id": 2, "command_result": "succeeded"}),
+                   ev(200, 14, "decision.recorded", "1953-02-03",
+                      data={"action_type": "ai.start", "approval_id": 3, "command_result": "succeeded"}),
+                   ev(100, 15, "panel.mcp", "1951-04-01",
+                      'openttd.ai.set_setting({"company": 0, "name": "b", "value": 6})')],
         "watchdog": [{"key": "watchdog.0", "value": json.dumps({"signature": "train 2 road 3 ship 0 aircraft 1 stations 4"})},
                      {"key": "watchdog.tuning", "value": "7"}],
         "revision": [{"version": json.dumps({"revision": "abc123"})}],
@@ -1275,9 +1284,13 @@ class Live(unittest.TestCase):
         self.assertEqual((rec["first_month"], rec["final_month"], rec["revision"]), ("1950-06", "1953-06", "abc123"))
         comp = {c["company"]: c for c in rec["companies"]}
         self.assertEqual([comp[c]["ai"] for c in range(4)], ["PrismaticAI", "AAAHogEx", "PrismaticAI", None])
-        self.assertEqual(comp[0]["settings_start"], "a=40")            # fr_from and a non-number left out
-        self.assertEqual(comp[0]["settings_requested"], [])            # a=40 again is no change
-        self.assertEqual(comp[2]["settings_requested"], [{"date": "1953-02-01", "name": "b", "value": 10}])
+        self.assertEqual(comp[0]["settings_start"], "a=40,aggressiveness=40")   # no fr_from, no non-number
+        # a=40 again is no change; a=90 and b=6 were requested and never enacted.
+        self.assertEqual(comp[0]["settings_requested"], [
+            {"date": "1951-03-01", "name": "a", "value": 90, "applied": None},
+            {"date": "1951-04-01", "name": "b", "value": 6, "applied": None}])
+        self.assertEqual(comp[2]["settings_requested"],
+                         [{"date": "1953-02-01", "name": "b", "value": 10, "applied": "1953-02-02"}])
         self.assertEqual([p["month"] for p in rec["series"]["0"]], ["1950-12", "1951-12", "1952-12", "1953-06"])
         self.assertEqual(rec["series"]["0"][2]["value"], 110)          # the loaded run's month replaces it
         self.assertEqual(rec["mode_mix"], {"0": {"train": 2, "road": 3, "ship": 0, "aircraft": 1, "stations": 4}})
@@ -1324,16 +1337,18 @@ class Live(unittest.TestCase):
         # Alone and short: no evidence; alone and long enough: judged against loss_ratio.
         rec = live_rec()
         rec["companies"][2]["ai"] = "Other"
-        rec["companies"][0]["settings_requested"] = [{"date": "1951-03-01", "name": "a", "value": 90}]
+        rec["companies"][0]["settings_requested"] = [{"date": "1951-03-01", "name": "a", "value": 90,
+                                                      "applied": "1951-03-05"}]
         (e,) = battle.live_entries([rec], LIVE_T)
         self.assertFalse(e["evidence"])
         self.assertIn("first setting change 1951", e["why"])
-        rec["companies"][0]["settings_requested"] = []
+        rec["companies"][0]["settings_requested"][0]["applied"] = None   # requested, never enacted
         (e,) = battle.live_entries([rec], LIVE_T)
         self.assertEqual((e["ratio"], e["lost"], e["paired"]), (0.5238, False, False))
         self.assertIn("a loss is under 0.5", e["why"])
         (e,) = battle.live_entries([rec], dict(LIVE_T, live={"loss_ratio": 0.6}))
-        self.assertTrue(e["lost"])
+        self.assertEqual((e["lost"], e["radius"]), (True, 3))          # lost to the rival: a wider veto
+        self.assertEqual(battle.live_veto(LIVE_T, {"a": 100, "b": 10}, [e])["company"], 0)
         (e,) = battle.live_entries([rec], dict(LIVE_T, live={"min_years": 5}))
         self.assertIn("first setting change none", e["why"])
 
@@ -1341,7 +1356,8 @@ class Live(unittest.TestCase):
         live = battle.live_entries([live_rec()], LIVE_T)       # lost: a=40,b=4; won: a=70,b=8
         self.assertEqual(battle.live_veto(LIVE_T, {"a": 40, "b": 4}, live)["company"], 0)
         self.assertIsNone(battle.live_veto(LIVE_T, {"a": 40, "b": 6}, live))
-        self.assertIsNotNone(battle.live_veto(dict(LIVE_T, live={"veto_genes": 1}), {"a": 40, "b": 6}, live))
+        wide = battle.live_entries([live_rec()], dict(LIVE_T, live={"veto_genes": 1}))
+        self.assertIsNotNone(battle.live_veto(LIVE_T, {"a": 40, "b": 6}, wide))
         g0 = [battle.variant(LIVE_T, 0, i, g, []) for i, g in enumerate(
             [{"a": 10, "b": 2}, {"a": 20, "b": 2}, {"a": 30, "b": 2}, {"a": 40, "b": 4}])]
         scored = [(v, {"score": i}) for i, v in enumerate(g0)]   # the lost configuration scores best
@@ -1360,24 +1376,34 @@ class Live(unittest.TestCase):
         pop1 = dict(LIVE_T, population=1)
         self.assertEqual(len(battle.next_generation(pop1, {"generation": 0}, scored, live)), 1)
 
-    def test_live_settings_take_the_best_arena_configuration_that_did_not_lose_live(self):
-        live_t = dict(LIVE_T)
+    def test_live_settings_take_only_a_configuration_with_live_evidence(self):
         brec = {"id": "battle-x", "contestants": [
             {"key": "P lost", "ai": "PrismaticAI", "settings": "a=40,b=4"},
-            {"key": "P ok", "ai": "PrismaticAI", "settings": "a=60,b=4,rail_a=2"},
+            {"key": "P won", "ai": "PrismaticAI", "settings": "a=70,b=8,rail_a=2"},
+            {"key": "P arena", "ai": "PrismaticAI", "settings": "a=60,b=4"},
             {"key": "P unplayed", "ai": "PrismaticAI", "settings": "a=90"},
             {"key": "AAAHogEx", "ai": "AAAHogEx", "settings": ""}],
             "leaderboard": [{"key": "AAAHogEx", "played": 4, "avg_value": 1000},
                             {"key": "P lost", "played": 4, "avg_value": 300},
-                            {"key": "P ok", "played": 4, "avg_value": 200},
+                            {"key": "P arena", "played": 4, "avg_value": 250},
+                            {"key": "P won", "played": 4, "avg_value": 200},
                             {"key": "P unplayed", "played": 0, "avg_value": 0}]}
-        d = battle.derive_live_settings(live_t, brec, [live_rec()])
-        self.assertEqual((d["chosen"], d["settings"]), ("P ok", "a=60,b=4"))
-        self.assertEqual([c["vetoed_by"] for c in d["candidates"]], ["live-7-100:0", None])
-        self.assertEqual(d["seeds"], ["live-7-100:2"])
-        self.assertEqual(d["live_records"], ["live-7-100"])
-        none = battle.derive_live_settings(live_t, None, [live_rec()])
-        self.assertEqual((none["chosen"], none["settings"], none["candidates"]), (None, None, []))
+        d = battle.derive_live_settings(LIVE_T, brec, [live_rec()])
+        # The arena's best did not lose live but has no live evidence either: not chosen.
+        self.assertEqual((d["chosen"], d["settings"]), ("live-7-100:2", "a=70,aggressiveness=70,b=8"))
+        self.assertEqual(d["candidates"][0]["arena"], "P won")
+        self.assertIn("found not lost", d["reason"])
+        self.assertEqual([(a["candidate"], a["vetoed_by"]) for a in d["arena"]],
+                         [("P lost", "live-7-100:0"), ("P arena", None), ("P won", None)])
+        self.assertEqual(d["seeds"], [])                                  # the arena has played it
+        # Its only winner lost elsewhere (a loss to the rival, within 3 genes): nothing is derived.
+        loser = live_rec()
+        loser["id"], loser["companies"][2]["ai"] = "live-8-1", "Other"
+        loser["companies"][0]["settings_start"] = "a=70,b=8"
+        none = battle.derive_live_settings(dict(LIVE_T, live={"loss_ratio": 0.6}), None, [live_rec(), loser])
+        self.assertEqual((none["chosen"], none["settings"], none["arena"]), (None, None, []))
+        self.assertEqual(none["candidates"][0]["vetoed_by"], "live-8-1:0")
+        self.assertIn("no configuration has live evidence", none["reason"])
 
     def test_runners_read_the_panel_and_a_store_copy(self):
         import http.server
@@ -1449,19 +1475,11 @@ class Live(unittest.TestCase):
                 self.assertEqual(battle.cmd_render(), 0)
                 self.assertEqual(battle.cmd_check(), 0)
                 self.assertEqual(battle.cmd_render(), 0)                 # current: nothing rewritten
-                # No battle record: nothing to choose.
-                self.assertEqual(battle.main(["live-settings"]), 10)
-                brec = record()
-                # The live record's settings name no gene of the real space, so its loser is the defaults.
-                brec["contestants"].append({"key": "PrismaticAI", "ai": "PrismaticAI",
-                                            "settings": "aggressiveness=100"})
-                brec["leaderboard"] = [{"key": "AAAHogEx", "played": 1, "avg_value": 10},
-                                       {"key": "PrismaticAI", "played": 1, "avg_value": 5}]
-                brec["contestants"].append({"key": "AAAHogEx", "ai": "AAAHogEx", "settings": ""})
-                (d / f"{brec['id']}.json").write_text(json.dumps(brec))
                 self.assertEqual(battle.main(["live-settings", "--write"]), 0)
-                self.assertEqual(json.loads((d / "live-start.json").read_text())["chosen"], "PrismaticAI")
-                (d / f"{brec['id']}.json").unlink()                       # a partial board, not a record
+                self.assertEqual(json.loads((d / "live-start.json").read_text())["chosen"], "live-7-100:2")
+                with mock.patch.object(battle, "derive_live_settings", lambda *a: {"chosen": None, "settings": None,
+                                                                                   "reason": "none"}):
+                    self.assertEqual(battle.main(["live-settings"]), 10)   # nothing evidenced: no start
                 rec["outcome"]["leader_value"] = 1                        # a forged record
                 (d / "live-7-100.json").write_text(json.dumps(rec))
                 self.assertEqual(battle.cmd_check(), 10)
@@ -1485,6 +1503,23 @@ class Live(unittest.TestCase):
             self.assertTrue(any("vetoed" in e["msg"] and variants[0]["label"] in e["msg"] for e in orch.events))
             state = json.loads(path.read_text())
             self.assertEqual(state["variants"][0]["genes"], {"a": 20, "b": 2})
+
+    def test_game_15805_is_a_loss_and_vetoes_the_ga_pick_it_ran(self):
+        """The committed record of live game 15805 (PrismaticAI 1 train, 36x behind AAAHogEx by 1964):
+        replan's request of rail_after=7 (1952-05-08) was never enacted, so it does not end the window;
+        judged at 1953-12 the company lost to AAAHogEx, and GA g347.3 (which it ran, with three owner
+        overrides) is vetoed."""
+        results = HERE.parents[1] / "research" / "results"
+        t = battle.live_tuning(json.loads(BATTLE_JSON.read_text()))
+        rec = json.loads(next(results.glob("live-15805-*.json")).read_text())
+        self.assertTrue(any(r["name"] == "rail_after" and not r["applied"]
+                            for r in rec["companies"][0]["settings_requested"]))
+        (e,) = [x for x in battle.live_entries([rec], t) if x["company"] == 0]
+        self.assertEqual((e["at"], e["lost"]), ("1953-12", True))
+        self.assertLess(e["ratio"], 0.5)
+        board = json.loads((results / "battle-20261122T045411-a80cc94a.json").read_text())
+        g347 = next(c for c in board["contestants"] if c["key"] == "PrismaticAI GA g347.3")
+        self.assertIs(battle.live_veto(t, battle.live_genes(t, battle.settings_dict(g347["settings"])), [e]), e)
 
     def test_battle_json_declares_the_live_rule_and_it_resolves(self):
         cfg_raw = json.loads(BATTLE_JSON.read_text())

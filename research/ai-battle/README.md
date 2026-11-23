@@ -574,7 +574,8 @@ So live games feed back into the tuning. There are three steps, and each reads o
    `research/results/live-<seed>-<run_ms>.json` (schema `ai-live-outcome/v1`). The record has:
    - the game's runs (a `--load` under a new run seed is followed while company 0 keeps its name);
    - the planner's revision;
-   - each company's AI, its start settings and the setting changes that were requested for it;
+   - each company's AI, its start settings, and the setting changes requested for it, each with the
+     date the approval server enacted it (`decision.recorded`, succeeded) or null;
    - each company's value, money, loan and fleet at every year end;
    - each company's last mode mix (the watchdog's train, road, ship and aircraft counts);
    - the outcome;
@@ -583,27 +584,33 @@ So live games feed back into the tuning. There are three steps, and each reads o
    The map's own settings (`fr*_`, `line*_`, `rail_a/b`, `air_a/b`) are left out because they name
    industries, not a strategy. `check` refuses a record whose outcome is not derived from its series.
 2. **Judge.** Each PrismaticAI company is judged on one configuration. Its end is the last year end
-   before its first requested setting change. A request is not a confirmation, and a game that mixed
-   configurations proves none of them. The end is at most `tuning.live.horizon_years` game years in
-   and at least `min_years`. The PrismaticAI companies of one game are compared at the earliest of
-   their ends. When one game has several, a configuration worth less than `paired_margin` times the
-   game's best has lost. A configuration alone in its game has lost when it is worth less than
-   `loss_ratio` times the reference AI (`reference`, AAAHogEx).
-3. **Act.** A variant whose genes equal those of a configuration that lost (at most `veto_genes`
-   genes may differ) is never the GA's elite or a parent again, and the orchestrator logs a
-   `TUNING ... vetoed` event for it. The best configuration of a paired live comparison joins the
-   next generation as child `g<n>.live` if it did not lose and no variant has had its genes yet:
-   live play suggests it, and the arena measures it. `battle.py live-settings` derives the next live
-   start, `research/results/live-start.json`. It ranks the PrismaticAI configurations of the
-   newest battle record by arena value relative to the reference and takes the best one that did
-   not lose live. `render` (and so `surfaces sync`) keeps the file current, and `check` refuses it
-   when it is stale. A live start sets `PRISMATIC_BOT_SETTINGS` from
-   `jq -r .settings research/results/live-start.json`. An empty value means info.nut's defaults.
+   before its first applied setting change. A game that mixed configurations proves none of them,
+   but a request that was never enacted (unanswered, expired or denied) changed nothing. In game
+   15805, replan's `rail_after=7` of 1952-05-08 was never enacted, so that game is judged at 1953-12
+   and not at 1951-12. The end is at most `tuning.live.horizon_years` game years in and at least
+   `min_years`. The PrismaticAI companies of one game are compared at the earliest of their ends.
+   When one game has several, a configuration worth less than `paired_margin` times the game's best
+   has lost. A configuration alone in its game has lost to the rival itself when it is worth less
+   than `loss_ratio` times the reference AI (`reference`, AAAHogEx).
+3. **Act.** A variant whose genes are within a lost configuration's radius is never the GA's elite
+   or a parent again, and the orchestrator logs a `TUNING ... vetoed` event for it. The radius is
+   `veto_genes` differing genes for a paired loss and `loss_veto_genes` for a loss to the reference.
+   The best configuration of a paired live comparison joins the next generation as child
+   `g<n>.live` if it did not lose and no variant has had its genes yet: live play suggests it, and
+   the arena measures it. `battle.py live-settings` derives the next live start,
+   `research/results/live-start.json`. It chooses only a configuration with live evidence: the one
+   a live game judged and found not lost with the best ratio to the reference, unless another
+   game's loss vetoes it. The newest battle record's PrismaticAI configurations are listed beside it
+   with their arena ratio and their veto, but none is chosen on arena evidence alone. When nothing
+   qualifies, `settings` is null and `live-settings` exits 10, so a start never falls back to
+   info.nut's defaults unseen. `render` (and so `surfaces sync`) keeps the file current, and `check`
+   refuses it when it is stale. A live start sets `PRISMATIC_BOT_SETTINGS` from
+   `jq -r .settings research/results/live-start.json`, and does not start when it is null.
 
 There is no score term. With a handful of live games, a kernel prior over the gene space would
 turn one map into a verdict on the neighbours of the configuration that played it (a codex review,
-2026-11-23, kept with `majordomus reasoning record`). The veto acts only on the configuration that
-lost, and the seed only adds matches. The battle brain (`tools/research/battle-brain`, an Axon
+2026-11-23, kept with `majordomus reasoning record`). The veto reaches only a lost configuration's
+radius, and the seed only adds matches. The battle brain (`tools/research/battle-brain`, an Axon
 ensemble) does not train on live rows yet. Its label is a value share relative to the default
 PrismaticAI on the same seed, and a live game has no such pair.
 

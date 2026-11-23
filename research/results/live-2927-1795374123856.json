@@ -1,7 +1,7 @@
 {
  "schema": "ai-live-outcome/v1",
  "id": "live-2927-1795374123856",
- "generated_at": "2026-11-23T03:26:12+00:00",
+ "generated_at": "2026-11-23T04:04:46+00:00",
  "source": "panel:http://127.0.0.1:8800",
  "instance": "panel-8800",
  "seed": 2927,
@@ -14,7 +14,7 @@
   }
  ],
  "revision": "c5bf32182a",
- "inputs_sha256": "73e1173d2023d7cad406e407f4dd72a601a5b4aa102857f7b4359f25546faec3",
+ "inputs_sha256": "beeb6b281f22acc046cac68f7562f682cba9c2f7a8466ae238b1e3dbc99d4ad0",
  "first_month": "1950-02",
  "final_month": "1957-12",
  "companies": [
@@ -27,22 +27,26 @@
     {
      "date": "1952-07-07",
      "name": "max_routes",
-     "value": 30
+     "value": 30,
+     "applied": "1952-08-18"
     },
     {
      "date": "1952-07-07",
      "name": "invest_min",
-     "value": 50
+     "value": 50,
+     "applied": "1952-08-19"
     },
     {
      "date": "1952-07-07",
      "name": "line_budget",
-     "value": 30000
+     "value": 30000,
+     "applied": "1952-08-19"
     },
     {
      "date": "1952-10-13",
      "name": "rail_after",
-     "value": 1
+     "value": 1,
+     "applied": null
     }
    ]
   },
@@ -563,6 +567,13 @@
   ]
  },
  "mode_mix": {
+  "1": {
+   "train": 6,
+   "road": 19,
+   "ship": 0,
+   "aircraft": 13,
+   "stations": 73
+  },
   "4": {
    "train": 5,
    "road": 43,
@@ -584,27 +595,6 @@
    "aircraft": 8,
    "stations": 75
   },
-  "1": {
-   "train": 6,
-   "road": 19,
-   "ship": 0,
-   "aircraft": 13,
-   "stations": 73
-  },
-  "6": {
-   "train": 9,
-   "road": 23,
-   "ship": 0,
-   "aircraft": 15,
-   "stations": 78
-  },
-  "2": {
-   "train": 114,
-   "road": 289,
-   "ship": 0,
-   "aircraft": 24,
-   "stations": 166
-  },
   "0": {
    "train": 1,
    "road": 24,
@@ -618,6 +608,20 @@
    "ship": 2,
    "aircraft": 6,
    "stations": 25
+  },
+  "2": {
+   "train": 114,
+   "road": 289,
+   "ship": 0,
+   "aircraft": 24,
+   "stations": 166
+  },
+  "6": {
+   "train": 9,
+   "road": 23,
+   "ship": 0,
+   "aircraft": 15,
+   "stations": 78
   }
  },
  "outcome": {

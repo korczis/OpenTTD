@@ -8,6 +8,7 @@
   "loss_ratio": 0.5,
   "paired_margin": 0.8,
   "veto_genes": 0,
+  "loss_veto_genes": 3,
   "seed_offspring": 1
  },
  "battle_record": "battle-20261122T045411-a80cc94a",
@@ -16,15 +17,36 @@
   "live-15805-1795381184362",
   "live-2927-1795374123856"
  ],
- "chosen": "PrismaticAI",
- "settings": "",
+ "chosen": "live-2927-1795374123856:6",
+ "settings": "aggressiveness=100,cash_reserve=5000,intercity=1,max_routes=30,own_lines=8",
+ "reason": "the best configuration a live game judged and found not lost (1.022 of AAAHogEx at 1951-12, the game's best 1.022)",
  "candidates": [
+  {
+   "candidate": "live-2927-1795374123856:6",
+   "settings": "aggressiveness=100,cash_reserve=5000,intercity=1,max_routes=30,own_lines=8",
+   "live_ratio": 1.0215,
+   "at": "1951-12",
+   "why": "1.022 of AAAHogEx at 1951-12, the game's best 1.022",
+   "arena": null,
+   "vetoed_by": null
+  },
+  {
+   "candidate": "live-2927-1795374123856:7",
+   "settings": "aggressiveness=100,cash_reserve=5000,intercity=1,max_routes=30,own_lines=8,self_steward=1",
+   "live_ratio": 0.8404,
+   "at": "1951-12",
+   "why": "0.840 of AAAHogEx at 1951-12, the game's best 1.022",
+   "arena": null,
+   "vetoed_by": null
+  }
+ ],
+ "arena": [
   {
    "candidate": "PrismaticAI GA g347.3",
    "settings": "aggressiveness=80,air_add_waiting=90,air_full_load=0,air_grow_money=0,air_keep_last=1,air_level_max=20,air_level_once=1,air_level_step=8,air_max_tiles=440,air_planes=5,air_reuse=1,air_routes_max=2,air_towns=35,cash_reserve=5000,catchment_stops=4,intercity=1,invest_air_cap=10,invest_borrow=1,invest_min=600,invest_ppv_div=6,invest_road_cap=12,line_budget=40000,max_routes=16,own_fail_pause=4,own_lines=4,rail_twin_max=10,self_steward=1,statue_money=0",
    "arena_ratio": 0.1584,
    "played": 6,
-   "vetoed_by": "live-2927-1795374123856:0"
+   "vetoed_by": "live-15805-1795381184362:0"
   },
   {
    "candidate": "PrismaticAI",
@@ -71,6 +93,7 @@
    "evidence": false,
    "paired": null,
    "lost": null,
+   "radius": null,
    "why": "one configuration for under 2 game year(s) (first setting change 1951)",
    "settings": ""
   },
@@ -82,18 +105,20 @@
    "evidence": false,
    "paired": null,
    "lost": null,
+   "radius": null,
    "why": "one configuration for under 2 game year(s) (first setting change none)",
    "settings": ""
   },
   {
    "record": "live-15805-1795381184362",
    "company": 0,
-   "at": "1951-12",
-   "ratio": 0.5221,
+   "at": "1953-12",
+   "ratio": 0.1022,
    "evidence": true,
    "paired": false,
-   "lost": false,
-   "why": "0.522 of AAAHogEx at 1951-12 (a loss is under 0.5)",
+   "lost": true,
+   "radius": 3,
+   "why": "0.102 of AAAHogEx at 1953-12 (a loss is under 0.5)",
    "settings": "aggressiveness=80,air_add_waiting=90,air_full_load=0,air_grow_money=0,air_keep_last=1,air_level_max=20,air_level_once=1,air_level_step=8,air_max_tiles=440,air_planes=5,air_reuse=1,air_routes_max=2,air_towns=35,cash_reserve=5000,catchment_stops=4,intercity=1,invest_air_cap=10,invest_borrow=1,invest_min=50,invest_ppv_div=6,invest_road_cap=12,line_budget=30000,max_routes=30,own_fail_pause=4,own_lines=4,rail_after=5,rail_twin_max=10,self_steward=1,statue_money=0"
   },
   {
@@ -104,6 +129,7 @@
    "evidence": true,
    "paired": true,
    "lost": true,
+   "radius": 0,
    "why": "0.752 of AAAHogEx at 1951-12, the game's best 1.022",
    "settings": "aggressiveness=80,air_add_waiting=90,air_full_load=0,air_grow_money=0,air_keep_last=1,air_level_max=20,air_level_once=1,air_level_step=8,air_max_tiles=440,air_planes=5,air_reuse=1,air_routes_max=2,air_towns=35,cash_reserve=5000,catchment_stops=4,intercity=1,invest_air_cap=10,invest_borrow=1,invest_min=600,invest_ppv_div=6,invest_road_cap=12,line_budget=40000,max_routes=16,own_fail_pause=4,own_lines=4,rail_after=2,rail_twin_max=10,self_steward=1,statue_money=0"
   },
@@ -115,6 +141,7 @@
    "evidence": true,
    "paired": true,
    "lost": true,
+   "radius": 0,
    "why": "0.763 of AAAHogEx at 1951-12, the game's best 1.022",
    "settings": "aggressiveness=50,air_add_waiting=0,air_grow_money=0,air_level_max=35,air_level_step=0,air_max_tiles=480,air_routes_max=3,cash_reserve=0,catchment_stops=2,invest_ppv_div=5,invest_road_cap=14,line_budget=80000,max_routes=30,own_fail_pause=0,own_lines=0,rail_twin_max=2"
   },
@@ -126,6 +153,7 @@
    "evidence": true,
    "paired": true,
    "lost": false,
+   "radius": 0,
    "why": "1.022 of AAAHogEx at 1951-12, the game's best 1.022",
    "settings": "aggressiveness=100,cash_reserve=5000,intercity=1,max_routes=30,own_lines=8"
   },
@@ -137,6 +165,7 @@
    "evidence": true,
    "paired": true,
    "lost": false,
+   "radius": 0,
    "why": "0.840 of AAAHogEx at 1951-12, the game's best 1.022",
    "settings": "aggressiveness=100,cash_reserve=5000,intercity=1,max_routes=30,own_lines=8,self_steward=1"
   }
