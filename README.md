@@ -792,7 +792,7 @@ from the code. The right-hand column says what was counted.
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
 | **60** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
-| **22** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
+| **23** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **38** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **209** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **99** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
@@ -803,7 +803,7 @@ from the code. The right-hand column says what was counted.
 pie showData title Counted from the sources: tooling
     "research tools and checks (tools/research/, shell and Python)" : 60
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 13
-    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 22
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 23
 ```
 <!-- surfaces:end facts -->
 
@@ -1360,6 +1360,7 @@ itself (generated):
 | [Battle brain and live tuner](research/battle-brain.md) | RESEARCH-ONLY. Self-improvement in two loops, both fed from the LAN battle's recorded data: |
 | [Battle post-mortem](research/battle-postmortem.md) | RESEARCH-ONLY. After each round of the LAN AI battle, the post-mortem answers where each contestant loses, and PrismaticAI above all. battle.py already writes a post-mortem per match into its machine store.... |
 | [Capability matrix: what every capability runs on today](research/capability-matrix.md) | RESEARCH-ONLY. One row per capability of this fork: who owns it, the code that does it (cited as path:line:Symbol), what it reads from a live game, what happens when that input or its engine is missing, where its... |
+| [Control loops audit: why nothing reacted while we fell behind](research/control-loops-audit.md) | RESEARCH-ONLY. A read-only audit of the owner's live game of 2026-11-22/23 (panel :8800, server :3979, MCP :8731), made on 2026-11-23. Company 0 (company 1 in the game) runs PrismaticAI; company 1 runs AAAHogEx, the... |
 | [Co-play: the owner and the bot in one company](research/coplay.md) | RESEARCH-ONLY, UNSTABLE. A server-side join policy behind OPTION_RESEARCH_INSTRUMENTATION. Default off. |
 | [Duel evidence audit and a frozen duel set](research/duel-evidence-audit.md) | RESEARCH-ONLY. What the recorded duels (research/results/duel-.json) hold constant and what they let vary, and one set of duels run with every input frozen and named. Tool: tools/research/mcp-duel; scoreboard:... |
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |

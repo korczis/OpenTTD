@@ -82,6 +82,8 @@ mod graph;
 mod plan;
 pub mod mesh_records;
 mod prismatic;
+#[cfg(test)]
+mod gap_watch_tests;
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map};
 use serde_json::{json, Value};
