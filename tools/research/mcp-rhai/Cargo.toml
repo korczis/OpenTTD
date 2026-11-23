@@ -43,3 +43,12 @@ algoglyph-kernels = { path = "../vendor/algoglyph/crates/algoglyph-kernels" }
 default = ["store"]
 # The DuckDB store of mcp-panel; without it the panel runs and reports "store": "off".
 store = ["dep:duckdb"]
+
+[dev-dependencies]
+# The performance benchmarks (benches/hot_paths.rs, research/rust-bench.md). No plots and no HTML
+# report: tools/research/rust-bench reads criterion's estimates.json and writes the record itself.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "hot_paths"
+harness = false
