@@ -159,6 +159,14 @@ outputs = ["research/results"]
 sync = ["tools/research/mcp-ab", "--render"]
 check = ["tools/research/mcp-ab", "--render", "--check"]
 
+# The Rust benchmark records (research/rust-bench.md): each bench-*.json is written by
+# `rust-bench run`; its page is re-derived from it here.
+[[generators.items]]
+id = "rust-bench"
+outputs = ["research/results"]
+sync = ["tools/research/rust-bench", "render"]
+check = ["tools/research/rust-bench", "render", "--check"]
+
 [[generators.items]]
 id = "atlas"
 outputs = ["README.md", "docs/atlas/hero-light.svg", "docs/atlas/hero-dark.svg"]

@@ -28,8 +28,11 @@ never into a tracked file.
 ## What is a reference
 
 In a scanned Markdown file, outside fenced code blocks: an inline code span whose first segment is
-a top-level entry git tracks — `path`, `path/` (a directory) or `path:Symbol` — and each pathspec in
-the front matter's `tracks:` list. For `A::B::name` the last component must occur as a whole word in
+a top-level entry git tracks — `path`, `path/` (a directory) or `path:Symbol` — each pathspec in
+the front matter's `tracks:` list, and each `file:<path>` value of the front matter (a
+`provenance.derived_from` entry or a `relations[].target`), which must name a tracked file or
+directory: a record that relates to a candidate later promoted to `curated/` fails until it follows
+the move. For `A::B::name` the last component must occur as a whole word in
 the cited file, so cite a symbol in the file that defines or declares it. A bare line number
 (`path:123`) is not verified, only its file: it rots on every upstream rebase, and symbols do not.
 
