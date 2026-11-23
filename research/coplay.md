@@ -60,6 +60,19 @@ The same change fixes the client supervisor in `mcp-e2e`. Under `set -e`, a cras
 (`wait` returning 134) ended the restart loop, so the client was never restarted (seen
 2026-11-22, an abort in libiconv at Cocoa start-up).
 
+## Services
+
+`mcp-e2e --coplay` starts the panel services that a co-play game runs, so nobody has to post them by
+hand:
+
+- `arena` fills the other seven companies ([live-arena.md](live-arena.md)).
+- `replan` re-plans the bot every game month ([Planner and AlgoGlyph](mechanisms/planner-and-algoglyph.md#replanning-while-the-game-runs)).
+- `watchdog` says when a company has built nothing for longer than its data-tuned threshold, and
+  what holds it ([The progress watchdog](mechanisms/rhai-scripting.md#the-progress-watchdog)).
+
+`MCP_SERVICES` names another list, and an empty value starts none. A service that does not start is
+reported on stderr, and the stack runs on without it.
+
 ## Validation
 
 Run on 2026-11-22 on this branch (macOS, `build-gate-research`: RelWithDebInfo,
