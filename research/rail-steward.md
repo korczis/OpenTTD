@@ -129,6 +129,95 @@ The bot builds and the steward decides. The bot then reconciles the line to the 
 `STEWARD_DRY=1` decides and prints without handing anything over. `STEWARD_EVERY_S` sets the
 round (default 120 s). A round's decisions are posted to the board as `openttd:<instance>:steward`.
 
+## The in-bot steward's capital
+
+With `self_steward=1` the bot applies the policy above itself (`steward.nut` `SelfSteward`). In
+six-year headless matches with the live game's settings, PrismaticAI's profit per train was close
+to AAAHogEx's, but it ran 3-9 times fewer trains. Its lines stayed at one or two trains.
+
+**What stopped growth** (master f4c02d0aac, `battle.py ablate`, start 1950, field AAAHogEx,
+LuDiAI AfterFix, CivilAI, AdmiralAI, seeds 15805, 2927, 31337 and 4242, `script=4` logs):
+
+- **The signal.** Every line runs full-load orders. A train at the source takes the cargo as it
+  arrives, so a trainload waits only when the trains cannot carry it at all. The steward decided
+  one to four trains per match, all by the double-track rule (half a trainload waiting). The
+  single-track `add_train` rule (a whole trainload waiting) never fired. The 27 lines peaked at one
+  to three trains: the double-track ones of 15-37 allowed, the single-track ones mostly at one of
+  two.
+- **What a shortage looks like instead.** The source station's rating falls with the days since
+  the last pickup (`station_cmd.cpp` `UpdateStationRating`), and the industry moves only the
+  rating's share of its output to the station. In the branch's yearly state lines, lines with one
+  train sat at 27-48%. Lines with a train at the platform most of the time sat at 64-80%.
+- **Money, where the loan was drawn.** `RepaySurplus` (main.nut) pays the loan down to the reserve
+  after every heartbeat, so the bank seldom held a train's price. In the owner's live game (seed
+  15805, 1958-08) a coal line earning 33.9k a year per train kept one train of two. The bank held
+  13k, and 250k of the loan was unused.
+- **Rare rounds.** The steward runs at most once a game month, on a heartbeat. A heartbeat waits
+  for the bot's rail path searches (90-178 game days each) and airport surveys. On the fitness
+  seed the monthly line records appeared about once a game year from 1963 on.
+- **Single track is a ceiling.** One track carries one train at a time, so a single-track line
+  moves about one trainload per two trips whatever it runs. Re-laying the second track of such a
+  line later on the junction geometry it was built with failed in all 8 tries in these matches:
+  the tiles beyond `B2` were taken by the line's own track A, by roads or by other rail. That code
+  was not kept.
+
+**The change** (`steward.nut`, `lines.nut`, `info.nut`):
+
+- **`steward_rating`** (default 55). An earning line (`LineEarns`) gets more trains while its
+  source rates the cargo below this percent, a source platform is free and its newest train is
+  `STEWARD_SETTLE_DAYS` (90) old. It gets one train, plus one for every 15 points the rating is
+  lower, up to `trains_max`.
+- **Several trains per round.** The double-track rule adds one train for every full trainload
+  waiting (at least one). `ReconcileLines` buys every missing train of a target in the same
+  heartbeat, not one per heartbeat.
+- **`steward_borrow`** (default 1). An earning line may borrow for its next train (`FundTrain`).
+  The company must not be frozen, the loan must stay at most half its limit, and the headroom left
+  must still hold a line budget and two quarters of running costs. Early in a game the loan pays
+  for new lines. Without these limits, in a replay of seed 4242, a train borrowed with 280k of
+  300k drawn froze construction, and the company built four freight lines where master built
+  seven.
+- **A state line per line**, on the first round of each game year: `steward state line <slot>`,
+  with its trains, waiting cargo, source rating, free source platforms and profit.
+
+**Measured** (single matches with the live game's settings, not held-start pairs, rule
+`a-tuning-claim-needs-held-start-pairs`; `battle.py ablate`, start 1950, six years; master and
+branch on one binary per round):
+
+| seed | arm | rail trains | company value | rail profit last year (`prail`) | AAAHogEx trains |
+|---|---|---|---|---|---|
+| 15805 | master 3ed759fd1e | 6 | 746,829 | 126,467 | 47 |
+| 15805 | branch | 7 | 754,212 | 113,637 | 46 |
+| 2927 | master 3ed759fd1e | 9 | 2,486,144 | 300,766 | 46 |
+| 2927 | branch | 12 | 3,106,114 | 445,637 | 45 |
+| 31337 | master 3ed759fd1e | 12 | 2,290,859 | 394,295 | 66 |
+| 31337 | branch | 14 | 2,044,513 | 261,169 | 49 |
+| 4242 | master 3ed759fd1e | 7 | 1,716,762 | 264,104 | 28 |
+| 4242 | branch | 17 | 2,609,134 | 501,960 | 43 |
+
+On master 3ed759fd1e (binary `94f7ee692f`) the branch ran 50 rail trains against 34. Its rail
+profit was 1.32M against 1.09M, and its value was 14.4% higher as a geometric mean, ahead on three
+seeds of four. In an earlier round on master f4c02d0aac (binary `94de29ae5b`) it ran 52 trains
+against 39, with rail profit 1.76M against 1.55M and value 7.2% higher, also ahead on three seeds
+of four.
+
+The games diverge within the first years, so each row is one sample of a chaotic process. On
+31337 the branch built fewer freight lines because its path searches failed differently, and
+AAAHogEx's own count moved by up to 17 trains between the arms. The borrowing path (`FundTrain`
+from the loan) did not fire in any of these matches: in them the bank held the price whenever the
+steward wanted a train. It is the owner's live-game case above and has not been run end to end.
+
+**Tried and not kept.** Two attempts did not work:
+
+- An idle-money rule: more trains while last year's profit per train paid a train back within
+  two years. It reached 66 trains, but value fell on all four seeds against the branch above,
+  because trains that only share a saturated line's cargo dilute it.
+- `rail_feed=3` and `rail_grow_max=7` as variants on top of the change: -44% to +25% by seed, so
+  no conclusion.
+
+**Open.** The steward still waits on the heartbeat. The single-track lines need a second-track
+design that reserves its corridor when the line is built. Most of the remaining gap is supply: a
+line saturates at about one producer's output.
+
 ## The monitor: what is wrong, on the board
 
 `rail_monitor.rhai` runs a round every `MONITOR_EVERY_S` (default 60 s) and reports, worst first:

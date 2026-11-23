@@ -147,6 +147,47 @@ function PrismaticAI::ClearPath(path) {
 	return n;
 }
 
+/* What a clone of `train` costs now: every part at its engine's price. */
+function PrismaticAI::TrainPrice(train) {
+	local price = 0;
+	for (local i = 0; i < AIVehicle.GetNumWagons(train); i++) price += AIEngine.GetPrice(AIVehicle.GetWagonEngineType(train, i));
+	return price;
+}
+
+/* Money for one more train of `line`, a clone of `train`. Returns the loan before the purchase, or
+ * -1 when the train cannot be paid.
+ * - The bank balance pays when it holds `reserve` plus the price.
+ * - Otherwise, with setting steward_borrow, a line whose trains earn (steward.nut LineEarns) borrows
+ *   what is missing while the company is not frozen (main.nut BuildFrozen), the loan stays at most
+ *   half its limit and the headroom left still holds a line budget and two quarters of running
+ *   costs.
+ * RepaySurplus (main.nut) pays the loan down to the reserve after every heartbeat, so the bank alone
+ * almost never held a train's price: in the owner's live game (seed 15805, 1958-08) a coal line
+ * earning 33.9k a year per train kept its one train of trains_max 2 with 13k in the bank and 250k of
+ * the loan unused, while its buses earned about 370 a year each. */
+function PrismaticAI::FundTrain(line, train, reserve) {
+	local price = PrismaticAI.TrainPrice(train);
+	local bank = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
+	local loan = AICompany.GetLoanAmount();
+	if (bank >= reserve + price) return loan;
+	if (AIController.GetSetting("steward_borrow") != 1 || !PrismaticAI.LineEarns(this.LineStats(line))) return -1;
+	local afloat = PrismaticAI.QuarterRunningCost();
+	if (this.BuildFrozen(afloat)) return -1;
+	local max_loan = AICompany.GetMaxLoanAmount();
+	local step = AICompany.GetLoanInterval();
+	local want = min(max_loan, loan + ((reserve + price - bank) / step + 1) * step);
+	/* The loan stays at most half its limit, and the headroom after it still holds a line budget and
+	 * two quarters of running costs. Early in a game the loan pays for the lines: in a replay of
+	 * seed 4242 a train borrowed for with 280k of 300k drawn left the bank at the reserve, the next
+	 * quarter's survival borrowing froze construction (BuildFrozen) and the company built four
+	 * freight lines where master built seven. */
+	local line_budget = AIController.GetSetting("line_budget");
+	if (2 * want > max_loan || max_loan - want < line_budget + 2 * afloat) return -1;
+	if (!AICompany.SetLoanAmount(want)) return -1;
+	AILog.Info("PrismaticAI: borrowed " + (want - loan) + " for a train of " + line.label + " (price " + price + ", bank was " + bank + ")");
+	return loan;
+}
+
 /* Make every line what its targets say (see the head of this file). */
 function PrismaticAI::ReconcileLines(reserve) {
 	foreach (i, line in RAIL_LINES) {
@@ -192,11 +233,20 @@ function PrismaticAI::ReconcileLines(reserve) {
 			local running = 0;
 			foreach (t in trains) if (!this.selling.rawin(t)) running++;
 			/* A line whose track cannot be repaired or whose trains get lost gets no new train (events.nut). */
-			if (running < want_trains && running > 0 && !PrismaticAI.LineHalted(line) && AICompany.GetBankBalance(AICompany.COMPANY_SELF) >= reserve) {
-				local nv = AIVehicle.CloneVehicle(line.depot, trains[0], true);
-				if (AIVehicle.IsValidVehicle(nv)) {
+			if (running < want_trains && running > 0 && !PrismaticAI.LineHalted(line)) {
+				/* Every missing train at once (steward.nut STEWARD_ROUND_NOTE), each paid from the bank
+				 * or, for a line that earns, from the loan (FundTrain). */
+				while (running < want_trains) {
+					local loan_before = this.FundTrain(line, trains[0], reserve);
+					if (loan_before < 0) break;
+					local nv = AIVehicle.CloneVehicle(line.depot, trains[0], true);
+					if (!AIVehicle.IsValidVehicle(nv)) {
+						if (AICompany.GetLoanAmount() > loan_before) AICompany.SetLoanAmount(loan_before);
+						break;
+					}
 					AIVehicle.StartStopVehicle(nv);
-					AILog.Info("PrismaticAI: rail line " + slot + ": added train " + nv + " (" + (running + 1) + " of " + want_trains + ")");
+					running++;
+					AILog.Info("PrismaticAI: rail line " + slot + ": added train " + nv + " (" + running + " of " + want_trains + ")");
 				}
 			} else if (running > want_trains) {
 				local newest = -1;
