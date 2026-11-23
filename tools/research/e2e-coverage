@@ -9,7 +9,8 @@
 // `e2e-covers: *` is every page of every app, as the shell has them when the check runs: the
 // generic crawl (mcp-ui-crawl-check) drives every control of every page, derived, nothing listed.
 // A declaration in a file that does not drive a browser is refused, so a page cannot be "covered"
-// by a check that never opens it; a declared page the shell does not have is refused too.
+// by a check that never opens it; a declared page the shell does not have is refused too, and so is
+// every declaration of a node check that does not parse (node --check), which could never start.
 //
 // Usage: tools/research/e2e-coverage [--json]
 //        tools/research/e2e-coverage --run --panel <panel-url> [--hub <hub-url>]
@@ -19,7 +20,9 @@
 // is printed and any failure, or a check that could not run, fails the run. A check that needs the
 // hub is NOT RUN, and said so, when no --hub is given.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
@@ -52,10 +55,33 @@ export function declaredBy(file, text) {
   return { file, covers, browser };
 }
 
-/** Every check of the research tools with its declaration. */
+/** Why a node script does not parse as the ES module node loads it as ('' when it parses, and for a
+    script in another language): `node --check` on a .mjs copy. A check that does not parse drives no
+    page, whatever it declares: a `//` comment once swallowed the end of a line of the crawl, which then
+    could not start while every page still read as covered (QA run, 2026-11-22). */
+export function parseError(text) {
+  if (!/^#!.*\bnode\b/.test(text)) return '';
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-parse-'));
+  try {
+    const file = path.join(dir, 'check.mjs');
+    fs.writeFileSync(file, text);
+    const r = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
+    if (r.status === 0) return '';
+    const lines = (r.stderr || '').split('\n');
+    const at = (lines[0].match(/:(\d+)$/) || [])[1];
+    const why = lines.find((l) => /^\w*Error\b/.test(l)) || r.error?.message || `node --check exited ${r.status}`;
+    return `${at ? `line ${at}: ` : ''}${why.trim()}`;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Every check of the research tools with its declaration and whether it parses. */
 export function checks(dir = here) {
-  return fs.readdirSync(dir).filter((f) => f.endsWith('-check')).sort()
-    .map((f) => declaredBy(f, fs.readFileSync(path.join(dir, f), 'utf8')));
+  return fs.readdirSync(dir).filter((f) => f.endsWith('-check')).sort().map((f) => {
+    const text = fs.readFileSync(path.join(dir, f), 'utf8');
+    return { ...declaredBy(f, text), parse: parseError(text) };
+  });
 }
 
 /** The verdict: {pages, covered: {page: [files]}, uncovered: [page], refused: [reason]}. */
@@ -64,6 +90,7 @@ export function coverage(pages, found) {
   const covered = {};
   const refused = [];
   for (const c of found) {
+    if (c.parse && c.covers.length) { refused.push(`${c.file} does not parse (${c.parse}), so it drives no page`); continue; }
     for (const page of c.covers.flatMap((x) => (x === '*' ? [...names] : [x]))) {
       if (!c.browser) { refused.push(`${c.file} declares ${page} but drives no browser (playwright-core chromium.launch)`); continue; }
       // A declared sub-page (/resource/<path>, /scripts/<name>) counts for the page it belongs to.
@@ -92,13 +119,19 @@ export function runPlan(found, panel, hub) {
   });
 }
 
+/** The line --run prints for one check's run (a spawnSync result): its last line of output, else, for
+    a check that died before it printed (a syntax error), its last line on stderr, else why it did not start. */
+export function verdictLine(out) {
+  const tail = (t) => (t || '').trim().split('\n').filter(Boolean).pop();
+  return tail(out.stdout) || tail(out.stderr) || out.error?.message || '(no output)';
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
   const args = process.argv.slice(2);
   if (args.includes('--run')) {
     const opt = (n) => (args.includes(n) ? args[args.indexOf(n) + 1] : '');
     const panel = opt('--panel'), hub = opt('--hub');
     if (!panel) { console.error('usage: e2e-coverage --run --panel <panel-url> [--hub <hub-url>]'); process.exit(2); }
-    const { spawnSync } = await import('node:child_process');
     // Coverage first: a run over checks that leave a page uncovered proves less than it says.
     const cov = coverage(shellPages(), checks());
     let bad = cov.uncovered.length + cov.refused.length;
@@ -108,7 +141,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(im
       if (!r.runnable) { console.log(`NOT RUN  ${r.file}: it covers ${r.apps.join(' and ')} pages and no --hub was given`); bad++; continue; }
       if (r.apps.includes('hub') && !hub) { console.log(`NOT RUN  ${r.file}: its hub pages (no --hub given); its panel pages run`); bad++; }
       const out = spawnSync(path.join(here, r.file), r.argv, { encoding: 'utf8', timeout: 600000 });
-      const last = (out.stdout || '').trim().split('\n').filter(Boolean).pop() || out.error?.message || '(no output)';
+      const last = verdictLine(out);
       const ok = out.status === 0;
       if (!ok) bad++;
       console.log(`${ok ? 'PASS    ' : 'FAIL    '} ${r.file} ${r.argv.join(' ')}: ${last}`);

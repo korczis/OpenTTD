@@ -80,6 +80,9 @@ fail() { echo "FAIL $*"; FAILS=$((FAILS + 1)); }
 
 [[ -n "$PANEL_PORT" ]] || PANEL_PORT="$(free_port)"
 URL="http://127.0.0.1:$PANEL_PORT"
+# The panel keeps its owner secret in a file of this run (mcp-panel reads the variable; mcp-e2e
+# passes the environment on), never on its stdout, so this check reads it from there.
+export PRISMATIC_PANEL_OWNER_SECRET_FILE="$TMP/panel-owner-secret"
 "$ROOT_DIR/tools/research/mcp-e2e" --bin "$BIN" --no-gui --no-browser "${PLAN[@]}" --panel-port "$PANEL_PORT" --seed 31337 \
   > "$TMP/e2e.log" 2>&1 &
 PIDS+=($!)
@@ -234,8 +237,9 @@ SEQ0="$(directive_seq)"
 # Switching auto-approve on is the owner's: this check started the stack, so it holds the owner
 # secret the panel printed once into the launcher's log. Auto-approve never approves an owner-only
 # tool (openttd.ai.set_settings); this directive applies through openttd.ai.set_setting.
-OWNER="$(sed -n 's/^mcp-panel: owner secret \([0-9a-f]*\) .*/\1/p' "$TMP/e2e.log" | head -1)"
-[[ -n "$OWNER" ]] || fail "the panel printed no owner secret into $TMP/e2e.log"
+OWNER="$(cat "$PRISMATIC_PANEL_OWNER_SECRET_FILE" 2>/dev/null || true)"
+[[ -n "$OWNER" ]] || fail "the panel kept no owner secret in $PRISMATIC_PANEL_OWNER_SECRET_FILE"
+grep -qF "$OWNER" "$TMP/e2e.log" && fail "the owner secret reached the stack's log" || pass "the owner secret is in its file and not in the stack's log"
 code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST -H 'Content-Type: application/json' -d '{"on": true}' "$URL/api/auto-approve")"
 [[ "$code" == 401 ]] && pass "auto-approve stays off without the owner secret (401)" || fail "auto-approve on without the owner secret answered $code"
 curl -s -m 10 -X POST -H 'Content-Type: application/json' -H "X-Panel-Owner: $OWNER" -d '{"on": true}' "$URL/api/auto-approve" > /dev/null
