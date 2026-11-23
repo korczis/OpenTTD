@@ -1,8 +1,9 @@
 # Design note: the owner's companies settle their approvals by a countdown
 
-**RESEARCH-ONLY. Status: proposed, under review.** Nothing here is implemented yet. This note goes to
-peer review (codex, gemini, peer sessions) before any code, under the owner's order of 2026-11-23 to
-consult other models and peers before implementing.
+**RESEARCH-ONLY. Status: reviewed by a peer session, revised; not implemented.** It went to review
+before any code, under the owner's order of 2026-11-23 to consult other models and peers first.
+Peer session openttd-36 reviewed it (below). Codex and Gemini have not: sending repository content
+to external models was refused to this session, and the owner decides whether they review it.
 
 ## The owner's decision
 
@@ -67,7 +68,42 @@ AAAHogEx's 29.4M ([incident](incident-2026-11-23-trainless-lines.md)).
      company with an approver in it executes at its deadline, and one for another company is retired.
    - The approval's `settled_by` names the scope ("deadline approve (approver in company 0)").
 
-## Questions for review
+## Review (peer session openttd-36, 2026-11-23) and the revised design
+
+The review answered the five questions below and found two blockers. The design now takes all of
+it in:
+
+1. **Scope, captured and checked.** The company the approval acts on (`CompanyOf`) is recorded when
+   the approval is created. At the deadline, a registered approver must still play in that company.
+   Deriving the scope only at settlement would let a key holder who joins another company later
+   widen it retroactively. `settled_by` names the captured company.
+2. **Default approve, announced first.** Approve as the default under that scope matches the
+   owner's "countdown with a default". The approval is announced in the control window or the chat
+   when it is created, so a default never fires unseen.
+3. **A hold covers one approval, and shows its age.** The control window (and the narrator's
+   digest) shows "held N days", or 199 pending re-plans come back as 199 held ones.
+4. **Revalidate at the deadline.** A setting is compare-and-set: a change computed against a value
+   the setting no longer has is retired as stale. A command runs its test pass again before it
+   executes.
+5. **Game ticks on the server.** The deadline counts game ticks on the server. Execution goes
+   through the regular command and network path. A hold clicked on a client reaches the server
+   (chat or admin message), because a client-local hold does nothing. A paused game stops the
+   countdown, and the docs say so.
+
+- **Blocker 1, supersession.** A newer pending approval for the same company and the same setting
+  key retires the older one ("superseded by #id"). Without that, a default of approve replays the
+  backlog of stale re-plans one after another.
+- **Blocker 2, a re-plan settles as one batch.** One re-plan files several per-key approvals
+  (`fr_from`, `fr_to`, `fr_cargo`, ...). They carry a batch id from creation and settle all or
+  none, so the countdown never writes half a freight slot. This is a batch settlement over the
+  existing per-key approvals. The owner-only atomic `set_settings` is not needed.
+- **Tests added to the plan.** `mcp-approval-check` gains a case for supersession and one for a half
+  batch that must never execute.
+
+The reasoning record of the task (`majordomus reasoning status`) holds the assessment and the
+conclusion that adopts this.
+
+## Questions for review (as first asked)
 
 1. Is "a registered approver currently plays in that company" the right derivation of "my player
    or my co-play player", or should the company be captured when the approval is created?
