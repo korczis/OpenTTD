@@ -410,6 +410,6 @@
   }
 
   if (typeof module !== 'undefined') {
-    module.exports = { PAGES, APPS, FRAME, UI, TONE, KIT, SIDEBAR_KEY, SIDEBAR_STATES, sidebarState, pageOf, sidebarHtml, sectionsHtml, navbarHtml, asideHtml, crumbsHtml, headerHtml, signInHtml };
+    module.exports = { PAGES, APPS, FRAME, UI, TONE, KIT, SIDEBAR_KEY, SIDEBAR_STATES, sidebarState, pageOf, sidebarHtml, sectionsHtml, navbarHtml, asideHtml, crumbsHtml, headerHtml };
   }
 })();

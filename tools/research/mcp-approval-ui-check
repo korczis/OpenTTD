@@ -176,6 +176,9 @@ try {
   const owner = await fresh.newPage();
   owner.on('pageerror', (e) => errors.push(e.message));
   await owner.coverage.startJSCoverage({ resetOnNavigation: false });
+  // V8 drops a page's coverage when it navigates away, so it is taken before every reload.
+  const signed = [];
+  const snapshot = async () => { signed.push(...await owner.coverage.stopJSCoverage()); await owner.coverage.startJSCoverage({ resetOnNavigation: false }); };
   const box = owner.locator('#owner-signin');
   const autoOn = async () => (await get('/api/status')).auto_approve === true;
   await owner.goto(base + '/', { waitUntil: 'load' });
@@ -205,6 +208,7 @@ try {
     return until(async () => (await autoOn()) === want);
   };
   check('switching off is open', await toggleWithoutBox(false));
+  await snapshot();
   await owner.reload({ waitUntil: 'load' });
   await owner.locator('#auto').waitFor({ state: 'attached', timeout: 15000 });
   check('after a reload the owner is still signed in', await toggleWithoutBox(true));
@@ -212,6 +216,7 @@ try {
   await stopAndWait();
   panel = startPanel();
   check('the panel comes back after its restart', await until(async () => (await get('/api/status')).mcp_up === true, 30000));
+  await snapshot();
   await owner.reload({ waitUntil: 'load' });
   await owner.locator('#auto').waitFor({ state: 'attached', timeout: 15000 });
   check('after the panel\'s restart the owner is still signed in', await toggleWithoutBox(true));
@@ -223,7 +228,7 @@ try {
   check('after signing out the box asks again', logout === 204 && await box.waitFor({ timeout: 10000 }).then(() => true).catch(() => false));
   await owner.locator('[data-signin-cancel]').first().click();
   check('the close button closes it too', await until(async () => (await box.count()) === 0));
-  const signed = await owner.coverage.stopJSCoverage();
+  signed.push(...await owner.coverage.stopJSCoverage());
   check('the sign-in pages threw no error', errors.length === 0, errors.join('; '));
   // Every line this change adds to static/shell.js ran in one of the pages.
   const shells = [...covered, ...signed].filter((e) => e.url.endsWith('/static/shell.js'));
