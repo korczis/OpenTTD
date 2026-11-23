@@ -254,3 +254,11 @@ tools/research/mcp-live-check --bin build-research-mcp/openttd
 The profile turns on both gates (`OPTION_RESEARCH_INSTRUMENTATION=ON` and
 `OPTION_PRISMATIC_MCP_SERVER=ON`) with the probed compiler, and the manifest under the experiment
 dir captures the exact CMake options, compiler and flags used.
+
+## Rust performance benchmarks
+
+The Rust host's hot paths (planner, line pricing, Rhai, the DuckDB store) are benchmarked with
+criterion, and each run is a `rust-bench/v1` record under `research/results/`:
+`tools/research/rust-bench run` records one, `check` compares a fresh run with this host's newest
+committed record (the `full` gate tier runs it), `render` derives each record's page. See
+[`rust-bench.md`](rust-bench.md).

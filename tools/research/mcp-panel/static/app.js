@@ -16,11 +16,15 @@ const tag = (text, tone) => `<span class="${UI.badge} ${TONE[tone]}">${esc(text)
 const money = (v) => (typeof v === 'number' ? v.toLocaleString('en') : v ?? '-');
 
 /* ---- markup from what the panel answers (pure) --------------------------------------------- */
-/** The decisions waiting for the owner, each with its Approve. */
+/** The decisions waiting for the owner, each with its Approve and its Deny: both go to the game
+ *  server's one approval core (POST /api/approve, /api/deny), which decides and answers. */
 const pendingHtml = (pending) => (pending.length ? pending.map((p) => `
     <li class="flex items-center justify-between gap-2 p-2 border border-gray-200 rounded-lg dark:border-gray-700">
       <span class="min-w-0 font-mono break-all">#${p.id} ${esc(p.tool)}(${esc(JSON.stringify(p.args))})</span>
-      <button data-approve="${p.id}" type="button" class="shrink-0 ${UI.primary}">Approve</button>
+      <span class="flex shrink-0 gap-2">
+        <button data-approve="${p.id}" type="button" class="${UI.primary}">Approve</button>
+        <button data-deny="${p.id}" type="button" class="${UI.secondary}">Deny</button>
+      </span>
     </li>`).join('') : '<li>none</li>');
 /** A game string as a person reads it: OpenTTD's formatting codes (font, colour, sprites: the
  *  private use area its strings carry them in) and control characters dropped, line breaks folded
@@ -121,7 +125,7 @@ async function tick() {
 }
 
 document.addEventListener('click', async (ev) => {
-  const t = ev.target.closest('[data-approve],[data-read]');
+  const t = ev.target.closest('[data-approve],[data-deny],[data-read]');
   if (!t) return;
   ev.preventDefault();
   if (t.dataset.approve) {
@@ -129,6 +133,14 @@ document.addEventListener('click', async (ev) => {
     t.disabled = true;
     const r = await api('/api/approve', { id: Number(t.dataset.approve) });
     if (r.ok) notify(`#${t.dataset.approve} approved: ${r.status} ${r.command_result ?? ''}`.trim(), 'green');
+    t.disabled = false;
+    tick();
+  }
+  if (t.dataset.deny) {
+    // A denial enacts nothing; the server's answer (or the API client's failure toast) says how it went.
+    t.disabled = true;
+    const r = await api('/api/deny', { id: Number(t.dataset.deny) });
+    if (r.ok) notify(`#${t.dataset.deny} denied`, 'green');
     t.disabled = false;
     tick();
   }

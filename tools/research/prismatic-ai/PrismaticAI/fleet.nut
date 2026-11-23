@@ -109,6 +109,145 @@ function PrismaticAI::AirRouteHasDemand(v) {
 	return pct < 0 || pct >= full;
 }
 
+/*
+ * Yield gates (settings load_add_min, road_yield, road_probes; info.nut "Yield" block).
+ *
+ * Why (headless matches of 2026-11-22, the live game's settings, 1950-1956, seeds 15805, 2927,
+ * 31337 and 4242 against AAAHogEx, LuDiAI AfterFix, CivilAI and AdmiralAI, referee REF Q lines):
+ * - InvestSurplus judged a route by what its year-old vehicles earned on average, so a route
+ *   that earned anything above price / invest_ppv_div grew to its cap whether one more vehicle
+ *   carried anybody or not. Seed 15805: the first air route earned 109302 a year with 5 planes
+ *   (21860 each); InvestSurplus took it to 10 planes, and the 10 earned 118569 (11856 each) while
+ *   flying 28-33% full. Seed 2927: 138599 with 6 planes, 100370 with 10. On the road it added
+ *   buses to routes earning 892 to 1684 a vehicle, up to 8 on one route.
+ * - Bus routes came first: the heartbeat built one a heartbeat up to the autopilot's 30 routes,
+ *   18 by 1951 on seed 15805, while the company's 23 to 42 road vehicles earned 7.3k to 13.5k
+ *   a year between them, a few hundred each, and the second air route waited until 1954-55 for
+ *   money and loan headroom.
+ *
+ * RouteLoad measures how full a route's vehicles run: every heartbeat it samples the cargo
+ * aboard each running vehicle against its capacity, as a decaying sum per route, so one empty
+ * leg does not decide. RoadPays decides whether another bus route is worth building from what
+ * the company's year-old road vehicles earned last year against their price.
+ */
+
+/* Route key -> {load, cap, unit}: the decaying sums RouteLoad reads (SampleRouteLoads). */
+ROUTE_LOAD <- {};
+/* Each heartbeat the old sums count 7/8, so about the last 8 heartbeats weigh most. */
+const ROUTE_LOAD_KEEP = 7;
+/* A route's load is judged once its decaying capacity sum reaches this many halves of the
+ * biggest capacity sampled on it in one heartbeat (about three heartbeats of it running). */
+const ROUTE_LOAD_MIN_LOADS = 6;
+
+/* Samples the cargo aboard every running road vehicle, plane and ship of ours into ROUTE_LOAD.
+ * Called once a heartbeat (ManageFleet). */
+function PrismaticAI::SampleRouteLoads() {
+	local seen = {};
+	foreach (v, _ in AIVehicleList()) {
+		local type = AIVehicle.GetVehicleType(v);
+		if (type != AIVehicle.VT_ROAD && type != AIVehicle.VT_AIR && type != AIVehicle.VT_WATER) continue;
+		if (AIVehicle.GetState(v) != AIVehicle.VS_RUNNING) continue;
+		local cargo = AIEngine.GetCargoType(AIVehicle.GetEngineType(v));
+		local cap = AIVehicle.GetCapacity(v, cargo);
+		if (cap <= 0) continue;
+		local k = PrismaticAI.RouteKey(v);
+		if (k == "") continue;
+		if (!seen.rawin(k)) seen[k] <- [0, 0];
+		seen[k][0] += AIVehicle.GetCargoLoad(v, cargo);
+		seen[k][1] += cap;
+	}
+	foreach (k, s in seen) {
+		if (!ROUTE_LOAD.rawin(k)) ROUTE_LOAD[k] <- {load = 0, cap = 0, unit = 0};
+		local r = ROUTE_LOAD[k];
+		r.load = r.load * ROUTE_LOAD_KEEP / 8 + s[0];
+		r.cap = r.cap * ROUTE_LOAD_KEEP / 8 + s[1];
+		r.unit = max(r.unit, s[1]);
+	}
+}
+
+/* How full, in percent, route `k` (RouteKey) ran over the recent heartbeats; -1 while too little
+ * was sampled to say. */
+function PrismaticAI::RouteLoad(k) {
+	if (!ROUTE_LOAD.rawin(k)) return -1;
+	local r = ROUTE_LOAD[k];
+	if (r.cap <= 0 || 2 * r.cap < ROUTE_LOAD_MIN_LOADS * r.unit) return -1;
+	return r.load * 100 / r.cap;
+}
+
+/* Whether route `k` takes one vehicle more by its load: it ran at least load_add_min percent full,
+ * or it was not sampled enough to say (load_add_min 0: always). */
+function PrismaticAI::RouteFillsMore(k) {
+	local min_pct = max(0, AIController.GetSetting("load_add_min"));
+	if (min_pct == 0) return true;
+	local pct = PrismaticAI.RouteLoad(k);
+	return pct < 0 || pct >= min_pct;
+}
+
+/* Whether another bus route is worth building (setting road_yield, percent; 0: always). Once any
+ * road vehicle of ours is a year old: those vehicles earned, last year, at least road_yield percent
+ * of their price between them. Before that: fewer than road_probes road routes run, so the first
+ * ones show what the road earns on this map before more money goes into it. */
+function PrismaticAI::RoadPays() {
+	local pct = max(0, AIController.GetSetting("road_yield"));
+	if (pct == 0) return true;
+	local profit = 0, price = 0, judged = 0, routes = {};
+	foreach (v, _ in AIVehicleList()) {
+		if (AIVehicle.GetVehicleType(v) != AIVehicle.VT_ROAD) continue;
+		routes[PrismaticAI.RouteKey(v)] <- true;
+		if (AIVehicle.GetAge(v) < 365) continue;
+		profit += AIVehicle.GetProfitLastYear(v);
+		price += AIEngine.GetPrice(AIVehicle.GetEngineType(v));
+		judged++;
+	}
+	if (judged == 0) return routes.len() < max(0, AIController.GetSetting("road_probes"));
+	return profit * 100 >= pct * price;
+}
+
+/* The game year RoadReport last logged. */
+ROAD_REPORT_YEAR <- -1;
+
+/* Once a game year, the road fleet's yield in the log, like AirReport: per road route its
+ * vehicles, the distance between its first two stops, whether both are in one town, how full it
+ * ran (RouteLoad) and last year's profit per vehicle a year old; then the company's total and
+ * RoadPays. RESEARCH-ONLY observability: it reads and logs, never acts. */
+function PrismaticAI::RoadReport() {
+	local year = AIDate.GetYear(AIDate.GetCurrentDate());
+	if (year == ROAD_REPORT_YEAR) return;
+	ROAD_REPORT_YEAR = year;
+	local routes = {}, n = 0, judged = 0, profit = 0, price = 0;
+	foreach (v, _ in AIVehicleList()) {
+		if (AIVehicle.GetVehicleType(v) != AIVehicle.VT_ROAD) continue;
+		local k = PrismaticAI.RouteKey(v);
+		if (!routes.rawin(k)) routes[k] <- {sample = v, n = 0, judged = 0, profit = 0};
+		local r = routes[k];
+		r.n++;
+		n++;
+		if (AIVehicle.GetAge(v) < 365) continue;
+		local p = AIVehicle.GetProfitLastYear(v);
+		r.judged++;
+		r.profit += p;
+		judged++;
+		profit += p;
+		price += AIEngine.GetPrice(AIVehicle.GetEngineType(v));
+	}
+	if (n == 0) return;
+	foreach (k, r in routes) {
+		local v = r.sample, tiles = [];
+		for (local i = 0; i < AIOrder.GetOrderCount(v) && tiles.len() < 2; i++) {
+			local st = AIStation.GetStationID(AIOrder.GetOrderDestination(v, i));
+			if (AIStation.IsValidStation(st)) tiles.push(AIStation.GetLocation(st));
+		}
+		local dist = tiles.len() >= 2 ? AIMap.DistanceManhattan(tiles[0], tiles[1]) : 0;
+		local kind = (tiles.len() >= 2 && AITile.GetClosestTown(tiles[0]) == AITile.GetClosestTown(tiles[1])) ? "town" : "intercity";
+		AILog.Info("PrismaticAI: road report " + year + ": route " + k + " " + kind + " " + dist + " tiles, " + r.n + " vehicle(s) running " +
+			PrismaticAI.RouteLoad(k) + "% full, " + r.judged + " a year old, " + (r.judged > 0 ? r.profit / r.judged : 0) + " a vehicle last year (price " +
+			AIEngine.GetPrice(AIVehicle.GetEngineType(v)) + ")");
+	}
+	AILog.Info("PrismaticAI: road report " + year + ": " + n + " vehicle(s) on " + routes.len() + " route(s), " + judged + " a year old earned " + profit +
+		" last year, " + (judged > 0 ? profit / judged : 0) + " a vehicle, " + (price > 0 ? profit * 100 / price : 0) + "% of their price; another route: " +
+		(PrismaticAI.RoadPays() ? "yes" : "no"));
+}
+
 /* Surplus to put to work (steward on): money above this many reserves, and above the setting
  * invest_min, funds more vehicles. */
 const INVEST_SURPLUS_RESERVES = 20;
@@ -144,6 +283,9 @@ function PrismaticAI::InvestSurplus(b) {
 		if (r.type == AIVehicle.VT_AIR && !PrismaticAI.RouteHasAirRoom(r.sample)) continue;
 		/* Nor where its planes already fly part empty (air_add_full, AirRouteHasDemand). */
 		if (r.type == AIVehicle.VT_AIR && !PrismaticAI.AirRouteHasDemand(r.sample)) continue;
+		/* Nor where its vehicles run part empty over the last heartbeats (load_add_min, RouteLoad):
+		 * a vehicle more there shares the same passengers and adds only its running cost. */
+		if (!PrismaticAI.RouteFillsMore(k)) continue;
 		/* At most as many unjudged vehicles (under a year old) as judged ones: the profit per vehicle
 		 * counts only the judged, so it does not fall as vehicles are added, and without this GA
 		 * g276.brainSafe1 (OpenTTD seed 1878134858, slot 0) put 50 buses on one route at 1810 a year
@@ -228,6 +370,8 @@ function PrismaticAI::AirReport() {
 
 function PrismaticAI::ManageFleet(reserve) {
 	PrismaticAI.AirReport();
+	PrismaticAI.RoadReport();
+	PrismaticAI.SampleRouteLoads();
 	local routes = {};
 	local list = AIVehicleList();
 	/* Planes per air route that are not on their way to be sold. With air_keep_last on (AIR_KEEP_LAST,
@@ -355,6 +499,7 @@ function PrismaticAI::ManageFleet(reserve) {
 		}
 		if (type == AIVehicle.VT_AIR && !PrismaticAI.RouteHasAirRoom(v)) continue;
 		if (type == AIVehicle.VT_AIR && !PrismaticAI.AirRouteHasDemand(v)) continue;
+		if (!PrismaticAI.RouteFillsMore(k)) continue; /* load_add_min, as in InvestSurplus */
 		/* Never a vehicle more on a route whose year-old vehicles lost money last year, whatever the
 		 * waiting cargo says. With air_full_load and a low air_add_waiting, GA g276.brainSafe1 (OpenTTD
 		 * seed 1878134858, slot 0) put 17 planes on 3 routes that lost 42.7k a year between them, and

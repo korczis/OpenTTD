@@ -15,7 +15,10 @@ What counts as a reference, in a scanned Markdown file outside fenced code block
     a bare line number cannot be verified and rots on every rebase, so cite a symbol instead),
     or `path:123:Symbol` / `path:12-14:Symbol`, a line anchored to a symbol: the lines must
     exist and the symbol must occur, as a whole word, on one of them;
-  - each pathspec in the front matter's `tracks:` list.
+  - each pathspec in the front matter's `tracks:` list;
+  - each `file:<path>` value of the front matter (a `provenance.derived_from` entry, a
+    `relations[].target`): a knowledge record that relates to a file which was moved, such as a
+    candidate promoted to curated, otherwise kept sending the reader to nothing.
 
 A file reference must name a tracked file, a directory reference a directory holding tracked
 files, a symbol must occur as a whole word in the file it is cited in, an anchored line must
@@ -188,12 +191,30 @@ def front_matter(text: str) -> tuple[list[str], int]:
     return [], 0
 
 
+FILE_VALUE = re.compile(r"(?:^|[\s:\-\[,])['\"]?file:([A-Za-z0-9_.][A-Za-z0-9_./-]*)['\"]?"
+                        r"\s*(?:#.*)?$")
+
+
+def front_matter_files(repo: Repo, record: str, text: str, body_start: int) -> list[Ref]:
+    """Each `file:<path>` value of the front matter, a file or directory reference on its line."""
+    out = []
+    for n, line in enumerate(text.split("\n")[1:max(body_start - 1, 1)], start=2):
+        m = FILE_VALUE.search(line)
+        if not m:
+            continue
+        path = m.group(1).rstrip("/")
+        kind = "dir" if path in repo.dirs else "file"
+        out.append(Ref(record, n, path, None, kind, raw=m.group(1)))
+    return out
+
+
 def scan(repo: Repo, record: str, text: str | None = None) -> list[Ref]:
     text = repo.text(record) if text is None else text
     tracks, body_start = front_matter(text)
     if body_start and HISTORY.search("\n".join(text.split("\n")[:body_start])):
         return []
     refs = [Ref(record, 1, t, None, "tracks") for t in tracks]
+    refs += front_matter_files(repo, record, text, body_start)
     fenced = False
     for n, line in enumerate(text.split("\n"), start=1):
         if n <= body_start:
