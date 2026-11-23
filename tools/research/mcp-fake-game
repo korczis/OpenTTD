@@ -22,7 +22,9 @@
 // waiting and new approvals, deny winning over allow, a panel line (`--via panel`) never deciding an
 // owner-only tool. Its console lines: `prismatic_mcp approve all|deny all [<glob> [<json>]] [--via panel]`,
 // `prismatic_mcp rule allow|deny <glob> [<json>] [--persist] [--via panel]`, `prismatic_mcp rules`,
-// `prismatic_mcp rule remove <id>`; `fake add <tool> <json, ' for ">` adds a new approval, as a bot asking would.
+// `prismatic_mcp rule remove <id>`, `prismatic_mcp approve|deny <id> <id> ... [--via <c>]`, each with
+// `--nonce <n>` answered by one `[approval-core] {...}` result line; `prismatic_mcp approvers ...`;
+// `fake add <tool> <json, ' for ">` adds a new approval, as a bot asking would.
 //
 // Usage (as mcp-panel calls it): mcp-fake-game -D <host:port> -x -g ... -c <cfg> -d ...
 import fs from 'node:fs';
@@ -144,15 +146,26 @@ function applyRules() {
   }
   return n;
 }
+/** A flag's value among a line's words (`--via panel`, `--nonce 7`), or ''. */
+const flag = (words, name) => (words.includes(name) ? words[words.indexOf(name) + 1] || '' : '');
+/** The core's one result line for a command sent with `--nonce` (feature/approval-rules). */
+function result(words, out) {
+  const nonce = flag(words, '--nonce');
+  if (nonce) say(`[approval-core] ${JSON.stringify({ nonce, ok: true, ...out })}`);
+}
+/** A refusal: the console's error, and the result line with ok false. */
+const refuse = (words, error) => { say(`ERROR: ${error}`); result(words, { ok: false, error }); return true; };
+
 /** The glob and matcher words after a subcommand: [glob, matcher, via, persist] or a refusal. */
 function scopeOf(words) {
-  const flags = words.filter((w, i) => w.startsWith('--') || words[i - 1] === '--via');
+  const flags = words.filter((w, i) => w.startsWith('--') || ['--via', '--nonce'].includes(words[i - 1]));
   const rest = words.filter((w) => !flags.includes(w));
   let m = null;
   if (rest[1] !== undefined) {
-    try { m = JSON.parse(rest[1].replace(/'/g, '"')); } catch (e) { return { error: `ERROR: the matcher is not JSON: ${e.message}` }; }
+    try { m = JSON.parse(rest[1].replace(/'/g, '"')); } catch (e) { return { error: `the matcher is not JSON: ${e.message}` }; }
   }
-  return { glob: rest[0] || '*', m, via: words.includes('--via') ? words[words.indexOf('--via') + 1] : 'console', persist: words.includes('--persist') };
+  if (rest[0] !== undefined && !/^[A-Za-z0-9._*?-]+$/.test(rest[0])) return { error: `${rest[0]} is not a tool glob` };
+  return { glob: rest[0] || '*', m, via: flag(words, '--via') || 'console', persist: words.includes('--persist') };
 }
 
 /** The approval-rules core's own lines; true when `w` was one. */
@@ -160,34 +173,79 @@ function rulesLine(w) {
   if (w[0] !== 'prismatic_mcp' || !rules) return false;
   if ((w[1] === 'approve' || w[1] === 'deny') && w[2] === 'all') {
     const s = scopeOf(w.slice(3));
-    if (s.error) return say(s.error) || true;
-    const owned = (a) => OWNER_ONLY.includes(a.tool) && (w[1] === 'deny' || s.via === 'panel');
+    if (s.error) return refuse(w, s.error);
+    const owned = (a) => OWNER_ONLY.includes(a.tool) && s.via !== 'console';
     const hit = queue.filter((a) => a.state === 'pending' && !a.expired && takes(s.glob, s.m, a) && !(w[1] === 'approve' && owned(a)));
     for (const a of hit) { if (w[1] === 'deny') a.state = 'denied'; else carryOut(a, s.via); }
     say(`${w[1] === 'deny' ? 'Denied' : 'Approved'} ${hit.length} approval(s).`);
+    result(w, { decided: hit.map((a) => a.id) });
     return true;
   }
   if (w[1] === 'rules') {
     say(rules.length ? rules.map((r) => `#${r.id} ${r.effect} ${r.tool} ${JSON.stringify(r.match)} hits ${r.hits}`).join('\n') : 'No standing rules.');
+    result(w, { rules });
     return true;
   }
   if (w[1] === 'rule' && (w[2] === 'allow' || w[2] === 'deny')) {
     const s = scopeOf(w.slice(3));
-    if (s.error) return say(s.error) || true;
-    if (s.m !== null && (typeof s.m !== 'object' || Array.isArray(s.m))) return say('ERROR: the matcher is a JSON object') || true;
+    if (s.error) return refuse(w, s.error);
+    if (s.m !== null && (typeof s.m !== 'object' || Array.isArray(s.m))) return refuse(w, 'the matcher is a JSON object');
     const r = { id: nextRule++, effect: w[2], tool: s.glob, match: s.m, created_via: s.via, created_tick: 1000, hits: 0, persisted: s.persist };
     rules.push(r);
-    say(`Rule #${r.id} added: always ${r.effect} ${r.tool}; it decided ${applyRules()} waiting approval(s).`);
+    const n = applyRules();
+    say(`Rule #${r.id} added: always ${r.effect} ${r.tool}; it decided ${n} waiting approval(s).`);
+    result(w, { rule_id: r.id, decided: n });
     return true;
   }
   if (w[1] === 'rule' && w[2] === 'remove') {
     const i = rules.findIndex((r) => r.id === Number(w[3]));
-    if (i < 0) return say(`ERROR: no rule #${w[3]}`) || true;
+    if (i < 0) return refuse(w, `no rule #${w[3]}`);
     rules.splice(i, 1);
     say(`Rule #${w[3]} removed.`);
+    result(w, {});
     return true;
   }
   return false;
+}
+
+/** `prismatic_mcp approve|deny <id> [<id> ...] [--via <channel>] [--nonce <n>]`: each id decided as
+ *  the core decides it, a panel line never deciding an owner-only tool; one result line names each. */
+function decideLine(w) {
+  const ids = [];
+  for (const x of w.slice(2)) { if (!/^\d+$/.test(x)) break; ids.push(Number(x)); }
+  const via = flag(w, '--via') || 'console';
+  const out = { decided: [], refused: [], skipped: [] };
+  for (const id of ids) {
+    const a = queue.find((x) => x.id === id);
+    if (!a || a.state !== 'pending') { say(`Approval #${id} is not pending.`); out.skipped.push({ id, reason: 'not pending' }); continue; }
+    if (w[1] === 'deny') {
+      if (ignored.has(a.id)) { say(`(fake) deny #${a.id} ignored`); out.skipped.push({ id, reason: 'ignored' }); continue; }
+      a.state = 'denied';
+      say(`Denied approval #${a.id}.`);
+    } else {
+      if (OWNER_ONLY.includes(a.tool) && via !== 'console') { say(`Refused #${id}: the owner approves it at the console.`); out.refused.push({ id, error: 'owner-only' }); continue; }
+      carryOut(a, via);
+      say(`Approved #${a.id}: carried out.`);
+    }
+    out.decided.push(id);
+  }
+  result(w, out);
+}
+
+/** `prismatic_mcp approvers [add <client id> | remove <key prefix>]`, as the game answers it. */
+const approvers = [];
+function approversLine(w) {
+  if (w[2] === 'add') {
+    if (w[3] !== '2') return say(`No connected client #${w[3]} with a key ('clients' lists them).`);
+    if (!approvers.includes('owner-key-0000')) approvers.push('owner-key-0000');
+    return say('Client #2 (owner) is an approver now.');
+  }
+  if (w[2] === 'remove') {
+    const i = approvers.findIndex((k) => k.startsWith(w[3]));
+    if (i < 0) return say(`No single approver's key starts with '${w[3]}'.`);
+    return say(`Removed the approver ${approvers.splice(i, 1)[0]}.`);
+  }
+  return say(approvers.length ? approvers.map((k) => `approver ${k}`).join('\n') : "No approvers registered: 'prismatic_mcp approvers add <client id>'.");
 }
 
 /** One console line, as the game's console answers it. */
@@ -203,17 +261,8 @@ export function consoleLine(line) {
     say(`(fake) #${id} waits; rules decided ${applyRules()}`);
     return undefined;
   }
-  if (w[0] === 'prismatic_mcp' && (w[1] === 'approve' || w[1] === 'deny')) {
-    const a = find(w[2]);
-    if (!a || a.state !== 'pending') return say(`Approval #${w[2]} is not pending.`);
-    if (w[1] === 'deny') {
-      if (ignored.has(a.id)) return say(`(fake) deny #${a.id} ignored`);
-      a.state = 'denied';
-      return say(`Denied approval #${a.id}.`);
-    }
-    carryOut(a, 'console');
-    return say(`Approved #${a.id}: carried out.`);
-  }
+  if (w[0] === 'prismatic_mcp' && (w[1] === 'approve' || w[1] === 'deny')) return decideLine(w);
+  if (w[0] === 'prismatic_mcp' && w[1] === 'approvers') return approversLine(w);
   if (w[0] === 'fake' && w[1] === 'consume') { const a = find(w[2]); if (a) a.state = 'consumed'; return say(`(fake) #${w[2]} consumed`); }
   if (w[0] === 'fake' && w[1] === 'drop') { const i = queue.findIndex((a) => a.id === Number(w[2])); if (i >= 0) queue.splice(i, 1); return say(`(fake) #${w[2]} dropped`); }
   if (w[0] === 'fake' && w[1] === 'ignore') { ignored.add(Number(w[2])); return say(`(fake) deny #${w[2]} will be ignored`); }

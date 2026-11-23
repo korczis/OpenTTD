@@ -537,7 +537,11 @@ pub fn console_refusal(cmd: &str) -> Option<String> {
     // The standing rules (allow, deny, remove, the list), the core's `--via` marker and a bulk
     // denial are the owner routes' alone (POST /api/rules, /api/rules/remove, /api/deny/all).
     let words: Vec<String> = tokens.iter().map(|t| console_word(t)).collect();
-    if words.iter().any(|w| matches!(w.as_str(), "rule" | "rules" | "via")) {
+    if words.iter().any(|w| matches!(w.as_str(), "approver" | "approvers")) {
+        return Some("who may approve is the owner's to say: the panel's POST /api/approvers with the owner secret, \
+                     or `prismatic_mcp approvers ...` at the game's own console, never a console line sent through the panel".into());
+    }
+    if words.iter().any(|w| matches!(w.as_str(), "rule" | "rules" | "via" | "nonce")) {
         return Some("standing approval rules are the owner's: the panel's Rules with the owner secret (POST /api/rules, \
                      /api/rules/remove), or `prismatic_mcp rule ...` at the game's own console, never a console line sent through the panel".into());
     }
@@ -698,9 +702,14 @@ pub const LOGIN_DELAY: Duration = Duration::from_secs(1);
 pub const LOGIN_DELAY: Duration = Duration::from_millis(0);
 
 /// The owner's sign-in (POST /api/owner/login): Ok when `given` is the secret (compared in constant
-/// time); 401 for any other, with nothing about the secret's length or prefix; 429 while
-/// [`LOGIN_TRIES`] failures fall within [`LOGIN_WINDOW`]. `failures` keeps their times.
+/// time), always: guesses from any local caller never lock the owner out. Any other answer is 401,
+/// with nothing about the secret's length or prefix, or 429 while [`LOGIN_TRIES`] wrong ones fall
+/// within [`LOGIN_WINDOW`] (a 256-bit secret is not guessed; the limit and [`LOGIN_DELAY`] keep a
+/// loop from flooding the event feed). `failures` keeps their times.
 pub fn owner_login(secret: Option<&str>, given: &str, failures: &mut VecDeque<Instant>, now: Instant) -> Result<(), (u16, Value)> {
+    if secret.is_some_and(|s| crate::web_access::same(s, given.trim())) {
+        return Ok(());
+    }
     while failures.front().is_some_and(|t| now.duration_since(*t) >= LOGIN_WINDOW) {
         failures.pop_front();
     }
@@ -708,20 +717,15 @@ pub fn owner_login(secret: Option<&str>, given: &str, failures: &mut VecDeque<In
         return Err((429, json!({"error": format!("{LOGIN_TRIES} wrong owner secrets within {} s: wait, then sign in again", LOGIN_WINDOW.as_secs()),
                                 "refused": "owner_login_rate"})));
     }
-    match secret {
-        Some(s) if crate::web_access::same(s, given.trim()) => Ok(()),
-        _ => {
-            failures.push_back(now);
-            Err((401, json!({"error": "that is not the owner secret", "refused": "owner_login"})))
-        }
-    }
+    failures.push_back(now);
+    Err((401, json!({"error": "that is not the owner secret", "refused": "owner_login"})))
 }
 
 /// The owner's POST routes besides auto-approve: approving one, the bulk decisions over a set of ids
 /// or a tool glob, and the standing rules (allow and deny alike: a deny rule withdraws requests
 /// nobody has seen yet). None of them is reachable through /api/console ([`console_refusal`]).
 pub const OWNER_ROUTES: &[&str] = &["/api/approve", "/api/approve/many", "/api/approve/all", "/api/deny/many", "/api/deny/all",
-                                    "/api/rules", "/api/rules/remove"];
+                                    "/api/rules", "/api/rules/remove", "/api/approvers"];
 
 /// The owner's routes: [`OWNER_ROUTES`] and switching auto-approve on (POST /api/auto-approve
 /// `{on: true}`; switching it off is open to anyone). They need the owner secret the panel printed
@@ -797,9 +801,90 @@ pub fn approve_all_line(tool: Option<&str>, m: Option<&Value>) -> Result<String,
     Ok(format!("prismatic_mcp approve all{} {VIA_PANEL}", scope_words(tool, m)?))
 }
 
-/// `prismatic_mcp deny all [<glob> [<matcher>]]`.
+/// `prismatic_mcp deny all [<glob> [<matcher>]] --via panel`.
 pub fn deny_all_line(tool: Option<&str>, m: Option<&Value>) -> Result<String, String> {
-    Ok(format!("prismatic_mcp deny all{}", scope_words(tool, m)?))
+    Ok(format!("prismatic_mcp deny all{} {VIA_PANEL}", scope_words(tool, m)?))
+}
+
+/// The channel a panel decision is recorded under: `auto` for the auto-approve switch, `panel` for
+/// every other (a person's Approve or Deny, one or many).
+pub fn via_of(by: &Value) -> &'static str {
+    if by["channel"] == json!("auto-approve") { "auto" } else { "panel" }
+}
+
+/// `prismatic_mcp approve|deny <id> [<id> ...] [--via <channel>] [--nonce <n>]`. An older core (no
+/// rules) takes neither flag, so both are optional.
+pub fn decide_line(approve: bool, ids: &[i64], via: Option<&str>, nonce: Option<&str>) -> String {
+    let ids: Vec<String> = ids.iter().map(i64::to_string).collect();
+    let mut line = format!("prismatic_mcp {} {}", if approve { "approve" } else { "deny" }, ids.join(" "));
+    if let Some(v) = via { line.push_str(&format!(" --via {v}")); }
+    if let Some(n) = nonce { line.push_str(&format!(" --nonce {n}")); }
+    line
+}
+
+/// What starts the approval core's one result line for a command sent with `--nonce`:
+/// `[approval-core] {"nonce", "ok", "decided", "refused", "skipped", "rule_id", "error"}`.
+pub const CORE_RESULT: &str = "[approval-core] ";
+
+/// The core's result line for `nonce` among console lines, parsed; None while it has not come.
+pub fn core_result(lines: &[String], nonce: &str) -> Option<Value> {
+    lines.iter().find_map(|l| {
+        let at = l.find(CORE_RESULT)?;
+        let v: Value = serde_json::from_str(l[at + CORE_RESULT.len()..].trim()).ok()?;
+        let n = &v["nonce"];
+        (n.as_str().map(str::to_string).unwrap_or_else(|| n.to_string()) == nonce).then_some(v)
+    })
+}
+
+/// A fresh nonce for one core line: digits only, unique in this process and across restarts.
+pub fn next_nonce() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let base = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    let n = NEXT.fetch_add(1, Ordering::SeqCst);
+    format!("{}", base.wrapping_mul(1000).wrapping_add(n % 1000))
+}
+
+/// The id of one entry of a core result's `decided`, `refused` or `skipped`: an id, or an object
+/// with `id` (and `error` or `reason`).
+fn entry_of(v: &Value) -> Option<(i64, String)> {
+    let id = v.as_i64().or_else(|| v["id"].as_i64())?;
+    Some((id, py_str(v.get("error").or(v.get("reason")))))
+}
+
+/// The per-id results of a multi-id core line: decided 200, refused 403, skipped 409, and 504 for
+/// an id the core's answer did not name.
+pub fn per_id(ids: &[i64], result: &Value, approve: bool) -> Vec<(i64, u16, Value)> {
+    let list = |k: &str| -> Vec<(i64, String)> { result[k].as_array().into_iter().flatten().filter_map(entry_of).collect() };
+    let (decided, refused, skipped) = (list("decided"), list("refused"), list("skipped"));
+    ids.iter().map(|&id| {
+        if decided.iter().any(|(d, _)| *d == id) {
+            return (id, 200, json!({"status": if approve { "executed" } else { "denied" }, "approval_id": id}));
+        }
+        if let Some((_, why)) = refused.iter().find(|(d, _)| *d == id) {
+            return (id, 403, json!({"error": format!("the approval core refused #{id}: {why}"), "approval_id": id}));
+        }
+        if let Some((_, why)) = skipped.iter().find(|(d, _)| *d == id) {
+            return (id, 409, json!({"error": format!("the approval core skipped #{id}: {why}"), "approval_id": id}));
+        }
+        (id, 504, json!({"error": format!("the approval core's answer does not name #{id}"), "approval_id": id, "pending_decision": true}))
+    }).collect()
+}
+
+/// `prismatic_mcp approvers [add <client id> | remove <key prefix>]`: Err for a body that names
+/// neither a client id nor a key prefix of 8 to 128 key characters.
+pub fn approvers_line(body: &Value) -> Result<String, String> {
+    if let Some(add) = body.get("add") {
+        let id = add.as_u64().filter(|id| *id > 0).ok_or("add: a client id (`clients` lists them)")?;
+        return Ok(format!("prismatic_mcp approvers add {id}"));
+    }
+    if let Some(remove) = body.get("remove") {
+        let key = remove.as_str().unwrap_or_default();
+        if !(8..=128).contains(&key.len()) || !key.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '_' | '-')) {
+            return Err("remove: 8 to 128 characters of one approver's key".into());
+        }
+        return Ok(format!("prismatic_mcp approvers remove {key}"));
+    }
+    Ok("prismatic_mcp approvers".into())
 }
 
 /// `prismatic_mcp rule allow|deny <glob> [<matcher>] [--persist] --via panel`. An allow rule that
@@ -861,14 +946,6 @@ pub fn bulk_ids(body: &Value) -> Result<Vec<i64>, String> {
         return Err(format!("ids: 1 to {BULK_MAX} approval ids"));
     }
     Ok(out)
-}
-
-/// The first console line that says the core refused a line (`ERROR`, `Usage`, unknown, invalid).
-pub fn refused_line(lines: &[String]) -> Option<String> {
-    lines.iter().find(|l| {
-        let l = l.trim_start().to_ascii_lowercase();
-        l.starts_with("error") || l.starts_with("usage") || l.contains("unknown") || l.contains("invalid")
-    }).cloned()
 }
 
 // ---------------------------------------------------------------------- subprocesses
@@ -1266,21 +1343,32 @@ impl Game {
     }
 
     /// The approval-rules core as tests stand in for it (with `test_rules` set): `rule allow|deny
-    /// <glob> ...` adds a rule, `rule remove <id>` removes one, a glob starting `bad` is answered
-    /// with an ERROR line on the log, as the core answers a line it cannot read.
+    /// <glob> ...` adds a rule, `rule remove <id>` removes one, `approve|deny all` and `approve|deny
+    /// <id> ...` decide (a pending one of `test_approvals`; others skipped), each answered with the
+    /// core's result line for its `--nonce`. A glob starting `bad` is refused (`ok: false`);
+    /// `approvers add 404` is answered with the game's refusal.
     #[cfg(test)]
     fn test_core(&self, command: &str) {
         let t = console_tokens(command);
-        let mut rules = self.test_rules.lock().unwrap();
-        let Some(rules) = rules.as_mut() else { return };
         let say = |line: &str| {
             let mut log = self.log.lock().unwrap();
             log.seq += 1;
             let seq = log.seq;
             log.lines.push_back((seq, line.to_string()));
         };
+        if t.get(1).is_some_and(|w| w == "approvers") {
+            return say(if t.get(3).is_some_and(|w| w == "404") { "No connected client #404 with a key ('clients' lists them)." } else { "Client #2 (owner) is an approver now." });
+        }
+        let mut rules = self.test_rules.lock().unwrap();
+        let Some(rules) = rules.as_mut() else { return };
+        let nonce = t.iter().position(|w| w == "--nonce").and_then(|i| t.get(i + 1)).cloned().unwrap_or_default();
+        let answer = |extra: Value| {
+            let mut v = json!({"nonce": nonce, "ok": true});
+            for (k, x) in extra.as_object().into_iter().flatten() { v[k] = x.clone(); }
+            say(&format!("{CORE_RESULT}{v}"));
+        };
         if t.get(3).is_some_and(|g| g.starts_with("bad")) {
-            return say(&format!("ERROR: cannot read the tool glob {}", t[3]));
+            return answer(json!({"ok": false, "error": format!("{} is not a tool glob", t[3])}));
         }
         match (t.get(1).map(String::as_str), t.get(2).map(String::as_str)) {
             (Some("rule"), Some(effect @ ("allow" | "deny"))) => {
@@ -1288,14 +1376,26 @@ impl Game {
                 let m = t.get(4).filter(|w| !w.starts_with("--")).and_then(|w| serde_json::from_str::<Value>(w).ok());
                 rules.push(json!({"id": id, "effect": effect, "tool": t[3], "match": m, "created_via": "panel", "hits": 0,
                                   "persisted": t.iter().any(|w| w == "--persist")}));
-                say(&format!("Rule #{id} added."));
+                answer(json!({"rule_id": id}));
             }
             (Some("rule"), Some("remove")) => {
                 let id = t.get(3).and_then(|w| w.parse::<i64>().ok());
                 rules.retain(|r| r["id"].as_i64() != id);
-                say("Rule removed.");
+                answer(json!({}));
             }
-            (Some("approve" | "deny"), Some("all")) => say("Decided 0 approval(s)."),
+            (Some("approve" | "deny"), Some("all")) => answer(json!({"decided": []})),
+            (Some(verb @ ("approve" | "deny")), Some(_)) => {
+                let ids: Vec<i64> = t[2..].iter().map_while(|w| w.parse::<i64>().ok()).collect();
+                let mut queue = self.test_approvals.lock().unwrap();
+                let (mut decided, mut skipped) = (vec![], vec![]);
+                for id in ids {
+                    match queue.iter_mut().find(|a| a["id"] == json!(id) && a["state"] == json!("pending")) {
+                        Some(a) => { a["state"] = json!(if verb == "approve" { "consumed" } else { "denied" }); decided.push(id); }
+                        None => skipped.push(json!({"id": id, "reason": "not pending"})),
+                    }
+                }
+                if !nonce.is_empty() { answer(json!({"decided": decided, "skipped": skipped})); }
+            }
             _ => {}
         }
     }
@@ -1600,6 +1700,12 @@ impl Game {
 
     /// The game server's approval queue (openttd://approvals, ADR 0038): every approval it holds,
     /// pending first; [] while the server does not answer.
+    /// Whether the game server's approval core keeps standing rules (its queue answers `rules`): it
+    /// then takes `--via` and `--nonce` on its lines, and an older core does not.
+    pub fn keeps_rules(&self) -> bool {
+        self.queue_data()["rules"].is_array()
+    }
+
     /// The server's whole queue resource (openttd://approvals data): its approvals and, from the
     /// approval-rules core, its standing rules. Null when the MCP is down or the read fails.
     pub fn queue_data(&self) -> Value {
@@ -1644,7 +1750,8 @@ impl Game {
             return Ok(json!({"error": format!("approval #{id} is {st}, not pending"), "approval": a}));
         }
         panel_decision::record_approval(id, by.clone());
-        self.console(&format!("prismatic_mcp approve {id}"))?;
+        let via = self.keeps_rules().then(|| via_of(&by));
+        self.console(&decide_line(true, &[id], via, None))?;
         self.event("operator", &format!("approved #{id} in the OpenTTD console ({})", panel_decision::approval_label(&by)));
         // The decision the server recorded when it carried the approval out.
         for _ in 0..20 {
@@ -1676,7 +1783,7 @@ impl Game {
             let st = if a["expired"] == json!(true) { "expired".to_string() } else { py_str(a.get("state")) };
             return Ok(json!({"error": format!("approval #{id} is {st}, not pending"), "approval": a}));
         }
-        self.console(&format!("prismatic_mcp deny {id}"))?;
+        self.console(&decide_line(false, &[id], self.keeps_rules().then_some("panel"), None))?;
         self.event("operator", &format!("denied #{id} in the OpenTTD console"));
         for _ in 0..20 {
             thread::sleep(Duration::from_millis(150));
@@ -2813,20 +2920,52 @@ fn h_approvals(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
     ok(approvals_view(&g.queue_data()))
 }
 
-/// One decision per id, through the same core as Approve and Deny (the core's own bulk line takes a
-/// glob, not the rows a person picked), so each id answers as POST /api/approve or /api/deny would.
+/// The picked ids decided together. With the approval-core of feature/approval-rules: the ids the
+/// panel may not decide are answered here as POST /api/approve and /api/deny would (403 owner-only,
+/// 404, 409), the rest go in ONE line `prismatic_mcp approve|deny <id> ... --via panel --nonce <n>`
+/// and the core's result line names each. With an older core: one decision per id, as before.
 fn decide_many(g: &Arc<Game>, i: &Input, approve: bool) -> Result<(u16, Value), String> {
     let ids = match bulk_ids(&i.body) {
         Ok(ids) => ids,
         Err(e) => return Ok((400, json!({"error": e}))),
     };
-    let results: Vec<(i64, u16, Value)> = ids.into_iter().map(|id| {
+    let one = |id: i64| {
         let out = if approve { g.approve(id, json!({"channel": "api", "bulk": true, "owner_secret": true})) } else { g.deny(id) };
         match out {
             Ok(out) => (id, approve_status(&out), out),
             Err(e) => (id, 502, json!({"error": e})),
         }
-    }).collect();
+    };
+    let results: Vec<(i64, u16, Value)> = if !g.keeps_rules() {
+        ids.into_iter().map(one).collect()
+    } else {
+        let queue = g.approvals();
+        let mut out = Vec::new();
+        let mut send = Vec::new();
+        for id in ids {
+            let held = queue.iter().find(|a| a["id"] == json!(id));
+            match held {
+                None => out.push((id, 404, json!({"error": format!("the game server holds no approval #{id}")}))),
+                Some(a) if a["state"] != json!("pending") || a["expired"] == json!(true) => {
+                    let st = if a["expired"] == json!(true) { "expired".to_string() } else { py_str(a.get("state")) };
+                    out.push((id, 409, json!({"error": format!("approval #{id} is {st}, not pending"), "approval": a})));
+                }
+                Some(a) if approve && a["tool"].as_str().is_some_and(owner_only) => out.push((id, 403, owner_only_refusal(id, &py_str(a.get("tool"))))),
+                Some(_) => send.push(id),
+            }
+        }
+        if !send.is_empty() {
+            if approve {
+                for &id in &send { panel_decision::record_approval(id, json!({"channel": "api", "bulk": true, "owner_secret": true})); }
+            }
+            let (code, answer) = core_line(g, &decide_line(approve, &send, Some("panel"), None))?;
+            match code {
+                200 => out.extend(per_id(&send, &answer["result"], approve)),
+                _ => out.extend(send.iter().map(|&id| (id, code, answer.clone()))),
+            }
+        }
+        out
+    };
     let answer = bulk_answer(results);
     g.event("operator", &format!("{} {} of {} selected approval(s)", if approve { "approved" } else { "denied" }, answer["done"],
                                  answer["done"].as_u64().unwrap_or(0) + answer["failed"].as_u64().unwrap_or(0)));
@@ -2847,36 +2986,32 @@ fn no_rules_core() -> (u16, Value) {
                            decide one at a time, or run a game built with the approval-rules core", "refused": "no_rules_core"}))
 }
 
-/// Send one line to the approval core and read back what it said: 422 with the line it refused
-/// with, else `done(log)` decides (Some answer) within [`READBACK`] reads, else 504.
-fn core_line(g: &Arc<Game>, line: &str, done: impl Fn(&[String]) -> Option<Value>) -> Result<(u16, Value), String> {
+/// Send one line to the approval core with a fresh `--nonce` and wait for its one result line
+/// (`[approval-core] {"nonce", "ok", ...}`, [`core_result`]): 200 with it as `result` when ok, 422
+/// with its `error` when not, 504 when none came within [`READBACK`] reads.
+fn core_line(g: &Arc<Game>, line: &str) -> Result<(u16, Value), String> {
+    let nonce = next_nonce();
+    let line = format!("{line} --nonce {nonce}");
     let mark = g.log_seq();
-    g.console(line)?;
+    g.console(&line)?;
     g.event("operator", &format!("sent to the approval core: {line}"));
     for _ in 0..READBACK {
         thread::sleep(Duration::from_millis(150));
-        let output = g.log_after(mark);
-        if let Some(why) = refused_line(&output) {
-            return Ok((422, json!({"error": why, "sent": line, "output": output})));
-        }
-        if let Some(mut out) = done(&output) {
-            out["sent"] = json!(line);
-            out["output"] = json!(output);
-            return Ok((200, out));
+        if let Some(result) = core_result(&g.log_after(mark), &nonce) {
+            if result["ok"] == json!(true) {
+                return Ok((200, json!({"sent": line, "result": result})));
+            }
+            let why = result["error"].as_str().filter(|e| !e.is_empty()).unwrap_or("the approval core refused the line").to_string();
+            return Ok((422, json!({"error": why, "sent": line, "result": result})));
         }
     }
-    Ok((504, json!({"error": format!("sent `{line}`, but the approval core showed no effect within {} ms", READBACK * 150),
+    Ok((504, json!({"error": format!("sent `{line}`, but the approval core gave no result within {} ms", READBACK * 150),
                     "sent": line, "output": g.log_after(mark), "pending_decision": true})))
-}
-
-/// The core's rule ids now.
-fn rule_ids(g: &Arc<Game>) -> Vec<i64> {
-    g.queue_data()["rules"].as_array().into_iter().flatten().filter_map(|r| r["id"].as_i64()).collect()
 }
 
 /// `approve all` or `deny all` over a tool glob and matcher, as the core decides them.
 fn decide_all(g: &Arc<Game>, i: &Input, approve: bool) -> Result<(u16, Value), String> {
-    if !approvals_view(&g.queue_data())["rules_supported"].as_bool().unwrap_or(false) {
+    if !g.keeps_rules() {
         return Ok(no_rules_core());
     }
     let (tool, m) = (i.body.get("tool").and_then(Value::as_str), i.body.get("match"));
@@ -2884,7 +3019,12 @@ fn decide_all(g: &Arc<Game>, i: &Input, approve: bool) -> Result<(u16, Value), S
         Ok(l) => l,
         Err(e) => return Ok((400, json!({"error": e}))),
     };
-    core_line(g, &line, |out| (!out.is_empty()).then(|| json!({"status": if approve { "approved" } else { "denied" }})))
+    let (code, mut out) = core_line(g, &line)?;
+    if code == 200 {
+        out["status"] = json!(if approve { "approved" } else { "denied" });
+        out["decided"] = out["result"]["decided"].clone();
+    }
+    Ok((code, out))
 }
 
 fn h_approve_all(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
@@ -2899,31 +3039,59 @@ fn h_deny_all(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
 /// the JSON matcher takes, kept across restarts with `persist`. 200 with the new rule as the core
 /// lists it.
 fn h_rule_add(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
-    if !approvals_view(&g.queue_data())["rules_supported"].as_bool().unwrap_or(false) {
+    if !g.keeps_rules() {
         return Ok(no_rules_core());
     }
     let line = match rule_line(&py_str(i.body.get("effect")), &py_str(i.body.get("tool")), i.body.get("match"), truthy(i.body.get("persist"))) {
         Ok(l) => l,
         Err(e) => return Ok((400, json!({"error": e}))),
     };
-    let before = rule_ids(g);
-    core_line(g, &line, |_| {
+    let (code, mut out) = core_line(g, &line)?;
+    if code == 200 {
         let rules = g.queue_data()["rules"].clone();
-        let added = rules.as_array().into_iter().flatten().find(|r| r["id"].as_i64().is_some_and(|id| !before.contains(&id))).cloned();
-        added.map(|rule| json!({"rule": rule, "rules": rules}))
-    })
+        let id = out["result"]["rule_id"].clone();
+        out["rule"] = rules.as_array().into_iter().flatten().find(|r| r["id"] == id).cloned().unwrap_or(json!({"id": id}));
+        out["rules"] = rules;
+    }
+    Ok((code, out))
 }
 
-/// Remove standing rule `id`: 404 for a rule the core does not hold, 200 once it is gone.
+/// Remove standing rule `id`: 404 for a rule the core does not hold, 200 once it says it is gone.
 fn h_rule_remove(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
-    if !approvals_view(&g.queue_data())["rules_supported"].as_bool().unwrap_or(false) {
+    if !g.keeps_rules() {
         return Ok(no_rules_core());
     }
     let id = py_int(&i.body["id"])?;
-    if !rule_ids(g).contains(&id) {
+    let held = g.queue_data()["rules"].as_array().into_iter().flatten().any(|r| r["id"].as_i64() == Some(id));
+    if !held {
         return Ok((404, json!({"error": format!("the approval core holds no rule #{id}")})));
     }
-    core_line(g, &rule_remove_line(id), |_| (!rule_ids(g).contains(&id)).then(|| json!({"removed": id, "rules": g.queue_data()["rules"]})))
+    let (code, mut out) = core_line(g, &rule_remove_line(id))?;
+    if code == 200 {
+        out["removed"] = json!(id);
+        out["rules"] = g.queue_data()["rules"].clone();
+    }
+    Ok((code, out))
+}
+
+/// Who may approve from inside the game (the in-game approvers, ADR 0038): `{add: <client id>}`,
+/// `{remove: <key prefix>}`, or `{}` to list them. The owner's alone; `/api/console` refuses every
+/// `approvers` line. 422 when the game printed a refusal, else 200 with its output.
+fn h_approvers(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
+    let line = match approvers_line(&i.body) {
+        Ok(l) => l,
+        Err(e) => return Ok((400, json!({"error": e}))),
+    };
+    let mark = g.log_seq();
+    g.console(&line)?;
+    g.event("operator", &format!("sent: {line}"));
+    thread::sleep(Duration::from_millis(if cfg!(test) { 0 } else { 600 }));
+    let output = g.log_after(mark);
+    let refused = output.iter().find(|l| ["No connected", "Could not", "No single"].iter().any(|p| l.trim_start().starts_with(p))).cloned();
+    Ok(match refused {
+        Some(why) => (422, json!({"error": why, "sent": line, "output": output})),
+        None => (200, json!({"sent": line, "output": output})),
+    })
 }
 
 fn h_bots(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
@@ -3126,6 +3294,8 @@ pub fn routes() -> Vec<Route> {
           s(json!({"effect": {"type": "string", "enum": ["allow", "deny"]}, "tool": st(), "match": obj(), "persist": {"type": "boolean"}}), &["effect", "tool"]), h_rule_add),
         r("POST", "/api/rules/remove", "ruleRemove", "The owner removes standing rule `id` (`prismatic_mcp rule remove <id>`): 200 once the core no longer lists it, 404 for a rule it does not hold, 501 while it keeps no rules. Needs the owner secret", true,
           s(json!({"id": {"type": "integer"}}), &["id"]), h_rule_remove),
+        r("POST", "/api/approvers", "approvers", "The owner says who may approve from inside the game (ADR 0038): {add: <client id>} registers a connected client's key, {remove: <key prefix>} drops one, {} lists them (`prismatic_mcp approvers ...`); /api/console refuses every approvers line. 422 when the game printed a refusal. Needs the owner secret", true,
+          s(json!({"add": {"type": "integer"}, "remove": st()}), &[]), h_approvers),
         r("POST", "/api/auto-approve", "autoApprove", "The owner's full-auto switch: on needs the owner secret (as /api/approve), off is open to anyone; it never approves an owner-only tool", false,
           s(json!({"on": {"type": "boolean"}}), &["on"]), h_auto),
         r("POST", "/api/owner/login", "ownerLogin", "The owner signs in: the owner secret (from the file mcp-panel named at start, $PRISMATIC_PANEL_OWNER_SECRET_FILE or ~/.config/prismatic/panel-owner-secret) sets this browser's HttpOnly cookie, as ?owner= does, and answers 204; a wrong secret 401 (after a delay), five wrong ones within a minute 429", false,
@@ -4011,7 +4181,8 @@ mod tests {
         // (POST /api/owner/login, /api/owner/logout). And the approvals list with its bulk decisions
         // and standing rules (GET /api/approvals; POST /api/approve/many, /api/deny/many,
         // /api/approve/all, /api/deny/all, /api/rules, /api/rules/remove).
-        assert_eq!(rs.len(), 91);
+        // And the in-game approvers (POST /api/approvers).
+        assert_eq!(rs.len(), 92);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -4700,7 +4871,7 @@ mod tests {
         assert_eq!(approve_all_line(Some("openttd.cmd.*"), None).unwrap(), "prismatic_mcp approve all openttd.cmd.* --via panel");
         assert_eq!(approve_all_line(None, Some(&json!({"company": 1}))).unwrap(), r#"prismatic_mcp approve all * "{\"company\":1}" --via panel"#);
         assert_eq!(approve_all_line(Some(" "), Some(&json!({}))).unwrap(), "prismatic_mcp approve all --via panel", "blank is none");
-        assert_eq!(deny_all_line(Some("command.Build*"), None).unwrap(), "prismatic_mcp deny all command.Build*");
+        assert_eq!(deny_all_line(Some("command.Build*"), None).unwrap(), "prismatic_mcp deny all command.Build* --via panel");
         assert_eq!(rule_line("allow", "openttd.game.set_pause", None, false).unwrap(), "prismatic_mcp rule allow openttd.game.set_pause --via panel");
         assert_eq!(rule_line("deny", "openttd.cmd.*", Some(&json!({"name": "max_*"})), true).unwrap(),
                    r#"prismatic_mcp rule deny openttd.cmd.* "{\"name\":\"max_*\"}" --persist --via panel"#);
@@ -4721,8 +4892,29 @@ mod tests {
         for bad in [json!({}), json!({"ids": []}), json!({"ids": ["1"]}), json!({"ids": (0..=BULK_MAX as i64).collect::<Vec<_>>()})] {
             assert!(bulk_ids(&bad).is_err(), "{bad}");
         }
-        assert_eq!(refused_line(&["Rule #1 added.".into(), "ERROR: no".into()]), Some("ERROR: no".into()));
-        assert_eq!(refused_line(&["Rule #1 added.".into()]), None);
+        // One decision line per channel; an older core gets neither flag.
+        assert_eq!((via_of(&json!({"channel": "auto-approve"})), via_of(&json!({"channel": "api"}))), ("auto", "panel"));
+        assert_eq!(decide_line(true, &[7], None, None), "prismatic_mcp approve 7");
+        assert_eq!(decide_line(false, &[7, 9], Some("panel"), Some("42")), "prismatic_mcp deny 7 9 --via panel --nonce 42");
+        // The core's result line, found by its nonce among other lines (a date prefix included).
+        let lines: Vec<String> = ["Rule #1 added.", "[approval-core] {\"nonce\":\"41\",\"ok\":true}",
+            "[2026-11-23 04:00:00] [approval-core] {\"nonce\":42,\"ok\":false,\"error\":\"x is not a tool glob\"}"].map(String::from).to_vec();
+        assert_eq!(core_result(&lines, "42").unwrap()["error"], "x is not a tool glob");
+        assert_eq!(core_result(&lines, "41").unwrap()["ok"], true);
+        assert!(core_result(&lines, "43").is_none() && core_result(&["[approval-core] not json".into()], "1").is_none());
+        let (a, b) = (next_nonce(), next_nonce());
+        assert!(a != b && a.chars().all(|c| c.is_ascii_digit()), "{a} {b}");
+        let r = per_id(&[1, 2, 3, 4], &json!({"decided": [1], "refused": [{"id": 2, "error": "owner-only"}], "skipped": [{"id": 3, "reason": "not pending"}]}), true);
+        assert_eq!(r.iter().map(|(id, c, _)| (*id, *c)).collect::<Vec<_>>(), [(1, 200), (2, 403), (3, 409), (4, 504)]);
+        assert!(py_str(r[1].2.get("error")).contains("owner-only") && py_str(r[2].2.get("error")).contains("not pending"));
+        assert_eq!(per_id(&[5], &json!({"decided": [5]}), false)[0].2["status"], "denied");
+        // Who may approve in the game.
+        assert_eq!(approvers_line(&json!({})).unwrap(), "prismatic_mcp approvers");
+        assert_eq!(approvers_line(&json!({"add": 2})).unwrap(), "prismatic_mcp approvers add 2");
+        assert_eq!(approvers_line(&json!({"remove": "AbCd+/=_-123"})).unwrap(), "prismatic_mcp approvers remove AbCd+/=_-123");
+        for bad in [json!({"add": 0}), json!({"add": "2"}), json!({"remove": "short"}), json!({"remove": "abcdefgh ; approve"})] {
+            assert!(approvers_line(&bad).is_err(), "{bad}");
+        }
     }
 
     /// /api/console refuses every line that would manage the standing rules, carry the core's
@@ -4735,6 +4927,8 @@ mod tests {
             "prismatic_mcp \"ru\"\"le\" allow *", "prismatic_mcp deny 3 --via panel", "prismatic_mcp deny 3 --VIA panel",
             "prismatic_mcp deny 3 -_via panel", "prismatic_mcp deny all", "prismatic_mcp deny ALL openttd.*",
             "prismatic_mcp de_ny \"all\"", "prismatic_mcp approve all --via panel",
+            "prismatic_mcp rule allow * --persist", "prismatic_mcp approvers add 2", "prismatic_mcp APPROVERS", "prismatic_mcp app_rovers remove abcdefgh",
+            "prismatic_mcp \"approver\"s", "/prismatic_mcp approv-ers", "prismatic_mcp deny 3 --nonce 1", "prismatic_mcp deny 3 --NON_CE 1",
         ] {
             assert!(console_refusal(line).is_some(), "{line}");
         }
@@ -4766,7 +4960,7 @@ mod tests {
             json!({"id": 43, "tool": "openttd.game.set_pause", "args": {}, "state": "pending", "expired": true}),
         ]);
         let list = approvals_view(&g.queue_data());
-        assert_eq!(list["rules_supported"], false);
+        assert_eq!((list["rules_supported"].clone(), g.keeps_rules()), (json!(false), false), "an older core takes no --via");
         for path in ["/api/rules", "/api/rules/remove", "/api/approve/all", "/api/deny/all"] {
             assert_eq!(post_as(&p, path, json!({"effect": "allow", "tool": "x", "id": 1}), &owner).0, 501, "{path}");
         }
@@ -4784,24 +4978,26 @@ mod tests {
         let (code, out) = post_as(&p, "/api/rules", json!({"effect": "allow", "tool": "openttd.game.*", "match": {"pause": true}, "persist": true}), &owner);
         assert_eq!((code, out["rule"]["id"].clone(), out["rule"]["persisted"].clone()), (200, json!(1), json!(true)), "{out}");
         assert_eq!(out["rule"]["match"], json!({"pause": true}), "the matcher arrived as JSON");
-        assert!(sent().last().unwrap().ends_with(VIA_PANEL) && py_str(out.get("sent")).ends_with(VIA_PANEL));
+        assert!(sent().last().unwrap().contains(" --persist --via panel --nonce ") && py_str(out.get("sent")) == *sent().last().unwrap());
         let (code, out) = post_as(&p, "/api/rules", json!({"effect": "deny", "tool": "bad.*"}), &owner);
-        assert_eq!((code, py_str(out.get("error")).starts_with("ERROR")), (422, true), "the core's refusal: {out}");
+        assert_eq!((code, out["error"].clone()), (422, json!("bad.* is not a tool glob")), "the core's refusal: {out}");
+        assert!(py_str(out.get("sent")).contains(" --via panel --nonce "), "{out}");
         assert_eq!(post_as(&p, "/api/rules", json!({"effect": "allow", "tool": "a b"}), &owner).0, 400);
         assert_eq!(post_as(&p, "/api/rules", json!({"effect": "allow", "tool": "openttd.ai.set_settings"}), &owner).0, 400);
         assert_eq!(post_as(&p, "/api/rules", json!({"effect": "allow", "tool": "x", "match": "nope"}), &owner).0, 400);
         let (code, out) = post_as(&p, "/api/rules/remove", json!({"id": 1}), &owner);
         assert_eq!((code, out["removed"].clone()), (200, json!(1)), "{out}");
-        assert_eq!(sent().last().unwrap(), "prismatic_mcp rule remove 1");
+        assert!(sent().last().unwrap().starts_with("prismatic_mcp rule remove 1 --nonce "));
         assert_eq!(post_as(&p, "/api/rules/remove", json!({"id": 1}), &owner).0, 404);
         let (code, out) = post_as(&p, "/api/approve/all", json!({"tool": "openttd.game.*"}), &owner);
         assert_eq!((code, out["status"].clone()), (200, json!("approved")), "{out}");
-        assert_eq!(sent().last().unwrap(), "prismatic_mcp approve all openttd.game.* --via panel");
+        assert!(sent().last().unwrap().starts_with("prismatic_mcp approve all openttd.game.* --via panel --nonce "));
         let (code, _) = post_as(&p, "/api/deny/all", json!({"match": {"company": 1}}), &owner);
-        assert_eq!((code, sent().last().unwrap().as_str()), (200, r#"prismatic_mcp deny all * "{\"company\":1}""#));
+        assert_eq!(code, 200);
+        assert!(sent().last().unwrap().starts_with(r#"prismatic_mcp deny all * "{\"company\":1}" --via panel --nonce "#));
         assert_eq!(post_as(&p, "/api/approve/all", json!({"tool": "x y"}), &owner).0, 400);
         // A rule line the core never answers: 504, never a 200.
-        let silent = core_line(&g, "prismatic_mcp status", |_| None).unwrap();
+        let silent = core_line(&g, "prismatic_mcp status").unwrap();
         assert_eq!(silent.0, 504);
         // Bulk over ids: one answer per id as /api/approve and /api/deny give it.
         let (code, out) = post_as(&p, "/api/approve/many", json!({"ids": [41, 99, 43]}), &owner);
@@ -4811,6 +5007,33 @@ mod tests {
         let (code, out) = post_as(&p, "/api/deny/many", json!({"ids": [99, 43]}), &owner);
         assert_eq!((code, out["failed"].clone()), (200, json!(2)), "{out}");
         assert_eq!(post_as(&p, "/api/approve/many", json!({"ids": []}), &owner).0, 400);
+        // A core with rules: the picked ids go in ONE line, via the panel, and its result names each.
+        g.test_approvals.lock().unwrap().extend([
+            json!({"id": 44, "tool": "openttd.game.set_pause", "args": {}, "state": "pending", "expired": false}),
+            json!({"id": 45, "tool": "openttd.game.set_pause", "args": {}, "state": "pending", "expired": false}),
+            json!({"id": 46, "tool": "openttd.game.set_pause", "args": {}, "state": "pending", "expired": false}),
+            json!({"id": 47, "tool": "openttd.game.set_pause", "args": {}, "state": "pending", "expired": false}),
+        ]);
+        let (code, out) = post_as(&p, "/api/approve/many", json!({"ids": [42, 44, 41]}), &owner);
+        assert_eq!(code, 200);
+        assert_eq!(out["results"].as_array().unwrap().iter().map(|r| (r["id"].as_i64().unwrap(), r["code"].as_u64().unwrap())).collect::<Vec<_>>(),
+                   [(41, 403), (42, 200), (44, 200)], "{out}");
+        assert!(sent().last().unwrap().starts_with("prismatic_mcp approve 42 44 --via panel --nonce "), "{:?}", sent().last());
+        let (code, out) = post_as(&p, "/api/deny/many", json!({"ids": [45]}), &owner);
+        assert_eq!((code, out["done"].clone()), (200, json!(1)));
+        assert!(sent().last().unwrap().starts_with("prismatic_mcp deny 45 --via panel --nonce "));
+        // One decision: the panel's channel, or auto-approve's.
+        let _ = g.deny(46);
+        assert_eq!(sent().last().unwrap(), "prismatic_mcp deny 46 --via panel");
+        let _ = g.approve(47, json!({"channel": "auto-approve"}));
+        assert_eq!(sent().last().unwrap(), "prismatic_mcp approve 47 --via auto");
+        // The in-game approvers, the owner's.
+        let (code, out) = post_as(&p, "/api/approvers", json!({"add": 2}), &owner);
+        assert_eq!((code, sent().last().unwrap().as_str()), (200, "prismatic_mcp approvers add 2"), "{out}");
+        let (code, out) = post_as(&p, "/api/approvers", json!({"add": 404}), &owner);
+        assert_eq!((code, py_str(out.get("error")).starts_with("No connected client #404")), (422, true), "{out}");
+        assert_eq!(post_as(&p, "/api/approvers", json!({"remove": "short"}), &owner).0, 400);
+        assert_eq!(post_as(&p, "/api/approvers", json!({}), &owner).0, 200);
         assert_eq!(bulk_answer(vec![(1, 200, json!({})), (2, 409, json!({}))])["done"], 1);
     }
 
@@ -4966,10 +5189,11 @@ mod tests {
         assert!(!wrong.1.to_string().contains('6') && !wrong.1.to_string().contains("s3c"), "nothing about the secret: {}", wrong.1);
         assert!(owner_login(None, "", &mut fails, t0).is_err(), "a panel without a secret signs nobody in");
         for _ in 0..3 { let _ = owner_login(Some("s3cret"), "x", &mut fails, t0); }
-        let limited = owner_login(Some("s3cret"), "s3cret", &mut fails, t0).unwrap_err();
-        assert_eq!((limited.0, limited.1["refused"].clone()), (429, json!("owner_login_rate")), "even the right secret waits out the window");
-        assert!(owner_login(Some("s3cret"), "s3cret", &mut fails, t0 + LOGIN_WINDOW).is_ok(), "the window passes");
-        assert!(fails.is_empty());
+        let limited = owner_login(Some("s3cret"), "guess", &mut fails, t0).unwrap_err();
+        assert_eq!((limited.0, limited.1["refused"].clone()), (429, json!("owner_login_rate")), "a guess waits out the window");
+        assert!(owner_login(Some("s3cret"), "s3cret", &mut fails, t0).is_ok(), "the owner's own secret is never locked out");
+        assert_eq!(owner_login(Some("s3cret"), "guess", &mut fails, t0 + LOGIN_WINDOW).unwrap_err().0, 401, "the window passes");
+        assert_eq!(fails.len(), 1);
         // The cookies: kept a year, HttpOnly, SameSite=Strict, for this panel's port; sign-out clears it.
         let c = owner_set_cookie(8800, "s3cret");
         assert!(c.starts_with("Set-Cookie: mcp_owner_8800=s3cret;") && c.contains("HttpOnly") && c.contains("SameSite=Strict")
@@ -5000,7 +5224,8 @@ mod tests {
         let seen = format!("{:?} {:?}", g.bus.since(0, &[], 10_000), g.events.lock().unwrap());
         assert!(seen.contains("the owner signed in") && seen.contains("wrong secret") && !seen.contains(&secret), "{seen}");
         for _ in 0..5 { let _ = post_to(&p, "/api/owner/login", json!({"secret": "x"})); }
-        assert_eq!(post_to(&p, "/api/owner/login", json!({"secret": secret})).0, 429);
+        assert_eq!(post_to(&p, "/api/owner/login", json!({"secret": "y"})).0, 429);
+        assert_eq!(post_to(&p, "/api/owner/login", json!({"secret": secret})).0, 204, "the owner is never locked out");
         assert!(format!("{:?}", g.events.lock().unwrap()).contains("too many wrong secrets"));
         // A 204 goes out with no body at all.
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();

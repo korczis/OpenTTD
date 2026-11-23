@@ -64,7 +64,8 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/approve` | `{"id"}` | the owner's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it, 504 when no decision came |
 | `POST /api/deny` | `{"id"}` | withdraw a pending decision through the same core (`prismatic_mcp deny <id>`): it enacts nothing, so no owner secret is needed. 200 with the approval now `denied`, 404 for one the server does not hold, 409 for one not pending, 504 when the server did not mark it denied. The home page's Deny button calls it |
 | `GET /api/approvals` | | the game server's whole queue for the approvals list: every approval with its `matched_rule`, marked `owner_only` and `decidable`; the core's standing `rules` and `rules_supported` (false while the core keeps none) |
-| `POST /api/approve/many`, `POST /api/deny/many` | `{"ids": [..]}` | the owner decides the rows a person picked, one by one through the same core as `/api/approve` and `/api/deny`: one result per id with the status those answer, and how many went through. Owner secret, else 401 |
+| `POST /api/approve/many`, `POST /api/deny/many` | `{"ids": [..]}` | the owner decides the rows a person picked. With the approval-rules core: the ids the panel may not decide are answered here (403 owner-only, 404, 409), the rest go in ONE line `prismatic_mcp approve\|deny <id> ... --via panel --nonce <n>` and the core's result line names each (decided 200, refused 403, skipped 409). With an older core: one decision per id. One result per id, and how many went through. Owner secret, else 401 |
+| `POST /api/approvers` | `{"add": <client id>}`, `{"remove": "<key prefix>"}` or `{}` | the owner says who may approve from inside the game (`prismatic_mcp approvers ...`); owner secret, else 401; 422 when the game printed a refusal. `/api/console` refuses every `approvers` line |
 | `POST /api/approve/all`, `POST /api/deny/all` | `{"tool"?, "match"?}` | the core's own bulk lines over a tool glob and a JSON matcher: `prismatic_mcp approve all [<glob> [<matcher>]] --via panel`, `prismatic_mcp deny all [...]`. Owner secret; 501 while the core keeps no rules, 422 with the line it refused with |
 | `POST /api/rules` | `{"effect": "allow"\|"deny", "tool", "match"?, "persist"?}` | a standing rule, as Claude's always allow / always deny: `prismatic_mcp rule allow\|deny <glob> [<matcher>] [--persist] --via panel`; 200 with the rule as the core lists it, 400 for a bad glob or matcher (or an allow rule naming an owner-only tool), 422, 501, 504. Owner secret |
 | `POST /api/rules/remove` | `{"id"}` | `prismatic_mcp rule remove <id>`: 200 once the core no longer lists it, 404 for a rule it does not hold. Owner secret |
@@ -1657,9 +1658,16 @@ built for deciding a long queue fast:
   the rule. Below the table, the rules list shows effect, tool glob, matcher, who made it, hits and
   whether it is kept, each with Remove. While the core keeps no rules (its queue answers no `rules`)
   the list says so and "Always…" is off.
-- **Every line the panel sends that approves in bulk or adds a rule ends with `--via panel`**
-  (`approve_all_line`, `rule_line`): the core cannot tell stdin lines apart, and with the marker it
-  records them as the panel's and never lets them decide an owner-only tool. A matcher travels as
+- **Every line the panel sends to a core that keeps rules carries its channel**: `--via panel` on
+  every approve and deny (one, many, all) and every rule, `--via auto` for the auto-approve switch
+  (`decide_line`, `approve_all_line`, `deny_all_line`, `rule_line`, `via_of`). The core cannot tell
+  stdin lines apart: it trusts a line without `--via` as the console's own, records the channel, and
+  never lets the panel's lines decide an owner-only tool. An older core (no `rules` in its queue)
+  gets neither flag.
+- **One result line per command.** The bulk and rule routes send `--nonce <n>` and wait only for
+  the core's `[approval-core] {"nonce", "ok", "decided", "refused", "skipped", "rule_id", "error"}`
+  line with that nonce (`core_line`, `core_result`): 200 when ok, 422 with the core's `error`
+  ("is not a tool glob", "the matcher is not JSON"), 504 when none came within 3 s. A matcher travels as
   one console token (`matcher_token`): compact JSON, every `"` as `\"` (the game's tokenizer turns it
   back), every `;` as `\u003b`, the whole quoted, so no text inside it can end the line or add a
   command; a glob holds letters, digits and `. _ - * ?` only (`rule_glob`).
@@ -1719,7 +1727,9 @@ pending request (red-team residual risk 3). Approval is now bound to the owner i
     in a password field. `POST /api/owner/login {secret}` sets the HttpOnly, `SameSite=Strict`
     cookie `mcp_owner_<port>`, kept a year, and answers 204; the refused request is then sent once
     more. A wrong secret answers 401 after a second's delay and says nothing of its length or
-    prefix; five wrong ones within a minute answer 429 for the rest of it (`owner_login`).
+    prefix; five wrong ones within a minute answer 429 for the rest of it (`owner_login`). The
+    right secret is checked first and always signs in: guesses from any local caller never lock
+    the owner out.
     `POST /api/owner/logout` clears the cookie. Cancel (or Escape) leaves the refusal shown.
   - A launcher may still open the page once as `http://127.0.0.1:<port>/?owner=<secret>` (mcp-e2e
     reads the secret from its file and does): the answer sets the same cookie.
