@@ -306,7 +306,7 @@ class PrismaticAI extends AIInfo {
 		});
 		AddSetting({
 			name = "own_fail_pause",
-			description = "After this many own freight lines in a row could not be built, try no more that game year (a failed line still costs its stations); 0: never pause.",
+			description = "After this many own freight lines in a row could not be built, try no more that game year (a failed line still costs its stations); 0: at most 8 a game year (main.nut OWN_FAIL_YEAR_MAX).",
 			min_value = 0, max_value = 10,
 			easy_value = 6, medium_value = 6, hard_value = 6, custom_value = 6, step_size = 1,
 			flags = CONFIG_INGAME,
