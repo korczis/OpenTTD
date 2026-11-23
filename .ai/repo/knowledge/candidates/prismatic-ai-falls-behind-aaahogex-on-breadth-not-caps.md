@@ -57,6 +57,8 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 | `H_TILE=8` vs 7, on `6333347512` | 24 | +0.9% | 12 |
 | master `fdc13851cf` (a failed own line no longer uses up `own_lines`) vs `6333347512` | 24 | -0.6% | 0 (0.87 to 1.00: mostly unchanged) |
 | own freight planner production floor 25 instead of 40, on `fdc13851cf` | 12 | +0.7% | 8 (249 trains against 232) |
+| `air_full_load=1` (planes wait for a full load, as AAAHogEx does), on `dbd39147ee` | 12 | -35.4% | 0 (0.26 to 0.98; 42 fewer planes) |
+| `rail_len=6` vs 4, on `dbd39147ee` | 12 | +1.8% | 7 (0.63 to 1.33; 58 fewer trains) |
 
 # How to apply it
 
@@ -65,6 +67,8 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
   (the planner) and sources chosen as clusters.
 - Do not spend idle money on aircraft: more planes and air routes lowered company value in every
   replay. Rich growth keeps its rail, road and own-line lifts (`rich_air=0`).
+- Do not make planes wait for a full load: copying AAAHogEx's `air_full_load` cost 35% over 12
+  matches. AAAHogEx's higher profit per plane comes from which pairs it picks, not from loading.
 - Size platforms at 4 tiles when a line is built. Growing them later gave the gain back.
 - Post-hoc feeding rarely fires, because a second unserved producer within station spread is rare.
   Scoring clusters in the planner did not help either (-8.8%, 3 joins in 8 games): on these 256x256
