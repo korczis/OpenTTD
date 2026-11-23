@@ -2521,7 +2521,12 @@ def hoarding(series: list[dict], rules: dict) -> str | None:
     borrowed money as hoarded: on the fitness seed 930967890 the self-steward contestant's last
     sample (1966-01) came while a new rail line was being built on the whole loan, 348k in 1965-10
     and 795k then, and the check read 321k -> 795k as a hoard. A sample without a loan (a log or
-    record from before the referee logged it) counts the loan as 0."""
+    record from before the referee logged it) counts the loan as 0. A window that starts with net
+    money at or below 0 is skipped: a factor of a non-positive start says nothing, and such a
+    company is paying back its loan. Judging net money means that, for a company holding the same
+    loan L throughout, the factor test reads bank_1 >= factor * bank_0 - (factor - 1) * L in bank
+    terms (looser) and the floor reads bank_1 >= floor + L (stricter). That is intended: the test
+    judges what the company owns."""
     window = rules.get("hoard_window", 8)
     factor, floor = rules.get("hoard_factor", 2.0), rules.get("hoard_floor", 500_000)
     slack = rules.get("hoard_fleet_slack", 0.1)
@@ -2530,6 +2535,12 @@ def hoarding(series: list[dict], rules: dict) -> str | None:
         v0 = w[0]["vehicles"]
         m0 = w[0].get("money", 0) - w[0].get("loan", 0)
         m1 = w[-1].get("money", 0) - w[-1].get("loan", 0)
+        # A window that starts in debt (net money at most 0) is not judged. Any rise is then at
+        # least "factor-fold", so only the floor would decide, and a company paying back its loan
+        # (100k on a 300k loan, then 520k with none) would read as a hoard. A company that goes on
+        # holding its money is caught by the next window that starts above 0.
+        if m0 <= 0:
+            continue
         # Building is spending: a company whose stations grow while its fleet waits is laying
         # lines (the planned fitness contestant, 9 vehicles, 283k -> 697k, one rail line a
         # heartbeat), not hoarding. Samples without a station count judge the fleet alone.

@@ -70,7 +70,11 @@ hand:
 - `watchdog` says when a company has built nothing for longer than its data-tuned threshold, and
   what holds it ([The progress watchdog](mechanisms/rhai-scripting.md#the-progress-watchdog)).
 
-`MCP_SERVICES` names another list, and an empty value starts none. A service that does not start is
+`--lineup "AAAHogEx,LuDiAI AfterFix,CivilAI,AdmiralAI,NoCAB,DictatorAI,SimpleAI"` names the other
+companies of a new world instead of the arena's lineup. Each is started with the server's `start_ai`
+once the bot's company exists, so the bot keeps company 1. With `--lineup`, and with `--load` (whose AIs
+come from the save), the default services are `replan watchdog build_audit rail_monitor`, without
+the arena. `MCP_SERVICES` names another list, and an empty value starts none. A service that does not start is
 reported on stderr, and the stack runs on without it.
 
 ## Validation
@@ -114,6 +118,24 @@ the news-refs branch. All 8 companies came back with their names, money and loan
 `/api/bots` listed all 8 AIs running: PrismaticAI four times, AAAHogEx, LuDiAI AfterFix, CivilAI
 and AdmiralAI. No new bot was started. The client half (`--coplay` after `--load`): NOT RUN on
 that check.
+
+### Signing in as the owner
+
+Approve and auto-approve in the panel need the owner's cookie, which one visit to `/?owner=<secret>`
+sets. `mcp-e2e` opens that link in the owner's default browser when it starts (not with
+`--no-browser`). It reads the secret from the owner's own file
+(`$PRISMATIC_PANEL_OWNER_SECRET_FILE`, default `~/.config/prismatic/panel-owner-secret`, mode 0600)
+and never prints it. Without the file it opens the plain panel.
+
+### The standing verdict
+
+The owner decided on 2026-11-22 (recorded with `majordomus decision`) that an approval nobody answers
+in the co-play game is carried out after 30 game days, when it is one a chat approver could decide:
+the company's own AI settings, which replan proposes every month. With the default `keep`, replan's
+plans were retired unanswered and never took effect. Start the stack with
+`mcp-e2e --coplay --approval-deadline 30:approve`. The owner can still approve or deny earlier in the
+control window or in the panel. Anything wider than the company's own AI is retired as under `keep`
+([approval-gate.md](mechanisms/approval-gate.md) "The deadline").
 
 ### After a load
 

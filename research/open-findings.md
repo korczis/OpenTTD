@@ -194,7 +194,7 @@ pie showData title Open findings by kind
 | not-run | C3 performance: NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):268 | none — needs an issue | OBSERVED |
 | not-run | C4 strategy (H2): NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):269 | none — needs an issue | OBSERVED |
 | not-run | C5 operator safety: NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):270 | none — needs an issue | OBSERVED |
-| not-run | A client restart after a crash (the supervisor fix): NOT RUN: no crash happened in this run | [research/coplay.md](coplay.md):88 | none — needs an issue | OBSERVED |
+| not-run | A client restart after a crash (the supervisor fix): NOT RUN: no crash happened in this run | [research/coplay.md](coplay.md):92 | none — needs an issue | OBSERVED |
 | not-run | Some things were not measured. The records do not give the money each failed line cost, whose track stopped the Flardingham line at tile 37716, or why line 1 runs one train when it may run two (trains_max=2). | [research/incident-2026-11-23-live-game-15805.md](incident-2026-11-23-live-game-15805.md):259 | none — needs an issue | OBSERVED |
 | not-run | Mesh records: NOT RUN, because the panel had no $MAJORDOMUS_URL. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):131 | none — needs an issue | OBSERVED |
 | not-run | A remote human joining over the internet: NOT RUN: needs a second machine and a person | [research/real-game.md](real-game.md):105 | none — needs an issue | OBSERVED |
