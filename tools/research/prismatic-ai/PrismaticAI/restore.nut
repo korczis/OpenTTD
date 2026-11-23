@@ -122,8 +122,9 @@ function PrismaticAI::Restore(b) {
 		" airports (" + how + ")");
 }
 
-/* own_built after a load: the own freight lines that stand (restored RAIL_LINES whose producer,
- * acceptor and cargo the planner did not hand over in fr_* .. fr16_*, each pair once), never the
+/* own_built after a load: the own freight lines built (restored RAIL_LINES whose producer,
+ * acceptor and cargo the planner did not hand over in fr_* .. fr16_*, each pair once, closed ones
+ * too: closing a line at runtime does not give its slot back, so neither does a load), never the
  * saved count. Before main.nut stopped counting a failed own line (PR #234), the saved count held
  * every line tried: the owner's live game (seed 15805) was saved with "4 own" and one rail line,
  * so after its load with the fix it still planned no own line. `saved` is the count the save
@@ -133,7 +134,7 @@ function PrismaticAI::RestoreOwnBuilt(saved) {
 	foreach (fl in PrismaticAI.FreightLines()) planned[fl.from + "-" + fl.to + "-" + fl.cargo] <- true;
 	local own = {};
 	foreach (l in RAIL_LINES) {
-		if (l.closed || !("from" in l) || !("to" in l)) continue;
+		if (!("from" in l) || !("to" in l)) continue;
 		local key = l.from + "-" + l.to + "-" + l.cargo;
 		if (!planned.rawin(key)) own[key] <- true;
 	}
