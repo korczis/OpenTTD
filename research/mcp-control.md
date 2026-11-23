@@ -64,6 +64,7 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/console` | `{"command"}` | one OpenTTD console line and its output |
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
 | `POST /api/approve` | `{"id"}` | the owner's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it, 504 when no decision came |
+| `POST /api/deny` | `{"id"}` | withdraw a pending decision through the same core (`prismatic_mcp deny <id>`): it enacts nothing, so no owner secret is needed. 200 with the approval now `denied`, 404 for one the server does not hold, 409 for one not pending, 504 when the server did not mark it denied. The home page's Deny button calls it |
 | `POST /api/auto-approve` | `{"on": bool}` | `on: true` needs the owner secret (401 without it); `on: false` is open to anyone |
 | `POST /api/rhai` | `{"script"}` | a Rhai script's output |
 | `POST /api/rhai/stream` | `{"script"}` | the same, streamed line by line (SSE `out`, `err`, `exit`) |
@@ -1648,6 +1649,17 @@ because each of them runs lines the panel cannot read first. The panel splits a 
 character, so a newline inside a value (an AI's settings, a content query) cannot add a second
 command. Approvals go through `POST /api/approve` with the owner secret, or through the game's own
 console. Withdrawing your own request (`deny`) is still allowed. `mcp-panel-check` tests both cases.
+
+### The panel's Approve and Deny, in Chrome
+
+`tools/research/mcp-approval-ui-check` runs the real `mcp-panel` against
+`tools/research/mcp-fake-game`, a stand-in for the dedicated server. It speaks the console on stdin
+and an MCP endpoint, and its one approval queue is seeded so that the page's buttons reach every
+answer: Approve gets 200 executed, 422 rejected, 504 with no decision, 409 consumed elsewhere and
+404 forgotten by the server; Deny gets 200 denied, 504, 409 and 404. Each answer must show on the
+page as a toast. The server's queue must then hold what the buttons did, and every line the change
+adds to `static/app.js` must have run in Chrome (its JS coverage). No process the run started may be
+left. It needs no game build, and the Research Rust workflow runs it on every change to the panel.
 
 ### Approval is bound to the owner
 

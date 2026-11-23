@@ -24,7 +24,7 @@ RAIL_LINES <- [];
 PRISMATIC_FULL_LOAD <- 0;
 /* The most levelling one airport site may cost (setting air_level_max, in thousands; air.nut). */
 AIR_LEVEL_MAX <- 15000;
-/* Levelling a rail station site when none is flat (rail.nut BuildRailStationAt): at most this
+/* Levelling a rail station site, the last resort (rail.nut LevelRailStationSite): at most this
  * estimated cost per site, corners within RAIL_LEVEL_STEP height steps, and RAIL_LEVEL_KEEP left. */
 RAIL_LEVEL_MAX <- 40000;
 RAIL_LEVEL_STEP <- 1;
@@ -96,6 +96,10 @@ class PrismaticAI extends AIController {
 /* Autopilot floors (Behaviour): the profile of the battle's "solo-max" contestant, which reached
  * second place with the in-bot steward (research/ai-battle/README.md). */
 const AUTOPILOT_OWN_LINES = 10;
+/* With own_fail_pause=0, still at most this many failed own lines a game year. Since a failed line
+ * no longer uses up own_lines (PR #234), nothing else bounds them, and g227.0 went bankrupt trying
+ * failing lines one after another. */
+const OWN_FAIL_YEAR_MAX = 8;
 /* Below START_FLEET vehicles, the bot borrows up to its reserve plus START_ROUTE_MONEY for its next
  * road route (main.nut). */
 const START_FLEET = 20;
@@ -555,7 +559,7 @@ function PrismaticAI::Start() {
 		if (year_now != this.own_failed_year) { this.own_failed_year = year_now; this.own_failed = 0; }
 		/* planned_freight_only (RESEARCH-ONLY): one authority outside the bot decides every freight
 		 * line, so the bot plans none of its own; the handed-over lines above still get built. */
-		if (!frozen && b.planned_freight_only == 0 && handed_done && !pair_open && this.own_built < own_cap && (b.own_fail_pause == 0 || this.own_failed < b.own_fail_pause) &&
+		if (!frozen && b.planned_freight_only == 0 && handed_done && !pair_open && this.own_built < own_cap && this.own_failed < (b.own_fail_pause == 0 ? OWN_FAIL_YEAR_MAX : b.own_fail_pause) &&
 				money + headroom_own >= b.line_budget) {
 			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried, b.rail_feed, b.rich);
 			if (own != null) {
@@ -598,7 +602,7 @@ function PrismaticAI::Start() {
 				money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 			}
 		}
-		if (!frozen && this.routes < b.max_routes && money > b.cash_reserve) {
+		if (!frozen && this.routes < b.max_routes && money > b.cash_reserve && PrismaticAI.RoadPays()) {
 			local pair = (b.intercity == 1) ? PrismaticAI.BuildIntercityRoute(b.aggressiveness, this.used_towns) : null;
 			if (pair != null) {
 				this.used_towns[pair[0]] <- true;
