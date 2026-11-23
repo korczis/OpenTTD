@@ -13,11 +13,15 @@ once it lands.
 
 ## Evaluations against the field
 
-Every ablation record under [`research/results/`](../results/) whose rows carry `standings` (the
-final company value of every company in the match) is a row here. `battle.py ablate --write`
-records them from 2026-11-23 on; a run made earlier whose log was kept is recorded with
-`tools/research/strategy-surfaces import`, and its page says so. One seed is a direction, not a
-verdict: compare cohorts over the same seeds.
+Every ablation record under [`research/results/`](../results/) whose rows carry `standings` is a
+row here. `standings` is the final company value of every company of the row's match, keyed as the
+lineup names it (the variant by its name, each opponent by its AI); `battle.py ablate --write`
+([`research/ai-battle/README.md`](../ai-battle/README.md)) records it from 2026-11-23 on, and
+`battle.py check` refuses standings that name a company twice, miss one, or disagree with the row's
+own value or best opponent. A run made before that whose log was kept (`ablate --log-dir`) is
+recorded with `tools/research/strategy-surfaces import`: the record then carries `imported` (the
+log's and the binary's sha256, the binary's version), its exit status is unknown, and its page says
+so. One seed is a direction, not a verdict: compare cohorts over the same seeds.
 
 <!-- strategy-evals:begin -->
 <!-- derived by `tools/research/strategy-surfaces render`; `surfaces check` fails when stale -->

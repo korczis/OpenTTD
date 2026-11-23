@@ -42,15 +42,6 @@ separate records. Each bar links to its variant's row. `battle.py render` re-der
 ablation page as well, and `battle.py check` validates each ablation record (schema, id, one row
 per variant, `vs_first` derived from the values) and fails while its page is stale.
 
-From 2026-11-23 each row also holds `standings`: the final company value of every company of its
-match, keyed as the lineup names it (the variant by its name, each opponent by its AI). `check`
-refuses standings that name a company twice, miss one, or disagree with the row's own value or best
-opponent. From them [`research/strategy/README.md`](../strategy/README.md) derives the rank, the
-strongest rival and the gap to it per seed (`tools/research/strategy-surfaces render`). A run made
-before that whose log was kept (`ablate --log-dir`) is recorded with
-`tools/research/strategy-surfaces import`; the record then carries `imported` (the log's and the
-binary's sha256, the binary's version), its exit status is unknown, and its page says so.
-
 <!-- battle:begin -->
 <!-- derived from research/results/battle-20261122T045411-a80cc94a.json by `battle.py report`; `battle.py check` fails when it is stale -->
 Latest record: [`battle-20261122T045411-a80cc94a`](../results/battle-20261122T045411-a80cc94a.md) (0/4 replays identical).
