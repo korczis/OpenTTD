@@ -41,6 +41,15 @@ confirm it, and has the GUI client join that company under the name `owner`. Wit
 panel and scripts can still press the client's widgets. That client then is not an approver (see
 "Who approves").
 
+### The bot's settings
+
+`PRISMATIC_BOT_SETTINGS="name=value,name=value,..."` in the launcher's environment holds the settings
+the bot starts with, as `start_ai` arguments. A later name wins, so overrides go at the end. It applies to a planned bot, on top
+of what the planner's portfolio chose, and to an unplanned one (`--no-plan-bot`), on its own
+(`panel_bot.rs` `unplanned_settings`). Before 2026-11-23 an unplanned bot ignored it and started on
+the defaults, `max_routes 4` among them. A malformed list is refused whole, and the panel's `ai`
+events say so. A loaded game keeps the settings it saved.
+
 ### Who approves
 
 The owner decided on 2026-11-22 (recorded with `majordomus decision`). The owner's own client runs

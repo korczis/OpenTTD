@@ -41,11 +41,14 @@ fn running_bot() {
 /// nothing: every call is openttd.ai.set_setting, which is gated. `writer` is the caller's name
 /// for the planner key (fr_author.rhai): while planner.<company> names another writer, nothing
 /// is sent (its freight-line slots among it) and the first line says why.
-fn apply_as(a, writer) {
+fn apply_as(a, writer) { apply_to(a, writer, running_bot()) }
+
+/// apply_as() for the running company `bot` (an entry of /api/bots running[]) instead of the first
+/// running bot: replan proposes each company of its AI the plan the panel made for that company.
+fn apply_to(a, writer, bot) {
     let settings = (a.build ?? #{}).settings ?? #{};
     let out = #{ pending: [], refused: [], withheld: [], held: (), lines: [], bot: "" };
     if settings.is_empty() { return out; }
-    let bot = running_bot();
     if type_of(bot) == "()" {
         out.lines.push("no bot is running: start one (bot start PrismaticAI) and ask again");
         return out;
