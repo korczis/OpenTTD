@@ -162,6 +162,22 @@ the days of 1950-52. The countdown makes a plan reach the bot. It does not close
 8. **The owner secret is a precondition.** Until #242, the panel refused `/api/approve` and
    `/api/auto-approve` ("no owner secret"), and chat was the only working channel.
 
+**An open conflict in correction 2, to be settled by review before code.** The panel treats
+`openttd.ai.set_settings` as owner-only (`OWNER_ONLY_TOOLS`, `tools/research/mcp-rhai/src/panel.rs:540`).
+`POST /api/approve` refuses it with 403, so it is approved only at the server's console, and it is
+the channel of a Battlebrain live decision (rule `project.decision-authority-boundaries`, B2: who may
+name an `fr_*` slot). Filing re-plans through it would take them out of the chat and panel channels
+and put the re-planner on the authority's channel. The options for review:
+
+- (a) keep per-key `ai.set_setting` approvals, with a plan id assigned at filing that settles them all
+  or none (openttd-36's first proposal);
+- (b) a new non-owner-only batched tool for a company's own AI settings, which excludes `fr_*` slots
+  unless the writer holds the company's planner key;
+- (c) make `ai.set_settings` approvable by chat for the company's own AI, which moves the B2 boundary.
+  The rule and ADR 0037 would then change in the same commit.
+
+Option (a) moves no boundary.
+
 **The order before a default of approve may be switched on:**
 
 1. The bot keeps its floors under a plan (`fix/prismatic-planned-and-early-rail`).
