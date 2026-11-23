@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -222,6 +223,10 @@ class Record(unittest.TestCase):
             with redirect_stdout(buf):
                 regimes.main(["--record", str(f), "--json"])
             self.assertEqual(json.loads(buf.getvalue())["0"]["month"], "1964-12")
+            run = subprocess.run([sys.executable, "-B", str(HERE / "ai-battle" / "regimes.py"), "--record", str(f)],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 10, run.stderr)
+            self.assertIn("no_expansion: 1953-12..1964-12 (known 1955-12)", run.stdout)
 
 
 def answer(sql):
@@ -341,6 +346,7 @@ class Panel(unittest.TestCase):
         self.assertIn("capped", str(e.exception))
         with self.assertRaises(urllib.error.HTTPError):
             regimes.http_json(self.url, "/api/nothing", {})
+        self.assertIsNone(regimes.http_json(self.url, "/api/rhai/shared?key=gap.9"))
 
     def test_a_gap_leader_that_is_not_a_rival_is_ignored(self):
         v = regimes.judge_company(live_series(), "0", ["1", "2", "4"], [], {"leader": {"company": 0}}, {})

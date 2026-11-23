@@ -78,10 +78,13 @@ Measured 2026-11-23 on master `eb0d839ce0`, binary `20261122-master-gfdc13851cf`
   approvals filed in 16 rounds).
 - **Live game 2927** (run 1795374123856, four PrismaticAI companies): `no_expansion` and
   `widening_gap` for company 0, `unapplied_plan` 1951-04-26 to 1957-11-12.
-- **Headless, master fitness** (seed 930967890, six lineups): no gated regime for a contestant in
-  `must_be_healthy`; the check passes. `no_expansion` for `PrismaticAI solo-max` (not held
-  healthy), and for LuDiAI in one match; `widening_gap` for LuDiAI in four matches and AdmiralAI
-  in one; never for AAAHogEx. Lineup 0 on the rival seeds 31337 and 1383023900: no gated regime.
+- **Headless, master fitness** (seed 930967890, six lineups, `battle.py fitness` on this branch:
+  PASS, 205 s): no gated regime for a contestant in `must_be_healthy`. Printed, not failing:
+  `no_expansion` for `PrismaticAI solo-max` (not held healthy), for LuDiAI and AdmiralAI in lineup
+  2 and for AAAHogEx in lineup 1 (a rival is judged against the other non-PrismaticAI contestants
+  only, there AdmiralAI); `widening_gap` for LuDiAI in five lineups and AdmiralAI in one, never for
+  AAAHogEx; `mode_never_pays` for AAAHogEx's road vehicles in lineup 5. Lineup 0 on the rival
+  seeds 31337 and 1383023900: no gated regime.
 
 ## Finding: PrismaticAI's aircraft lose money
 
