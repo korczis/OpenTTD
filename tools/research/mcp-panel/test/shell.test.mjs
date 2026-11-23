@@ -149,3 +149,16 @@ for (const name of PANEL_PAGES) {
     }
   });
 }
+
+test('the owner sign-in names where the secret lives and asks for it in a password field', () => {
+  const { signInHtml } = createRequire(import.meta.url)('../static/shell.js');
+  const html = signInHtml('/home/o/.config/prismatic/panel-owner-secret');
+  assert.match(html, /role="dialog" aria-modal="true"/);
+  assert.match(html, /<code[^>]*>\/home\/o\/\.config\/prismatic\/panel-owner-secret<\/code>/);
+  assert.match(html, /<input type="password" id="owner-secret"/);
+  assert.match(html, /id="owner-signin-error" role="alert"/);
+  assert.equal((html.match(/data-signin-cancel/g) || []).length, 2, 'the close button and Cancel');
+  assert.ok(html.includes(UI.primary) && html.includes(UI.secondary) && html.includes(UI.input), 'the shell\'s own class sets');
+  assert.match(signInHtml(null), /~\/\.config\/prismatic\/panel-owner-secret/, 'the default place when the panel names none');
+  assert.ok(!signInHtml('<x>').includes('<x>'), 'the file name is escaped');
+});
