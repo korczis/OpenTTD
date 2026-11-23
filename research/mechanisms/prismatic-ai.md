@@ -34,10 +34,24 @@ flowchart TB
   ST -->|"openttd.ai.set_setting, gated"| SET
 ```
 
-- **Heartbeat** (`main.nut` `Start`). Every round reads the settings again (`Behaviour`), then:
-  the planner's air pair, freight lines (`fr_*` to `fr16_*`) and passenger rail first, then the
-  bot's own lines and buses, the fleet, line reconciliation and the loan. Old vehicles are renewed
-  by the game's own autorenew.
+- **Heartbeat** (`main.nut` `Start`). Every round reads the settings again (`Behaviour`). Then come
+  the planner's air pair, the autopilot's air routes, the planner's freight lines (`fr_*` to
+  `fr16_*`), the bot's own freight line, the planner's passenger rail pair and buses, then the
+  fleet, line reconciliation and the loan. Until the first own line stands, the passenger pair comes
+  after the own line of each heartbeat; after that it comes before the own line (`TryRailPair`).
+  Old vehicles are renewed by the game's own autorenew.
+- **A plan is added on top of the autopilot** (`main.nut` `Behaviour`). With `autopilot=1` a
+  planned bot keeps the autopilot's floors: at least 10 own lines, up to 30 routes, intercity roads,
+  at most a 5000 reserve. Producers nobody serves are taken by rivals within the first years, and a
+  town pair is not, so the planner's passenger pair no longer runs ahead of the bot's first own
+  freight line. On the live settings a planned start cost 25-35% (headless ablation, 2026-11-23).
+  The passenger pair took months of path search in the first heartbeat, and the planned bot held
+  four own lines while its bank doubled.
+- **Handed slots must be whole** (`main.nut` `FreightLines`). The panel and the re-planner write a
+  freight slot one approved setting at a time. A slot counts only when it is complete, both
+  industries exist, the producer makes the cargo and the acceptor takes it, and two reads in a row
+  agree. Until then it is never tried or marked tried. The test hook `test_freight_slots` drives
+  every case.
 - **Rail a train can always run** (`rail.nut`). No 90-degree turn anywhere (`Turns90`, because
   `pf.forbid_90_deg` is on by default). Termini with two platforms joined by a throat with path
   signals. A terminus takes the catching site with the most cargo on the axis toward the other end,

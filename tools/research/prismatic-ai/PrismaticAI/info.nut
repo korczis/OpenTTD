@@ -212,7 +212,7 @@ class PrismaticAI extends AIInfo {
 		}
 		AddSetting({
 			name = "own_lines",
-			description = "Freight rail lines the bot plans itself once every line the planner handed over was tried and money waits (0: none; the panel sets it for a bot it starts from a plan, so a bot started without one stays unplanned).",
+			description = "Freight rail lines the bot plans itself once every line the planner handed over was tried and money waits. With autopilot=1, planned or not, at least 10 (main.nut Behaviour); 0 means none only with autopilot=0, and planned_freight_only=1 turns them off under any plan.",
 			min_value = 0, max_value = 32,
 			easy_value = 18, medium_value = 18, hard_value = 18, custom_value = 18,
 			flags = CONFIG_INGAME,
@@ -439,7 +439,7 @@ class PrismaticAI extends AIInfo {
 		});
 		AddSetting({
 			name = "autopilot",
-			description = "1 (default): a bot started without a plan from the panel (no planner line, air or rail pair) grows on its own: in-bot steward, own freight lines (at least 8), intercity roads, up to 30 routes and a 5000 reserve. 0: the unplanned bot stays as small as its settings say (the duels' rival before 2026-11-19).",
+			description = "1 (default): the bot grows on its own, with or without a plan from the panel: in-bot steward, own freight lines (at least 10), intercity roads, up to 30 routes and at most a 5000 reserve; a plan's lines are built on top, its passenger pair after the bot's first own freight line. 0: the bot stays as small as its settings say (the duels' rival before 2026-11-19).",
 			min_value = 0, max_value = 1,
 			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
 			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
@@ -652,6 +652,16 @@ class PrismaticAI extends AIInfo {
 			name = "test_trainless",
 			description = "RESEARCH-ONLY test hook. 1: the first train of every new rail line, and every other new line's depot, is refused as if for money, so the line waits trainless for KeepLinesServed to buy it; 2: as 1, and once a game month the bot forgets its lines that still have no train, as a restart would, so AdoptTrainlessLines (monthly in this mode, yearly otherwise) takes them back from the map. 0 (default): off.",
 			min_value = 0, max_value = 2,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			step_size = 1,
+			flags = CONFIG_NONE,
+		});
+		/* RESEARCH-ONLY test hook (main.nut TestFreightSlots): handed freight slots written one
+		 * setting at a time, as the panel and the re-planner write them. */
+		AddSetting({
+			name = "test_freight_slots",
+			description = "RESEARCH-ONLY test hook. 1: the handed freight slots (fr_*) are not read from the settings but from main.nut TestFreightSlots, which hands the bot's own best freight line half written, then incoherent (an acceptor that does not take the cargo, a cargo the producer does not make), then flipping between two acceptors, then whole; FreightLines must try it once, only when whole. Run it with planned_freight_only=1. 0 (default): off.",
+			min_value = 0, max_value = 1,
 			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
 			step_size = 1,
 			flags = CONFIG_NONE,
