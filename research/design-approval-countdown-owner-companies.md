@@ -132,7 +132,7 @@ the days of 1950-52. The countdown makes a plan reach the bot. It does not close
    retired. A countdown in game days alone would fire before the owner could read it. The countdown
    is `max(N game days, M real seconds)`, shown as a bar that empties in real time, like the ask
    window's.
-2. **One approval per re-plan, through `ai.set_settings`, not batch ids.** `ai.set_settings`
+2. **A re-plan settles as one plan (see the open conflict below: option (a), a plan id over per-key approvals, was chosen over `ai.set_settings`).** `ai.set_settings`
    validates every key and applies them all in one main-thread call
    (`prismatic_mcp_ai.cpp:268-300`). Today the panel files one `ai.set_setting` per key, in
    alphabetical order (`panel_bot.rs:402-407`, `build_plan.rhai:66`). Under `keep` only an
@@ -178,10 +178,22 @@ and put the re-planner on the authority's channel. The options for review:
 
 Option (a) moves no boundary.
 
+**Review of the conflict (openttd-36, 2026-11-23): option (a).** Option (c) moves the
+decision-authority boundary, which is the owner's call together with a change to ADR 0037. It is
+not a means to an end. Option (b) adds a second channel for the same thing. The details of (a):
+
+- The panel assigns the plan id when it files the plan, and the server keeps it in each approval.
+  `SettleDueApprovals` then settles the plan atomically, revalidation included.
+- An approve or deny by chat or panel on any row of a plan acts on the whole plan, and the
+  interface says so ("approves plan #N, 23 keys").
+- Supersession works per plan, not per key.
+- A test proves that half a plan is never written, even when one key fails revalidation: the whole
+  plan is retired, with its reason.
+
 **The order before a default of approve may be switched on:**
 
 1. The bot keeps its floors under a plan (`fix/prismatic-planned-and-early-rail`).
-2. The re-planner files one `ai.set_settings` per re-plan.
+2. The re-planner files a plan as per-key approvals under one plan id, settled all or none (option (a) below).
 3. Compare-and-set and plan-level supersession are implemented and tested in
    `mcp-approval-check`: a half plan never settles, a load drops pending approvals, and a one-key
    change cannot kill a plan.
