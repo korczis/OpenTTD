@@ -172,6 +172,53 @@ The payback is only as good as the planner's monthly profit, and the planner ove
 ([`the-planner-overpredicts-what-a-line-earns`](../../.ai/repo/knowledge/curated/the-planner-overpredicts-what-a-line-earns.md)).
 The record-based lower bound is what discounts it.
 
+## Outcome feedback
+
+The monthly round said whether a new line pays (earned or lost), but nothing compared what the plan
+predicted with what each mode really earned, or our mode mix with the leader's. With calibration
+off by default, the plan kept handing the bot the modes the game paid least for.
+[`outcome.rs`](../../tools/research/mcp-rhai/src/outcome.rs) closes that loop as a proposal.
+`mcp-plan --outcome --for <ids>` and the panel's planned-bot path (`POST /api/bots/planned`,
+which `replan.rhai` calls every month) answer `outcome.<company>` for each company of `--for`:
+
+| Part | What it is |
+|---|---|
+| `modes` | Per mode, calibrate.rs's realised / predicted ratios, split by the owner of each line: ours, and every other company's. The prior is the weighted median (other companies' lines weigh 0.5), shrunk with 2 pseudo-lines toward `default`, the same median over every line. A mode with no line gets `default`, so an unmeasured mode never beats a measured one. A ratio measured against an already calibrated plan is scaled back to the model's prediction. |
+| `plan.model`, `plan.outcome` | The plan's portfolio, and the same candidates and budget chosen again by the same capability (AlgoGlyph knapsack-dp, or the built-in DP labelled as the fallback). Every option's score is scaled by the prior. This is a sensitivity: fleet sizes stay as the model chose them, and the planner is not run again. |
+| `mix` | Per vehicle type, our vehicles and profit per vehicle last year, and the best other company with at least 3 vehicles a year old. |
+| `signals`, `verdict` | `overpredicted_mode_planned` (mismatch): the plan holds a mode whose prior is below 0.5, on at least 3 weighted lines. `outcome_plan_differs` (watch): the outcome plan holds other lines and beats the model's lines, scored with the prior, by at least 10 %. `leader_out_earns` (watch): the best other company earns at least 1.25 times ours per vehicle of a type. The verdict is `mismatch`, `watch`, `consistent`, or `insufficient` (fewer than 3 weighted measured lines). |
+| `proposal` | `params.calibration` from the priors, with `applied: false`. |
+
+The panel writes each answer to the shared blackboard as `outcome.<company>` (writer `panel_bot`),
+stamped with the game's seed, date and tick and with the `plan.portfolio` it belongs to. The write
+is a `rhai.shared` event, so it is on the bus and in the store, for a gap watcher and the strategy
+review to read. Nothing here changes a setting, a slot or a default. Calibration stays off by
+default until held-start pairs on three seeds favour it (rule `a-tuning-claim-needs-held-start-pairs`).
+
+The seed 12609 game (PrismaticAI as company 0 against seven AIs), read on 2026-11-23 from `GET
+/api/plan` and `openttd://vehicles` and assessed offline (`outcome::tests::saved`), went as follows.
+Our six bus lines earned a median 6 % of their prediction and our three freight-rail lines 72 %.
+Air was about right: one line of ours at 124 %, the others' five at 93 %. The plan for a 300k
+budget held freight rail 1, passenger rail 2 and bus 2. With the prior (air 0.91, bus 0.16,
+freight rail 0.53, rail 0.40, default 0.47), the same candidates chose freight rail 3, worth 48,114
+more than the model's own lines scored the same way (196,456). The verdict was `mismatch` on the
+bus mode. Company 1 earned 1.54 times ours per aircraft. Air stays out of the outcome plan because
+its option is six aircraft and two airports for about 195k, scored over a 24-month payback.
+
+Why the three-seed held-start A/B of calibration averaged about zero:
+
+- The arms barely differed. Both handed the bot the same freight lines; only the uncalibrated arm
+  added a passenger-rail pair (seed 4242: `duel-20261117T215303` and `duel-20261117T215310`).
+- The factors came from one reading of another game (six lines, one vehicle each), and air got
+  `default` 0.37 there. This game says air is the best-predicted mode.
+- They were read once at the bot start. No line is two years old in a fresh game before month 24.
+- calibrate.rs pools every company's lines, and the record that the monthly round keeps counts
+  lines, not money.
+
+Open: the outcome plan is not yet a re-run of the planner with the prior (fleet sizes and the
+candidate cut). `road` mixes buses and trucks. The budget is still `difficulty.max_loan`, not
+money plus headroom, and the game held about 370k idle. No held-start pair has measured the proposal.
+
 ## Where it lives
 
 | File | What it holds |
@@ -183,6 +230,7 @@ The record-based lower bound is what discounts it.
 | [`tools/research/mcp-rhai/src/sites.rs`](../../tools/research/mcp-rhai/src/sites.rs) | where a rail station and its depot can go |
 | [`tools/research/mcp-rhai/src/invest.rs`](../../tools/research/mcp-rhai/src/invest.rs) | transport-investment over the live game |
 | [`tools/research/mcp-rhai/src/calibrate.rs`](../../tools/research/mcp-rhai/src/calibrate.rs) | real against predicted profit, the stored readings |
+| [`tools/research/mcp-rhai/src/outcome.rs`](../../tools/research/mcp-rhai/src/outcome.rs) | the plan against what the game pays: owner-split priors, the outcome plan, the fleet against the leader, signals |
 | [`tools/research/mcp-rhai/src/intent.rs`](../../tools/research/mcp-rhai/src/intent.rs) | sentences to queries |
 | [`tools/research/mcp-rhai/src/graph.rs`](../../tools/research/mcp-rhai/src/graph.rs) | the road network as a graph |
 | [`tools/research/mcp-rhai/src/hub_algoglyph.rs`](../../tools/research/mcp-rhai/src/hub_algoglyph.rs), [`flow_serve.rs`](../../tools/research/mcp-rhai/src/flow_serve.rs), [`kernel_feed.rs`](../../tools/research/mcp-rhai/src/kernel_feed.rs) | how kernels are called and fed |
@@ -193,12 +241,14 @@ The record-based lower bound is what discounts it.
 ## How it is tested
 
 - `cargo test` in `tools/research/mcp-rhai`: tests in `plan.rs`, `cargo.rs`, `linecost.rs`,
-  `yards.rs`, `sites.rs`, `invest.rs`, `calibrate.rs`, `intent.rs`, `hub_algoglyph.rs`,
+  `yards.rs`, `sites.rs`, `invest.rs`, `calibrate.rs`, `outcome.rs`, `intent.rs`, `hub_algoglyph.rs`,
   `flow_serve.rs`, `kernel_feed.rs`, `panel_bot.rs` and `plan_pipeline.rs`. The rival and sibling
   claims are covered by `rail_stations_near_a_raw_producer_hold_it_for_their_company`,
   `a_plan_for_a_company_leaves_out_the_producers_another_company_holds`,
   `two_companies_of_one_ai_are_handed_different_producers_best_first` and
-  `every_running_company_gets_a_plan_of_its_own`. A whole `replan.rhai` round over stubbed reads
+  `every_running_company_gets_a_plan_of_its_own`. The outcome feedback is covered by
+  `the_plan_changes_toward_what_the_outcomes_pay_and_the_mismatch_is_named` (`outcome.rs`) and
+  `an_outcome_assessment_becomes_a_stamped_blackboard_record` (`panel_bot.rs`). A whole `replan.rhai` round over stubbed reads
   is covered by `replan_proposes_each_company_of_its_ai_its_own_plan` (`rhai_shared.rs`).
 - `tools/research/mcp-intent-check`: the owner's plan sentences typed into the game's console and
   answered end to end. `tools/research/mcp-carryout-check`: an answered sentence's settings reach

@@ -32,6 +32,9 @@ pub struct Options {
     /// With `track`, prove up to N transfer yards.
     pub yards: usize,
     pub calibrate: bool,
+    /// Also assess the plan against the game's outcomes for each company of `plan_for`
+    /// (src/outcome.rs, `outcome`); implies `calibrate`.
+    pub outcome: bool,
     /// Also decide with AlgoGlyph's transport-investment (`investment`).
     pub invest: bool,
     /// Answer only the transport-investment kernel input.
@@ -81,7 +84,7 @@ pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &
     // calibrate: what the running lines really earn against what this plan predicts for the
     // same towns or industries, per mode (src/calibrate.rs); `calibration.params` goes back in
     // as params for the next plan. Read before track pricing changes any score.
-    if o.calibrate {
+    if o.calibrate || o.outcome {
         let mut cands: Vec<Value> = out["pairs"].as_array().cloned().unwrap_or_default();
         cands.extend(out["freight"].as_array().cloned().unwrap_or_default());
         out["calibration"] = crate::calibrate::calibrate(&read("vehicles")?, &read("stations")?, &cands, crate::calibrate::REACH_TILES);
@@ -118,6 +121,18 @@ pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &
     candidates.extend(out["freight"].as_array().cloned().unwrap_or_default());
     candidates.sort_by(|a, b| b["score"].as_f64().unwrap_or(0.0).total_cmp(&a["score"].as_f64().unwrap_or(0.0)));
     out["portfolio"] = crate::cargo::portfolio(&candidates, out["params"]["budget"].as_f64(), kernels);
+    // outcome: per company, does the plan match what the game pays (src/outcome.rs)? Proposes only.
+    if o.outcome {
+        let vehicles = read("vehicles")?;
+        let companies = read("companies").unwrap_or(Value::Null);
+        let assessed: serde_json::Map<String, Value> = o.plan_for.iter().flatten()
+            .map(|c| (c.to_string(), crate::outcome::assess(&out, &vehicles, &companies, *c, kernels))).collect();
+        out["outcome"] = if o.plan_for.as_ref().map_or(true, Vec::is_empty) {
+            json!({"why": "no company to assess: --for names none (a company not started yet has no outcomes)"})
+        } else {
+            Value::Object(assessed)
+        };
+    }
     if o.invest_inputs { return Ok(crate::invest::input(&out, &engines, &towns).unwrap_or(Value::Null)); }
     if o.invest { out["investment"] = crate::invest::decide(&out, &engines, &towns, kernels); }
     out["model"] = json!("v4: v3 for passengers, freight pairs from the world graph's industries priced with each cargo's own payment rate and transit periods, and a portfolio chosen by knapsack within the budget");

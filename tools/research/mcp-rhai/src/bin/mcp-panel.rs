@@ -20,6 +20,8 @@ mod bus_sinks;
 #[path = "../calibrate.rs"]
 #[allow(dead_code)]
 mod calibrate;
+#[path = "../outcome.rs"]
+mod outcome;
 #[path = "../duel_outcomes.rs"]
 mod duel_outcomes;
 #[path = "../hub.rs"]
