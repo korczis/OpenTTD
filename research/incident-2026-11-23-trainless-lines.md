@@ -153,41 +153,40 @@ and the arena cache at `~/ttd-battle/arena`. "Master" is master's PrismaticAI (`
 origin/master`) judged by this branch's `battle.py` and referee, so both sides are counted the
 same way.
 
-**The check refuses the build it must refuse.** `battle.py fitness`, gate seed 930967890:
+**The check refuses the build it must refuse.** `battle.py fitness`, gate seed 930967890; master
+before the merge of master into the branch, the branch after it:
 
 | Lineup | Master: trainless a year | Branch: trainless a year | Branch: trainless at the end |
 |---|---|---|---|
-| PrismaticAI | 3 | 0 | 0 of 12 |
-| PrismaticAI self-steward | 6 | 0 | 2 of 10 |
-| PrismaticAI solo-max | 3 | 0 | 0 of 15 |
-| PrismaticAI planned | 1 | 0 | 2 of 18 |
+| PrismaticAI | 3 | 0 | 0 of 13 |
+| PrismaticAI self-steward | 6 | 0 | 0 of 12 |
+| PrismaticAI solo-max | 3 | 0 | 0 of 19 |
+| PrismaticAI planned | 1 | 0 | 0 of 13 |
 | PrismaticAI sibling A | 2 | 0 | 0 of 11 |
-| PrismaticAI trainless test | (not on master) | 0 | 0 of 10 |
+| PrismaticAI trainless test | (not on master) | (`trainless_skip`) | 2 of 12 |
 
 Master fails with `trainless_stations` in all five of its lineups, and the branch passes (`fitness:
-PASS (6 match(es), 6 years, seed 930967890)`). The stations trainless at the end on the branch
-belong to lines still being laid: in the self-steward match, the termini of `WOOD Hartburg Forest -
-Pronhattan Sawmill` stood three quarters before its first train, which is why the rule counts the
-same stations over a year and not a count over two reports (the first version, which master and
-branch then both failed).
+PASS (6 match(es), 6 years, seed 930967890)`). Before the merge, the branch ended with 2 trainless
+stations in two lineups. They belonged to lines still being laid: in the self-steward match, the
+termini of `WOOD Hartburg Forest - Pronhattan Sawmill` stood three quarters before the line's first
+train. That is why the rule counts the same stations over a year, not a count over two reports. The
+first version counted over two reports, and master and branch both failed it.
 
 On the live game's seed 15805, master fails `trainless_stations` in three lineups (3, 3 and 3
-stations) and `shared_producer` once. The branch fails neither. Both fail `hoards` in the
-`PrismaticAI` lineup with the same final value (3,316,940), so this change neither causes nor fixes
-that failure. Final values on the two seeds, one match per side (not a tuning claim, rule
-`project.a-tuning-claim-needs-held-start-pairs`): planned 1.26M -> 1.52M and 1.75M -> 2.79M,
-solo-max 1.54M -> 1.66M and 2.33M -> 2.64M, PrismaticAI 1.80M -> 1.72M and unchanged.
+stations), `shared_producer` once and `hoards` once. The branch passes.
 
 On seed 31337 master fails `trainless_stations` in five lineups and `shared_producer` once. The
 branch fails `trainless_stations` once (the halted line under "What is still open") and `hoards` in
 `PrismaticAI planned`, which went from 3.66M on master to 2.61M. The two runs part from their second
 line on: on the branch, `COAL Slunbourne Coal Mine - Flintston Power Station` gives up and removes
 its stations, and master leaves them standing. From then on each bot plans a different map. A
-single seed of a chaotic headless match cannot attribute the difference either way.
+single seed of a chaotic headless match cannot attribute the difference either way, and these runs
+are no tuning claim (rule `project.a-tuning-claim-needs-held-start-pairs`).
 
 **The new paths run.** With the AI log at `-d script=4`, the `PrismaticAI trainless test` lineup on
-seeds 930967890 and 15805 logged 13 `first train was not bought`, 13 `test_trainless forgot`,
-13 `adopted trainless` and 12 `got its first train`, and no Squirrel error. Two versions of the
+seeds 930967890, 15805 and 31337 logged 21 `first train was not bought`, 10 `depot was refused for
+money`, 10 `got its depot`, 15 `test_trainless forgot`, 20 `adopted trainless` and 19 `got its first
+train`, and no Squirrel error. Two versions of the
 adoption failed this test before it passed: one required no train at either station, but a
 terminus a served line joined has trains, and one matched a station to its industry within
 `RESTORE_INDUSTRY_REACH` (16 tiles from the industry's location), but the Pronhattan Forest station
