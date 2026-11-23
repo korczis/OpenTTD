@@ -1,0 +1,479 @@
+#!/usr/bin/env python3
+"""RESEARCH-ONLY: the Rust performance benchmarks of tools/research/mcp-rhai, as records.
+
+Usage:
+  rust-bench run    [--host NAME] [--threshold 0.25] [--accept] [--root DIR]
+  rust-bench check  [--threshold 0.25] [--record FILE] [--host NAME] [--root DIR]
+  rust-bench render [--check] [--root DIR]
+  rust-bench validate FILE...
+
+run       runs `cargo bench --bench hot_paths` in the crate and turns criterion's
+          target/criterion/**/new/{benchmark,estimates,sample}.json of that run into one record,
+          research/results/bench-<YYYYMMDDTHHMMSS>-<rev8>.json (schema rust-bench/v1,
+          tools/research/schema/rust-bench.v1.json), compared with the newest committed record of
+          the same host, plus its derived page bench-....md. A run that regresses against that
+          record writes nothing and exits 1 unless --accept: a committed record is the next
+          baseline, so a slower one is recorded only on purpose.
+check     compares a fresh run (written nowhere), or --record FILE, with the newest committed
+          record of the same host: exit 1 when the median of any bench present in both grew by
+          more than the threshold and lies above the baseline's slowest sample (the noise guard),
+          each such bench printed. NOT RUN (exit 3) without such a record, without cargo, or when
+          the locked dependencies are neither cached nor downloadable.
+render    writes the page of every record; --check writes nothing and exits 11 while one is stale.
+validate  checks records against the schema.
+
+Environment: CARGO and RUSTC name the toolchain (default cargo, rustc); CARGO_TARGET_DIR is where
+criterion writes (default the crate's target/); RUST_BENCH_HOST is the host name a record carries.
+The benches run with --offline after a `cargo fetch --locked` (offline first, then online).
+Exit: 0 pass, 1 regression, invalid record or failed run, 2 usage, 3 NOT RUN, 11 stale page.
+See research/rust-bench.md.
+"""
+import argparse
+import datetime
+import json
+import os
+import platform
+import re
+import shlex
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+SCHEMA_ID = "rust-bench/v1"
+CRATE = "tools/research/mcp-rhai"
+# Every tracked path the benches build or read: the crate, its path dependencies (the real-world
+# compiler, the AlgoGlyph submodule), the panel's Rhai scripts and the schema fixtures. A record's
+# tree_dirty says whether any of them held uncommitted changes.
+INPUTS = (CRATE, "tools/research/real-world", "tools/research/vendor/algoglyph",
+          "tools/research/mcp-panel/rhai", "tools/research/schema/fixtures")
+# What cargo prints when it cannot reach the network: a fetch that fails so is NOT RUN, not FAIL.
+NETWORK = re.compile(r"could not resolve host|couldn't resolve|failed to download|network|failed to connect|"
+                     r"timed out|failed to query replaced source registry|unable to update registry", re.I)
+RESULTS = "research/results"
+SCHEMA_FILE = "tools/research/schema/rust-bench.v1.json"
+BENCH = "hot_paths"
+THRESHOLD = 0.25
+EXIT_NOT_RUN = 3
+EXIT_STALE = 11
+DERIVED = "do not edit, derived by tools/research/rust-bench"
+
+
+class Failure(Exception):
+    """A run or a record that cannot be turned into a result; exit 1 with its message."""
+
+
+class NotRun(Exception):
+    """A check that could not be made; reported as NOT RUN with its reason."""
+
+
+# --- the schema: a fail-closed validator for the subset of draft 2020-12 the schema uses ---------
+
+ASSERTING = {"type", "required", "properties", "additionalProperties", "items", "enum", "const",
+             "pattern", "minimum", "minItems", "minLength"}
+ANNOTATIONS = {"$schema", "$id", "title", "description"}
+TYPES = {
+    "object": lambda v: isinstance(v, dict),
+    "array": lambda v: isinstance(v, list),
+    "string": lambda v: isinstance(v, str),
+    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "boolean": lambda v: isinstance(v, bool),
+    "null": lambda v: v is None,
+}
+
+
+def schema_errors(schema, value, path="$"):
+    """Every violation of `schema` by `value`, each '<json path>: <message>'. A keyword this
+    validator does not implement is itself an error, never silently ignored."""
+    unknown = set(schema) - ASSERTING - ANNOTATIONS
+    if unknown:
+        return [f"{path}: schema keyword(s) {sorted(unknown)} not implemented"]
+    if "type" in schema:
+        types = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
+        if not any(TYPES[t](value) for t in types):
+            return [f"{path}: expected {'/'.join(types)}, got {type(value).__name__}"]
+    errors = []
+    if "const" in schema and value != schema["const"]:
+        errors.append(f"{path}: expected {schema['const']!r}, got {value!r}")
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{path}: {value!r} is not one of {schema['enum']}")
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0):
+            errors.append(f"{path}: shorter than {schema['minLength']}")
+        if "pattern" in schema and not re.search(schema["pattern"], value):
+            errors.append(f"{path}: {value!r} does not match {schema['pattern']}")
+    if TYPES["number"](value) and "minimum" in schema and value < schema["minimum"]:
+        errors.append(f"{path}: {value} is below {schema['minimum']}")
+    if isinstance(value, dict):
+        props = schema.get("properties", {})
+        for key in schema.get("required", []):
+            if key not in value:
+                errors.append(f"{path}: missing required property {key!r}")
+        for key, item in value.items():
+            if key in props:
+                errors.extend(schema_errors(props[key], item, f"{path}.{key}"))
+            elif schema.get("additionalProperties") is False:
+                errors.append(f"{path}: unexpected property {key!r}")
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0):
+            errors.append(f"{path}: fewer than {schema['minItems']} items")
+        for i, item in enumerate(value):
+            if "items" in schema:
+                errors.extend(schema_errors(schema["items"], item, f"{path}[{i}]"))
+    return errors
+
+
+def load_schema(root):
+    return json.loads((root / SCHEMA_FILE).read_text(encoding="utf-8"))
+
+
+def validate(root, record, where):
+    """Raise Failure listing every violation when `record` does not match the schema."""
+    errors = schema_errors(load_schema(root), record)
+    if errors:
+        raise Failure(f"{where} is not a valid {SCHEMA_ID} record:\n  " + "\n  ".join(errors))
+
+
+def load_record(root, path):
+    try:
+        record = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise Failure(f"{path}: {e}") from e
+    validate(root, record, path)
+    return record
+
+
+# --- criterion's output --------------------------------------------------------------------------
+
+def throughput_of(raw):
+    """criterion's Throughput ({"Bytes": n}, {"ElementsAndBytes": {...}}, ...) as {kind, per_iteration}."""
+    if not raw:
+        return None
+    (variant, n), = raw.items()
+    if variant == "ElementsAndBytes":
+        return {"kind": "elements", "per_iteration": n["elements"]}
+    kind = {"Bytes": "bytes", "BytesDecimal": "bytes", "Elements": "elements", "Bits": "bits"}[variant]
+    return {"kind": kind, "per_iteration": n}
+
+
+def read_bench(new_dir):
+    """One bench from a criterion `new/` directory: its id, estimates and samples, in ns."""
+    def load(name):
+        try:
+            return json.loads((new_dir / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise Failure(f"{new_dir / name}: {e}") from e
+    meta, est, sample = load("benchmark.json"), load("estimates.json"), load("sample.json")
+    per_iter = [t / i for t, i in zip(sample["times"], sample["iters"]) if i > 0]
+    if not per_iter:
+        raise Failure(f"{new_dir / 'sample.json'}: no sample")
+    group, full = meta["group_id"], meta["full_id"]
+    name = full[len(group) + 1:] if full.startswith(group + "/") else full
+    return {"id": full, "group": group, "name": name, "unit": "ns",
+            "mean": est["mean"]["point_estimate"], "median": est["median"]["point_estimate"],
+            "stddev": est["std_dev"]["point_estimate"], "min": min(per_iter), "max": max(per_iter),
+            "samples": len(per_iter), "throughput": throughput_of(meta.get("throughput"))}
+
+
+def collect(criterion_dir, since):
+    """Every bench criterion wrote at or after `since` (seconds), sorted by id. Older directories
+    are earlier runs of benches this run did not measure, and are left out."""
+    benches = []
+    for est in sorted(Path(criterion_dir).glob("**/new/estimates.json")):
+        if est.stat().st_mtime >= since:
+            benches.append(read_bench(est.parent))
+    return sorted(benches, key=lambda b: b["id"])
+
+
+# --- the run -------------------------------------------------------------------------------------
+
+def git(root, *args):
+    out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    if out.returncode != 0:
+        raise Failure(f"git {' '.join(args)}: {out.stderr.strip()}")
+    return out.stdout
+
+
+def tool(var, default):
+    return shlex.split(os.environ.get(var) or default)
+
+
+def host_of(name):
+    os_name = {"darwin": "macos"}.get(sys.platform, platform.system().lower() or sys.platform)
+    name = name or os.environ.get("RUST_BENCH_HOST") or socket.gethostname().split(".")[0]
+    return {"name": name, "os": os_name, "cpus": os.cpu_count() or 1}
+
+
+def toolchain():
+    out = subprocess.run([*tool("RUSTC", "rustc"), "--version"], capture_output=True, text=True)
+    if out.returncode != 0:
+        raise Failure(f"rustc --version: {out.stderr.strip()}")
+    return " ".join(out.stdout.split()[:2])
+
+
+def fetch(cargo, crate):
+    """Make every locked dependency local, so the bench itself runs --offline. Already cached:
+    nothing to do. Otherwise it is downloaded; a host that cannot reach the registry is NOT RUN
+    (the reason printed), and any other failure (a lock file out of date) is a FAIL."""
+    base = [*cargo, "fetch", "--locked", "--manifest-path", str(crate / "Cargo.toml")]
+    if subprocess.run([*base, "--offline"], cwd=crate, capture_output=True, text=True).returncode == 0:
+        return
+    out = subprocess.run(base, cwd=crate, capture_output=True, text=True)
+    if out.returncode == 0:
+        return
+    why = (out.stderr.strip().splitlines() or ["no output"])[-1]
+    if NETWORK.search(out.stderr):
+        raise NotRun(f"the locked dependencies are not cached and cannot be downloaded ({why})")
+    raise Failure(f"cargo fetch --locked: {why}")
+
+
+def bench(root):
+    """Run the benches; return what criterion wrote during this run."""
+    cargo = tool("CARGO", "cargo")
+    if shutil.which(cargo[0]) is None:
+        raise NotRun(f"{cargo[0]} is not on PATH (install Rust, or set CARGO)")
+    crate = root / CRATE
+    target = Path(os.environ.get("CARGO_TARGET_DIR") or crate / "target")
+    if not target.is_absolute():
+        target = crate / target
+    fetch(cargo, crate)
+    cmd = [*cargo, "bench", "--locked", "--offline", "--manifest-path", str(crate / "Cargo.toml"), "--bench", BENCH]
+    print("==> " + " ".join(shlex.quote(c) for c in cmd), flush=True)
+    start = time.time() - 1
+    # In the crate, where cargo also resolves a relative CARGO_TARGET_DIR.
+    if subprocess.run(cmd, cwd=crate).returncode != 0:
+        raise Failure("cargo bench failed")
+    benches = collect(target / "criterion", start)
+    if not benches:
+        raise Failure(f"cargo bench wrote no estimates under {target / 'criterion'}")
+    return benches
+
+
+def record_of(root, benches, host, now):
+    """A record of `benches` (baseline not yet compared)."""
+    rev = git(root, "rev-parse", "HEAD").strip()
+    dirty = bool(git(root, "status", "--porcelain", "--", *INPUTS).strip())
+    return {"schema": SCHEMA_ID, "id": f"bench-{now:%Y%m%dT%H%M%S}-{rev[:8]}",
+            "generated_at": now.isoformat(timespec="seconds"), "rev": rev, "tree_dirty": dirty,
+            "host": host, "toolchain": toolchain(), "profile": "bench", "crate": CRATE,
+            "benches": benches, "baseline": {"id": None, "regressions": []}}
+
+
+def fresh_record(root, host_name):
+    benches = bench(root)
+    return record_of(root, benches, host_of(host_name),
+                     datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0))
+
+
+# --- baselines and the comparison ----------------------------------------------------------------
+
+def committed(root):
+    """Every committed record, oldest first (ids sort by time)."""
+    names = git(root, "ls-files", "--", f"{RESULTS}/bench-*.json").split()
+    return sorted(names, key=lambda n: Path(n).name)
+
+
+def baseline_for(root, record):
+    """The newest committed record of the record's host other than the record itself, or None."""
+    for name in reversed(committed(root)):
+        other = load_record(root, root / name)
+        if other["id"] != record["id"] and other["host"] == record["host"]:
+            return other
+    return None
+
+
+def regressions(record, baseline, threshold):
+    """Benches present in both whose median both grew by more than `threshold` (0.25 = 25 %)
+    and lies above the baseline's slowest sample. The second condition is the noise guard: on a
+    shared machine a bench whose baseline samples spread widely is not called slower until its
+    median leaves that whole spread, so a busy neighbour does not fail the gate on its own."""
+    base = {b["id"]: b for b in baseline["benches"]}
+    out = []
+    for b in record["benches"]:
+        was = base.get(b["id"])
+        if was and was["median"] and b["median"] / was["median"] > 1 + threshold and b["median"] > was["max"]:
+            out.append({"id": b["id"], "median": b["median"], "baseline_median": was["median"],
+                        "ratio": round(b["median"] / was["median"], 3)})
+    return out
+
+
+def compare(root, record, threshold):
+    """Fill the record's baseline; return the baseline record (None when there is none)."""
+    baseline = baseline_for(root, record)
+    record["baseline"] = {"id": baseline["id"] if baseline else None,
+                          "regressions": regressions(record, baseline, threshold) if baseline else []}
+    return baseline
+
+
+# --- the page ------------------------------------------------------------------------------------
+
+def fmt_ns(ns):
+    for unit, scale in (("s", 1e9), ("ms", 1e6), ("µs", 1e3)):
+        if ns >= scale:
+            return f"{ns / scale:.3g} {unit}"
+    return f"{ns:.3g} ns"
+
+
+def fmt_rate(b):
+    t = b["throughput"]
+    if t is None:
+        return ""
+    rate = t["per_iteration"] / (b["median"] / 1e9) if b["median"] else 0
+    unit = {"bytes": "B/s", "elements": "elem/s", "bits": "bit/s"}[t["kind"]]
+    for prefix, scale in (("G", 1e9), ("M", 1e6), ("k", 1e3)):
+        if rate >= scale:
+            return f"{rate / scale:.3g} {prefix}{unit}"
+    return f"{rate:.3g} {unit}"
+
+
+def page(record):
+    """The derived Markdown page of a record."""
+    rid, h, base = record["id"], record["host"], record["baseline"]
+    baseline_cell = f"[{base['id']}]({base['id']}.md)" if base["id"] else "none (no earlier record of this host)"
+    lines = [f"<!-- {DERIVED} (render) from {rid}.json -->",
+             f"# Rust benchmarks {rid}", "",
+             f"Do not edit, derived by `tools/research/rust-bench` from [{rid}.json]({rid}.json) "
+             f"(schema `{SCHEMA_ID}`, [research/rust-bench.md](../rust-bench.md)).", "",
+             "| Run | |", "|---|---|",
+             f"| Revision | `{record['rev'][:8]}`{' (uncommitted changes in the inputs of the benches)' if record['tree_dirty'] else ''} |",
+             f"| Generated | {record['generated_at']} |",
+             f"| Host | {h['name']}, {h['os']}, {h['cpus']} CPUs |",
+             f"| Toolchain | {record['toolchain']}, profile `{record['profile']}` |",
+             f"| Crate | `{record['crate']}` |",
+             f"| Baseline | {baseline_cell} |",
+             "", f"{len(record['benches'])} benches, times per iteration.", "",
+             "| Bench | Median | Mean | Std dev | Min | Max | Samples | Throughput (median) |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|"]
+    for b in record["benches"]:
+        lines.append(f"| `{b['id']}` | {fmt_ns(b['median'])} | {fmt_ns(b['mean'])} | {fmt_ns(b['stddev'])} | "
+                     f"{fmt_ns(b['min'])} | {fmt_ns(b['max'])} | {b['samples']} | {fmt_rate(b)} |")
+    lines += ["", "## Regressions against the baseline", ""]
+    if not base["id"]:
+        lines.append("None compared: this run had no baseline.")
+    elif not base["regressions"]:
+        lines.append("None: no median grew by more than the run's threshold.")
+    else:
+        lines += ["| Bench | Median | Baseline median | Ratio |", "|---|---:|---:|---:|"]
+        lines += [f"| `{r['id']}` | {fmt_ns(r['median'])} | {fmt_ns(r['baseline_median'])} | x{r['ratio']} |"
+                  for r in base["regressions"]]
+    return "\n".join(lines) + "\n"
+
+
+def render(root, check):
+    """Write (or with `check`, compare) the page of every record under research/results."""
+    stale = []
+    for path in sorted((root / RESULTS).glob("bench-*.json")):
+        want = page(load_record(root, path))
+        md = path.with_suffix(".md")
+        if not md.exists() or md.read_text(encoding="utf-8") != want:
+            stale.append(md)
+            if not check:
+                md.write_text(want, encoding="utf-8")
+    for md in stale:
+        print(f"{'stale' if check else 'wrote'} {md.relative_to(root)}")
+    return EXIT_STALE if check and stale else 0
+
+
+# --- the commands --------------------------------------------------------------------------------
+
+def write(root, record):
+    out = root / RESULTS / f"{record['id']}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    out.with_suffix(".md").write_text(page(record), encoding="utf-8")
+    return out
+
+
+def summary(record):
+    slowest = max(record["benches"], key=lambda b: b["median"])
+    print(f"{len(record['benches'])} benches; slowest {slowest['id']} at {fmt_ns(slowest['median'])} (median)")
+
+
+def cmd_run(root, args):
+    record = fresh_record(root, args.host)
+    compare(root, record, args.threshold)
+    validate(root, record, "the new record")
+    summary(record)
+    found = record["baseline"]["regressions"]
+    for r in found:
+        print(f"REGRESSION {r['id']}: median {fmt_ns(r['median'])} against {fmt_ns(r['baseline_median'])} (x{r['ratio']})")
+    # A committed record is the next run's baseline: writing a slower one would ratchet the
+    # baseline down to it. It is written only when the slowdown is accepted on purpose.
+    if found and not args.accept:
+        print(f"rust-bench run: FAIL -- {len(found)} regressions against {record['baseline']['id']}; no record written. "
+              "Rerun with --accept to record them as this host's new baseline.")
+        return 1
+    if found:
+        print(f"rust-bench run: ACCEPTED {len(found)} regressions: the new record becomes this host's baseline")
+    out = write(root, record)
+    print(f"wrote {out.relative_to(root)} and {out.with_suffix('.md').relative_to(root)}")
+    return 0
+
+
+def cmd_check(root, args):
+    record = load_record(root, args.record) if args.record else fresh_record(root, args.host)
+    baseline = compare(root, record, args.threshold)
+    if baseline is None:
+        h = record["host"]
+        raise NotRun(f"no committed record of host {h['name']} ({h['os']}, {h['cpus']} CPUs) under {RESULTS} "
+                     "to compare with: run `tools/research/rust-bench run` there and commit its record")
+    shared = {b["id"] for b in baseline["benches"]} & {b["id"] for b in record["benches"]}
+    print(f"rust-bench check: {record['id']} against {baseline['id']}, {len(shared)} benches in both, "
+          f"threshold {args.threshold:.0%}")
+    for r in record["baseline"]["regressions"]:
+        print(f"REGRESSION {r['id']}: median {fmt_ns(r['median'])} against {fmt_ns(r['baseline_median'])} (x{r['ratio']})")
+    if record["baseline"]["regressions"]:
+        print(f"rust-bench check: FAIL ({len(record['baseline']['regressions'])} regressions)")
+        return 1
+    print("rust-bench check: PASS")
+    return 0
+
+
+def cmd_validate(root, args):
+    for f in args.files:
+        load_record(root, f)
+        print(f"{f}: valid {SCHEMA_ID}")
+    return 0
+
+
+def parser():
+    p = argparse.ArgumentParser(prog="rust-bench", description=__doc__.split("\n")[0])
+    p.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2],
+                   help="the repository root (default: this tool's repository)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    for name in ("run", "check"):
+        s = sub.add_parser(name)
+        s.add_argument("--threshold", type=float, default=THRESHOLD)
+        s.add_argument("--host", help="the host name the record carries (default RUST_BENCH_HOST, else the hostname)")
+        if name == "check":
+            s.add_argument("--record", help="compare this record instead of a fresh run")
+        else:
+            s.add_argument("--accept", action="store_true",
+                           help="write the record although it regresses (it becomes the baseline)")
+    s = sub.add_parser("render")
+    s.add_argument("--check", action="store_true")
+    s = sub.add_parser("validate")
+    s.add_argument("files", nargs="+")
+    return p
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
+    root = args.root.resolve()
+    try:
+        if args.cmd == "render":
+            return render(root, args.check)
+        return {"run": cmd_run, "check": cmd_check, "validate": cmd_validate}[args.cmd](root, args)
+    except NotRun as e:
+        print(f"rust-bench {args.cmd}: NOT RUN -- {e}")
+        return EXIT_NOT_RUN
+    except Failure as e:
+        print(f"rust-bench {args.cmd}: FAIL -- {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

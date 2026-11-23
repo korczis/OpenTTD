@@ -1,0 +1,84 @@
+{
+  "$id": "https://github.com/korczis/OpenTTD/tools/research/schema/rust-bench.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rust-bench/v1",
+  "description": "RESEARCH-ONLY. One run of the Rust performance benchmarks of tools/research/mcp-rhai (benches/hot_paths.rs), as tools/research/rust-bench run writes it to research/results/bench-<YYYYMMDDTHHMMSS>-<rev8>.json from criterion's estimates. Times are nanoseconds per iteration. See research/rust-bench.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "generated_at", "rev", "tree_dirty", "host", "toolchain", "profile", "crate", "benches", "baseline"],
+  "properties": {
+    "schema": {"const": "rust-bench/v1"},
+    "id": {"type": "string", "pattern": "^bench-[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$", "description": "bench-<UTC time of the run>-<first 8 hex digits of rev>; the record's file name without .json"},
+    "generated_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\+00:00$", "description": "when the run ended, UTC, ISO 8601"},
+    "rev": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "git HEAD the benchmarks were built from"},
+    "tree_dirty": {"type": "boolean", "description": "an input of the benches had uncommitted changes (tracked or untracked, not ignored) when they were built: the crate, its path dependencies tools/research/real-world and tools/research/vendor/algoglyph, tools/research/mcp-panel/rhai or tools/research/schema/fixtures"},
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "os", "cpus"],
+      "description": "the machine the run measured; a check compares only records of the same name, os and cpus",
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "description": "the host's short name (--host or RUST_BENCH_HOST, else the first label of its hostname)"},
+        "os": {"type": "string", "minLength": 1, "description": "macos, linux, windows, or the platform's own lowercased name"},
+        "cpus": {"type": "integer", "minimum": 1}
+      }
+    },
+    "toolchain": {"type": "string", "pattern": "^rustc [0-9]+\\.[0-9]+\\.[0-9]+", "description": "rustc --version, its first two words"},
+    "profile": {"const": "bench"},
+    "crate": {"const": "tools/research/mcp-rhai"},
+    "benches": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "group", "name", "unit", "mean", "median", "stddev", "min", "max", "samples", "throughput"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "description": "criterion's full id, <group>/<name>"},
+          "group": {"type": "string", "minLength": 1},
+          "name": {"type": "string", "minLength": 1},
+          "unit": {"const": "ns"},
+          "mean": {"type": "number", "minimum": 0, "description": "criterion's mean estimate per iteration"},
+          "median": {"type": "number", "minimum": 0, "description": "criterion's median estimate per iteration; what check compares"},
+          "stddev": {"type": "number", "minimum": 0},
+          "min": {"type": "number", "minimum": 0, "description": "the fastest sample, per iteration"},
+          "max": {"type": "number", "minimum": 0, "description": "the slowest sample, per iteration"},
+          "samples": {"type": "integer", "minimum": 1},
+          "throughput": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["kind", "per_iteration"],
+            "description": "what one iteration processes, when the bench declares it (criterion Throughput); null otherwise",
+            "properties": {
+              "kind": {"enum": ["bytes", "elements", "bits"]},
+              "per_iteration": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "regressions"],
+      "description": "the newest committed record of the same host this run was compared with, and every bench whose median grew by more than the run's threshold (default 25 %) and lies above that record's slowest sample; a record with regressions is written only with run --accept",
+      "properties": {
+        "id": {"type": ["string", "null"], "pattern": "^bench-[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$"},
+        "regressions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "median", "baseline_median", "ratio"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "median": {"type": "number", "minimum": 0},
+              "baseline_median": {"type": "number", "minimum": 0},
+              "ratio": {"type": "number", "minimum": 0, "description": "median / baseline_median, rounded to 3 decimals"}
+            }
+          }
+        }
+      }
+    }
+  }
+}
