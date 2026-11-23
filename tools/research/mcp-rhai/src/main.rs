@@ -939,7 +939,7 @@ mod tests {
                 #{ data: #{ text: "PrismaticAI: rail line X is built but its first train was not bought (cash); it waits for one" } },
                 #{ data: #{ text: "PrismaticAI: rail line Y given up (no depot); its two stations are removed" } },
                 #{ data: #{ text: "PrismaticAI heartbeat: date=1" } } ]);
-            let r = rl::report(0, lines, [], warn, st);
+            let r = rl::report(0, lines, [ours, theirs], warn, st);
             let kinds = []; for x in r { kinds.push(x.kind); }
             let none = rl::trainless_stations(0, [st[0], st[1]], [ours]);
             [`${ids}`, t[0].text, warn.len(), `${kinds}`, none.len(), rl::problem_rank("nope"),
