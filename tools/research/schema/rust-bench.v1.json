@@ -11,7 +11,7 @@
     "id": {"type": "string", "pattern": "^bench-[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$", "description": "bench-<UTC time of the run>-<first 8 hex digits of rev>; the record's file name without .json"},
     "generated_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\+00:00$", "description": "when the run ended, UTC, ISO 8601"},
     "rev": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "git HEAD the benchmarks were built from"},
-    "tree_dirty": {"type": "boolean", "description": "the crate directory had uncommitted changes (tracked or untracked, not ignored) when it was built"},
+    "tree_dirty": {"type": "boolean", "description": "an input of the benches had uncommitted changes (tracked or untracked, not ignored) when they were built: the crate, its path dependencies tools/research/real-world and tools/research/vendor/algoglyph, tools/research/mcp-panel/rhai or tools/research/schema/fixtures"},
     "host": {
       "type": "object",
       "additionalProperties": false,
@@ -61,7 +61,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "regressions"],
-      "description": "the newest committed record of the same host this run was compared with, and every bench whose median grew by more than the run's threshold (default 25 %)",
+      "description": "the newest committed record of the same host this run was compared with, and every bench whose median grew by more than the run's threshold (default 25 %) and lies above that record's slowest sample; a record with regressions is written only with run --accept",
       "properties": {
         "id": {"type": ["string", "null"], "pattern": "^bench-[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$"},
         "regressions": {

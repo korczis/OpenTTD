@@ -43,6 +43,17 @@ FAKE_CARGO = """#!/usr/bin/env python3
 # A fake `cargo bench`: writes the criterion tree of $FAKE_BENCH_SPEC under $CARGO_TARGET_DIR.
 import json, os, sys
 from pathlib import Path
+if sys.argv[1] == "fetch":
+    # $FAKE_FETCH: cached (default), download (online only), network (unreachable), broken (lock file).
+    mode, offline = os.environ.get("FAKE_FETCH", "cached"), "--offline" in sys.argv
+    if mode == "cached" or (mode == "download" and not offline):
+        sys.exit(0)
+    print({"download": "error: attempting to make an HTTP request, but --offline was specified",
+           "network": "error: failed to download from `https://static.crates.io/x`\\n\\nCaused by:\\n  Could not resolve host: static.crates.io",
+           "broken": "error: the lock file needs to be updated but --locked was passed to prevent this"}[
+              "download" if offline and mode != "broken" else mode], file=sys.stderr)
+    sys.exit(101)
+assert "--offline" in sys.argv, "the bench runs offline"
 spec = json.loads(os.environ.get("FAKE_BENCH_SPEC", "[]"))
 target = Path(os.environ["CARGO_TARGET_DIR"])
 for b in spec:
@@ -155,7 +166,16 @@ class Run(Scratch):
         first, _ = self.run_once()
         self.commit_all()
         time.sleep(1.1)  # a new id, and criterion files newer than the first run's
-        second, out = self.run_once(self.slower(1.5))
+        os.environ["FAKE_BENCH_SPEC"] = json.dumps(self.slower(1.5))
+        code, out, _ = self.main("run")
+        self.assertEqual(code, 1, out)
+        self.assertIn("REGRESSION planner/pipeline: median 37.5 ms against 25 ms (x1.5)", out)
+        self.assertIn("1 regressions against " + first["id"] + "; no record written. Rerun with --accept", out)
+        self.assertEqual(len(self.records()), 1, "a regressing run writes no record")
+        code, out, _ = self.main("run", "--accept")
+        self.assertEqual(code, 0, out)
+        self.assertIn("ACCEPTED 1 regressions", out)
+        second = json.loads(self.records()[-1].read_text())
         self.assertEqual(second["baseline"]["id"], first["id"])
         self.assertEqual(second["baseline"]["regressions"],
                          [{"id": "planner/pipeline", "median": 3.75e7, "baseline_median": 2.5e7, "ratio": 1.5}])
@@ -172,11 +192,15 @@ class Run(Scratch):
         rec, _ = self.run_once()
         self.assertNotIn("gone/bench", [b["id"] for b in rec["benches"]])
 
-    def test_an_uncommitted_change_in_the_crate_marks_the_tree_dirty(self):
-        (self.root / rb.CRATE / "new.rs").write_text("")
+    def test_an_uncommitted_change_in_any_input_of_the_benches_marks_the_tree_dirty(self):
+        rhai = self.root / "tools/research/mcp-panel/rhai"
+        rhai.mkdir(parents=True)
+        (rhai / "rail_lib.rhai").write_text("")
         rec, _ = self.run_once()
         self.assertTrue(rec["tree_dirty"])
-        self.assertIn("(uncommitted changes in the crate)", self.records()[-1].with_suffix(".md").read_text())
+        self.assertIn("(uncommitted changes in the inputs of the benches)", self.records()[-1].with_suffix(".md").read_text())
+        self.assertIn("tools/research/vendor/algoglyph", rb.INPUTS)
+        self.assertIn("tools/research/schema/fixtures", rb.INPUTS)
 
     def test_a_relative_target_dir_is_the_crates(self):
         os.environ["CARGO_TARGET_DIR"] = "tgt"
@@ -204,6 +228,21 @@ class Run(Scratch):
         code, _, err = self.main("run")
         self.assertEqual((code, "rustc --version: no toolchain" in err), (1, True))
         self.assertEqual(self.records(), [])
+
+    def test_dependencies_are_fetched_first_and_an_unreachable_registry_is_not_run(self):
+        os.environ["FAKE_FETCH"] = "download"
+        self.run_once()
+        os.environ["FAKE_FETCH"] = "network"
+        code, out, _ = self.main("run")
+        self.assertEqual(code, rb.EXIT_NOT_RUN, out)
+        self.assertIn("NOT RUN -- the locked dependencies are not cached and cannot be downloaded", out)
+        self.assertIn("Could not resolve host", out)
+        code, out, _ = self.main("check")
+        self.assertEqual(code, rb.EXIT_NOT_RUN, out)
+        os.environ["FAKE_FETCH"] = "broken"
+        code, _, err = self.main("run")
+        self.assertEqual(code, 1)
+        self.assertIn("cargo fetch --locked: error: the lock file needs to be updated", err)
 
     def test_outside_git_the_run_fails(self):
         shutil.rmtree(self.root / ".git")
@@ -276,6 +315,21 @@ class Check(Scratch):
         code, _, err = self.main("check", "--record", str(bad))
         self.assertEqual(code, 1)
         self.assertIn("missing required property 'benches'", err)
+
+
+class NoiseGuard(unittest.TestCase):
+    def bench(self, median, mx):
+        return {"id": "g/b", "median": median, "max": mx}
+
+    def test_a_slower_median_inside_the_baselines_spread_is_not_a_regression(self):
+        base = {"benches": [self.bench(100.0, 160.0)]}
+        self.assertEqual(rb.regressions({"benches": [self.bench(150.0, 0)]}, base, 0.25), [], "x1.5, below the slowest sample")
+        self.assertEqual(rb.regressions({"benches": [self.bench(170.0, 0)]}, base, 0.25),
+                         [{"id": "g/b", "median": 170.0, "baseline_median": 100.0, "ratio": 1.7}])
+        self.assertEqual(rb.regressions({"benches": [self.bench(120.0, 0)]}, {"benches": [self.bench(100.0, 101.0)]}, 0.25), [],
+                         "above the spread but within the threshold")
+        self.assertEqual(rb.regressions({"benches": [self.bench(5.0, 0)]}, {"benches": [self.bench(0.0, 0.0)]}, 0.25), [],
+                         "a zero baseline median is not divided by")
 
 
 class Render(Scratch):

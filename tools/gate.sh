@@ -102,8 +102,10 @@ Usage: $SELF <smoke|change|research|research-free|full> [options]
             Then runs the Rust performance benchmarks of mcp-rhai against
             the newest committed record of this host (tools/research/
             rust-bench check, research/rust-bench.md): a median more than
-            25% slower fails; no such record, or no cargo, is NOT RUN, so
-            PARTIAL. Only in this tier: a fresh run takes minutes.
+            25% slower and above the baseline's slowest sample fails; no
+            such record, no cargo, or uncached dependencies on a host that
+            cannot download them, is NOT RUN, so PARTIAL. Only in this
+            tier: a fresh run takes minutes.
 
   -h, --help   Show this help and exit.
 
@@ -751,10 +753,10 @@ cmd_research() {
 
 # The Rust performance benchmarks against the newest committed record of this host
 # (research/rust-bench.md). 0 PASS, 1 a regression or a failed run, 3 NOT RUN (no record of this
-# host, no cargo), which is PARTIAL here. Only the full tier runs it: change must stay fast.
+# host, no cargo, dependencies neither cached nor downloadable), which is PARTIAL here. Only the full tier runs it: change must stay fast.
 rust_bench_check() {
   local rc=0
-  echo "==> tools/research/rust-bench check (median regression above 25% against this host's newest record)"
+  echo "==> tools/research/rust-bench check (median regression above 25% and the baseline's spread, against this host's newest record)"
   python3 -B tools/research/rust-bench check || rc=$?
   case "$rc" in
     0) return 0 ;;

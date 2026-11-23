@@ -33,7 +33,7 @@ is short, with flat sampling, so the suite runs in about a minute after the buil
 ## Run, record, check
 
 ```sh
-tools/research/rust-bench run [--host NAME]     # cargo bench, then research/results/bench-<UTC time>-<rev8>.{json,md}
+tools/research/rust-bench run [--host NAME] [--accept]  # cargo bench, then research/results/bench-<UTC time>-<rev8>.{json,md}
 tools/research/rust-bench check [--threshold 0.25] [--record FILE]
 tools/research/rust-bench render [--check]      # every record's page (tools/surfaces/surfaces sync runs it)
 tools/research/rust-bench validate FILE...
@@ -45,11 +45,29 @@ honoured. The host name in a record is `--host`, else `RUST_BENCH_HOST`, else th
 the hostname: pass a neutral one when the hostname names a person.
 
 `run` compares the new record with the newest committed record of the same host (name, OS and CPU
-count), and writes each bench whose median grew by more than the threshold into its `baseline`.
-`check` does the same for a fresh run, written nowhere, or for `--record FILE`, and exits 1 on any
-such regression, printing each. Without a committed record of this host, or without cargo, it says
-NOT RUN and exits 3; the `full` tier reports that as PARTIAL. Records of different hosts are never
-compared: their numbers measure the machine as much as the code.
+count), and writes each bench that regressed into its `baseline`. `check` does the same for a fresh
+run, written nowhere, or for `--record FILE`, and exits 1 on any regression, printing each.
+Without a committed record of this host, or without cargo, it says NOT RUN and exits 3; the `full`
+tier reports that as PARTIAL. Records of different hosts are never compared: their numbers measure
+the machine as much as the code.
+
+A bench regressed when its median grew by more than the threshold (default 25 %) **and** lies above
+the baseline's slowest sample. The second condition is the noise guard. These records are taken on
+a shared developer machine, where other builds run beside the benches, and a fixed percentage
+alone would fail the gate whenever a neighbour was busy. A bench whose baseline samples spread
+widely is called slower only once its median leaves that whole spread. A tight bench still fails
+at the threshold. The guard trades sensitivity for stability: a slowdown smaller than the
+baseline's own spread goes unreported until a record taken on a quieter machine narrows it.
+
+**The ratchet.** A committed record is the next run's baseline, so committing a slower record would
+lower the bar for every later check. `run` therefore refuses to write a record that regresses: it
+prints each regression and exits 1 without writing. `run --accept` writes it anyway, saying so,
+and the record becomes the new baseline. Use it only when the slowdown is understood and wanted,
+and say why in the commit.
+
+Dependencies: the benches run with `--offline` after `cargo fetch --locked`, which is tried offline
+first and then online. A host that has neither the crates cached nor the network to download them
+reports NOT RUN with cargo's reason, never FAIL. A lock file out of date is a FAIL.
 
 A record is committed like any other result: commit the `.json` and its derived `.md` together.
 The page is never edited by hand; `tools/surfaces/surfaces check` (the `rust-bench` generator of
@@ -62,7 +80,9 @@ the tool validates every record it writes or reads against it. Times are nanosec
 iteration: `mean`, `median` and `stddev` are criterion's estimates, `min` and `max` the fastest and
 slowest sample, `samples` their count. `throughput` is `null`, or `{kind, per_iteration}` with
 `kind` one of `bytes`, `elements`, `bits` when the bench declares what one iteration processes.
-`tree_dirty` says the crate directory held uncommitted changes when it was built.
+`tree_dirty` says an input of the benches held uncommitted changes when they were built: the
+crate, its path dependencies (`tools/research/real-world`, the AlgoGlyph submodule), the panel's
+Rhai scripts or the schema fixtures.
 
 ## Where it runs
 
