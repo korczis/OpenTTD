@@ -59,6 +59,8 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 | own freight planner production floor 25 instead of 40, on `fdc13851cf` | 12 | +0.7% | 8 (249 trains against 232) |
 | `air_full_load=1` (planes wait for a full load, as AAAHogEx does), on `dbd39147ee` | 12 | -35.4% | 0 (0.26 to 0.98; 42 fewer planes) |
 | `rail_len=6` vs 4, on `dbd39147ee` | 12 | +1.8% | 7 (0.63 to 1.33; 58 fewer trains) |
+| compete for producers a rival's rail station claims (`ForeignRailStationAt` off), on `dbd39147ee` | 12 | +9.6% | 7 (251 trains against 208) |
+| the same plus producers others serve, discounted by the served share | 12 / 24 | +10.2% / -1.4% | 7 / 11 (the second 12: -11.8%, 4 better) |
 
 # How to apply it
 
@@ -81,5 +83,12 @@ Replayed A/Bs (`battle.py ablate --match`, real lineups, default PrismaticAI):
 - A gain measured on one master does not carry to the next: `H_TILE=8` replayed at +9.4% over 24
   matches on `5cc9cdbf8d` and at +0.9% on `6333347512`, three bot changes later. Re-measure on the
   current master before opening a PR.
+- Decide on 24 matches, not 12. Three changes that led by 10-15% on matches 6, 18 and 30 of the four
+  editions fell to +6%, +3% and -12% on matches 12, 24 and 36 (`H_TILE=8`, `H_TILE=9`, competing
+  for producers). Twelve paired replays spread by about 10%.
+- In a 20-year replay the own freight planner runs out of producers: of 42-53 on land it holds
+  8-14, rivals' rail stations claim 15-19, 5-12 are transported by others and 5-10 make under 40
+  a month (`55e2546b/m-0018`, `07472abe/m-0006`). Taking claimed or served producers did not add
+  value (above), so the money it cannot place stays idle.
 - A single replay is chaotic: `07472abe/m-0006` moved by up to 15% with no behavioural change.
   Use 8 or more matches.
