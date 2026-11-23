@@ -64,6 +64,7 @@ def sample(value, rail=0, prail=0, air=0, pair=0, road=0, proad=0):
 
 def row(name, value, rival=1_000_000, errors=0, exit_code=0, rail=1, prail=10_000):
     return {"variant": name, "settings": "", "exit_code": exit_code, "value": value, "errors": errors,
+            "money": 0, "vehicles": rail, "rail": rail, "road": 0, "air": 0, "field_best": rival, "t": "1951-01",
             "standings": [dict(sample(value, rail=rail, prail=prail), company=0, key=name, errors=errors),
                           dict(sample(rival, rail=20, prail=400_000, air=1, pair=20_000), company=1,
                                key="AAAHogEx", errors=0)]}
@@ -498,6 +499,40 @@ class Evolve(unittest.TestCase):
             code, out, rec = self.go(cfg, args(force=True, baseline=BASE, budget=3), fake_run(gain))
             self.assertEqual((rec["status"], rec["candidates"]), ("inconclusive", []))
             self.assertIn("no candidate for modes", rec["verdict"])
+
+    def test_write_records_every_played_seed_and_skips_one_never_played(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = config(Path(tmp))
+            results = Path(tmp) / "results"
+            results.mkdir()
+            old, real_git = battle.RESULTS_DIR, battle.git
+            battle.RESULTS_DIR = results
+            battle.git = lambda *a, **k: "0" * 40 if a[0] == "rev-parse" else ""
+            try:
+                code, out, rec = self.go(cfg, args(force=True, baseline=BASE, budget=2, write=True),
+                                         fake_run(lambda s, x: 1.0))
+            finally:
+                battle.RESULTS_DIR, battle.git = old, real_git
+            self.assertEqual(rec["status"], "incomplete")
+            self.assertEqual(sorted(p.name.split("-seed")[1] for p in results.glob("ablation-*.json")),
+                             ["1.json", "2.json"])          # seed 3 was never played
+
+    def test_an_invalid_ablation_record_is_written_with_a_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old = battle.RESULTS_DIR
+            battle.RESULTS_DIR = Path(tmp)
+            out = io.StringIO()
+            try:
+                rows = [dict(row("baseline", 1000), vs_first=0.0)]
+                rec = {"schema": battle.ABLATION_SCHEMA, "id": "ablation-x-seed1", "generated_at": "now", "seed": 1,
+                       "years": 1, "field": ["AAAHogEx"], "slot": 0, "match_cfg": config(Path(tmp))["match"], "rev": "not-a-hash",
+                       "tree_dirty": False, "rows": rows}
+                with redirect_stdout(out), redirect_stderr(out):
+                    battle.write_ablation(rec)
+            finally:
+                battle.RESULTS_DIR = old
+            self.assertIn("warning: ablation-x-seed1.json: rev is not a full commit hash", out.getvalue())
+            self.assertTrue((Path(tmp) / "ablation-x-seed1.md").is_file())
 
     def test_no_binary_is_not_run(self):
         with tempfile.TemporaryDirectory() as tmp:
