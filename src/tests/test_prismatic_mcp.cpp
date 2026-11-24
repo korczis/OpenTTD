@@ -31,6 +31,7 @@
 #include "../map_func.h"
 #include "../tile_map.h"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -1434,14 +1435,14 @@ TEST_CASE("A rule's JSON matcher: plain keys match a subset, $ paths select, str
 	CHECK(R::Match({{"params", json::array({3, "*", 5})}}, args));
 	CHECK_FALSE(R::Match({{"params", json::array({3, 4})}}, args));
 	CHECK_FALSE(R::Match({{"company", json::array({1})}}, args));
-	/* A nested object pattern recurses; a plain key against a value that is no object fails. */
+	/* A nested object pattern recurses; a plain key against a value that is no object does not match. */
 	CHECK(R::Match({{"plan", {{"steps", "*"}}}}, args));
 	CHECK_FALSE(R::Match({{"company", {{"id", 1}}}}, args));
 	/* $ paths: one value, an index, every element, every member, at any depth. */
 	CHECK(R::Match({{"$.company", 1}}, args));
 	CHECK(R::Match({{"$['name']", "max_loan"}}, args));
 	CHECK(R::Match({{"$.params[0]", 3}}, args));
-	CHECK_FALSE(R::Match({{"$.params[7]", "*"}}, args)); // a path that leads nowhere fails
+	CHECK_FALSE(R::Match({{"$.params[7]", "*"}}, args)); // a path that leads nowhere does not match
 	CHECK(R::Match({{"$.params[*]", "?"}}, args));       // every element must match
 	CHECK_FALSE(R::Match({{"$.params[*]", 3}}, args));
 	CHECK(R::Match({{"$.plan.steps[*].cost", "*"}}, args));
@@ -2037,7 +2038,7 @@ TEST_CASE("A glob escapes its wildcards and takes one UTF-8 character for ?, and
 	CHECK(R::MatcherError({{"value", {{"$lt", "x"}}}}).has_value());
 	CHECK(R::MatcherError({{"value", {{"$in", 3}}}}).has_value());
 	CHECK_FALSE(R::MatcherError({{"value", {{"$in", json::array({1, 2})}, {"$ne", 3}}}}).has_value());
-	/* An empty list selects nothing through [*]: the key fails, for an allow rule and a deny rule alike. */
+	/* An empty list selects nothing through [*]: the key does not match, for an allow rule and a deny rule alike. */
 	CHECK_FALSE(R::Match({{"$.params[*]", "*"}}, {{"params", json::array()}}));
 	CHECK(R::Match({{"params", json::array()}}, {{"params", json::array()}}));
 	/* {} matches anything; a long line is matched whole. */
@@ -2146,6 +2147,121 @@ TEST_CASE("A network client reads every page of the server's queue before it sho
 	CHECK(r.Feed(R"([approvals] {"count": 1, "page": 1, "pages": 1})"));
 	REQUIRE(r.rows.size() == 1);
 	CHECK(r.rows[0]["id"] == 3);
+}
+
+TEST_CASE("A held key decides once: every repeat within the quiet time restarts it", "[prismatic_mcp]")
+{
+	namespace P = PrismaticMCP::Panel;
+	using namespace std::chrono_literals;
+	const auto t0 = std::chrono::steady_clock::now();
+	P::KeyHistory h;
+	CHECK(P::KeyTaken(h, 'A', t0));              // the press
+	CHECK_FALSE(P::KeyTaken(h, 'A', t0 + 500ms)); // macOS's first repeat, after its initial delay
+	CHECK_FALSE(P::KeyTaken(h, 'A', t0 + 583ms)); // then every repeat interval
+	CHECK_FALSE(P::KeyTaken(h, 'A', t0 + 1100ms));
+	CHECK_FALSE(P::KeyTaken(h, 'A', t0 + 1650ms)); // still held: each sighting restarts the quiet time
+	CHECK(P::KeyTaken(h, 'A', t0 + 2300ms));       // released and pressed again, after the quiet time
+	CHECK(P::KeyTaken(h, 'D', t0 + 2350ms));       // another key is a new press at once
+	CHECK(P::KeyTaken(h, 'A', t0 + 2400ms));
+	CHECK(P::KEY_QUIET >= 600ms);
+}
+
+TEST_CASE("A broad allow is refused whatever matcher spells any arguments, and {} is no matcher", "[prismatic_mcp]")
+{
+	namespace R = PrismaticMCP::Rules;
+	auto spec = [](std::vector<std::string_view> t) { return R::ParseSpec(t); };
+	CHECK(spec({"*", "{}"}).match.is_null());
+	CHECK(spec({"*", "{ }"}).match.is_null());
+	CHECK(R::IsBroadMatcher(json()));
+	CHECK(R::IsBroadMatcher({{"$", "*"}}));
+	CHECK(R::IsBroadMatcher({{"$ne", nullptr}}));
+	CHECK_FALSE(R::IsBroadMatcher({{"company", 1}}));
+	CHECK_FALSE(R::IsBroadMatcher({{"company", 0}}));  // a company named, not none: {} has no company
+	CHECK_FALSE(R::IsBroadMatcher({{"name", "max_*"}}));
+	for (const char *m : {"{}", "{'$': '*'}", "{'$ne': null}"}) {
+		INFO(m);
+		CHECK(R::BroadAllowRefusal(R::Effect::Allow, spec({"openttd.cmd.*", m})).has_value());
+	}
+	CHECK_FALSE(R::BroadAllowRefusal(R::Effect::Allow, spec({"openttd.cmd.*", "{'company': 1}"})).has_value());
+	CHECK_FALSE(R::BroadAllowRefusal(R::Effect::Allow, spec({"openttd.cmd.*", "{'$': '*'}", "--force"})).has_value());
+}
+
+TEST_CASE("The result line names why each id was refused, rejected or skipped, and the console prints exactly that line", "[prismatic_mcp]")
+{
+	namespace R = PrismaticMCP::Rules;
+	PrismaticMCP::BulkOutcome out;
+	out.rule_id = 4;
+	out.decided_ids = {7};
+	out.refused_ids = {{8, "approval #8 is not pending"}};
+	out.rejected_ids = {{9, "the pause command was refused"}};
+	out.skipped_ids = {{10, "expired"}};
+	CHECK(PrismaticMCP::ResultLine("n1", out, "") == R"([approval-core] {"decided":[7],"error":"","nonce":"n1","ok":true,)"
+		R"("refused":[{"error":"approval #8 is not pending","id":8}],"rejected":[{"error":"the pause command was refused","id":9}],)"
+		R"("rule_id":4,"skipped":[{"error":"expired","id":10}]})");
+	CHECK(PrismaticMCP::ResultLine("n2", {}, "usage") == R"([approval-core] {"decided":[],"error":"usage","nonce":"n2","ok":false,"refused":[],"rejected":[],"rule_id":0,"skipped":[]})");
+
+	/* Tally: a refusal of what was pending and has run is a rejected run; of what was not pending, a refusal. */
+	ClearRulesAndQueue();
+	const uint64_t id = AskPause(true)["approval_id"].get<uint64_t>();
+	PrismaticMCP::BulkOutcome t;
+	std::string m;
+	const bool approved = AsNetworkClient([&] { return PrismaticMCP::ApproveById(id, m, "console"); });
+	PrismaticMCP::Tally(t, id, true, approved, m);
+	REQUIRE(t.rejected_ids.size() == 1);
+	CHECK(t.rejected_ids[0].id == id);
+	CHECK(PrismaticMCP::HasRun(id));
+	PrismaticMCP::Tally(t, id, false, false, "approval is not pending");
+	REQUIRE(t.refused_ids.size() == 1);
+	CHECK(t.refused == 2);
+
+	/* What the console prints, captured through its own log ('script <file>'). */
+	const std::filesystem::path log = std::filesystem::temp_directory_path() / fmt::format("prismatic-console-{}.log", id);
+	std::filesystem::remove(log);
+	IConsoleStdLibRegister();
+	const uint64_t waiting = AskPause(false)["approval_id"].get<uint64_t>();
+	IConsoleCmdExec(fmt::format("script \"{}\"", log.string()));
+	IConsoleCmdExec(fmt::format("prismatic_mcp deny {} {} --nonce c1", waiting, id));
+	IConsoleCmdExec("prismatic_mcp rule deny openttd.ai.* {'company': 3} --nonce c2");
+	IConsoleCmdExec("prismatic_mcp rule allow openttd.cmd.* {} --nonce c3");
+	IConsoleCmdExec("prismatic_mcp approve all openttd.cmd.* --nonce c4");
+	IConsoleCmdExec("prismatic_mcp approve --nonce c5");
+	IConsoleCmdExec(fmt::format("prismatic_mcp rule remove {} --nonce c6", PrismaticMCP::ApprovalRules().back().id));
+	IConsoleCmdExec("script");
+	std::ifstream in(log);
+	std::vector<json> lines;
+	for (std::string l; std::getline(in, l);) {
+		const size_t at = l.find("[approval-core] ");
+		if (at != std::string::npos) lines.push_back(json::parse(l.substr(at + 16)));
+	}
+	std::filesystem::remove(log);
+	REQUIRE(lines.size() == 6); // one line per command, nothing else carries the tag
+	CHECK(lines[0]["nonce"] == "c1");
+	CHECK(lines[0]["decided"] == json::array({waiting}));
+	CHECK(lines[0]["refused"] == json::array({{{"id", id}, {"error", fmt::format("approval #{} is not pending", id)}}}));
+	CHECK((lines[1]["ok"] == true && lines[1]["rule_id"].get<uint64_t>() > 0));
+	CHECK(lines[2]["ok"] == false);
+	CHECK(lines[2]["error"].get<std::string>().find("--force") != std::string::npos);
+	CHECK((lines[3]["ok"] == true && lines[3]["decided"].empty() && lines[3]["skipped"].empty()));
+	CHECK((lines[4]["ok"] == false && lines[4]["error"] == "usage"));
+	CHECK((lines[5]["ok"] == true && lines[5]["rule_id"] == lines[1]["rule_id"]));
+	ClearRulesAndQueue();
+}
+
+TEST_CASE("Without a hub address the hub's pages lead to the panel, and an allow rule counts no expired approval", "[prismatic_mcp]")
+{
+	namespace M = PrismaticMCP::Menu;
+	namespace P = PrismaticMCP::Panel;
+	unsetenv("PRISMATIC_HUB_URL");
+	CHECK(M::HubUrl() == M::PanelUrl());
+	setenv("PRISMATIC_HUB_URL", "http://hub:8790/", 1);
+	CHECK(M::HubUrl() == "http://hub:8790");
+	unsetenv("PRISMATIC_HUB_URL");
+	const json s = {{"approvals", json::array({{{"id", 1}, {"tool", "ai.set_setting"}, {"args", "{}"}, {"expired", true}},
+		{{"id", 2}, {"tool", "ai.set_setting"}, {"args", "{}"}, {"expired", false}}})}};
+	PrismaticMCP::Rules::Spec spec;
+	spec.tool = "ai.set_setting";
+	CHECK(P::Selected(s, spec) == std::vector<uint64_t>{1, 2});
+	CHECK(P::Selected(s, spec, true) == std::vector<uint64_t>{2});
 }
 
 #endif /* OTTD_PRISMATIC_MCP_SERVER */

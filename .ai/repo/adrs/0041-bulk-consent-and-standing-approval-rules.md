@@ -70,8 +70,9 @@ like a single approval, and every one of them is recorded.
      (`created_via panel`), the panel's auto-approve loop (`auto`) or loaded from the rules file
      (`file`) never decides an owner-only tool (`ai.set_settings`, a Battlebrain plan); one made at
      the game's console or by the owner's own click in the window does.
-   - An allow rule over a glob of several tools without a matcher (`*`, `openttd.cmd.*`) is
-     refused, except at the console with `--force`.
+   - An allow rule over a glob of several tools (`*`, `openttd.cmd.*`) whose matcher matches any
+     arguments (none, `{}`, or one that matches both `{}` and `{"company": 0, "x": 1}`, as
+     `{"$": "*"}` does) is refused, except at the console with `--force`.
    - Removing a deny rule is guarded like an allow rule, since an allow rule may then decide what
      it held back.
    - Rules apply to every approval as it is created, and to every approval already waiting when a
@@ -100,9 +101,11 @@ like a single approval, and every one of them is recorded.
      it decides now. It issues the console lines above with `--via window`. Guards against a
      decision the owner did not aim at:
      - its keys decide only after a click in the window, and Enter (the chat key) decides nothing;
-     - a repeat of the same key within 250 ms is ignored;
-     - for 400 ms after rows moved, or the selection changed, by themselves, a row's buttons and the
-       keys decide nothing;
+     - a held key decides once: the same key seen again within 600 ms of its last sighting is a
+       repeat, and each repeat restarts that time (`Panel::KeyTaken`);
+     - for 400 ms after rows moved (by themselves, or after the owner's own decision), a row's
+       buttons and Approve/Deny all decide nothing, and the second click of a double click never
+       does; for 400 ms after the selection changed by itself, the keys decide nothing;
      - on a network client a decided row is marked "sent, waiting for the server" until the server
        stops listing it, and the client reads every page of the server's queue;
      - a dropdown's choice arrives frames after the click, outside any injection scope, so a menu an
@@ -112,8 +115,11 @@ like a single approval, and every one of them is recorded.
    - The panel (`mcp-panel`): its owner-authenticated routes write the same console lines on the
      dedicated server's stdin and append `--via panel` (its auto-approve loop `--via auto`), and
      `--nonce <n>`. The console then prints one machine-readable line per command,
-     `[approval-core] {"nonce", "ok", "decided", "refused", "skipped", "rule_id", "error"}`,
-     which is all the panel reads.
+     `[approval-core] {"nonce", "ok", "decided": [ids], "refused": [{id, error}], "rejected": [{id,
+     error}], "skipped": [{id, error}], "rule_id", "error"}`, which is all the panel reads:
+     refused is not run, rejected is run with its command refused.
+   - Without `$PRISMATIC_HUB_URL` the hub's menu items lead to the panel's base, since a co-play
+     stack starts the panel and no hub.
    - MCP stays read-only: `openttd://approvals` and `openttd.ui.control` carry `rules` and, per
      approval, `matched_rule {id, effect, decides}`. No MCP tool makes a rule or approves in bulk.
    - On a network client, `approve all` and `deny all` expand over the server's queue as the client

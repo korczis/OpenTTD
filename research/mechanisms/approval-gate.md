@@ -118,13 +118,18 @@ permission rules do.
   and printed when the MCP server starts, only if it is the user's and nobody else may read it.
   A loaded rule is `created_via file` and never decides an owner-only tool.
 - **Guards:**
-  - An allow rule over several tools without a matcher (`*`, `openttd.cmd.*`) needs `--force`,
-    and only the console takes it.
+  - An allow rule over several tools (`*`, `openttd.cmd.*`) whose matcher matches any arguments
+    (none, `{}`, `{"$": "*"}`, `{"$ne": null}`: one that matches both `{}` and
+    `{"company": 0, "x": 1}`) needs `--force`, and only the console takes it.
   - Removing a deny rule is refused to armed or injected input, like an allow rule.
   - Rules decide a request before the queue's cap.
 - **For programs:** `--via panel|auto|window` names the channel. With `--nonce <n>` the console
-  prints one line, `[approval-core] {"nonce", "ok", "decided", "refused", "skipped", "rule_id",
-  "error"}`.
+  prints one line, `[approval-core] {"nonce", "ok", "decided": [ids], "refused": [{id, error}],
+  "rejected": [{id, error}], "skipped": [{id, error}], "rule_id", "error"}`. Refused means not run
+  (not pending, expired, owner-only for the channel); rejected means approved and run, but the
+  command was refused, so nothing was enacted.
+- **Tested end to end:** `tools/research/mcp-control-window-check`, which `tools/gate.sh research`
+  runs after ctest (NOT RUN without node or a base set).
 
 The Prismatic control window drives the same lines with `--via window`. Every row has Approve,
 Deny and Always... at the same x, a check box (Shift for a range, Space on the selected row) and

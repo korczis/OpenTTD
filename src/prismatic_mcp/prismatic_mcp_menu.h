@@ -55,7 +55,7 @@ static constexpr int MENU_GROUP_ROW = 1000;
 /** The items, in menu order. */
 std::span<const Item> Items();
 
-/** The hub's base URL: $PRISMATIC_HUB_URL, else http://127.0.0.1:8790. */
+/** The hub's base URL: $PRISMATIC_HUB_URL, else the panel's (PanelUrl), which a co-play stack starts where it starts no hub. */
 std::string HubUrl();
 
 /**

@@ -154,7 +154,7 @@ Derived from `ITEMS` in `src/prismatic_mcp/prismatic_mcp_menu.cpp` by `tools/res
 | Action | What a click does |
 |---|---|
 | `ask` | asks for a sentence; it becomes a request of kind `ask` |
-| `browse` | opens the hub page (base `$PRISMATIC_HUB_URL`, else `http://127.0.0.1:8790`), or for a `panel:` target the panel's (base `$PRISMATIC_PANEL_URL`, else `http://127.0.0.1:8800`) |
+| `browse` | opens the hub page (base `$PRISMATIC_HUB_URL`, else the panel's), or for a `panel:` target the panel's (base `$PRISMATIC_PANEL_URL`, else `http://127.0.0.1:8800`) |
 | `console` | runs the console command and shows the console |
 | `request` | queues a request of that kind for the tile under the main view's centre |
 | `toggle` | calls the MCP tool with the boolean it flips, shown checked |

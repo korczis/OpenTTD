@@ -1986,21 +1986,26 @@ BulkOutcome AddApprovalRule(Rules::Effect effect, const Rules::Spec &spec)
 		if (v.decides == nullptr || v.decides->id != r.id) {
 			if (v.blocked != nullptr && v.blocked->id == r.id) {
 				out.skipped++;
-				out.skipped_ids.push_back(a.id);
-				out.lines.push_back(OutcomeLine(a, "skipped: an owner-only tool, decided only at the game's console or by the owner's click in the game"));
+				out.skipped_ids.push_back({a.id, "an owner-only tool: decided only at the game's console or by the owner's click in the game"});
+				out.lines.push_back(OutcomeLine(a, "skipped: " + out.skipped_ids.back().error));
 			}
 			continue;
 		}
 		auto ruled = ApplyRules(a);
 		if (!ruled.has_value()) {
 			out.skipped++;
-			out.skipped_ids.push_back(a.id);
+			out.skipped_ids.push_back({a.id, "expired"});
 			out.lines.push_back(OutcomeLine(a, "skipped: expired"));
 			continue;
 		}
 		const std::string status = (*ruled)["status"].get<std::string>();
-		if (status == "rejected") out.refused++; else out.decided++;
-		(status == "rejected" ? out.refused_ids : out.decided_ids).push_back(a.id);
+		if (status == "rejected") {
+			out.refused++;
+			out.rejected_ids.push_back({a.id, ruled->value("error", std::string{"the command was refused"})});
+		} else {
+			out.decided++;
+			out.decided_ids.push_back(a.id);
+		}
 		out.lines.push_back(OutcomeLine(a, status + (ruled->contains("error") ? " -- " + (*ruled)["error"].get<std::string>() : "")));
 	}
 	return out;
@@ -2016,6 +2021,35 @@ bool RemoveApprovalRule(uint64_t id, std::string &message)
 	if (removed.persisted && !SaveRules()) message += fmt::format("; could not rewrite {}, so it loads again at the next start", RulesFile());
 	Debug(Facility::Net, Severity::Error, "[prismatic-mcp] {}", message);
 	return true;
+}
+
+void Tally(BulkOutcome &out, uint64_t id, bool was_pending, bool ok, const std::string &msg)
+{
+	if (ok) {
+		out.decided++;
+		out.decided_ids.push_back(id);
+		return;
+	}
+	out.refused++;
+	(was_pending && HasRun(id) ? out.rejected_ids : out.refused_ids).push_back({id, msg});
+}
+
+bool HasRun(uint64_t id)
+{
+	const PendingApproval *a = FindApproval(id);
+	return a != nullptr && (a->state == ApprovalState::Consumed || a->state == ApprovalState::Approved);
+}
+
+std::string ResultLine(std::string_view nonce, const BulkOutcome &out, std::string_view error)
+{
+	auto errors = [](const std::vector<IdError> &list) {
+		json arr = json::array();
+		for (const IdError &e : list) arr.push_back({{"id", e.id}, {"error", e.error}});
+		return arr;
+	};
+	json j = {{"nonce", nonce}, {"ok", out.ok && error.empty()}, {"decided", out.decided_ids}, {"refused", errors(out.refused_ids)},
+		{"rejected", errors(out.rejected_ids)}, {"skipped", errors(out.skipped_ids)}, {"rule_id", out.rule_id}, {"error", error}};
+	return "[approval-core] " + j.dump();
 }
 
 BulkOutcome DecideAll(bool approve, const Rules::Spec &spec)
@@ -2037,17 +2071,16 @@ BulkOutcome DecideAll(bool approve, const Rules::Spec &spec)
 	for (uint64_t id : ids) {
 		PendingApproval *a = FindApproval(id);
 		if (a == nullptr || a->state != ApprovalState::Pending) continue; // decided by an earlier one of these (a superseding plan)
-		if (approve && now > a->expiry_tick) { out.skipped++; out.skipped_ids.push_back(id); out.lines.push_back(OutcomeLine(*a, "skipped: expired")); continue; }
+		if (approve && now > a->expiry_tick) { out.skipped++; out.skipped_ids.push_back({id, "expired"}); out.lines.push_back(OutcomeLine(*a, "skipped: expired")); continue; }
 		if (approve && !Rules::MayDecide(Rules::Effect::Allow, spec.via, a->tool)) {
 			out.skipped++;
-			out.skipped_ids.push_back(id);
-			out.lines.push_back(OutcomeLine(*a, "skipped: an owner-only tool, decided only at the game's console or by the owner's click in the game"));
+			out.skipped_ids.push_back({id, "an owner-only tool: decided only at the game's console or by the owner's click in the game"});
+			out.lines.push_back(OutcomeLine(*a, "skipped: " + out.skipped_ids.back().error));
 			continue;
 		}
 		std::string msg;
 		bool ok = approve ? ApproveById(id, msg, via) : DenyById(id, msg, via);
-		if (ok) out.decided++; else out.refused++;
-		(ok ? out.decided_ids : out.refused_ids).push_back(id);
+		Tally(out, id, true, ok, msg);
 		if (PendingApproval *now_a = FindApproval(id)) out.lines.push_back(OutcomeLine(*now_a, msg));
 	}
 	return out;

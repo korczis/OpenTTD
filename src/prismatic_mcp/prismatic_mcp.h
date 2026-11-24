@@ -88,18 +88,49 @@ std::vector<PendingApprovalInfo> PendingApprovals();
 
 /* --- bulk consent and standing rules (ADR 0041) ------------------------------------------ */
 
-/** What a bulk decision or a new rule did, one console line per approval it decided or skipped. */
+/** An approval's id with why it was not decided as asked. */
+struct IdError {
+	uint64_t id = 0;   ///< the approval.
+	std::string error; ///< why: the core's own message.
+};
+
+/** What a bulk decision, a list of ids or a new rule did, one console line per approval it decided or skipped. */
 struct BulkOutcome {
 	bool ok = true;                 ///< false: refused as a whole (a malformed rule, no such rule); lines say why.
 	uint64_t rule_id = 0;           ///< the rule added, for AddApprovalRule.
 	int decided = 0;                ///< approvals approved (and executed) or denied.
-	int refused = 0;                ///< approvals whose approval the core refused (it ran and was rejected, say).
+	int refused = 0;                ///< approvals not decided as asked: refused before they ran, or run and rejected.
 	int skipped = 0;                ///< approvals the filter took but this channel may not decide (expired, owner-only).
 	std::vector<std::string> lines; ///< what happened, in order: what each id did, its tool and its arguments.
 	std::vector<uint64_t> decided_ids; ///< the ids decided, for the machine-readable result line.
-	std::vector<uint64_t> refused_ids; ///< the ids refused.
-	std::vector<uint64_t> skipped_ids; ///< the ids skipped.
+	std::vector<IdError> refused_ids;  ///< refused before anything ran (not pending, expired, not found, owner-only).
+	std::vector<IdError> rejected_ids; ///< approved and run, but the command was refused (nothing enacted).
+	std::vector<IdError> skipped_ids;  ///< selected but not taken (expired, owner-only for this channel).
 };
+
+/**
+ * The machine-readable result line a console command prints when it carries --nonce (ADR 0041):
+ * `[approval-core] {"nonce", "ok", "decided": [ids], "refused": [{id, error}], "rejected": [{id, error}],
+ * "skipped": [{id, error}], "rule_id", "error"}`. The panel reads only this line.
+ * @param nonce The caller's token.
+ * @param out What the command did.
+ * @param error Why the command failed as a whole; empty when it did not.
+ * @return The line.
+ */
+std::string ResultLine(std::string_view nonce, const BulkOutcome &out, std::string_view error);
+
+/** Whether approval \p id was approved and run (its command posted or refused), not merely pending or denied. */
+bool HasRun(uint64_t id);
+
+/**
+ * Count what one id did into a bulk outcome: decided; approved and run but rejected; or refused before anything ran.
+ * @param out The outcome counted into.
+ * @param id The approval.
+ * @param was_pending Whether it was pending before it was asked: only then can a refusal be a rejected run.
+ * @param ok Whether ApproveById or DenyById succeeded.
+ * @param msg Their message.
+ */
+void Tally(BulkOutcome &out, uint64_t id, bool was_pending, bool ok, const std::string &msg);
 /** Every standing rule, in id order. */
 std::vector<Rules::Rule> ApprovalRules();
 /**

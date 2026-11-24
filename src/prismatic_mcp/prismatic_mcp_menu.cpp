@@ -82,8 +82,11 @@ std::span<const Item> Items()
 
 std::string HubUrl()
 {
+	/* A co-play stack (mcp-e2e) starts the panel and no hub: without PRISMATIC_HUB_URL the hub's
+	 * pages lead to the panel, which answers them, rather than to a port where nothing listens. */
 	const char *env = std::getenv("PRISMATIC_HUB_URL");
-	std::string url = (env != nullptr && *env != '\0') ? env : "http://127.0.0.1:8790";
+	if (env == nullptr || *env == '\0') return PanelUrl();
+	std::string url = env;
 	while (!url.empty() && url.back() == '/') url.pop_back();
 	return url;
 }

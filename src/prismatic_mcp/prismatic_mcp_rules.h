@@ -621,8 +621,25 @@ inline Spec ParseSpec(std::span<const std::string_view> tokens)
 		s.error = *err;
 		return s;
 	}
+	/* {} matches any arguments, exactly as no matcher does: one spelling, so every guard sees it. */
+	if (m->is_object() && m->empty()) *m = nlohmann::json();
 	s.match = std::move(*m);
 	return s;
+}
+
+/**
+ * Whether a matcher matches about anything: none at all, or one that matches both empty arguments
+ * and arguments that name nothing in particular (a company 0 and a stray key), as {"$": "*"} or
+ * {"$ne": null} do.
+ * @param match The matcher; null for any arguments.
+ * @return True when it does not narrow the arguments.
+ */
+inline bool IsBroadMatcher(const nlohmann::json &match)
+{
+	if (match.is_null()) return true;
+	static const nlohmann::json probes[] = {nlohmann::json::object(), nlohmann::json{{"company", 0}, {"x", 1}}};
+	for (const auto &probe : probes) if (!Match(match, probe)) return false;
+	return true;
 }
 
 /**
@@ -635,10 +652,10 @@ inline Spec ParseSpec(std::span<const std::string_view> tokens)
  */
 inline std::optional<std::string> BroadAllowRefusal(Effect effect, const Spec &spec)
 {
-	if (effect != Effect::Allow || !spec.match.is_null() || !HasWildcard(spec.tool)) return std::nullopt;
+	if (effect != Effect::Allow || !IsBroadMatcher(spec.match) || !HasWildcard(spec.tool)) return std::nullopt;
 	if (spec.force && spec.via == "console") return std::nullopt;
-	return fmt::format("an allow rule for every tool of '{}' with any arguments approves whatever they ask: give a matcher, name one tool, "
-		"or add --force at the game's console", spec.tool);
+	return fmt::format("an allow rule for every tool of '{}' with a matcher that matches any arguments approves whatever they ask: "
+		"give a narrower matcher, name one tool, or add --force at the game's console", spec.tool);
 }
 
 /**

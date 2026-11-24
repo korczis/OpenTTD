@@ -342,7 +342,7 @@ std::vector<uint64_t> BulkTargets(const std::vector<Row> &rows, bool approve)
 	return ids;
 }
 
-std::vector<uint64_t> Selected(const json &snapshot, const Rules::Spec &spec)
+std::vector<uint64_t> Selected(const json &snapshot, const Rules::Spec &spec, bool skip_expired)
 {
 	Rules::Rule filter;
 	filter.tool = spec.tool;
@@ -351,9 +351,18 @@ std::vector<uint64_t> Selected(const json &snapshot, const Rules::Spec &spec)
 	for (const json &a : ArrayAt(snapshot, "approvals")) {
 		const std::string tool = StringAt(a, "tool"), mcp_tool = StringAt(a, "mcp_tool");
 		const json args = json::parse(StringAt(a, "args"), nullptr, false);
+		if (skip_expired && FlagAt(a, "expired")) continue;
 		if (Rules::Applies(filter, Rules::Subject{mcp_tool, tool, args})) ids.push_back(IdAt(a, "id"));
 	}
 	return ids;
+}
+
+bool KeyTaken(KeyHistory &history, uint16_t key, std::chrono::steady_clock::time_point now)
+{
+	const bool repeat = key == history.key && history.at != std::chrono::steady_clock::time_point{} && now - history.at < KEY_QUIET;
+	history.key = key;
+	history.at = now;
+	return !repeat;
 }
 
 std::optional<uint64_t> NextSelection(const std::vector<uint64_t> &before, const std::set<uint64_t> &decided, const std::vector<uint64_t> &after)
@@ -430,8 +439,6 @@ enum class QueryFor : uint8_t { Ask, AllowRule, DenyRule };
 static constexpr auto SENT_FOR = std::chrono::seconds(12);
 /** How long rows that moved, or a selection that changed, by themselves hold the decisive clicks and keys. */
 static constexpr auto RECENTLY = std::chrono::milliseconds(400);
-/** Within this a key is taken as a repeat of the same key, and ignored. */
-static constexpr auto KEY_REPEAT = std::chrono::milliseconds(250);
 
 /** Whether \p at was less than \p span ago. */
 static bool Within(std::chrono::steady_clock::time_point at, std::chrono::milliseconds span)
@@ -456,8 +463,7 @@ struct ControlWindow : Window {
 	std::vector<std::pair<Row::Kind, uint64_t>> layout; ///< What each row of the list was at the last refresh.
 	std::chrono::steady_clock::time_point moved_at{}; ///< When rows moved without the owner's doing (a refresh).
 	std::chrono::steady_clock::time_point auto_selected_at{}; ///< When the selection changed without the owner's doing.
-	std::chrono::steady_clock::time_point last_key_at{}; ///< When the last key was taken, to ignore its repeats.
-	uint16_t last_key = 0; ///< The last key taken.
+	KeyHistory keys; ///< The last decisive key seen, to ignore a held key's repeats (KeyTaken).
 	std::optional<uint64_t> pending_remove; ///< The rule Remove asks to confirm.
 	std::optional<std::pair<Rules::Effect, Rules::Spec>> pending_rule; ///< The allow rule Always... asks to confirm.
 
@@ -695,6 +701,8 @@ struct ControlWindow : Window {
 		this->selected = NextSelection(before, decided, Shown(this->rows));
 		if (this->selected.has_value()) this->ScrollTo(*this->selected);
 		this->Refresh();
+		/* The rows moved up under the pointer: the next click needs a moment, so a double click decides one row. */
+		this->moved_at = std::chrono::steady_clock::now();
 	}
 
 	/**
@@ -708,7 +716,7 @@ struct ControlWindow : Window {
 			return;
 		}
 		if (effect == Rules::Effect::Allow && !confirmed) {
-			const size_t now = Selected(Snapshot(), spec).size();
+			const size_t now = Selected(Snapshot(), spec, true).size(); // an allow rule never approves an expired one
 			this->pending_rule = std::make_pair(effect, spec);
 			ShowQuery(GetEncodedString(STR_JUST_RAW_STRING, fmt::format("Always allow {}?", spec.tool)),
 				GetEncodedString(STR_JUST_RAW_STRING, fmt::format("{}{}: it approves {} waiting approval{} now and every new one it matches, until you remove it.",
@@ -801,7 +809,7 @@ struct ControlWindow : Window {
 		ShowDropDownListAt(this, std::move(list), -1, WID_PC_LIST, button, Colours::Grey);
 	}
 
-	void OnClickList(Point pt)
+	void OnClickList(Point pt, int click_count)
 	{
 		auto it = this->vscroll->GetScrolledItemFromWidget(this->rows, pt.y, this, WID_PC_LIST, WidgetDimensions::scaled.framerect.top);
 		if (it == this->rows.end()) return;
@@ -814,6 +822,8 @@ struct ControlWindow : Window {
 			case Row::Kind::Approval: {
 				const RowPart part = HitPart(ir.left, ir.right, pt.x, CheckWidth(), button, always);
 				if (part != RowPart::Text && part != RowPart::Check && (moved || row.sent)) return;
+				/* The second click of a double click lands on the row that moved under it: it decides nothing. */
+				if (part != RowPart::Text && part != RowPart::Check && click_count > 1) return;
 				switch (part) {
 					case RowPart::Check:
 						if (IsShiftPressed() && this->anchor.has_value()) {
@@ -868,11 +878,11 @@ struct ControlWindow : Window {
 		cw->Consent(true, ids);
 	}
 
-	void OnClick(Point pt, WidgetID widget, [[maybe_unused]] int click_count) override
+	void OnClick(Point pt, WidgetID widget, int click_count) override
 	{
 		this->keys_armed = true;
 		switch (widget) {
-			case WID_PC_LIST: this->OnClickList(pt); break;
+			case WID_PC_LIST: this->OnClickList(pt, click_count); break;
 			case WID_PC_TOOL: {
 				this->tool_choices = ToolNames(Snapshot()); // what waits now, not a second ago
 				DropDownList list;
@@ -886,6 +896,7 @@ struct ControlWindow : Window {
 			case WID_PC_CHECK_SHOWN: for (uint64_t id : Shown(this->rows)) this->view.checked.insert(id); this->Refresh(); break;
 			case WID_PC_CHECK_NONE: this->view.checked.clear(); this->Refresh(); break;
 			case WID_PC_APPROVE_ALL: {
+				if (Within(this->moved_at, RECENTLY)) break; // the rows it would take just changed
 				std::vector<uint64_t> ids = BulkTargets(this->rows, true);
 				if (ids.empty()) break;
 				if (auto refused = ConsentRefusal(true); refused.has_value()) {
@@ -903,7 +914,9 @@ struct ControlWindow : Window {
 					GetEncodedString(STR_JUST_RAW_STRING, fmt::format("Each executes at once: {}.", list)), this, &ControlWindow::ApproveConfirmed);
 				break;
 			}
-			case WID_PC_DENY_ALL: this->Consent(false, BulkTargets(this->rows, false)); break;
+			case WID_PC_DENY_ALL:
+				if (!Within(this->moved_at, RECENTLY)) this->Consent(false, BulkTargets(this->rows, false)); // not while the rows just changed
+				break;
 			case WID_PC_GOTO: {
 				auto target = this->GotoTarget();
 				if (!target.has_value()) break;
@@ -984,9 +997,7 @@ struct ControlWindow : Window {
 		if (_focused_window != this || !this->keys_armed) return EventState::NotHandled;
 		/* A held key repeats: one press decides one row. Enter is the chat key in a network game, so it decides nothing. */
 		const bool decisive = keycode == 'A' || keycode == 'Y' || keycode == 'D' || keycode == 'N';
-		if (decisive && keycode == this->last_key && Within(this->last_key_at, KEY_REPEAT)) return EventState::Handled;
-		this->last_key = keycode;
-		this->last_key_at = std::chrono::steady_clock::now();
+		if (decisive && !KeyTaken(this->keys, keycode, std::chrono::steady_clock::now())) return EventState::Handled;
 		/* A selection the owner did not make (the selected row went by itself) is not decided by a key at once. */
 		if (decisive && Within(this->auto_selected_at, RECENTLY)) return EventState::Handled;
 		switch (keycode) {

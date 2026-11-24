@@ -19,6 +19,7 @@
 #include "../3rdparty/nlohmann/json.hpp"
 #include "prismatic_mcp_rules.h"
 
+#include <chrono>
 #include <optional>
 #include <set>
 #include <string>
@@ -92,10 +93,35 @@ std::vector<uint64_t> BulkTargets(const std::vector<Row> &rows, bool approve);
 bool AnyChecked(const std::vector<Row> &rows);
 
 /**
- * The ids in \p snapshot's approvals that the tool glob and matcher of \p spec select: what a network
- * client's 'prismatic_mcp approve all|deny all' sends to the server, one id per line.
+ * The ids in a snapshot's approvals that the tool glob and matcher of a spec select: what a network
+ * client's 'prismatic_mcp approve all|deny all' sends to the server, one id per line, and how many
+ * waiting approvals an allow rule decides at once.
+ * @param snapshot The snapshot.
+ * @param spec The glob and matcher.
+ * @param skip_expired Leave out expired approvals, which no allow rule approves.
+ * @return The ids, in queue order.
  */
-std::vector<uint64_t> Selected(const nlohmann::json &snapshot, const Rules::Spec &spec);
+std::vector<uint64_t> Selected(const nlohmann::json &snapshot, const Rules::Spec &spec, bool skip_expired = false);
+
+/** The last decisive key the window saw, to tell a held key's repeats from a new press. */
+struct KeyHistory {
+	uint16_t key = 0;                          ///< The key.
+	std::chrono::steady_clock::time_point at{}; ///< When it was last seen, taken or not.
+};
+
+/** How long the same key must rest before it decides again: longer than a keyboard's repeat interval, so a held key decides once. */
+inline constexpr std::chrono::milliseconds KEY_QUIET{600};
+
+/**
+ * Whether a decisive key press is taken. The same key seen again within KEY_QUIET of its last
+ * sighting is a repeat of a held key and is not taken; every sighting, taken or not, restarts that
+ * time, so a key held through the keyboard's repeats decides exactly once.
+ * @param history The last key seen; updated.
+ * @param key The key pressed.
+ * @param now When.
+ * @return Whether it decides.
+ */
+bool KeyTaken(KeyHistory &history, uint16_t key, std::chrono::steady_clock::time_point now);
 
 /**
  * The approval to select after \p decided were decided: the first row at or after the first decided
