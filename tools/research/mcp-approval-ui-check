@@ -365,7 +365,9 @@ async function bulkPhase(page, secret, earlier) {
   const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
   const under = () => page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest('[data-approve]')?.dataset.approve, [x, y]);
   await page.mouse.click(x, y);
-  check('Yes approves #11 and the next row\'s Yes is under the pointer', await toast('green', '#11 approved') && await settled(async () => (await under()) === '12'));
+  const toasts = () => page.locator('[data-toast]').allTextContents().then((t) => t.join(' | '));
+  check('Yes approves #11 and the next row\'s Yes is under the pointer', await toast('green', '#11 approved') && await settled(async () => (await under()) === '12'),
+    `toasts: ${await toasts()}; under: ${await under()}`);
   check('the focus moved to #12\'s Yes', await page.evaluate(() => document.activeElement?.dataset.approve) === '12');
   await page.waitForTimeout(450);
   await page.mouse.click(x, y);
@@ -380,19 +382,25 @@ async function bulkPhase(page, secret, earlier) {
   check('j moves to the next row', await settled(async () => page.evaluate(() => document.activeElement?.dataset.row === '15')));
   await page.keyboard.press('k');
   check('k moves back', await page.evaluate(() => document.activeElement?.dataset.row === '14'));
+  await page.waitForTimeout(450); // a person's pace: past the 400 ms guard after a decision
   await page.keyboard.press('y');
   check('y approves the focused row (#14), the next row takes the focus', await toast('green', '#14 approved') && await page.evaluate(() => document.activeElement?.dataset.row === '15'));
+  await page.waitForTimeout(450); // a person's pace: past the 400 ms guard after a decision
   await page.keyboard.press('n');
   check('n denies #15', await toast('green', '#15 denied') && (await state(15)).state === 'denied');
+  await page.waitForTimeout(450); // a person's pace: past the 400 ms guard after a decision
   await page.keyboard.press('y');
   check('y on an owner-only row does nothing', (await state(16)).state === 'pending' && await page.evaluate(() => document.activeElement?.dataset.row === '16'));
   await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(450); // a person's pace: past the 400 ms guard after a decision
   await page.keyboard.press('a');
   check('a approves #18', await toast('green', '#18 approved'));
+  await page.waitForTimeout(450); // a person's pace: past the 400 ms guard after a decision
   await page.keyboard.press('d');
   check('d denies #19', await toast('green', '#19 denied'));
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(450); // a person's pace: past the 400 ms guard after a decision
   await page.keyboard.press('Enter');
   check('Enter approves #20', await toast('green', '#20 approved') && await settled(async () => (await state(20)).state === 'consumed'));
 
@@ -409,6 +417,7 @@ async function bulkPhase(page, secret, earlier) {
   await page.locator('#approvals-approve-bulk').click();
   await confirm.locator('[data-confirm="yes"]').click();
   check('Approve in the box approves the picked row', await toast('green', 'Approved 1 of 1') && (await state(21)).state === 'consumed' && await via(21) === 'panel');
+  await page.waitForTimeout(450); // a person's pace: past the 400 ms guard after a decision
   await page.locator('#approvals-deny-bulk').click();
   check('Deny all denies every row the filter shows', await toast('green', 'Denied 1 of 1') && (await state(22)).state === 'denied');
   // A bulk decision over a row the server consumed meanwhile: the failure is named.
@@ -433,6 +442,17 @@ async function bulkPhase(page, secret, earlier) {
   await page.locator('#rule-match').fill('{"company": 3, "name": "max_*"');
   await ed.locator('button[type="submit"]').click();
   check('a matcher that is not JSON is refused in the box', await page.locator('#rule-error').filter({ hasText: 'not JSON' }).isVisible() && await ed.count() === 1);
+  // The dry run reads every kind of matcher as the core does: paths of each step, the operators.
+  for (const [m, n] of [
+    ['{"$": "*"}', 2], ['{"$..name": "max_*"}', 2], ['{"$.name": "max_s*", "$.*": "*"}', 1], ['{"$[\'name\']": "*", "$[*]": "*"}', 2],
+    ['{"$[0]": 1}', 0], ['{"$x": 1}', 0], ['{"$[0": 1}', 0], ['{"$.": 1}', 0], ['{"$..": 1}', 0], ['{"$[a]": 1}', 0],
+    ['{"value": {"$gte": 5, "$lt": 6}, "company": {"$in": [3]}, "name": {"$ne": "x"}}', 1], ['{"value": {"$gt": "5"}}', 0],
+    ['{"value": {"$lte": 6}, "company": 3}', 2], ['{"x": [1]}', 0],
+  ]) {
+    await page.locator('#rule-match').fill(m);
+    check(`the dry run of ${m} takes ${n}`, await settled(async () => (await page.locator('#rule-dryrun').textContent()).startsWith(`Would decide ${n} waiting approval`)),
+      await page.locator('#rule-dryrun').textContent());
+  }
   await page.locator('#rule-match').fill('{"company": 3, "name": "max_*"}');
   check('the editor says what the rule would decide now', await settled(async () => (await page.locator('#rule-dryrun').textContent()) === 'Would decide 2 waiting approvals now: #24, #25'));
   await page.locator('#rule-persist').check();
