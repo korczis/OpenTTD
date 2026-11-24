@@ -141,7 +141,7 @@ inline bool HasWildcard(std::string_view pattern)
 struct PathStep {
 	/** What the step selects. */
 	enum class Kind : uint8_t {
-		Key,     ///< `.name` or `['name']`: one member.
+		Key,     ///< A member by name: dot name, or the name quoted in brackets.
 		Index,   ///< `[n]`: one element.
 		Every,   ///< `[*]` or `.*`: every element or member, each of which must match.
 		Descend, ///< `..name`: that member at any depth, each one found must match.
@@ -152,8 +152,10 @@ struct PathStep {
 };
 
 /**
- * Parse a JSON path: `$` followed by `.name`, `['name']`, `[n]`, `[*]`, `.*` and `..name` steps.
- * @param path The path, starting with `$`.
+ * Parse a JSON path: a dollar sign followed by steps, each a member by name (dot name, or the
+ * name quoted in brackets), an element by index in brackets, every element (a star in brackets,
+ * or dot star), or a member by name at any depth (two dots and the name).
+ * @param path The path, starting with a dollar sign.
  * @return The steps; nullopt when it does not parse.
  */
 inline std::optional<std::vector<PathStep>> ParsePath(std::string_view path)
