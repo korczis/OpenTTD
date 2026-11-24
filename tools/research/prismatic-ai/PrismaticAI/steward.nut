@@ -23,6 +23,17 @@
  */
 
 const STEWARD_JUDGE_AFTER_DAYS = 400;
+
+/* The age a train needs before its profit last year judges it: STEWARD_JUDGE_AFTER_DAYS, and at
+ * least the days since 1 January of last year, so it ran all of last year. A train bought during
+ * last year shows only the months it ran, its purchase month's running cost included, and 400 days
+ * did not cover that: in the owner's game 21647 (1955-09-01) lines 7 and 10 each sold the second
+ * train they had just got, both for "lost -1017", and in ten-year matches of this branch (seeds
+ * 15805, 2927 and 4242) 10 of 13 shrinks judged a train bought the year before. */
+function PrismaticAI::JudgeAge() {
+	local now = AIDate.GetCurrentDate();
+	return max(STEWARD_JUDGE_AFTER_DAYS, now - AIDate.GetDate(AIDate.GetYear(now) - 1, 1, 1));
+}
 const STEWARD_GROW_LOADS = 1.0;
 const STEWARD_SHRINK_LOADS = 0.25;
 
@@ -42,6 +53,26 @@ const STEWARD_SHRINK_LOADS = 0.25;
  * stops earning. research/rail-steward.md has the measurement. */
 const STEWARD_SETTLE_DAYS = 90;
 const STEWARD_RATING_STEP = 15;
+/* Trains from supply (setting steward_target, default 1). The waiting-cargo and rating rules grow a
+ * line by one train a month at most and only when cargo piles up or the rating falls, which
+ * full-load orders hide: in the merged analysis of 2026-11-23 (research/analysis-2026-11-23-why-
+ * prismatic-loses.md) double-track lines allowed 33-39 trains ran 2 ("2 of 33", "2 of 39",
+ * 1955-01-02), PrismaticAI ran 1.54 trains a line at 1960-01 and AAAHogEx 3.24, and AAAHogEx sizes
+ * a line's trains from its production (its estimator). The target is the trains that carry the
+ * line's monthly production (its producer and the producers that feed its source station,
+ * growth.nut) over one round trip: production x round-trip days / (30 x a trainload), rounded
+ * up, at most trains_max. The round trip is the line's tiles both ways at the locomotive's top
+ * speed plus a week at the stations, as rail.nut PlatformPlan sizes the platform
+ * (STEWARD_TILES_A_DAY tiles a day per km/h). A line below its target that earns and whose newest
+ * train has run STEWARD_SETTLE_DAYS gets trains in a batch: up to the target, at most doubling, so
+ * a wrong estimate costs one batch, and the next batch waits until the last one has run that long.
+ * No free-platform test: the target is the throughput the production needs, and on double track
+ * a train waits for a platform at the last one-way signal (rail.nut), as AAAHogEx's do. Reviewed
+ * by Codex (2026-11-24): settle on the newest train, count only fed producers whose cargo is
+ * carried; one month's production and the top speed stay estimates. */
+const STEWARD_TILES_A_DAY = 0.036;
+const STEWARD_STATION_DAYS = 7;
+
 /* The game year SelfSteward last logged every line's state in. */
 STEWARD_STATE_YEAR <- -1;
 
@@ -141,7 +172,33 @@ function PrismaticAI::MaintenanceHold() {
  * and its newest train, once old enough to judge, did not lose money last year. */
 function PrismaticAI::LineEarns(s) {
 	if (s.trains == 0 || s.profit_last + s.profit_this <= 0) return false;
-	return !(s.newest_age >= STEWARD_JUDGE_AFTER_DAYS && s.newest_profit_last < 0);
+	return !(s.newest_age >= PrismaticAI.JudgeAge() && s.newest_profit_last < 0);
+}
+
+/* The monthly production of `line`'s cargo at its producer and the producers feeding its source
+ * station (growth.nut `fed`), or -1 for a line with no producer (a passenger line). */
+function PrismaticAI::LineSupply(line) {
+	if (!("from" in line) || !AIIndustry.IsValidIndustry(line.from)) return -1;
+	local supply = max(0, AIIndustry.GetLastMonthProduction(line.from, line.cargo));
+	if ("fed" in line) {
+		foreach (p, _ in line.fed) {
+			/* A feeder whose join failed is recorded too (growth.nut records before it joins): only one
+			 * whose cargo someone carries counts. */
+			if (!AIIndustry.IsValidIndustry(p) || AIIndustry.GetLastMonthTransported(p, line.cargo) <= 0) continue;
+			supply += AIIndustry.GetLastMonthProduction(p, line.cargo);
+		}
+	}
+	return supply;
+}
+
+/* The trains `line` needs to carry `supply` a month with trains of `trainload` like `train`:
+ * {trains, trip} (see steward_target above). */
+function PrismaticAI::LineTrainTarget(line, train, supply, trainload) {
+	local kmh = max(1, AIEngine.GetMaxSpeed(AIVehicle.GetEngineType(train)));
+	local tiles = max(line.path.len(), AIMap.DistanceManhattan(line.a, line.b));
+	local trip = (2.0 * tiles / (kmh * STEWARD_TILES_A_DAY)).tointeger() + STEWARD_STATION_DAYS;
+	local trains = (supply * trip + 30 * trainload - 1) / max(1, 30 * trainload);
+	return {trains = min(line.trains_max, max(1, trains)), trip = trip};
 }
 
 /* The rating, in percent, of `line`'s cargo at its source station, or -1 while it has none. */
@@ -159,7 +216,8 @@ const STEWARD_OWN_LINES_MAX = 32;
  * newest, newest_profit_last}. Trains on their way to be sold do not count. */
 function PrismaticAI::LineStats(line) {
 	local s = { trains = 0, capacity = 0, wagons = 0, profit_last = 0, profit_this = 0, oldest = 0,
-		newest = -1, newest_age = 0, newest_profit_last = 0 };
+		newest = -1, newest_age = 0, newest_profit_last = 0, judged = 0, judged_profit_last = 0 };
+	local judge_age = PrismaticAI.JudgeAge();
 	foreach (t in PrismaticAI.TrainsOf(line)) {
 		if (this.selling.rawin(t)) continue;
 		s.trains++;
@@ -169,6 +227,11 @@ function PrismaticAI::LineStats(line) {
 		s.profit_this += AIVehicle.GetProfitThisYear(t);
 		local age = AIVehicle.GetAge(t);
 		s.oldest = max(s.oldest, age);
+		/* The trains that ran all of last year: only their profit last year judges the line (JudgeAge). */
+		if (age >= judge_age) {
+			s.judged++;
+			s.judged_profit_last += AIVehicle.GetProfitLastYear(t);
+		}
 		if (s.newest == -1 || age < s.newest_age) {
 			s.newest = t;
 			s.newest_age = age;
@@ -219,11 +282,13 @@ function PrismaticAI::SelfSteward(stamped = false) {
 	if (!stamped && !PrismaticAI.MaintenanceStamp("heartbeat")) return;
 	local rating_low = AIController.GetSetting("steward_rating");
 	if (rating_low == null) rating_low = 0;
+	local sized = AIController.GetSetting("steward_target") == 1;
 	/* On the first round of every game year each line's state, so a log shows what held each line
 	 * (the evidence above); a round can come months late (STEWARD_ROUND_NOTE). */
 	local year = AIDate.GetYear(AIDate.GetCurrentDate());
 	local yearly = year != STEWARD_STATE_YEAR;
 	STEWARD_STATE_YEAR = year;
+	local judge_age = PrismaticAI.JudgeAge();
 	foreach (i, line in RAIL_LINES) {
 		if (line.closed) continue;
 		local slot = i + 1;
@@ -234,22 +299,36 @@ function PrismaticAI::SelfSteward(stamped = false) {
 		local cur = this.self_targets.rawin(slot) ? this.self_targets[slot] : { trains = -1, wagons = -1 };
 		local want = { trains = cur.trains, wagons = cur.wagons };
 		local why = null;
-		if (s.oldest >= STEWARD_JUDGE_AFTER_DAYS && s.profit_last < 0 && s.profit_this < 0) {
+		/* Close: the trains that ran all of last year lost money in it, and the line loses money this
+		 * year after a quarter of it, so neither a train's partial first year nor January's running
+		 * costs before the first delivery close a line (in the owner's game 21647 line 7 was closed
+		 * on 1957-08-25, two years after its second train was sold on a partial year). */
+		if (s.judged > 0 && s.judged_profit_last < 0 && s.profit_this < 0 &&
+				AIDate.GetCurrentDate() - AIDate.GetDate(year, 1, 1) >= STEWARD_SETTLE_DAYS) {
 			want.trains = 0;
-			why = "close: lost " + s.profit_last + " last year and " + s.profit_this + " this year";
+			why = "close: the " + s.judged + " train(s) that ran all of last year lost " + s.judged_profit_last + " in it, and the line lost " +
+				s.profit_this + " this year";
 		} else if (s.capacity > 0) {
 			local waiting = PrismaticAI.LineWaiting(line);
 			local loads = waiting.tofloat() / s.capacity.tofloat();
 			local fit = ("wagons_fit" in line) ? line.wagons_fit : s.wagons;
 			local free_platforms = (("platforms" in line) ? line.platforms : 1) - PrismaticAI.TrainsLoadingAt(line, line.a);
 			local rating = PrismaticAI.SourceRating(line);
+			local supply = sized ? PrismaticAI.LineSupply(line) : -1;
+			local target = (supply > 0) ? PrismaticAI.LineTrainTarget(line, s.newest, supply, s.capacity / s.trains) : null;
 			if (yearly) {
 				AILog.Info("PrismaticAI: steward state line " + slot + " (" + line.label + "): " + s.trains + " of " + line.trains_max +
 					" trains" + (("path2" in line) ? " (double track)" : "") + ", " + waiting + " waiting, trainload " + (s.capacity / s.trains) +
 					", rating " + rating + "% at the source, " + free_platforms + " source platform(s) free, profit " + s.profit_last +
-					" last year and " + s.profit_this + " this year, newest train " + s.newest_age + " days");
+					" last year and " + s.profit_this + " this year, newest train " + s.newest_age + " days" +
+					(target != null ? ", supply " + supply + " a month, round trip " + target.trip + " days, target " + target.trains + " trains" : ""));
 			}
-			if (("path2" in line) && s.trains < line.trains_max && 2 * waiting * s.trains >= s.capacity &&
+			if (target != null && target.trains > s.trains && s.newest_age >= STEWARD_SETTLE_DAYS && PrismaticAI.LineEarns(s)) {
+				/* Trains from supply (above): a batch up to the target, at most doubling a round. */
+				want.trains = min(target.trains, 2 * s.trains);
+				why = "add_trains (supply): " + supply + " a month over a " + target.trip + "-day round trip in trainloads of " +
+					(s.capacity / s.trains) + " needs " + target.trains + " of " + line.trains_max + "; " + s.trains + " -> " + want.trains;
+			} else if (("path2" in line) && s.trains < line.trains_max && 2 * waiting * s.trains >= s.capacity &&
 					free_platforms > 0) {
 				/* Double track (rail.nut): after AAAHogEx, a train more while half a trainload waits
 				 * and a source platform is free to take it. "No train loading" almost never held with a
@@ -273,7 +352,7 @@ function PrismaticAI::SelfSteward(stamped = false) {
 				why = "add_train (rating): " + rating + "% at the source, below " + rating_low + "%, " + free_platforms +
 					" source platform(s) free, profit " + s.profit_last + " last year and " + s.profit_this + " this year; " +
 					s.trains + " -> " + want.trains + " of " + line.trains_max;
-			} else if (s.trains > 1 && loads < STEWARD_SHRINK_LOADS && s.newest_age >= STEWARD_JUDGE_AFTER_DAYS && s.newest_profit_last < 0) {
+			} else if (s.trains > 1 && loads < STEWARD_SHRINK_LOADS && s.newest_age >= judge_age && s.newest_profit_last < 0) {
 				want.trains = s.trains - 1;
 				why = "shrink: " + waiting + " waiting and train " + s.newest + " lost " + s.newest_profit_last;
 			}
