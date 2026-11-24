@@ -212,7 +212,7 @@ class PrismaticAI extends AIInfo {
 		}
 		AddSetting({
 			name = "own_lines",
-			description = "Freight rail lines the bot plans itself once every line the planner handed over was tried and money waits (0: none; the panel sets it for a bot it starts from a plan, so a bot started without one stays unplanned).",
+			description = "Freight rail lines the bot plans itself once every line the planner handed over was tried and money waits. With autopilot=1, planned or not, at least 10 (main.nut Behaviour); 0 means none only with autopilot=0, and planned_freight_only=1 turns them off under any plan.",
 			min_value = 0, max_value = 32,
 			easy_value = 18, medium_value = 18, hard_value = 18, custom_value = 18,
 			flags = CONFIG_INGAME,
@@ -439,7 +439,7 @@ class PrismaticAI extends AIInfo {
 		});
 		AddSetting({
 			name = "autopilot",
-			description = "1 (default): a bot started without a plan from the panel (no planner line, air or rail pair) grows on its own: in-bot steward, own freight lines (at least 8), intercity roads, up to 30 routes and a 5000 reserve. 0: the unplanned bot stays as small as its settings say (the duels' rival before 2026-11-19).",
+			description = "1 (default): the bot grows on its own, with or without a plan from the panel: in-bot steward, own freight lines (at least 10), intercity roads, up to 30 routes and at most a 5000 reserve; a plan's lines are built on top, its passenger pair in a heartbeat that starts no own freight line, or after two years of waiting. 0: the bot stays as small as its settings say (the duels' rival before 2026-11-19).",
 			min_value = 0, max_value = 1,
 			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
 			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
