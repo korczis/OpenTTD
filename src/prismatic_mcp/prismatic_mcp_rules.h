@@ -37,8 +37,8 @@ enum class Effect : uint8_t {
 
 /** One standing rule of the owner. */
 struct Rule {
-	uint64_t id = 0;           ///< Its number, for 'prismatic_mcp rule remove <id>'.
-	Effect effect = Effect::Deny;
+	uint64_t id = 0;           ///< Its number, which 'prismatic_mcp rule remove' takes.
+	Effect effect = Effect::Deny; ///< What it does with an approval it applies to.
 	std::string tool = "*";    ///< A glob over the tool name: the MCP tool or the action type.
 	nlohmann::json match;      ///< A JSON matcher over the approval's arguments; null matches any.
 	std::string created_via;   ///< "console", "window" or "panel": who made it.
@@ -48,7 +48,11 @@ struct Rule {
 	bool persisted = false;    ///< Kept in the rules file, so a restart loads it again.
 };
 
-/** The channels whose rule or bulk approval may decide an owner-only tool: the game's console and the owner's click in the game. */
+/**
+ * Whether a rule or a bulk approval made through a channel may decide an owner-only tool.
+ * @param via The channel: "console", "window", "panel", "auto" or "file".
+ * @return True for the game's console and the owner's click in the game ("window") only.
+ */
 inline bool OwnersOwnChannel(std::string_view via)
 {
 	return via == "console" || via == "window";
@@ -57,13 +61,20 @@ inline bool OwnersOwnChannel(std::string_view via)
 /**
  * Whether an action is the owner's alone (ADR 0038): a Battlebrain live decision applies through
  * ai.set_settings, one approval for a whole plan, so the panel never decides it.
+ * @param action The action type or the MCP tool name.
+ * @return True for ai.set_settings.
  */
 inline bool OwnerOnly(std::string_view action)
 {
 	return action == "ai.set_settings" || action == "openttd.ai.set_settings";
 }
 
-/** The length in bytes of the UTF-8 character starting at \p i of \p s (1 for a stray byte). */
+/**
+ * The length of one UTF-8 character.
+ * @param s The text.
+ * @param i Where the character starts in it.
+ * @return Its length in bytes: 1 for a stray byte, never past the end of \p s.
+ */
 inline size_t Utf8Length(std::string_view s, size_t i)
 {
 	const unsigned char c = static_cast<unsigned char>(s[i]);
@@ -72,8 +83,9 @@ inline size_t Utf8Length(std::string_view s, size_t i)
 }
 
 /**
- * A glob: `*` matches any run of characters (none included), `?` exactly one character (one UTF-8
- * character, not one byte), `\*`, `\?` and `\\` the character itself, anything else itself.
+ * A glob: a star matches any run of characters (none included), a question mark exactly one
+ * character (one UTF-8 character, not one byte); a backslash before either, or before another
+ * backslash, makes that character itself; anything else is itself.
  * @param pattern The glob.
  * @param text What it is matched against, whole.
  * @return Whether the whole text matches.
@@ -110,7 +122,12 @@ inline bool Glob(std::string_view pattern, std::string_view text)
 	return p == pattern.size();
 }
 
-/** Whether a glob has a wildcard (`*` or `?` not escaped): it then names more than one tool. */
+/**
+ * Whether a glob has a wildcard, a star or a question mark that is not escaped: it then names
+ * more than one tool.
+ * @param pattern The glob.
+ * @return True when it has one.
+ */
 inline bool HasWildcard(std::string_view pattern)
 {
 	for (size_t i = 0; i < pattern.size(); i++) {
@@ -122,13 +139,14 @@ inline bool HasWildcard(std::string_view pattern)
 
 /** One step of a JSON path. */
 struct PathStep {
+	/** What the step selects. */
 	enum class Kind : uint8_t {
 		Key,     ///< `.name` or `['name']`: one member.
 		Index,   ///< `[n]`: one element.
 		Every,   ///< `[*]` or `.*`: every element or member, each of which must match.
 		Descend, ///< `..name`: that member at any depth, each one found must match.
 	};
-	Kind kind = Kind::Key;
+	Kind kind = Kind::Key; ///< What the step selects.
 	std::string key;  ///< Key and Descend: the member's name.
 	size_t index = 0; ///< Index: the element.
 };
@@ -182,7 +200,12 @@ inline std::optional<std::vector<PathStep>> ParsePath(std::string_view path)
 	return steps;
 }
 
-/** Every value under \p node that has member \p key, at any depth, in document order. */
+/**
+ * Collect every value under a node that is a member of that name, at any depth, in document order.
+ * @param node Where to look.
+ * @param key The member's name.
+ * @param[out] out Where each value found is added.
+ */
 inline void Descend(const nlohmann::json &node, const std::string &key, std::vector<const nlohmann::json *> &out)
 {
 	if (node.is_object()) {
@@ -242,16 +265,29 @@ inline std::vector<const nlohmann::json *> Select(const nlohmann::json &root, co
  *   or against the JSON text of any other value (`"1?"` matches 12, `"[1,*"` an array starting 1).
  * - A number, a boolean or null: JSON equality, or a string holding its JSON text ("5" for 5).
  * - An array: an array of the same length whose elements match in order.
+ * @param pattern The matcher.
+ * @param value The value it is matched against.
+ * @return Whether it matches.
  */
 inline bool Match(const nlohmann::json &pattern, const nlohmann::json &value);
 
-/** The comparison operators a matcher object may hold instead of a key or a path. */
+/**
+ * Whether a matcher object's key is a comparison operator rather than a member or a path.
+ * @param key The key.
+ * @return True for $lt, $lte, $gt, $gte, $in and $ne.
+ */
 inline bool IsOperator(std::string_view key)
 {
 	return key == "$lt" || key == "$lte" || key == "$gt" || key == "$gte" || key == "$in" || key == "$ne";
 }
 
-/** Whether \p value satisfies the operator \p op with operand \p operand (see Match). */
+/**
+ * Whether a value satisfies a comparison operator (see Match).
+ * @param op The operator ($lt, $lte, $gt, $gte, $in, $ne).
+ * @param operand Its operand: a number, or for $in an array of patterns, for $ne a pattern.
+ * @param value The value compared.
+ * @return Whether it holds.
+ */
 inline bool Satisfies(std::string_view op, const nlohmann::json &operand, const nlohmann::json &value)
 {
 	if (op == "$in") {
@@ -303,8 +339,11 @@ inline bool Match(const nlohmann::json &pattern, const nlohmann::json &value)
 }
 
 /**
- * Why a matcher cannot be a rule's, or nullopt when it can: it is null (any arguments) or an
- * object, and every `$` key in it, at any depth, parses as a path.
+ * Why a matcher cannot be a rule's: it must be null (any arguments) or an object, every operator
+ * must have an operand of its kind, and every other key starting with a dollar sign, at any depth,
+ * must parse as a path.
+ * @param m The matcher.
+ * @return Why not; nullopt when it can.
  */
 inline std::optional<std::string> MatcherError(const nlohmann::json &m)
 {
@@ -338,14 +377,27 @@ struct Subject {
 	const nlohmann::json &args; ///< The canonical arguments it binds to.
 };
 
-/** Whether \p r applies to \p s: its glob matches the MCP tool or the action type, and its matcher the arguments. */
+/**
+ * Whether a rule applies to an approval: its glob matches the MCP tool or the action type, and
+ * its matcher the arguments.
+ * @param r The rule.
+ * @param s The approval.
+ * @return Whether it applies.
+ */
 inline bool Applies(const Rule &r, const Subject &s)
 {
 	bool tool = Glob(r.tool, s.action) || (!s.mcp_tool.empty() && Glob(r.tool, s.mcp_tool));
 	return tool && (r.match.is_null() || Match(r.match, s.args));
 }
 
-/** Whether a rule made through \p via may decide an approval of \p action: an allow rule from the panel never decides an owner-only tool. */
+/**
+ * Whether a rule may decide an approval: an allow rule from the panel, the auto-approve loop or a
+ * file never decides an owner-only tool.
+ * @param effect The rule's effect.
+ * @param via The channel it was made through.
+ * @param action The approval's action type.
+ * @return Whether it may decide it.
+ */
 inline bool MayDecide(Effect effect, std::string_view via, std::string_view action)
 {
 	return effect == Effect::Deny || !OwnerOnly(action) || OwnersOwnChannel(via);
@@ -358,8 +410,11 @@ struct Verdict {
 };
 
 /**
- * The verdict of \p rules on \p s: a deny rule that applies wins over every allow rule; else the
- * first allow rule that applies and may decide it. Rules are taken in id order.
+ * The verdict of the rules on an approval: a deny rule that applies wins over every allow rule;
+ * else the first allow rule that applies and may decide it. Rules are taken in id order.
+ * @param rules The rules.
+ * @param s The approval.
+ * @return The rule that decides it, and an allow rule held back, if any.
  */
 inline Verdict Decide(const std::vector<Rule> &rules, const Subject &s)
 {
@@ -380,19 +435,31 @@ inline Verdict Decide(const std::vector<Rule> &rules, const Subject &s)
 	return v;
 }
 
-/** "allow" or "deny". */
+/**
+ * The word of an effect.
+ * @param e The effect.
+ * @return "allow" or "deny".
+ */
 inline std::string_view EffectName(Effect e)
 {
 	return e == Effect::Allow ? "allow" : "deny";
 }
 
-/** A rule in one line, as a decision records it: `rule #3 allow openttd.ai.set_setting {"name":"max_*"}`. */
+/**
+ * A rule in one line, as a decision records it, for example "rule #3 allow openttd.ai.set_setting" and its matcher.
+ * @param r The rule.
+ * @return The line.
+ */
 inline std::string Describe(const Rule &r)
 {
 	return fmt::format("rule #{} {} {}{}", r.id, EffectName(r.effect), r.tool, r.match.is_null() ? "" : " " + r.match.dump());
 }
 
-/** A rule as JSON, as openttd://approvals, openttd.ui.control and the rules file carry it. */
+/**
+ * A rule as JSON, as openttd://approvals, openttd.ui.control and the rules file carry it.
+ * @param r The rule.
+ * @return Its id, effect, tool, match, created_via, created_at, created_tick, hits, persisted and text.
+ */
 inline nlohmann::json ToJson(const Rule &r)
 {
 	return {{"id", r.id}, {"effect", EffectName(r.effect)}, {"tool", r.tool}, {"match", r.match},
@@ -400,7 +467,11 @@ inline nlohmann::json ToJson(const Rule &r)
 		{"hits", r.hits}, {"persisted", r.persisted}, {"text", Describe(r)}};
 }
 
-/** A rule read back from JSON (the rules file); nullopt when it is not one. */
+/**
+ * A rule read back from JSON (the rules file).
+ * @param j The JSON.
+ * @return The rule, persisted; nullopt when it is not one.
+ */
 inline std::optional<Rule> FromJson(const nlohmann::json &j)
 {
 	if (!j.is_object()) return std::nullopt;
@@ -421,9 +492,11 @@ inline std::optional<Rule> FromJson(const nlohmann::json &j)
 }
 
 /**
- * Rewrite single-quoted strings as JSON ones: 'it''s' style is not JSON, so `'O\\'Brien'` (an escaped
- * quote) becomes "O'Brien", a `"` inside a single-quoted string is escaped, and a `'` inside a
- * double-quoted string ("O'Brien") is left alone.
+ * Rewrite single-quoted strings as JSON ones. A single-quoted string with an escaped apostrophe
+ * becomes "O'Brien", a double quote inside a single-quoted string is escaped, and an apostrophe
+ * inside a double-quoted string is left alone.
+ * @param text The matcher as typed.
+ * @return The same with JSON strings.
  */
 inline std::string SingleToDoubleQuotes(std::string_view text)
 {
@@ -456,7 +529,8 @@ inline std::string SingleToDoubleQuotes(std::string_view text)
 
 /**
  * Read a matcher typed at the console: JSON as it is, or, when that does not parse, with its
- * single-quoted strings read as JSON ones ({'name': 'max_*'}), since a console line quotes with ".
+ * single-quoted strings read as JSON ones, since a console line quotes with double quotes.
+ * @param text The matcher as typed.
  * @return The matcher (null for empty text); nullopt when neither parses.
  */
 inline std::optional<nlohmann::json> ParseMatcherText(std::string_view text)
@@ -477,21 +551,27 @@ struct Spec {
 	bool persist = false;      ///< `--persist`: keep it in the rules file.
 	bool force = false;        ///< `--force`: an allow rule for a whole glob without a matcher (the console only).
 	std::string via = "console"; ///< `--via window|panel|auto`: the channel that asks, recorded with it.
-	std::string nonce;         ///< `--nonce <n>`: the caller's token for its machine-readable result line.
+	std::string nonce;         ///< The value of --nonce: the caller's token for its machine-readable result line.
 	std::string error;         ///< Why the tokens are not a spec; empty when they are.
 };
 
-/** The channels a console line may name with --via; without it the line is the console's own. */
+/**
+ * Whether a console line may name this channel with --via; without --via the line is the console's own.
+ * @param via The channel named.
+ * @return True for "window", "panel" and "auto".
+ */
 inline bool KnownVia(std::string_view via)
 {
 	return via == "window" || via == "panel" || via == "auto";
 }
 
 /**
- * Read `[<tool-glob> [<json matcher> ...]] [--persist] [--force] [--via window|panel|auto] [--nonce <n>]`
- * from console tokens.
- * The tokens after the glob that are not flags are joined with spaces and read as one matcher, so
- * an unquoted {'a': 1, 'b': 'x'} works as well as one quoted token ("{\"a\":1}").
+ * Read a tool glob, a JSON matcher and the flags --persist, --force, --via (window, panel or auto)
+ * and --nonce (with its value) from console tokens. The tokens after the glob that are not flags
+ * are joined with spaces and read as one matcher, so an unquoted matcher with single quotes works
+ * as well as one quoted token.
+ * @param tokens The tokens after the verb.
+ * @return The spec; its error says why the tokens are not one.
  */
 inline Spec ParseSpec(std::span<const std::string_view> tokens)
 {
@@ -544,9 +624,12 @@ inline Spec ParseSpec(std::span<const std::string_view> tokens)
 }
 
 /**
- * Why an allow rule may not be made as \p spec asks, or nullopt: a glob over several tools with no
- * matcher approves whatever those tools ask, so only the game's console makes one, and only with
- * --force; the window and the panel name one tool or give a matcher.
+ * Why an allow rule may not be made as asked: a glob over several tools with no matcher approves
+ * whatever those tools ask, so only the game's console makes one, and only with --force; the
+ * window and the panel name one tool or give a matcher.
+ * @param effect The rule's effect.
+ * @param spec What was asked.
+ * @return Why not; nullopt when it may be made.
  */
 inline std::optional<std::string> BroadAllowRefusal(Effect effect, const Spec &spec)
 {
@@ -556,7 +639,12 @@ inline std::optional<std::string> BroadAllowRefusal(Effect effect, const Spec &s
 		"or add --force at the game's console", spec.tool);
 }
 
-/** One console token holding \p text exactly: in double quotes, with every " written as \" (the console's own escape). */
+/**
+ * One console token holding a text exactly: in double quotes, with every double quote escaped by
+ * a backslash, the console's own escape.
+ * @param text The text.
+ * @return The token.
+ */
 inline std::string ConsoleQuote(std::string_view text)
 {
 	std::string out = "\"";
@@ -568,7 +656,16 @@ inline std::string ConsoleQuote(std::string_view text)
 	return out;
 }
 
-/** The console line that makes a rule: `prismatic_mcp rule allow <tool> "<matcher>" [--persist] --via <via>`. */
+/**
+ * The console line that makes a rule: prismatic_mcp rule, the effect, the tool, the quoted
+ * matcher, --persist when asked, and --via unless it is the console's own.
+ * @param effect The rule's effect.
+ * @param tool The tool glob.
+ * @param match The matcher; null for any arguments.
+ * @param persist Whether the rule is kept in the rules file.
+ * @param via The channel that makes it.
+ * @return The line.
+ */
 inline std::string RuleCommand(Effect effect, std::string_view tool, const nlohmann::json &match, bool persist, std::string_view via)
 {
 	std::string line = fmt::format("prismatic_mcp rule {} {}", EffectName(effect), tool);
@@ -579,8 +676,10 @@ inline std::string RuleCommand(Effect effect, std::string_view tool, const nlohm
 }
 
 /**
- * The matcher the window offers for "Always ... with these arguments": the approval's arguments as
- * they are, without a stale date (expires_tick), which a later request of the same plan would not repeat.
+ * The matcher the window offers for "Always ... matching": the approval's arguments as they are,
+ * without a stale date (expires_tick), which a later request of the same plan would not repeat.
+ * @param args The approval's arguments.
+ * @return The matcher; an empty object when the arguments are not one.
  */
 inline nlohmann::json MatcherFromArgs(const nlohmann::json &args)
 {

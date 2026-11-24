@@ -18,7 +18,8 @@
 // all's confirmation (the query naming the count). Injected input is refused by design, and nothing
 // here moves the real mouse; those paths are covered by the unit tests of src/tests/test_prismatic_mcp.cpp.
 //
-// e2e-covers: openttd-window prismatic_control
+// It covers the game's own window, not a web page, so it declares no e2e-covers line: the web UI rule
+// (project.web-ui-is-covered-end-to-end, tools/research/e2e-coverage) counts browser checks only.
 //
 // Usage: tools/research/mcp-control-window-check --bin <openttd>   (a research build with the MCP server)
 // Exit 0 when every check passes, 1 otherwise, 2 on bad usage or when the game does not come up.
