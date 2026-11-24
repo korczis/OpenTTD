@@ -188,6 +188,26 @@ producer for good.
   the two companies split nothing. Tests: `test_parse_keeps_each_cargo_apart` and
   `test_two_prismatic_companies_on_different_cargoes_of_one_farm_do_not_fail`.
 
+How it was checked (PR #277). By the owner's rule, a change passes the fitness check when it shows
+no failure that master does not also show, over repeated runs.
+
+- **Master and the branch on the same yardstick.** Both played all seven fitness lineups on seeds
+  930967890, 31337 and 4242, judged by the same per-cargo referee: master at `e95a0e37aa`, the
+  branch at `7d0a1c1a0e`. Over 21 matches each, master failed 6 times (`hoards` 2,
+  `trainless_stations` 4), the branch 4 times (`hoards` 1, `trainless_stations` 3).
+  `shared_producer` failed 0 times on either.
+- **`battle.py fitness` itself, on the gate's seed.**
+  - The branch, after merging master `59b9432336`: FAIL only on
+    `claim race A: trainless_stations` (station 151). That is a line still being laid when the
+    match ends; its path search alone took 117 days.
+  - Master `59b9432336`: FAIL `hoards` on the PrismaticAI and self-steward lineups.
+- **A replay of the owner's live save `final-15805-0106.sav`.** In its first yearly report the
+  branch counted 0 producers claimed and 30 released, where master counted 21 claimed. The 30
+  released producers: 27 move cargo and go to the share test, 3 move none. Rivals move 60% or more
+  of every one of them, so the rich share test, not the claim, is now what limits the bot there.
+
+These are single matches per seed and side, so they make no tuning claim about value.
+
 ## What is still open
 
 <!-- open-finding kind=failed -->
