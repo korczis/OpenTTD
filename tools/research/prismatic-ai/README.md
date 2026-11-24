@@ -35,6 +35,7 @@ another personal directory: Linux uses `$XDG_DATA_HOME/openttd`, and a test run 
 | `lines.nut` | Rail lines as desired state: line slots, the record the Rhai steward reads (with station ids), and the reconciliation of its targets; closing removes only what the line owns |
 | `fleet.nut` | Road, air and ship capacity follows waiting cargo and the link graph's planned flow; vehicles that lose money are sold; no vehicle more on a route that runs part empty (`load_add_min`) and no new bus route while the road does not pay (`road_yield`); a yearly road and air report in the log |
 | `ships.nut` | Ships behind `ships_max` (0, default: none; RESEARCH-ONLY): the bot's own water routes from an oil rig or a coastal producer to an acceptor by the sea, or between two coastal towns, scored by estimated yearly profit, checked on the map before anything is built (dock sites in `AITestMode`, an A* over water), then docks, a ship depot and ships; `fleet.nut` grows and sells them like road and air routes |
+| `funnel.nut` | The growth funnel (RESEARCH-ONLY observability: counts and logs, never acts): one `FUNNEL` line per mode once a game year counts candidates, skips, money short or idle, builds, trains and paying lines; `battle.py fitness` prints them ([`research/growth-funnel.md`](../../../research/growth-funnel.md)) |
 | `catchment.nut`, `statues.nut` | Mechanisms learned from AAAHogEx: joined drive-through stops that ring each airport to collect the whole town, and statues in the towns of our stations; each behind its setting, off by default |
 | `autopilot.nut` | Autopilot's own air routes for a bot without a plan: the best big-town pairs, built first on borrowed money with a real budget check; a half-built route takes its airport down again |
 | `steward.nut` | The in-bot steward behind `self_steward=1`: the Rhai steward's line policy for lines with no external target, and reinvestment of idle money in more own lines; on a double-track line, a train more while half a trainload waits and no train loads at the source; on any line that earns, a train more while its source station rates the cargo below `steward_rating` (a full-load train hides a shortage of trains from the cargo waiting), and with `steward_borrow` such a train may be paid from the loan (`lines.nut` `FundTrain`) |
@@ -322,6 +323,22 @@ The changes, each an AI setting in the info.nut "Yield" block:
 
 The measurement and its limits are in
 [`research/mechanisms/prismatic-ai.md`](../../../research/mechanisms/prismatic-ai.md#road-and-air-yield).
+
+## Growth funnel (2026-11-24)
+
+Once a game year the bot logs one `FUNNEL year=<y> mode=<rail|road|air|ship> <stage>=<n> ...` line
+per mode (`funnel.nut`). Rail counts the last own-line search's census (producers, ours, claimed,
+small, served, no acceptor, pairs tried) and the year's events: tries, both stations standing,
+path failures, track laid, lines kept, single-track fallbacks, trainless lines, locomotives
+refused for money and first trains. It also counts the heartbeats short of a line's budget
+(`short_hb`) and those with money idle above the investor's threshold (`idle_hb`), because
+`InvestSurplus` buys no train. At the report it adds the open lines, the paying lines and the
+trains. Road and air count each try's outcome; every mode counts the vehicles that
+`InvestSurplus` added and the vehicles that paid. The line uses `AILog.Error` so that a
+headless match at `-d script=1` shows it. `battle.py fitness` prints every line with the stage
+that lost most, and fails a contestant in `fitness.must_funnel` that misses a whole year
+(`no_funnel`). Every stage and counter is described in
+[`research/growth-funnel.md`](../../../research/growth-funnel.md).
 
 ## Checks
 

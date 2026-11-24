@@ -214,6 +214,7 @@ idle money should relax `load_add_min`.
 | [`PrismaticAI/fleet.nut`](../../tools/research/prismatic-ai/PrismaticAI/fleet.nut) | road, air and ship capacity from waiting cargo and the link graph; the yield gates (`RouteLoad`, `RoadPays`) and the road report |
 | [`PrismaticAI/ships.nut`](../../tools/research/prismatic-ai/PrismaticAI/ships.nut) | ship routes behind `ships_max`: candidates, dock sites, the water path check, docks, depot, ships |
 | [`PrismaticAI/roadstop.nut`](../../tools/research/prismatic-ai/PrismaticAI/roadstop.nut), [`intercity.nut`](../../tools/research/prismatic-ai/PrismaticAI/intercity.nut), [`air.nut`](../../tools/research/prismatic-ai/PrismaticAI/air.nut) | bus stops and depots, intercity roads, airports |
+| [`PrismaticAI/funnel.nut`](../../tools/research/prismatic-ai/PrismaticAI/funnel.nut) | the yearly growth funnel, one `FUNNEL` line per mode (RESEARCH-ONLY observability; [growth funnel](../growth-funnel.md)) |
 | [`install`](../../tools/research/prismatic-ai/install) | links the bot into the personal `ai/` folder; `--check` verifies it |
 | [`tools/research/mcp-rhai/src/panel_bot.rs`](../../tools/research/mcp-rhai/src/panel_bot.rs) | the panel side: planned start, settings, running bots |
 
@@ -225,6 +226,8 @@ idle money should relax `load_add_min`.
   [`research/results/`](../results/).
 - `cargo test` in `tools/research/mcp-rhai` runs the Rhai side that reads the bot's records
   (`rail_*` tests on fixtures in `main.rs`).
+- `battle.py fitness` runs the bot in short headless matches and fails one whose contestants
+  in `fitness.must_funnel` miss a yearly `FUNNEL` line ([growth funnel](../growth-funnel.md)).
 - `tools/research/prismatic-ai/install --check` exits 0 when the game loads this checkout's bot.
 - `tools/research/mcp-carryout-check` checks that proposed settings reach the running bot only
   through the gate.

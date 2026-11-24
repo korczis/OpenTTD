@@ -107,6 +107,35 @@ SQ_ERROR = re.compile(r"\[script:\d\] \[(\d+)\] \[S\] ")
 # The referee's shared producers: an industry whose output rail stations of several companies catch.
 REF_SHARED = re.compile(r"REF S date=(\d+)-(\d+) ind=(\d+) owners=([\d,]+) name=(.*)$")
 REF_TRAINLESS = re.compile(r"REF T date=(\d+)-(\d+) cid=(\d+) rail_stations=(\d+) trainless=(\d+) ids=([\d,]*)")
+# PrismaticAI's yearly growth funnel (RESEARCH-ONLY, PrismaticAI/funnel.nut), one line per mode:
+# "dbg: [script:1] [<company>] [E] FUNNEL year=<y> mode=<mode> <stage>=<n> ...".
+AI_FUNNEL = re.compile(r"\[script:\d\] \[(\d+)\] \[E\] FUNNEL year=(\d+) mode=(\w+) (.*)$")
+# Where each mode's funnel loses, by population, so no loss is compared with one counted in other
+# units: {mode: [(group, stage, the counts lost, the counts it was lost of), ...]}, each count a sum
+# of signed stage counts. Rail discovery is in producers of the last search's census (`served`
+# counts cargoes), building in tries, running in lines; road in tries and vehicles; air in
+# autopilot calls past its caps (each ends short, with no pair, or tried), tries and vehicles.
+FUNNEL_DROPS = {
+    "rail": [("discovery", "ours", [("ours", 1)], [("producers", 1)]),
+             ("discovery", "claimed", [("claimed", 1)], [("producers", 1)]),
+             ("discovery", "served", [("served", 1)], [("producers", 1)]),
+             ("discovery", "no_acceptor", [("no_acceptor", 1)], [("producers", 1)]),
+             ("build", "stations", [("tried", 1), ("stations", -1)], [("tried", 1)]),
+             ("build", "path", [("path_fail", 1)], [("stations", 1)]),
+             ("build", "lay", [("stations", 1), ("path_fail", -1), ("laid", -1)], [("stations", 1)]),
+             ("build", "given_up", [("laid", 1), ("built", -1)], [("laid", 1)]),
+             ("run", "paying", [("lines", 1), ("paying", -1)], [("lines", 1)])],
+    "road": [("build", "stop", [("stop_fail", 1)], [("tried", 1)]),
+             ("build", "network", [("network_fail", 1)], [("tried", 1)]),
+             ("build", "depot", [("depot_fail", 1)], [("tried", 1)]),
+             ("build", "vehicle", [("vehicle_fail", 1)], [("tried", 1)]),
+             ("run", "paying", [("vehicles", 1), ("paying", -1)], [("vehicles", 1)])],
+    "air": [("discovery", "budget", [("short", 1)], [("short", 1), ("no_pair", 1), ("tried", 1)]),
+            ("discovery", "pair", [("no_pair", 1)], [("short", 1), ("no_pair", 1), ("tried", 1)]),
+            ("build", "build", [("tried", 1), ("built", -1)], [("tried", 1)]),
+            ("run", "paying", [("vehicles", 1), ("paying", -1)], [("vehicles", 1)])],
+    "ship": [("run", "paying", [("vehicles", 1), ("paying", -1)], [("vehicles", 1)])],
+}
 
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
             "-o", "ControlMaster=auto", "-o", "ControlPersist=120",
@@ -1485,6 +1514,63 @@ def parse_trainless(text: str) -> dict[int, list[dict]]:
     return out
 
 
+def parse_funnel(text: str) -> dict[int, list[dict]]:
+    """{company id: [{"year", "mode", <stage>: count, ...}, ...] by year, then mode} from a match
+    log's FUNNEL lines (PrismaticAI/funnel.nut). A repeated year and mode keeps the last line."""
+    by_key: dict[tuple, dict] = {}
+    for line in text.splitlines():
+        m = AI_FUNNEL.search(line)
+        if not m:
+            continue
+        cid, year, mode, fields = m.groups()
+        row = {"year": int(year), "mode": mode}
+        row.update({k: int(v) for k, v in REF_FIELD.findall(fields)})
+        by_key[(int(cid), int(year), mode)] = row
+    out: dict[int, list[dict]] = {}
+    for (cid, _y, _mode), row in sorted(by_key.items()):
+        out.setdefault(cid, []).append(row)
+    return out
+
+
+def funnel_most_lost(row: dict) -> list[tuple[str, str, int, int]]:
+    """Per population of one FUNNEL row (FUNNEL_DROPS, in its order), the stage that lost the largest
+    share of what reached it: [(group, stage, lost, of), ...], ties to the larger loss; a group
+    whose stages lost nothing is left out."""
+    best: dict[str, tuple[str, str, int, int]] = {}
+    for group, stage, lost_terms, of_terms in FUNNEL_DROPS.get(row["mode"], []):
+        lost = sum(sign * row.get(k, 0) for k, sign in lost_terms)
+        of = sum(sign * row.get(k, 0) for k, sign in of_terms)
+        if lost <= 0 or of <= 0:
+            continue
+        b = best.get(group)
+        if b is None or (lost / of, lost) > (b[2] / b[3], b[2]):
+            best[group] = (group, stage, lost, of)
+    return list(best.values())
+
+
+def funnel_text(row: dict) -> str:
+    """One FUNNEL row as the fitness check and the post-mortem print it."""
+    counts = " ".join(f"{k}={v}" for k, v in row.items() if k not in ("year", "mode"))
+    lost = ", ".join(f"{g} {st} {n}/{of}" for g, st, n, of in funnel_most_lost(row))
+    return f"{row['mode']} {row['year']}: {counts}; most lost: {lost or 'none'}"
+
+
+def funnel_gaps(m: dict, keys: list[str]) -> list[str]:
+    """The fitness failures of contestants in `keys` (fitness.must_funnel) whose rail funnel misses a
+    game year the match played whole: the line for year Y comes at the first heartbeat of Y+1, so a
+    match of N years from start_year owes start_year .. start_year+N-2 (`m["funnel"]` by key)."""
+    fails = []
+    for c in m["lineup"]:
+        if c["key"] not in keys:
+            continue
+        start, years = m["match_cfg"]["start_year"], m["years"]
+        seen = {r["year"] for r in m.get("funnel", {}).get(c["key"], []) if r["mode"] == "rail"}
+        missing = [y for y in range(start, start + years - 1) if y not in seen]
+        if missing:
+            fails.append(f"{c['key']}: no_funnel: no FUNNEL rail line for {', '.join(map(str, missing))}")
+    return fails
+
+
 def trainless_stations(m: dict, rules: dict) -> list[str]:
     """The fitness failures of PrismaticAI companies that keep rail stations no train of theirs calls
     at (`m["trainless"]` from parse_trainless, keyed by company id in start order): more than
@@ -1638,6 +1724,11 @@ def postmortem(m: dict) -> list[dict]:
                 findings.append(f"{mode} profit/yr {mine:,} vs {theirs:,} "
                                 f"({last.get(mode, 0)} vs {wlast.get(mode, 0)} vehicles)")
         findings += [f"anomaly {a}" for a in f.get("anomalies", [])]
+        # The growth funnel's last year per mode, where the contestant logs one (funnel.nut).
+        last_rows: dict[str, dict] = {}
+        for r in m.get("funnel", {}).get(f["key"], []):
+            last_rows[r["mode"]] = r
+        findings += [f"funnel {funnel_text(r)}" for r in last_rows.values()]
         out.append({"contestant": f["key"], "winner": win,
                     "gap": round(wlast.get("value", 0) / max(1, last.get("value", 1)), 2),
                     "behind_since": behind,
@@ -2022,7 +2113,7 @@ class Orchestrator:
         for m in running:
             d = match_dir(host.root, m)
             parts.append(f"echo '@@@ {m['id']}'; cat {d}/exit_code 2>/dev/null || echo RUNNING; "
-                         f"grep -a -E 'REF Q|\\] \\[S\\] ' {d}/match.log 2>/dev/null | tail -n 4000")
+                         f"grep -a -E 'REF Q|\\] \\[S\\] |\\] \\[E\\] FUNNEL ' {d}/match.log 2>/dev/null | tail -n 4000")
         try:
             r = host.sh("; ".join(parts), timeout=30)
         except subprocess.TimeoutExpired:
@@ -2043,6 +2134,7 @@ class Orchestrator:
             # Company ids follow the start order: a `-g` null-driver game has no human company.
             m["series"] = {lineup[c]["key"]: s for c, s in series.items() if c < len(lineup)}
             m["errors"] = {lineup[c]["key"]: n for c, n in errors.items() if c < len(lineup)}
+            m["funnel"] = {lineup[c]["key"]: r for c, r in parse_funnel(body).items() if c < len(lineup)}
             self.watch(m)
             if status_line.strip() != "RUNNING":
                 self.finish(m, int(status_line.strip() or -1))
@@ -2872,6 +2964,7 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
         fails += [f"{c['key']}: {b}" for b in bad]
     fails += sibling_producers(m)
     fails += trainless_stations(m, fit["rules"])
+    fails += funnel_gaps(m, fit.get("must_funnel", []))
     # A contestant held to run trains ends with at least one: the test_trainless lineup refuses every
     # new line's first train, so a train at the end proves KeepTrainlessLine, the adoption and
     # KeepLinesServed's first train (research/incident-2026-11-23-trainless-lines.md).
@@ -2947,6 +3040,7 @@ def cmd_fitness(cfg: dict) -> int:
             m["status"] = match_status(m, proc.returncode)
             m["shared"] = parse_shared(out)
             m["trainless"] = parse_trainless(out)
+            m["funnel"] = {lineup[c]["key"]: r for c, r in parse_funnel(out).items() if c < len(lineup)}
             for c in lineup:
                 s = m["series"].get(c["key"], [])
                 peak, final = fleet_peak_final(s)
@@ -2961,6 +3055,9 @@ def cmd_fitness(cfg: dict) -> int:
                 if cid < len(lineup) and reps and lineup[cid]["ai"].startswith("PrismaticAI"):
                     print(f"fitness[{i}]: {lineup[cid]['key']:26} rail stations {reps[-1]['rail']:>3}, "
                           f"without a train {reps[-1]['trainless']:>3} ({reps[-1]['date']})")
+            for key, rows in m["funnel"].items():
+                for r in rows:
+                    print(f"fitness[{i}]: {key:26} funnel {funnel_text(r)}")
             fails += [f"[{i}] {f}" for f in fitness_verdict(m, fit)]
     for f in fails:
         print(f"fitness: FAIL {f}", file=sys.stderr)
