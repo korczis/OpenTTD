@@ -110,6 +110,77 @@ PrismaticAI companies together:
 These are single matches, one per seed and side. They show that the shared producers are gone.
 They are no tuning claim about value (rule `project.a-tuning-claim-needs-held-start-pairs`).
 
+## What changed next: the claim made exact and narrow (2026-11-23)
+
+Three items stayed open after the change above: the same-days race, a claim that was too broad,
+and processing industries. Before any of it was written, the design was reviewed by Codex and by
+an independent peer agent. The peer agent stood in for Gemini, whose client was refused. Their
+critique changed the design in the ways listed below. The coordinator then found the defect that
+mattered most in the owner's live game. From 1952-10 the bot reported 19 to 21 producers
+"claimed" and 0 pairs tried, and still did so in rich mode from 1954-03. `ForeignRailStationAt`
+ran before the rich share test of `NextOwnFreightLine`, so a rival's working line held its
+producer for good.
+
+- **A claim is a fresh station, nothing more** (`ForeignRailStationAt`, `ClaimFresh`, `rail.nut`).
+  A foreign rail station tile catching a producer claims it while this company first saw it less
+  than `CLAIM_FRESH_DAYS` (365) ago. Such a station belongs to a line still being built, or to
+  one waiting for its first train. From the choice of a line to its first train, PrismaticAI's
+  lines took 0 to 18 months, most within 12 (quarter resolution).
+
+  Once a station is older, the producer's transported amount decides, through the filters
+  `NextOwnFreightLine` already has. Outside rich mode, a producer that moved cargo last month is
+  skipped. In rich mode it is scored on the share left below `rich_served_below`. A station that
+  only catches a producer no longer holds it for good, for example a rival's passenger station in
+  a town beside a mine, or a station delivering to a power station next to one. The old comment's
+  premise was wrong: a station that catches a raw industry need not pick up from it.
+
+  Nothing else can tell those stations apart:
+  - an AI is refused a foreign station's ratings, waiting cargo, vehicles, name and construction
+    date (`AIStation.IsValidStation` is false for it);
+  - the cargo monitor is for Game Scripts only;
+  - a pickup station at a mine inside a town accepts passengers too, so acceptance proves nothing;
+  - company names are the game's own unless `disclose_name` is set, so a sibling PrismaticAI
+    cannot be told from a rival either.
+
+  The first sight is kept per tile, with the owner and the station id. A platform joined to an old
+  station, or a station rebuilt on the same tile, is therefore fresh again.
+
+  The table is saved and restored (`restore.nut`). After a restart, a station of unknown age
+  counts as old (`ClaimsAfterRestart`): a load restarts every AI, so no line is being built across
+  it. Without that, the first deploy into a running game would block every such producer for a
+  year. A neutral station (an oil rig's) never claims.
+- **Processing industries are claimed the same way.** The raw-only test is gone. During the race,
+  a sibling's fresh goods pickup is a claim like any other. A station delivering to a sawmill holds
+  the sawmill's output for a year at most.
+- **The same-days race is settled by two checks** (`BuildFreightRailRoute`, `ClaimBlocks`). Both
+  count only fresh tiles, so an old station whose producer starts to move cargo is not mistaken
+  for a new claim.
+  - Check 1, after the source station: a lower company id wins, as before. This settles the
+    common race, where both companies start in one heartbeat.
+  - Check 2, after the destination station: a lower id wins at once. A higher id wins as well if
+    its station still stands after `CLAIM_SETTLE_DAYS` (2). A company that saw us at its own
+    check 1 has removed its station by then. One whose station still stands kept it, because its
+    check 1 came before ours existed.
+
+  Of two companies that both kept a station, the one whose check 2 came later saw the other's
+  source station standing and yielded. So two lines are never both kept, and the check costs no
+  wait without contention. Both companies yield only when one's check 2 falls within the days the
+  other takes to remove a station it gave up. Then nobody builds there. The first attempt's
+  10-day wait, which cost every line, is not used.
+- **The fitness check plays the race.** A seventh lineup, `PrismaticAI claim race A/B`, sets
+  `test_claim_race=20` (RESEARCH-ONLY) on company 0. Company 0 waits 20 days before its first
+  source station, so company 1 builds and checks first, and only check 2 can settle the race. On
+  the fitness seed company 0 yields at check 2 (`given up at its second station`), and only
+  company 1 and AAAHogEx pick up at Wontford Coal Mine. With check 2 removed, the same lineup fails
+  `shared_producer:Wontford Coal Mine` (companies 0 and 1). Test:
+  `SharedProducers.test_the_fitness_config_plays_the_claim_race`.
+- **A shared producer is judged per cargo** (referee `REF S ... cargo=<id>`, `battle.py`
+  `parse_shared`, `sibling_producers`). The narrower claim let company 0 take Punthill Farm's
+  livestock. Company 1's grain station at the neighbouring Dindinghall Farm also caught Punthill
+  Farm's grain. The referee counted any rated cargo, so it flagged the farm as shared, although
+  the two companies split nothing. Tests: `test_parse_keeps_each_cargo_apart` and
+  `test_two_prismatic_companies_on_different_cargoes_of_one_farm_do_not_fail`.
+
 ## What is still open
 
 <!-- open-finding kind=failed -->
@@ -128,13 +199,28 @@ neither (`cargo.rs` `CLAIM_RULE`). The sub-tropical lumber mill, which accepts n
 counts as raw.
 
 <!-- open-finding kind=partial -->
-A processing industry served by two PrismaticAI companies is still possible: only the
-transported-last-month filter covers it.
+A source station can catch a second producer of its cargo besides the one it was built for, and
+pick up from it too. When another PrismaticAI company already serves that neighbour, the two share
+it. The claim checks look only at the producer the line was built for. A site that avoids a claimed
+neighbour is the station-site functions' choice (`BuildRailStationAt` and its helpers). Found by
+review, 2026-11-23. Seen once in the claim-race lineup, with different cargoes (Punthill Farm
+above), which the per-cargo check no longer counts.
 
 <!-- open-finding kind=partial -->
-The same-days tie-break settles a race only when both source stations stand when the later check
-runs. If the company of the higher id finishes its station before the other's site search ends, it
-sees no rival and keeps it, and the lower one then sees a higher rival and keeps its own as well
-(found by review, 2026-11-23). PR #240's longer site search widens that window. Waiting 10 days
-before the check closed it but cost every line: on the fitness seed 930967890 the six PrismaticAI
-lineups summed 7.87M with the wait and 9.36M without.
+In rich mode, a sibling PrismaticAI's established line can get a second line beside it when its
+producer moves less than `rich_served_below` of its output. An AI cannot tell a sibling from a
+rival, and an old station no longer claims. In the claim-race lineup company 0 tried two such lines
+at its sibling's Dindinghall Farm (grain). One was given up when its track met the sibling's; the
+other was still being laid when the match ended. The planner's copy of the claim (`cargo.rs`
+`CLAIM_RULE`, `mcp-plan --for`) still applies the old rule: any rail station near a raw producer
+holds it, and a processing industry is never held.
+
+<!-- open-finding kind=staged -->
+A line that yields to a claim counts as a failed own line (`own_failed` in `main.nut`), and its
+pair stays in `freight_tried`. If the company that kept the producer later fails to build its
+line, neither company returns to that producer.
+
+<!-- open-finding kind=staged -->
+`FeedNewLine` (`growth.nut`, setting `rail_feed`, default 0) joins feeder platforms at other
+producers and checks only the transported amount, not `ForeignRailStationAt`. With `rail_feed`
+on, it can join a producer that a sibling has just claimed.

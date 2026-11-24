@@ -666,6 +666,16 @@ class PrismaticAI extends AIInfo {
 			step_size = 1,
 			flags = CONFIG_NONE,
 		});
+		/* RESEARCH-ONLY test hook (rail.nut TestClaimRace): the producer-claim race that only the second
+		 * claim check settles, run by the fitness check's claim-race lineup. */
+		AddSetting({
+			name = "test_claim_race",
+			description = "RESEARCH-ONLY test hook. Days the company waits after the claim check before its first source station, once a game, so a sibling that chose the same producer builds and checks its station first and only the second claim check (rail.nut ClaimBlocks) can settle the race. 0 (default): off.",
+			min_value = 0, max_value = 60,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			step_size = 1,
+			flags = CONFIG_NONE,
+		});
 	}
 }
 

@@ -158,7 +158,7 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 
 <!-- prismatic-ai-settings:begin -->
 
-172 settings in 84 declarations, 170 of them live-changeable (`CONFIG_INGAME`), 36 genes of the battle's genetic algorithm (`tuning` in [`battle.json`](../ai-battle/battle.json)). Derived from [`PrismaticAI/info.nut`](PrismaticAI/info.nut) by `derive_docs.py`.
+173 settings in 85 declarations, 170 of them live-changeable (`CONFIG_INGAME`), 36 genes of the battle's genetic algorithm (`tuning` in [`battle.json`](../ai-battle/battle.json)). Derived from [`PrismaticAI/info.nut`](PrismaticAI/info.nut) by `derive_docs.py`.
 
 | Setting | Default | Range / step | Live | GA | Description |
 |---|---|---|---|---|---|
@@ -246,6 +246,7 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 | [`air_yield_routes`](PrismaticAI/info.nut#L642) | 8 | 0 .. 30 | yes |  | Yield: autopilot air routes beyond air_routes_max, one at a time, each once every air route we fly has planes a year old that earned last year at least their price / invest_ppv_div a plane (autopilot.nut AirRoutesPay; 0: off). |
 | [`test_trainless`](PrismaticAI/info.nut#L651) | 0 | 0 .. 2 | no |  | RESEARCH-ONLY test hook. 1: the first train of every new rail line, and every other new line's depot, is refused as if for money, so the line waits trainless for KeepLinesServed to buy it; 2: as 1, and once a game month the bot forgets its lines that still have no train, as a restart would, so AdoptTrainlessLines (monthly in this mode, yearly otherwise) takes them back from the map. 0 (default): off. |
 | [`test_freight_slots`](PrismaticAI/info.nut#L661) | 0 | 0 .. 1 | no |  | RESEARCH-ONLY test hook. 1: the handed freight slots (fr_*) are not read from the settings but from main.nut TestFreightSlots, which hands the bot's own best freight line half written, then incoherent (an acceptor that does not take the cargo, a cargo the producer does not make), then flipping between two acceptors, then whole; FreightLines must try it once, only when whole. Run it with planned_freight_only=1. 0 (default): off. |
+| [`test_claim_race`](PrismaticAI/info.nut#L671) | 0 | 0 .. 60 | no |  | RESEARCH-ONLY test hook. Days the company waits after the claim check before its first source station, once a game, so a sibling that chose the same producer builds and checks its station first and only the second claim check (rail.nut ClaimBlocks) can settle the race. 0 (default): off. |
 
 <!-- prismatic-ai-settings:end -->
 
