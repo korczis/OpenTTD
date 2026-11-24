@@ -63,9 +63,10 @@
  * money idle; idle_last: the previous quarter did; calls, bought, spent, holds: the quarter's
  * report; frozen: the quarter's days under BuildFrozen, counted from call to call (last, was_frozen:
  * the day and state of the previous call); skip: route keys skipped for the rest of the quarter;
- * hold_key, hold_quarter: the candidate money is held for and the quarter the hold began. */
+ * hold_key, hold_quarter: the candidate money is held for and the quarter the hold began; b: the
+ * last heartbeat's Behaviour(), for the rounds inside a rail search (AllocateCapitalInside). */
 CAPITAL <- {quarter = -1, start = -1, idle = false, idle_last = false, calls = 0, bought = 0, spent = 0, holds = 0,
-	frozen = 0, last = -1, was_frozen = false, skip = {}, hold_key = "", hold_quarter = -1};
+	frozen = 0, last = -1, was_frozen = false, skip = {}, hold_key = "", hold_quarter = -1, b = null};
 
 /* How many days a vehicle must be old today to have run all of last year: its profit last year is
  * then a whole year's (GetProfitLastYear is the previous calendar year, not the last 365 days). */
@@ -204,27 +205,14 @@ function PrismaticAI::CapitalQuarter(q, keep, level) {
 	CAPITAL.skip = {};
 }
 
-/* One heartbeat's allocation (see the head of this file). `afloat`: StayAfloat's floor, a quarter
- * of the fleet's running costs (main.nut QuarterRunningCost). The quarter's bookkeeping and its
- * report run at every level, 0 included, so a match measures master's frozen days the same way. */
-function PrismaticAI::AllocateCapital(b, afloat) {
-	local level = AIController.GetSetting("capital_alloc");
-	local floor = max(2 * b.cash_reserve, afloat);
-	local keep = floor + (level >= 1 ? AICompany.GetLoanInterval() : 0);
-	local frozen = this.BuildFrozen(afloat);
-	local q = PrismaticAI.PressureQuarter();
-	PrismaticAI.CapitalQuarter(q, keep, level);
-	local today = AIDate.GetCurrentDate();
-	if (CAPITAL.was_frozen && CAPITAL.last >= 0 && today > CAPITAL.last) CAPITAL.frozen += today - CAPITAL.last;
-	CAPITAL.last = today;
-	CAPITAL.was_frozen = frozen;
-	CAPITAL.calls++;
-	if (level <= 0) {
-		PrismaticAI.RepaySurplus(floor);
-		return;
-	}
+/* The purchases of one allocation: the best candidate (CapitalBest) bought while the bank holds
+ * `keep` plus its price and the purchase leaves two quarters of running costs (`afloat` is one
+ * quarter's) in money and loan headroom, then the candidates measured again. With `may_hold`, a
+ * candidate the bank cannot pay yet keeps its price from repayment (for a quarter at most, game
+ * quarter `q`). Returns {best, held}: the last candidate seen and the money held for it. */
+function PrismaticAI::CapitalBuy(b, keep, afloat, q, may_hold) {
 	local held = 0, best = null;
-	while (level >= 2 && !frozen) {
+	while (true) {
 		best = this.CapitalBest(b);
 		if (best == null) break;
 		local bank = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
@@ -252,10 +240,10 @@ function PrismaticAI::AllocateCapital(b, afloat) {
 			CAPITAL.bought++;
 			CAPITAL.spent += best.price;
 			AILog.Info("PrismaticAI: capital: " + (best.rail ? "train " : "vehicle ") + nv + " on " + (best.rail ? "rail " : "route ") + best.key + ", " + best.profit + " a year a vehicle on a price of " +
-				best.price + " (bank " + bank + ", keep " + keep + ")");
+				best.price + " (bank " + bank + ", keep " + keep + (may_hold ? ")" : ", inside a rail search)"));
 			continue;
 		}
-		if (!safe) break;
+		if (!safe || !may_hold) break;
 		/* Not yet affordable, or a train an external steward wants (ReconcileLines buys it): the money
 		 * stays for it, for a quarter at most. */
 		if (CAPITAL.hold_key != best.key) {
@@ -272,6 +260,50 @@ function PrismaticAI::AllocateCapital(b, afloat) {
 		held = best.price;
 		CAPITAL.holds++;
 		break;
+	}
+	return {best = best, held = held};
+}
+
+/* A round inside a long rail path search (steward.nut MaintenanceRound, which runs a bounded round
+ * once a game month while FindRailPath works). A heartbeat on the fitness seed's planned lineup
+ * came once in 183-366 days while own lines were searched and laid, and the money grew from 528k
+ * to 1.25M net of the loan in 1964-65 on 21-23 vehicles. Here only purchases, from the money beyond
+ * `hold` (the round's own: all of the loan, the cash reserve and one line budget, since the builder
+ * lays the line from the loan it took): no repayment, no hold, no new route, never borrowing. */
+function PrismaticAI::AllocateCapitalInside(hold) {
+	local b = CAPITAL.b;
+	if (b == null || AIController.GetSetting("capital_alloc") < 2) return;
+	local afloat = PrismaticAI.QuarterRunningCost();
+	if (this.BuildFrozen(afloat)) return;
+	local keep = max(hold, max(2 * b.cash_reserve, afloat) + AICompany.GetLoanInterval());
+	this.CapitalBuy(b, keep, afloat, PrismaticAI.PressureQuarter(), false);
+}
+
+/* One heartbeat's allocation (see the head of this file). `afloat`: StayAfloat's floor, a quarter
+ * of the fleet's running costs (main.nut QuarterRunningCost). The quarter's bookkeeping and its
+ * report run at every level, 0 included, so a match measures master's frozen days the same way. */
+function PrismaticAI::AllocateCapital(b, afloat) {
+	local level = AIController.GetSetting("capital_alloc");
+	local floor = max(2 * b.cash_reserve, afloat);
+	local keep = floor + (level >= 1 ? AICompany.GetLoanInterval() : 0);
+	local frozen = this.BuildFrozen(afloat);
+	local q = PrismaticAI.PressureQuarter();
+	PrismaticAI.CapitalQuarter(q, keep, level);
+	local today = AIDate.GetCurrentDate();
+	if (CAPITAL.was_frozen && CAPITAL.last >= 0 && today > CAPITAL.last) CAPITAL.frozen += today - CAPITAL.last;
+	CAPITAL.last = today;
+	CAPITAL.was_frozen = frozen;
+	CAPITAL.calls++;
+	CAPITAL.b = b;
+	if (level <= 0) {
+		PrismaticAI.RepaySurplus(floor);
+		return;
+	}
+	local held = 0, best = null;
+	if (level >= 2 && !frozen) {
+		local r = this.CapitalBuy(b, keep, afloat, q, true);
+		best = r.best;
+		held = r.held;
 	}
 	if (best == null) CAPITAL.hold_key = "";
 	/* A new air route where the fleet is proven, after a quarter of idle money; before repaying,
