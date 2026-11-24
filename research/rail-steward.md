@@ -214,9 +214,55 @@ steward wanted a train. It is the owner's live-game case above and has not been 
 - `rail_feed=3` and `rail_grow_max=7` as variants on top of the change: -44% to +25% by seed, so
   no conclusion.
 
-**Open.** The steward still waits on the heartbeat. The single-track lines need a second-track
-design that reserves its corridor when the line is built. Most of the remaining gap is supply: a
-line saturates at about one producer's output.
+**Open.** The single-track lines need a second-track design that reserves its corridor when the
+line is built. Most of the remaining gap is supply: a line saturates at about one producer's
+output. The steward's wait on the heartbeat is the next section.
+
+## The steward between heartbeats
+
+**The problem.** The steward ran once a game month at most, on a heartbeat, and a heartbeat waits
+for everything the bot builds in it. A rail path search takes 28-160 game days (seed 2927), a
+double-track line runs two, and a heartbeat with a line, an airport and a few bus routes takes
+most of a year. In ten-year matches of master 11411cdc4d (live settings, `battle.py ablate`,
+start 1950, field AAAHogEx, LuDiAI AfterFix, CivilAI, AdmiralAI, NoCAB, DictatorAI, SimpleAI) the
+steward's rounds came 1-3 times in most game years, up to 548 days apart. A line whose source
+rating fell waited that long for its next train.
+
+**The change** (`steward.nut` `MaintenanceYield`, `MaintenanceRound`; `rail.nut` `FindRailPath`,
+`BuildRailAlong`; `lines.nut` `ReconcileLines`, `FundTrain`). The search loop of `FindRailPath`
+checks every 512 nodes whether a game month has begun since the last round. The check is one API
+call and a comparison. When one has, a maintenance round runs right there:
+
+- it decides (`SelfSteward`), adds at most four trains to running lines (`ReconcileLines`), and
+  buys a first or replacement train or a pending depot (`KeepLinesServed`, one per line at most);
+- it pays only from money beyond all of the loan, the cash reserve and one line budget. The
+  builder takes the whole loan before a line and lays it from that money, so a round never spends
+  it. A round never borrows. A company that builds on borrowed money buys nothing in a round and
+  waits for its heartbeat, as before; a company with money of its own buys;
+- it never resizes, shrinks or closes a line, and builds no line. A train sent to be sold would
+  wait in its depot for the heartbeat's `ManageFleet`. `CloseHaltedLines` demolishes a whole line
+  with hundreds of commands and pays for it without a reserve check, so it stays in the heartbeat,
+  like `TwinLines`, `GrowPlatforms` and `FeedStations`;
+- it never runs while track is being laid. `BuildRailAlong` counts its frames in `MAINT_LAYING`,
+  so the search of a re-plan inside a laying yields nothing. A round never runs inside another
+  round either;
+- it keeps the builder's state: its own `AIAccounting` (the double track's cost of track A decides
+  whether track B is affordable; `ScriptAccounting`'s destructor restores the outer count), exec
+  mode, and the current rail type.
+
+The heartbeat's `SelfSteward` skips a month a round already decided, so a line changes at most once
+a game month. Each round logs `steward round <n> on <y-m-d> (survey|heartbeat)`. This is where the
+cadence below is measured from.
+
+**FundTrain.** A train the steward adds is paid from the bank when it holds the reserve plus the
+price. Otherwise, for a line that earns, it is paid from the loan within the bounds of
+`steward_borrow`. The loan is now raised in whole steps rounded up: `/ step + 1` borrowed one step
+too many when the shortfall was a whole number of steps. A borrow logs the loan after it, the
+limit, and the headroom left. A refusal by the bounds is logged once per line and reason. A clone
+that will not start is sold at once, and a clone copies a running train, never one on its way to
+be sold.
+
+**Measured.** MEASURED_PLACEHOLDER
 
 ## The monitor: what is wrong, on the board
 

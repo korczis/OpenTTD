@@ -656,6 +656,15 @@ class PrismaticAI extends AIInfo {
 			step_size = 1,
 			flags = CONFIG_NONE,
 		});
+		/* RESEARCH-ONLY test hook (lines.nut FundTrain): the borrowing path for a train runs only when the
+		 * bank is short of a train's price, which RepaySurplus and income rarely leave it. */
+		AddSetting({
+			name = "test_borrow",
+			description = "RESEARCH-ONLY test hook. 1: when the steward adds a train, FundTrain counts the bank as holding only the cash reserve, so every such train is borrowed for, within the bounds of steward_borrow (the loan at most half its limit, a line budget and two quarters of running costs left), and RepaySurplus pays it back. 0 (default): off.",
+			min_value = 0, max_value = 1,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			flags = CONFIG_BOOLEAN,
+		});
 	}
 }
 

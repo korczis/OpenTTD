@@ -45,11 +45,97 @@ const STEWARD_RATING_STEP = 15;
 /* The game year SelfSteward last logged every line's state in. */
 STEWARD_STATE_YEAR <- -1;
 
-/* STEWARD_ROUND_NOTE: a round may add more than one train to a line. The steward runs once a game
- * month at most, on a heartbeat, and a heartbeat can take most of a year: on the fitness seed
- * (930967890, the self-steward lineup) the line records, logged on the same monthly gate, appeared
- * about once a game year from 1963 on, while rail path searches took 90-178 game days each.
- * ReconcileLines buys every missing train of a target at once. */
+/* STEWARD_ROUND_NOTE: a round may add more than one train to a line, and rounds also run inside a
+ * long rail path search. The heartbeat runs the steward once a game month at most, and a heartbeat
+ * can take most of a year: on the fitness seed (930967890, the self-steward lineup) the line
+ * records, logged on the same monthly gate, appeared about once a game year from 1963 on, while
+ * rail path searches took 90-178 game days each. In ten-year matches of master 11411cdc4d (live
+ * settings, battle.py ablate, seeds 15805, 2927 and 4242) the rounds came 1-3 times in most game
+ * years, up to 548 days apart. ReconcileLines buys every missing train of a target at once, and
+ * MaintenanceYield (below) runs a bounded round from inside FindRailPath. */
+
+/* The maintenance tick: a round of what keeps the existing lines served, run from inside a long
+ * rail path search (rail.nut FindRailPath calls MaintenanceYield every MAINT_YIELD_NODES nodes). Due
+ * on the first day of every game month; a round in the heartbeat counts too (SelfSteward), so a line
+ * changes at most once a month. A round there:
+ *   - decides (SelfSteward) and adds at most MAINT_YIELD_TRAINS trains to running lines
+ *     (ReconcileLines with `inside`), and buys a first or replacement train or a pending depot
+ *     (rail.nut KeepLinesServed, at most one per line);
+ *   - pays only from money beyond all of the loan, the cash reserve and one line budget: the builder
+ *     takes the whole loan before a line and lays it from that money, so a round never spends it;
+ *     it never borrows. KeepLinesServed checks the bank before every purchase but a replacement
+ *     train against the reserve alone, so it is handed that hold plus the dearest first train of
+ *     any line (MaintenanceHold). A company that builds on borrowed money therefore buys nothing
+ *     here and waits for its heartbeat as before; one with money of its own buys;
+ *   - never resizes, shrinks or closes (a train sent to be sold waits in its depot for the
+ *     heartbeat's ManageFleet; CloseHaltedLines demolishes a whole line with hundreds of commands
+ *     and spends on it with no reserve check, so it stays in the heartbeat), and builds no line
+ *     (TwinLines, GrowPlatforms and FeedStations stay in the heartbeat);
+ *   - never runs while track is laid (MAINT_LAYING counts BuildRailAlong frames: a re-plan's search
+ *     inside a laying yields nothing), nor inside another round (MAINT_TICKING);
+ *   - keeps the builder's state: its own AIAccounting (the double track's cost of track A decides
+ *     track B), exec mode, and the current rail type.
+ * An uncaught error ends the script, so the guard needs no reset on one. The state below is not
+ * saved: after a load the first round stamps it again (at most one extra round that month). */
+MAINT_YIELD_NODES <- 512;   /* globals, not consts: rail.nut and lines.nut are compiled first */
+MAINT_YIELD_TRAINS <- 4;
+MAINT_BOT <- null;        /* the running bot: FindRailPath runs on the class, not the instance */
+MAINT_TICKING <- false;   /* a round is running */
+MAINT_LAYING <- 0;        /* BuildRailAlong frames on the stack */
+MAINT_ROUND_MONTH <- -1;  /* the game month (MonthKey) of the last round */
+MAINT_DUE <- 0;           /* the first day of the month after the last round */
+MAINT_RESERVE <- 0;       /* the cash reserve the last heartbeat gave ReconcileLines */
+MAINT_ROUNDS <- 0;
+
+/* Called once from Start: the instance MaintenanceYield runs its rounds on, and the reserve until
+ * the first heartbeat gives one. */
+function PrismaticAI::MaintenanceAttach(reserve) {
+	MAINT_BOT = this;
+	MAINT_RESERVE = reserve;
+}
+
+/* Stamps a round in this game month and logs it ("steward round <n> on <y-m-d> (<where>)", what the
+ * cadence is measured from); false when one already ran this month. */
+function PrismaticAI::MaintenanceStamp(where) {
+	local now = AIDate.GetCurrentDate();
+	local y = AIDate.GetYear(now), m = AIDate.GetMonth(now);
+	if (y * 12 + m == MAINT_ROUND_MONTH) return false;
+	MAINT_ROUND_MONTH = y * 12 + m;
+	MAINT_DUE = (m == 12) ? AIDate.GetDate(y + 1, 1, 1) : AIDate.GetDate(y, m + 1, 1);
+	MAINT_ROUNDS++;
+	AILog.Info("PrismaticAI: steward round " + MAINT_ROUNDS + " on " + y + "-" + m + "-" + AIDate.GetDayOfMonth(now) + " (" + where + ")");
+	return true;
+}
+
+/* The yield point (rail.nut FindRailPath): one API call and a comparison while no round is due. */
+function PrismaticAI::MaintenanceYield() {
+	if (MAINT_BOT == null || MAINT_TICKING || MAINT_LAYING > 0 || AIDate.GetCurrentDate() < MAINT_DUE) return;
+	MAINT_TICKING = true;
+	local rt = AIRail.GetCurrentRailType();
+	MAINT_BOT.MaintenanceRound();
+	AIRail.SetCurrentRailType(rt);
+	MAINT_TICKING = false;
+}
+
+/* One round inside a search (see above). The mode and the accounting are this function's locals, so
+ * they end with it and the builder's own come back. */
+function PrismaticAI::MaintenanceRound() {
+	local mode = AIExecMode();
+	local acc = AIAccounting();
+	if (!PrismaticAI.MaintenanceStamp("survey")) return;
+	if (this.steward_on) this.SelfSteward(true);
+	local hold = AICompany.GetLoanAmount() + MAINT_RESERVE + AIController.GetSetting("line_budget");
+	this.ReconcileLines(hold, true);
+	PrismaticAI.KeepLinesServed(hold + PrismaticAI.MaintenanceHold());
+}
+
+/* The dearest first train (rail.nut FirstTrainPrice) of any open line, what a replacement bought by
+ * KeepLinesServed may cost at most. */
+function PrismaticAI::MaintenanceHold() {
+	local most = 0;
+	foreach (line in RAIL_LINES) if (!line.closed) most = max(most, PrismaticAI.FirstTrainPrice(line));
+	return most;
+}
 
 /* Whether `s` (LineStats) earns: the line's profit last year and this year together is positive,
  * and its newest train, once old enough to judge, did not lose money last year. */
@@ -126,8 +212,11 @@ function PrismaticAI::EffectiveTarget(slot, what) {
 	return this.self_targets[slot][what];
 }
 
-/* One round of the in-bot steward: at most one change per line, logged like the Rhai steward's. */
-function PrismaticAI::SelfSteward() {
+/* One round of the in-bot steward: at most one change per line, logged like the Rhai steward's. The
+ * heartbeat's call returns at once when a round already ran this game month (MaintenanceStamp);
+ * `stamped`: MaintenanceRound stamped it. */
+function PrismaticAI::SelfSteward(stamped = false) {
+	if (!stamped && !PrismaticAI.MaintenanceStamp("heartbeat")) return;
 	local rating_low = AIController.GetSetting("steward_rating");
 	if (rating_low == null) rating_low = 0;
 	/* On the first round of every game year each line's state, so a log shows what held each line

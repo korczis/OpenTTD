@@ -175,6 +175,8 @@ function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, fro
 	budget = min(RAIL_NODES_MAX, max(RAIL_NODES_MIN, budget));
 	local budget0 = budget;
 	while (!open.IsEmpty() && budget-- > 0) {
+		/* A search can take months: the maintenance tick keeps the lines served meanwhile (steward.nut). */
+		if (budget % MAINT_YIELD_NODES == 0) PrismaticAI.MaintenanceYield();
 		local cur = open.Pop();
 		if (cur == to) {
 			RAIL_LAST_NODES = budget0 - budget;
@@ -908,8 +910,17 @@ function PrismaticAI::RailCashWait(budget, kind, a, b = 0, c = 0) {
  * actually laid, or null. A piece the game refuses (a house, a rival's track or a vehicle took the
  * tile since the search, ERR_AREA_NOT_CLEAR) is not the end of the line: from the last laid tile the
  * search runs again around the refused one, the last piece is relaid toward the new route, and the
- * rest follows (at most `replans` times). On seed 31337 a 212-tile coal line was dropped this way. */
+ * rest follows (at most `replans` times). On seed 31337 a 212-tile coal line was dropped this way.
+ * While it lays, MAINT_LAYING says so, and no maintenance round runs (steward.nut MaintenanceYield). */
 function PrismaticAI::BuildRailAlong(path, a_end, b_end, replans = 2, to_straight = false, from_straight = false, cash = null) {
+	MAINT_LAYING++;
+	local laid = PrismaticAI.LayRailAlong(path, a_end, b_end, replans, to_straight, from_straight, cash);
+	MAINT_LAYING--;
+	return laid;
+}
+
+/* BuildRailAlong's body. */
+function PrismaticAI::LayRailAlong(path, a_end, b_end, replans, to_straight, from_straight, cash) {
 	local n = path.len();
 	local corners = 0;
 	if (cash == null) cash = {days = 0};
