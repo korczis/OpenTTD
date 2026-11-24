@@ -498,13 +498,30 @@ mod tests {
     /// planner proposes nothing, one the plan has no entry for is said so, and nothing is approved.
     /// Answers the setting calls as `company:name@writer` and the printed lines.
     fn replan_round(store: &Rc<Shared>) -> (Vec<String>, Vec<String>, usize) {
+        let setting = |name: &str, value: i64| json!({"name": name, "value": value});
+        let live = json!([setting("fr_from", -1), setting("fr_to", -1), setting("fr_cargo", -1), setting("own_lines", 8)]);
+        let trains = json!([{"owner": 0, "type": "train", "age": 400, "profit_last_year": 9000, "orders": [{"destination": 5}]},
+                            {"owner": 2, "type": "train", "age": 400, "profit_last_year": 20000, "orders": [{"destination": 8}]},
+                            {"owner": 6, "type": "train", "age": 400, "profit_last_year": 7000, "orders": [{"destination": 9}]}]);
+        let r = replan_round_with(store, live, trains, "fr_from={p},fr_to=99,fr_cargo=1,own_lines=8", json!([]), |_, _| (0.8, 0.6, 0.9));
+        (r.sent, r.printed, r.plans)
+    }
+
+    /// What one replan round did: the setting calls, the printed lines, the planner calls, and the
+    /// blackboard writes (key, value).
+    struct Round { sent: Vec<String>, printed: Vec<String>, plans: usize, records: Vec<(String, Value)> }
+
+    /// replan_round over the companies' live settings `live`, the vehicles of openttd://vehicles,
+    /// each plan entry's start_ai (`{p}` is the company's producer), the game's pending approvals
+    /// and a bayes-update stub (earned, lost) -> (mean, lower, upper).
+    fn replan_round_with(store: &Rc<Shared>, live: Value, vehicles: Value, start: &str, pending: Value,
+                         bayes: fn(i64, i64) -> (f64, f64, f64)) -> Round {
         let sent = Rc::new(RefCell::new(Vec::new()));
         let printed = Rc::new(RefCell::new(Vec::new()));
         let planned = Rc::new(RefCell::new(0usize));
+        let records = Rc::new(RefCell::new(Vec::<(String, Value)>::new()));
         let mut e = guard_engine(store.clone(), Rc::new(RefCell::new(Vec::new())));
         let dynamic = |v: Value| rhai::serde::to_dynamic(v).unwrap();
-        let setting = |name: &str, value: i64| json!({"name": name, "value": value});
-        let live = json!([setting("fr_from", -1), setting("fr_to", -1), setting("fr_cargo", -1), setting("own_lines", 8)]);
         let bots = json!({"running": [{"id": 0, "name": "P0", "ai": "PrismaticAI", "settings": live},
                                       {"id": 2, "name": "Hog", "ai": "AAAHogEx", "settings": []},
                                       {"id": 6, "name": "P6", "ai": "PrismaticAI", "settings": live},
@@ -512,7 +529,7 @@ mod tests {
         e.register_fn("api_bots", move || dynamic(bots.clone()));
         let line = |p: i64| json!({"mode": "freight_rail", "cargo": "Coal", "cargo_id": 1,
                                    "from": {"id": format!("industry:{p}"), "name": format!("Mine {p}")}, "to": {"id": "industry:99", "name": "Plant"}});
-        let entry = |c: f64, p: i64| json!({"company": c, "start_ai": format!("fr_from={p},fr_to=99,fr_cargo=1,own_lines=8"),
+        let entry = |c: f64, p: i64| json!({"company": c, "start_ai": start.replace("{p}", &p.to_string()),
                                             "freight": [{"from": p, "to": 99, "cargo_id": 1, "monthly_profit": 5000.0}]});
         let plan = json!({"settings": "own_lines=8", "portfolio": {"investment_k": 100, "solver": "knapsack-dp", "chosen": [line(1), line(2)],
                                                                    "priced": {"lines": 2, "with_route": 2}},
@@ -530,9 +547,7 @@ mod tests {
                 "openttd://game/state" => json!({"game_date": "1951-03-01", "game_tick": 5, "data": {"paused": false}}),
                 "openttd://companies" => json!({"data": {"companies": [{"id": 0, "name": "P0", "company_value": 900}, {"id": 2, "name": "Hog", "company_value": 2000},
                                                                        {"id": 6, "name": "P6", "company_value": 800}, {"id": 7, "name": "P7", "company_value": 700}]}}),
-                "openttd://vehicles" => json!({"data": {"vehicles": [{"owner": 0, "type": "train", "age": 400, "profit_last_year": 9000, "orders": [{"destination": 5}]},
-                                                                     {"owner": 2, "type": "train", "age": 400, "profit_last_year": 20000, "orders": [{"destination": 8}]},
-                                                                     {"owner": 6, "type": "train", "age": 400, "profit_last_year": 7000, "orders": [{"destination": 9}]}]}}),
+                "openttd://vehicles" => json!({"data": {"vehicles": vehicles.clone()}}),
                 _ => return Err(format!("{uri}: not stubbed").into()),
             };
             Ok(dynamic(v))
@@ -544,13 +559,16 @@ mod tests {
             dynamic(if m["name"].to_string() == "company_rank" { json!({"rows": [[1, 4, 900, "1951-03-01"]]}) }
                     else { json!({"rows": [["1951-02", 900, 10, 50, 5, 1]]}) })
         });
-        e.register_fn("kernel", move |name: &str, _: rhai::Map| {
-            dynamic(if name == "bayes-update" { json!({"mean": 0.8, "lower": 0.6, "upper": 0.9}) } else { json!({"p50": 10.0, "p80": 12.0, "p90": 14.0}) })
+        e.register_fn("kernel", move |name: &str, m: rhai::Map| {
+            let n = |k: &str| m.get(k).and_then(|v| v.as_int().ok()).unwrap_or(-1);
+            let (mean, lower, upper) = bayes(n("successes"), n("failures"));
+            dynamic(if name == "bayes-update" { json!({"mean": mean, "lower": lower, "upper": upper}) } else { json!({"p50": 10.0, "p80": 12.0, "p90": 14.0}) })
         });
-        e.register_fn("status", move || dynamic(json!({"pending": []})));
+        e.register_fn("status", move || dynamic(json!({"pending": pending.clone()})));
         e.register_fn("http_timeout", |s: i64| s);
         e.register_fn("con_say", |_: &str| ());
-        e.register_fn("shared_set", |_: &str, _: rhai::Dynamic| ());
+        let w = records.clone();
+        e.register_fn("shared_set", move |k: &str, v: rhai::Dynamic| { w.borrow_mut().push((k.to_string(), rhai::serde::from_dynamic(&v).unwrap())); });
         e.register_fn("to_json", |_: rhai::Dynamic| String::from("{}"));
         e.register_fn("mesh_record_write", |_: rhai::Map| -> Result<rhai::Dynamic, Box<rhai::EvalAltResult>> { Err("no mesh session".into()) });
         e.register_fn("env", |k: &str| if k == "REPLAN_ONCE" { "1".to_string() } else { String::new() });
@@ -559,7 +577,7 @@ mod tests {
         let script = std::fs::read_to_string(format!("{RHAI_DIR}/replan.rhai")).unwrap();
         e.run(&script).unwrap_or_else(|err| panic!("{err}"));
         let n = *planned.borrow();
-        (sent.take(), printed.take(), n)
+        Round { sent: sent.take(), printed: printed.take(), plans: n, records: records.take() }
     }
 
     #[test]
@@ -567,10 +585,12 @@ mod tests {
         let store = Rc::new(Shared::default());
         let (sent, printed, plans) = replan_round(&store);
         assert_eq!(plans, 1, "one plan for every company");
-        assert_eq!(sent, ["0:fr_cargo@replan", "0:fr_from@replan", "0:fr_to@replan", "6:fr_cargo@replan", "6:fr_from@replan", "6:fr_to@replan"],
-                   "each company its own entry, only what differs from its live settings");
+        assert_eq!(sent, ["0:fr_cargo@replan", "0:fr_from@replan", "0:fr_to@replan", "0:own_lines@replan",
+                          "6:fr_cargo@replan", "6:fr_from@replan", "6:fr_to@replan", "6:own_lines@replan"],
+                   "each company its own entry, only what differs from its live settings, and the floor the plan would drop");
         let all = printed.join("\n");
-        assert!(all.contains("fr_from = 1: pending approval #2") && all.contains("fr_from = 2: pending approval #5"), "{all}");
+        assert!(all.contains("fr_from = 1: pending approval #2") && all.contains("fr_from = 2: pending approval #6"), "{all}");
+        assert!(all.contains("own_lines = 10: pending approval #4"), "{all}");
         assert!(all.contains("plan: 2 line(s), investment 100k, predicted 5000 a month (1 line(s) without a price count as 0)"), "{all}");
         assert!(all.contains("== company 8 (P7): the plan has no entry for it; nothing proposed"), "{all}");
         assert!(all.contains("mesh: no mesh session"), "{all}");
@@ -578,8 +598,247 @@ mod tests {
 
         store.set("planner.6", json!("battlebrain"), "runbook", Some(0)).unwrap();
         let (sent, printed, _) = replan_round(&store);
-        assert_eq!(sent, ["0:fr_cargo@replan", "0:fr_from@replan", "0:fr_to@replan"], "company 6 is held by another planner");
+        assert_eq!(sent, ["0:fr_cargo@replan", "0:fr_from@replan", "0:fr_to@replan", "0:own_lines@replan"], "company 6 is held by another planner");
         assert!(printed.iter().any(|l| l.contains("holding: company 6's freight-line slots are planned by battlebrain")), "{printed:?}");
+    }
+
+    /// PrismaticAI's autopilot floors are kept once on the panel's side (bot_floors.rhai), and
+    /// that copy is main.nut's `if (b.autopiloted)` block: each `max(b.x, CONST)` an at_least, each
+    /// `min(b.x, CONST)` an at_most, each `b.x = n` an equals, with the AUTOPILOT_* values main.nut
+    /// declares. The planned rule bot_floors applies (one freight line or pair complete) and the
+    /// autopilot default are main.nut's and info.nut's too.
+    #[test]
+    fn the_floors_are_main_nuts_autopilot_block() {
+        let bot = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../prismatic-ai/PrismaticAI");
+        let main = std::fs::read_to_string(bot.join("main.nut")).unwrap();
+        let consts: std::collections::BTreeMap<String, i64> = main.lines()
+            .filter_map(|l| l.trim().strip_prefix("const AUTOPILOT_"))
+            .filter_map(|l| { let (k, v) = l.split_once('=')?; Some((format!("AUTOPILOT_{}", k.trim()), v.trim().trim_end_matches(';').trim().parse().ok()?)) })
+            .collect();
+        let block: Vec<&str> = main.split("if (b.autopiloted) {").nth(1).expect("main.nut has the autopiloted block")
+            .lines().map(str::trim).take_while(|l| *l != "}").filter(|l| !l.is_empty()).collect();
+        let mut want = serde_json::Map::new();
+        for l in &block {
+            let (lhs, rhs) = l.trim_end_matches(';').split_once(" = ").unwrap_or_else(|| panic!("not an assignment: {l}"));
+            let name = lhs.trim().strip_prefix("b.").unwrap().to_string();
+            let floor = if let Some(args) = rhs.strip_prefix("max(").or_else(|| rhs.strip_prefix("min(")) {
+                let c = args.trim_end_matches(')').split(", ").nth(1).unwrap();
+                let kind = if rhs.starts_with("max(") { "at_least" } else { "at_most" };
+                json!({kind: consts.get(c).unwrap_or_else(|| panic!("{c} is not an AUTOPILOT_ const: {consts:?}"))})
+            } else {
+                json!({"equals": rhs.parse::<i64>().unwrap_or_else(|_| panic!("{l}"))})
+            };
+            want.insert(name, floor);
+        }
+        assert!(want.len() >= 4, "the block was read: {block:?}");
+        let (got, _) = eval_with(&Rc::new(Shared::default()), r#"import "bot_floors" as bf; bf::floors()"#);
+        assert_eq!(got["floors"], Value::Object(want), "bot_floors.rhai FLOORS drifted from main.nut's autopiloted block");
+        assert!(main.contains("b.planned <- b.freight.len() > 0 || (b.air_a >= 0 && b.air_b >= 0) || (b.rail_a >= 0 && b.rail_b >= 0);"),
+                "main.nut's planned rule changed: bot_floors::planned follows it");
+        assert!(main.contains("b.autopiloted <- b.autopilot == 1 && !b.planned;"), "the floors apply to an unplanned bot with the autopilot on");
+        assert!(main.contains("if (line.from >= 0 && line.to >= 0 && line.cargo >= 0) out.push(line);"), "a freight line is complete when all three are set");
+        let info = std::fs::read_to_string(bot.join("info.nut")).unwrap();
+        let decl = info.split(&format!("name = \"{}\"", got["name"].as_str().unwrap())).nth(1).expect("info.nut declares the autopilot setting");
+        let decl = decl.split('}').next().unwrap();
+        let value_of = |key: &str| decl.split(&format!("{key} = ")).nth(1)
+            .and_then(|v| v.split(|c: char| !c.is_ascii_digit()).next()?.parse::<i64>().ok());
+        let default = value_of("default_value").or_else(|| value_of("custom_value")).expect("info.nut gives the autopilot a default");
+        assert_eq!(got["default"], json!(default), "AUTOPILOT_DEFAULT is info.nut's default");
+    }
+
+    /// bot_floors::guard on its own: a touched line is filed whole, a plan that makes the bot
+    /// planned carries each floor the bot's live settings would lose, a proposed floor key is held to
+    /// its floor, the autopilot off keeps every value, and a bot planned already has its lost floors
+    /// named.
+    #[test]
+    fn a_guarded_plan_files_a_line_whole_and_keeps_the_floors() {
+        let live = |planned: bool| {
+            let mut l: Vec<Value> = [("fr_from", -1), ("fr_to", -1), ("fr_cargo", -1), ("rail_a", -1), ("rail_b", -1), ("rail_after", 0),
+                ("air_a", -1), ("air_b", -1), ("own_lines", 4), ("max_routes", 30), ("cash_reserve", 5000), ("intercity", 1),
+                ("self_steward", 1), ("autopilot", 1)].iter().map(|(n, v)| json!({"name": n, "value": v})).collect();
+            for (n, v) in [("fr2_from", 5), ("fr2_to", 6), ("fr2_cargo", 1)] {
+                l.push(json!({"name": n, "value": if planned { v } else { -1 }}));
+            }
+            l
+        };
+        let guard = |live: Vec<Value>, diff: Value| -> Value {
+            let script = format!("import \"bot_floors\" as bf; bf::guard({}, {})", to_rhai_literal(&json!(live)), to_rhai_literal(&diff));
+            eval_with(&Rc::new(Shared::default()), &script).0
+        };
+        let (g, _) = eval_with(&Rc::new(Shared::default()), r#"import "bot_floors" as bf;
+            bf::groups(["fr_from", "fr_to", "fr_cargo", "fr2_from", "fr2_to", "rail_a", "rail_b", "rail_after", "air_a", "air_b", "own_lines"])"#);
+        assert_eq!(g, json!([{"prefix": "fr_", "members": ["fr_from", "fr_to", "fr_cargo"], "mode": "rail"},
+                             {"prefix": "rail_", "members": ["rail_a", "rail_b"], "mode": "rail"},
+                             {"prefix": "air_", "members": ["air_a", "air_b"], "mode": "air"}]), "fr2_ lacks its cargo: no group");
+
+        let r = guard(live(false), json!({"fr_to": 7}));
+        assert_eq!(r["settings"], json!({"fr_to": 7, "fr_from": -1, "fr_cargo": -1}), "one key of a line is filed with the rest of it");
+        assert_eq!((r["grouped"].clone(), r["raised"].clone(), r["planned_after"].clone()), (json!(["fr_from", "fr_cargo"]), json!([]), json!(false)));
+        assert_eq!(r["added_modes"], json!([]), "an incomplete line adds no mode");
+
+        let r = guard(live(false), json!({"fr_from": 1, "fr_to": 2, "fr_cargo": 3, "own_lines": 4, "cash_reserve": 25000, "intercity": 0}));
+        assert_eq!(r["planned_after"], json!(true));
+        assert_eq!(r["settings"]["own_lines"], json!(10), "the plan makes the bot planned: own_lines stays at the floor");
+        assert_eq!((r["settings"]["cash_reserve"].clone(), r["settings"]["intercity"].clone()), (json!(5000), json!(1)));
+        assert!(r["settings"].get("max_routes").is_none() && r["settings"].get("self_steward").is_none(), "a floor the live value meets is not filed");
+        assert_eq!(r["added_modes"], json!(["rail"]));
+        assert_eq!(r["lost"], json!([]), "an unplanned bot has lost nothing yet");
+
+        let r = guard(live(false), json!({"air_a": 3, "air_b": 4}));
+        assert_eq!((r["added_modes"].clone(), r["settings"]["own_lines"].clone()), (json!(["air"]), json!(10)), "a pair plans the bot too");
+
+        let r = guard(live(false), json!({"fr_from": 1, "fr_to": 2, "fr_cargo": 3, "autopilot": 0}));
+        assert!(r["settings"].get("autopilot").is_none(), "a plan never turns the autopilot off: {r}");
+        assert_eq!((r["raised"][0].clone(), r["settings"]["own_lines"].clone()), (json!({"name": "autopilot", "from": 0, "to": 1}), json!(10)));
+        let mut off = live(false);
+        for s in off.iter_mut() { if s["name"] == "autopilot" { s["value"] = json!(0); } }
+        let r = guard(off, json!({"fr_from": 1, "fr_to": 2, "fr_cargo": 3}));
+        assert!(r["settings"].get("own_lines").is_none() && r["raised"] == json!([]), "the owner turned the autopilot off: no floors: {r}");
+
+        let r = guard(live(false), json!({"own_lines": 2}));
+        assert_eq!((r["settings"].clone(), r["planned_after"].clone()), (json!({"own_lines": 10}), json!(false)), "a proposed floor key is held to it");
+
+        let r = guard(live(true), json!({}));
+        assert_eq!(r["lost"], json!([{"name": "own_lines", "from": 4, "to": 10}]), "planned already: own_lines=4 binds today");
+        assert_eq!((r["planned_before"].clone(), r["settings"].clone()), (json!(true), json!({"own_lines": 10})));
+    }
+
+    /// A JSON value as a Rhai literal (maps as #{...}).
+    fn to_rhai_literal(v: &Value) -> String {
+        match v {
+            Value::Object(m) => format!("#{{{}}}", m.iter().map(|(k, x)| format!("{k}: {}", to_rhai_literal(x))).collect::<Vec<_>>().join(", ")),
+            Value::Array(a) => format!("[{}]", a.iter().map(to_rhai_literal).collect::<Vec<_>>().join(", ")),
+            other => other.to_string(),
+        }
+    }
+
+    fn live_of(values: &[(&str, i64)]) -> Value {
+        Value::Array(values.iter().map(|(n, v)| json!({"name": n, "value": v})).collect())
+    }
+
+    /// The live settings of an unplanned PrismaticAI in game 10487 (1952-04): no line slot set,
+    /// own_lines 4 from the run's start string, the autopilot on.
+    const UNPLANNED_10487: &[(&str, i64)] = &[("fr_from", -1), ("fr_to", -1), ("fr_cargo", -1), ("own_lines", 4), ("max_routes", 30),
+        ("cash_reserve", 5000), ("intercity", 1), ("self_steward", 1), ("autopilot", 1)];
+
+    /// A bayes-update stub whose lower bound is (earned + 0.1) / (earned + lost + 1).
+    fn bayes_share(earned: i64, lost: i64) -> (f64, f64, f64) {
+        let lower = (earned as f64 + 0.1) / (earned + lost + 1) as f64;
+        (lower.max(0.05), lower, (lower + 0.3).min(1.0))
+    }
+
+    fn train(owner: i64, stop: i64, profit: i64) -> Value {
+        json!({"owner": owner, "type": "train", "age": 400, "profit_last_year": profit, "orders": [{"destination": stop}]})
+    }
+
+    fn bus(owner: i64, stop: i64, profit: i64) -> Value {
+        json!({"owner": owner, "type": "road", "age": 400, "profit_last_year": profit, "orders": [{"destination": stop}]})
+    }
+
+    /// The trap of runs 12609 and 10487: the plan completes a freight slot of an unplanned bot whose
+    /// live own_lines is 4 and asks own_lines 4 itself. Applied as filed, the bot turns planned and
+    /// main.nut stops lifting own_lines to 10 (10487: `growth-on-plan own_lines=4` from 1952-04-15
+    /// to 2114). The plan is not proposed that way: own_lines=10 is filed with the slot, in the same
+    /// call, and the record says so.
+    #[test]
+    fn a_plan_that_would_drop_the_autopilot_floors_is_not_proposed() {
+        let store = Rc::new(Shared::default());
+        let r = replan_round_with(&store, live_of(UNPLANNED_10487), json!([train(0, 5, 9000), train(6, 9, 7000)]),
+                                  "fr_from={p},fr_to=99,fr_cargo=1,own_lines=4", json!([]), |_, _| (0.8, 0.6, 0.9));
+        let mine: Vec<&String> = r.sent.iter().filter(|s| s.starts_with("0:")).collect();
+        assert_eq!(mine, ["0:fr_cargo@replan", "0:fr_from@replan", "0:fr_to@replan", "0:own_lines@replan"]);
+        let all = r.printed.join("\n");
+        assert!(all.contains("floor: own_lines 4 -> 10") && all.contains("own_lines = 10: pending approval #4"), "{all}");
+        assert!(!all.contains("own_lines = 4"), "own_lines=4 is never filed: {all}");
+        // Every setting the bot would hold once each filed row is approved meets the floors.
+        let mut after: BTreeMap<String, i64> = UNPLANNED_10487.iter().map(|(n, v)| (n.to_string(), *v)).collect();
+        for l in r.printed.iter().filter(|l| l.contains(": pending approval #")).take(4) {
+            let (name, rest) = l.trim().split_once(" = ").unwrap();
+            after.insert(name.to_string(), rest.split(':').next().unwrap().parse().unwrap());
+        }
+        assert!(after["fr_from"] >= 0 && after["fr_to"] >= 0 && after["fr_cargo"] >= 0, "the plan makes the bot planned: {after:?}");
+        assert!(after["own_lines"] >= 10 && after["max_routes"] >= 30 && after["cash_reserve"] <= 5000 && after["intercity"] == 1, "{after:?}");
+        let rec = &r.records.iter().find(|(k, _)| k == "replan.0").unwrap().1;
+        assert_eq!(rec["floors"]["raised"], json!([{"name": "own_lines", "from": 4, "to": 10}]));
+        assert_eq!((rec["floors"]["planned_after"].clone(), rec["held"].clone()), (json!(true), Value::Null), "proposed: nothing held");
+        assert_eq!(rec["sent"], json!(["fr_cargo", "fr_from", "fr_to", "own_lines"]));
+    }
+
+    /// The record is kept per mode, and a plan is judged by the mode of the lines it adds: two
+    /// earning train lines and three losing bus lines (game 10487, 1951-09-29: "3 of 5 lines
+    /// earned" held a rail plan) no longer veto a rail plan. A company with no rail record holds,
+    /// and says why in `held`; one held by another planner says that.
+    #[test]
+    fn a_rail_plan_is_judged_by_the_rail_record_and_a_hold_says_why() {
+        let store = Rc::new(Shared::default());
+        let vehicles = json!([train(0, 5, 35000), train(0, 6, 36000), bus(0, 7, -300), bus(0, 8, -200), bus(0, 9, -100), bus(6, 10, 500)]);
+        let r = replan_round_with(&store, live_of(UNPLANNED_10487), vehicles.clone(), "fr_from={p},fr_to=99,fr_cargo=1", json!([]), bayes_share);
+        let rec = |k: &str| r.records.iter().find(|(x, _)| x == k).unwrap().1.clone();
+        let zero = rec("replan.0");
+        assert_eq!(zero["record"]["by_mode"], json!({"rail": {"lines": 2, "earned": 2, "lost": 0}, "road": {"lines": 3, "earned": 0, "lost": 3}}));
+        assert_eq!((zero["record"]["earned"].clone(), zero["record"]["lines"].clone()), (json!(2), json!(5)), "pooled: 2 of 5, below the switch");
+        assert_eq!((zero["model"]["judged_by"].clone(), zero["model"]["adopt"].clone()), (json!("rail"), json!(true)));
+        assert_eq!(zero["model"]["by_mode"]["rail"]["earned"], json!(2));
+        assert!(r.sent.iter().any(|s| s == "0:fr_from@replan"), "the rail plan is proposed: {:?}", r.sent);
+        assert!(r.printed.iter().any(|l| l.contains("judged by rail: 2 of 2")), "{:?}", r.printed);
+
+        let six = rec("replan.6");
+        assert_eq!(six["model"]["judged_by"], json!("rail"));
+        let held = six["held"].as_str().expect("a hold is a reason");
+        assert!(held.starts_with("the model holds the current plan (4 setting(s) would change): ") && held.contains("a new rail line"), "{held}");
+        assert_eq!(six["held_by"], Value::Null);
+        assert!(!r.sent.iter().any(|s| s.starts_with("6:")), "company 6 holds: {:?}", r.sent);
+        assert!(r.printed.iter().any(|l| l.contains(&format!("holding: {held}"))), "the reason is logged too");
+
+        store.set("planner.6", json!("battlebrain"), "runbook", Some(0)).unwrap();
+        let r = replan_round_with(&store, live_of(UNPLANNED_10487), vehicles.clone(), "fr_from={p},fr_to=99,fr_cargo=1",
+                                  json!([{"tool": "openttd.ai.set_setting", "args": {"company": 0.0}}]), bayes_share);
+        let rec = |k: &str| r.records.iter().find(|(x, _)| x == k).unwrap().1.clone();
+        assert!(rec("replan.6")["held"].as_str().unwrap().contains("planned by battlebrain"), "{}", rec("replan.6")["held"]);
+        assert_eq!(rec("replan.6")["held_by"]["holder"], "battlebrain");
+        assert_eq!(rec("replan.0")["held"], json!("1 earlier change(s) for company 1 still wait for the owner's approval"));
+        assert!(r.sent.is_empty(), "{:?}", r.sent);
+    }
+
+    /// A plan of the company still pending (its rows filed under one plan id, fix/approval-plan-batch)
+    /// holds the round: nothing is filed beside it, not even a lost floor, and `held` says why. A
+    /// newer plan withdraws the older one only after the older one settled or expired, never every
+    /// month (run 10487 re-filed the slots monthly, 1952-04 to 1953-10).
+    #[test]
+    fn a_pending_plan_holds_the_round() {
+        let store = Rc::new(Shared::default());
+        let mut planned: Vec<(&str, i64)> = UNPLANNED_10487.to_vec();
+        planned.retain(|(n, _)| !n.starts_with("fr"));
+        planned.extend([("fr_from", 50), ("fr_to", 99), ("fr_cargo", 1)]);
+        let row = |name: &str| json!({"tool": "openttd.ai.set_setting", "args": {"company": 0, "name": name, "value": 1, "plan": "plan-c0-e7-t5"}});
+        let pending = json!([row("fr_from"), row("fr_to"), row("fr_cargo"), row("own_lines")]);
+        let r = replan_round_with(&store, live_of(&planned), json!([]), "fr_from={p},fr_to=99,fr_cargo=1", pending, |_, _| (0.8, 0.6, 0.9));
+        assert!(!r.sent.iter().any(|s| s.starts_with("0:")), "company 0's pending plan holds it: {:?}", r.sent);
+        let rec = &r.records.iter().find(|(k, _)| k == "replan.0").unwrap().1;
+        assert_eq!(rec["held"], json!("4 earlier change(s) for company 1 still wait for the owner's approval"));
+        assert_eq!(rec["sent"], json!([]));
+        assert!(r.sent.iter().any(|s| s.starts_with("6:")), "another company's round goes on: {:?}", r.sent);
+    }
+
+    /// A bot planned already (10487 after 1952-04-15: a slot complete, own_lines 4) whose new plan
+    /// the model holds is offered back the floor it lost, alone; a plan equal to the live settings
+    /// of an unplanned bot files nothing.
+    #[test]
+    fn a_planned_bot_is_offered_its_lost_floors_while_the_plan_holds() {
+        let store = Rc::new(Shared::default());
+        let mut planned: Vec<(&str, i64)> = UNPLANNED_10487.to_vec();
+        planned.retain(|(n, _)| !n.starts_with("fr"));
+        planned.extend([("fr_from", 50), ("fr_to", 99), ("fr_cargo", 1)]);
+        let r = replan_round_with(&store, live_of(&planned), json!([]), "fr_from={p},fr_to=99,fr_cargo=1", json!([]), |_, _| (0.2, 0.1, 0.3));
+        assert_eq!(r.sent, ["0:own_lines@replan", "6:own_lines@replan"], "only the lost floor, while the plan holds");
+        let rec = &r.records.iter().find(|(k, _)| k == "replan.0").unwrap().1;
+        assert!(rec["held"].as_str().unwrap().starts_with("the model holds the current plan"), "{}", rec["held"]);
+        assert_eq!((rec["sent"].clone(), rec["floors"]["lost"].clone()), (json!(["own_lines"]), json!([{"name": "own_lines", "from": 4, "to": 10}])));
+
+        let r = replan_round_with(&store, live_of(UNPLANNED_10487), json!([]), "own_lines=4", json!([]), |_, _| (0.8, 0.6, 0.9));
+        assert!(r.sent.is_empty(), "{:?}", r.sent);
+        assert!(r.printed.iter().any(|l| l.contains("the plan equals the bot's live settings")), "{:?}", r.printed);
+        assert_eq!(r.records.iter().find(|(k, _)| k == "replan.0").unwrap().1["held"], Value::Null);
     }
 
     /// The key's format lives in fr_author.rhai alone: no other script of the library spells it.
