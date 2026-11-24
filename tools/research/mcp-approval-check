@@ -15,9 +15,9 @@
 // 3. Every approval the check left pending is denied again (`prismatic_mcp deny <id>` through POST
 //    /api/console), so the stack is left as it was found.
 //
-// Approving needs the panel's owner secret, which mcp-panel prints once when it starts
-// ("mcp-panel: owner secret <s> ...", in the stack's log). Give it with --owner <s> or
-// PANEL_OWNER_SECRET; it is sent as X-Panel-Owner on every POST, and the browser opens
+// Approving needs the panel's owner secret, which mcp-panel keeps in a 0600 file it names when
+// it starts ($PRISMATIC_PANEL_OWNER_SECRET_FILE, else ~/.config/prismatic/panel-owner-secret). Give
+// it with --owner <s> or PANEL_OWNER_SECRET, else it is read from that file; it is sent as X-Panel-Owner on every POST, and the browser opens
 // <panel>/?owner=<s> first, which sets the page's cookie mcp_owner_<port>. Without it part 1 and
 // the full-queue part are NOT RUN.
 //
@@ -58,7 +58,8 @@ if (!base) { console.error('usage: mcp-approval-check <panel-url> [--owner <secr
 const url = new URL(base);
 const port = url.port || (url.protocol === 'https:' ? '443' : '80');
 if (port === '8800') { console.error('mcp-approval-check: refusing :8800, the owner\'s live panel; run it against a disposable stack'); process.exit(2); }
-const secret = opt('--owner') || process.env.PANEL_OWNER_SECRET || '';
+const ownerFile = process.env.PRISMATIC_PANEL_OWNER_SECRET_FILE || `${process.env.HOME}/.config/prismatic/panel-owner-secret`;
+const secret = opt('--owner') || process.env.PANEL_OWNER_SECRET || (fs.existsSync(ownerFile) ? fs.readFileSync(ownerFile, 'utf8').trim() : '');
 const auth = secret ? { 'X-Panel-Owner': secret } : {};
 
 const results = [];

@@ -14,7 +14,8 @@ research/ai-battle/README.md.
 
 Commands:
   discover   find the SSH-reachable machines on the local /24 and write the local hosts file
-  fetch      download the BaNaNaS contestants into the cache (throwaway loopback -D server)
+  fetch      download the BaNaNaS contestants and the live-like rivals into the cache (throwaway
+             loopback -D server); says which live rival's version the download lacks
   prepare    assemble the arena bundle: base set, AIs, PrismaticAI and referee at a clean commit
   probe      show which hosts are usable now (state, build, load, disk; paused and busy hosts)
   run        schedule matches forever and serve the dashboard (SIGTERM / Ctrl-C stops; STOP holds it)
@@ -27,6 +28,12 @@ Commands:
              leaderboard is derived (the gate)
   fitness    one short local match of the working tree's PrismaticAI against a reference AI; fails
              on a Squirrel error, an unfinished match or a collapsing fleet (the gate, on change)
+  ablate     one local match per PrismaticAI settings variant on one seed and field; --live-like
+             plays the owner's live world instead (battle.json live_like: 1950, the seven live
+             rivals, the live script budget, seed 15805, the unplanned and the planned arm)
+  replay     load a live game's save headless (battle.json replay: 15805's earliest save) with the
+             working tree's PrismaticAI (or --rev's) for N game years and fail when the bot repeats
+             the live one-train failure (trains, months with at most one train, value vs leader)
   power      the recorded battle's noise (split-half Kendall tau of the GA score, the paired
              deviation across seeds) and the held-start pairs a strategy comparison needs for a
              margin (--margin 1.10); reads research/results only, starts nothing
@@ -100,6 +107,35 @@ SQ_ERROR = re.compile(r"\[script:\d\] \[(\d+)\] \[S\] ")
 # The referee's shared producers: an industry whose output rail stations of several companies catch.
 REF_SHARED = re.compile(r"REF S date=(\d+)-(\d+) ind=(\d+) owners=([\d,]+) name=(.*)$")
 REF_TRAINLESS = re.compile(r"REF T date=(\d+)-(\d+) cid=(\d+) rail_stations=(\d+) trainless=(\d+) ids=([\d,]*)")
+# PrismaticAI's yearly growth funnel (RESEARCH-ONLY, PrismaticAI/funnel.nut), one line per mode:
+# "dbg: [script:1] [<company>] [E] FUNNEL year=<y> mode=<mode> <stage>=<n> ...".
+AI_FUNNEL = re.compile(r"\[script:\d\] \[(\d+)\] \[E\] FUNNEL year=(\d+) mode=(\w+) (.*)$")
+# Where each mode's funnel loses, by population, so no loss is compared with one counted in other
+# units: {mode: [(group, stage, the counts lost, the counts it was lost of), ...]}, each count a sum
+# of signed stage counts. Rail discovery is in producers of the last search's census (`served`
+# counts cargoes), building in tries, running in lines; road in tries and vehicles; air in
+# autopilot calls past its caps (each ends short, with no pair, or tried), tries and vehicles.
+FUNNEL_DROPS = {
+    "rail": [("discovery", "ours", [("ours", 1)], [("producers", 1)]),
+             ("discovery", "claimed", [("claimed", 1)], [("producers", 1)]),
+             ("discovery", "served", [("served", 1)], [("producers", 1)]),
+             ("discovery", "no_acceptor", [("no_acceptor", 1)], [("producers", 1)]),
+             ("build", "stations", [("tried", 1), ("stations", -1)], [("tried", 1)]),
+             ("build", "path", [("path_fail", 1)], [("stations", 1)]),
+             ("build", "lay", [("stations", 1), ("path_fail", -1), ("laid", -1)], [("stations", 1)]),
+             ("build", "given_up", [("laid", 1), ("built", -1)], [("laid", 1)]),
+             ("run", "paying", [("lines", 1), ("paying", -1)], [("lines", 1)])],
+    "road": [("build", "stop", [("stop_fail", 1)], [("tried", 1)]),
+             ("build", "network", [("network_fail", 1)], [("tried", 1)]),
+             ("build", "depot", [("depot_fail", 1)], [("tried", 1)]),
+             ("build", "vehicle", [("vehicle_fail", 1)], [("tried", 1)]),
+             ("run", "paying", [("vehicles", 1), ("paying", -1)], [("vehicles", 1)])],
+    "air": [("discovery", "budget", [("short", 1)], [("short", 1), ("no_pair", 1), ("tried", 1)]),
+            ("discovery", "pair", [("no_pair", 1)], [("short", 1), ("no_pair", 1), ("tried", 1)]),
+            ("build", "build", [("tried", 1), ("built", -1)], [("tried", 1)]),
+            ("run", "paying", [("vehicles", 1), ("paying", -1)], [("vehicles", 1)])],
+    "ship": [("run", "paying", [("vehicles", 1), ("paying", -1)], [("vehicles", 1)])],
+}
 
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
             "-o", "ControlMaster=auto", "-o", "ControlPersist=120",
@@ -1048,7 +1084,7 @@ def cmd_fetch(cfg: dict) -> None:
 
     time.sleep(5)
     send("content update", 10)
-    wanted = [c["ai"] for c in cfg["contestants"] if c.get("source") == "bananas"]
+    wanted = fetch_wanted(cfg)
     ids = {}
     for name in dict.fromkeys(wanted):
         mark = len(lines)
@@ -1069,9 +1105,236 @@ def cmd_fetch(cfg: dict) -> None:
     missing = sorted(set(wanted) - set(ids))
     done = sum(1 for line in lines if line.startswith("Completed download"))
     log(f"fetched {done} package(s) for {sorted(ids)}; missing: {missing or 'none'}")
+    for problem in rival_versions(home / "content_download" / "ai", live_like(cfg).get("rivals", [])):
+        log(f"live-like: {problem}")
     if missing:
         sys.exit(12)
 
+
+# ------------------------------------------------------------------------ live-like arena, replay
+#
+# The arena's own world (1960, four rivals, the bot unplanned) is not the owner's live game (1950,
+# seven BaNaNaS rivals, the bot sometimes planned): in live game 15805 PrismaticAI ran one train
+# for eight years, and the arena produced a one-train PrismaticAI in 0.2% of its matches
+# (research/incident-2026-11-23-live-game-15805.md). battle.json `live_like` declares the live
+# world once; `ablate --live-like` plays it, and `replay` loads a live game's own save headless.
+
+def live_like(cfg: dict) -> dict:
+    """battle.json `live_like` (empty when the configuration has none)."""
+    return cfg.get("live_like") or {}
+
+
+def fetch_wanted(cfg: dict) -> list[str]:
+    """The BaNaNaS AIs `fetch` downloads: the arena's contestants and the live-like rivals."""
+    return list(dict.fromkeys([c["ai"] for c in cfg["contestants"] if c.get("source") == "bananas"]
+                              + [r["ai"] for r in live_like(cfg).get("rivals", [])]))
+
+
+def tar_versions(ai_dir: Path, ai: str) -> list[str]:
+    """The versions of `ai` among the content tars of a directory, which the content client names
+    <8 hex digits>-<name with _ for spaces>-<version>.tar (484f4745-AAAHogEx-115.tar)."""
+    pat = re.compile(rf"[0-9a-fA-F]{{8}}-{re.escape(ai.replace(' ', '_'))}-(.+)\.tar")
+    found = (pat.fullmatch(t.name) for t in ai_dir.rglob("*.tar")) if ai_dir.is_dir() else ()
+    return sorted(m.group(1) for m in found if m)
+
+
+def rival_versions(ai_dir: Path, rivals: list[dict]) -> list[str]:
+    """What the AI tars of `ai_dir` lack against the live rivals: an AI with no tar, or none of the
+    version the live game ran. A replayed save asks for the AI it saved; a missing one is replaced
+    by a random AI or left empty, and another version plays another game."""
+    out = []
+    for r in rivals:
+        have = tar_versions(ai_dir, r["ai"])
+        if not have:
+            out.append(f"{r['ai']}: no tar in {ai_dir} (battle.py fetch && battle.py prepare)")
+        elif r.get("version") and r["version"] not in have:
+            out.append(f"{r['ai']}: version {', '.join(have)} in {ai_dir}, the live game ran "
+                       f"{r['version']}")
+    return out
+
+
+def live_like_ablate(cfg: dict, seed: int | None, variants: list[str]) -> tuple[dict, int, list[str], int, list[str]]:
+    """`ablate --live-like`: (config with the live match settings, seed, field, PrismaticAI's slot,
+    variants). The seed defaults to the live game's, the variants to the configured arms; a
+    planned arm names towns and industries by id, so it holds only on the seed it was planned on."""
+    live = live_like(cfg)
+    if not live:
+        raise SystemExit("ablate --live-like: battle.json has no live_like block")
+    out = dict(cfg, match=dict(cfg["match"], **live["match"]))
+    arms = [f"{name}={settings}" for name, settings in live.get("arms", {}).items()]
+    return (out, live["seed"] if seed is None else seed, [r["ai"] for r in live["rivals"]],
+            live.get("slot", 0), variants or arms)
+
+
+CONSOLE_DATE = re.compile(r"Date: (\d{4})-(\d{2})-(\d{2})")
+CONSOLE_COMPANY = re.compile(r"#:(\d+)\([^)]*\) Company Name: '(.*)'  Year Founded: -?\d+  "
+                             r"Money: (-?\d+)  Loan: (-?\d+)  Value: (-?\d+)  "
+                             r"\(T:(\d+), R:(\d+), P:(\d+), S:(\d+)\)\s*(AI)?\s*$")
+
+
+def replay_scripts(console_log: Path) -> tuple[str, str]:
+    """(game_start.scr, monthly.scr) of a replay. A loaded save keeps its own Game Script (the live
+    game runs none), so the referee cannot report: the console does. game_start.scr opens a
+    console log (`script`, written without a GUI too), prints the date and `companies`, and
+    schedules monthly.scr, which prints them again and schedules itself for the next month."""
+    report = "getdate\ncompanies\nschedule on-next-calendar-month scripts/monthly.scr\n"
+    return f'script "{console_log}"\n' + report, report
+
+
+def parse_console(text: str) -> dict[int, list[dict]]:
+    """{company id: [one sample per `companies` report]} from a replay's console log. `companies`
+    numbers companies from 1; the id here is the game's (from 0). Only AI companies count: a save
+    loaded without a network game adds a company for the local player."""
+    series: dict[int, list[dict]] = {}
+    t = ""
+    for line in text.splitlines():
+        d = CONSOLE_DATE.search(line)
+        if d:
+            t = f"{d.group(1)}-{d.group(2)}-{d.group(3)}"
+            continue
+        m = CONSOLE_COMPANY.search(line)
+        if not m or not m.group(10):
+            continue
+        rail, road, air, water = (int(m.group(i)) for i in (6, 7, 8, 9))
+        series.setdefault(int(m.group(1)) - 1, []).append({
+            "t": t, "name": m.group(2), "money": int(m.group(3)), "loan": int(m.group(4)),
+            "value": int(m.group(5)), "rail": rail, "road": road, "air": air, "water": water,
+            "vehicles": rail + road + air + water})
+    return series
+
+
+AI_GONE = re.compile(r"The savegame has an AI by the name '(.*)', version (\d+) which is no longer available")
+
+
+def replay_substitutions(text: str) -> list[str]:
+    """Every AI the save names that the replay could not load (the game then starts a random AI in
+    its place or none): such a replay plays another game, so each one fails it."""
+    return [f"invalid replay: the save's AI {m.group(1)} version {m.group(2)} is not available"
+            for m in AI_GONE.finditer(text)]
+
+
+def replay_copy(src: Path, dst: Path) -> bool:
+    """Copy a save for a replay, an lzma one (tag OTTX, OpenTTD's default) unpacked to an
+    uncompressed one (tag OTTN, the same 4-byte savegame version, then the chunks): a binary built
+    without liblzma (lundra's) loads only that, and the chunks are byte for byte the same. True
+    when it unpacked."""
+    data = src.read_bytes()
+    if data[:4] != b"OTTX":
+        dst.write_bytes(data)
+        return False
+    import lzma
+    dst.write_bytes(b"OTTN" + data[4:8] + lzma.decompress(data[8:]))
+    return True
+
+
+def replay_verdict(series: dict[int, list[dict]], company: int, years: int, rules: dict) -> list[str]:
+    """The replay's failures for the bot's company (empty: PASS). `min_trains`: trains at the end;
+    `one_train_years`: fails when it ran at most one train in every monthly report of the last N
+    years; `min_leader_ratio`: its value over the best other company's at the end. A replay that
+    did not reach `years` of monthly reports fails too: it says nothing about those years."""
+    mine = series.get(company, [])
+    if len(mine) < 12 * years:
+        return [f"company {company}: {len(mine)} monthly report(s), {12 * years} needed: the replay "
+                "did not run its years"]
+    fails, end = [], mine[-1]
+    if end["rail"] < rules.get("min_trains", 2):
+        fails.append(f"company {company}: {end['rail']} train(s) at {end['t']}, at least "
+                     f"{rules.get('min_trains', 2)} wanted")
+    window = mine[-12 * rules.get("one_train_years", 3):]
+    if max(s["rail"] for s in window) <= 1:
+        fails.append(f"company {company}: at most one train from {window[0]['t']} to {end['t']}")
+    rivals = [s[-1] for c, s in series.items() if c != company and s and s[-1]["t"] == end["t"]]
+    leader = max(rivals, key=lambda s: s["value"], default=None)
+    if leader and leader["value"] > 0:
+        ratio = end["value"] / leader["value"]
+        if ratio < rules.get("min_leader_ratio", 0.0):
+            fails.append(f"company {company}: value {end['value']:,} is {ratio:.3f} of the leader "
+                         f"{leader['name']} ({leader['value']:,}), at least "
+                         f"{rules['min_leader_ratio']} wanted")
+    return fails
+
+
+def replay_table(series: dict[int, list[dict]], company: int) -> list[str]:
+    """One line per game year of the replay (its last report): the bot's trains, road vehicles,
+    aircraft and value against the leader's."""
+    out = []
+    mine = series.get(company, [])
+    last = {s["t"][:4]: i for i, s in enumerate(mine)}
+    for year, i in last.items():
+        s = mine[i]
+        others = [o[i] for c, o in series.items() if c != company and len(o) > i]
+        lead = max(others, key=lambda o: o["value"], default={"value": 0, "name": "-", "rail": 0})
+        ratio = s["value"] / lead["value"] if lead["value"] > 0 else 0.0
+        out.append(f"replay: {s['t']}  trains {s['rail']:>3} road {s['road']:>3} air {s['air']:>3}  "
+                   f"value {s['value']:>11,}  leader {lead['name']} {lead['value']:,} "
+                   f"({lead['rail']} trains)  ratio {ratio:.3f}")
+    return out
+
+
+def cmd_replay(cfg: dict, save: str | None, years: int | None, rev: str | None,
+               binary: str | None, log_dir: str | None) -> int:
+    """Load a copy of a live game's save headless (scratch HOME, null drivers) with this tree's
+    PrismaticAI (or the one at `rev`) and the arena's rival tars, run it `years` game years and
+    judge the bot's company by battle.json `replay` rules. The live save is never written."""
+    rep = cfg.get("replay") or {}
+    save_path = expand(save or rep.get("save", ""))
+    years = years or rep.get("years", 4)
+    exe = Path(binary) if binary else REPO / "build" / "openttd"
+    arena = cfg["cache"] / "arena"
+    if not save_path.is_file() or not exe.is_file() or not (arena / "baseset").is_dir():
+        print(f"replay: NOT RUN: needs the save {save_path}, the binary {exe} and an arena cache "
+              f"with a base set at {arena} (battle.py fetch && battle.py prepare)")
+        return 12
+    for problem in rival_versions(arena / "ai", live_like(cfg).get("rivals", [])):
+        print(f"replay: warning: {problem}")
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="battle-replay-") as tmp:
+        home = Path(tmp) / "home"
+        personal = home / "Documents" / "OpenTTD"
+        for sub in ("scripts", "ai", "game"):
+            (personal / sub).mkdir(parents=True)
+        os.symlink(arena / "baseset", personal / "baseset")
+        (home / ".local" / "share").mkdir(parents=True)
+        os.symlink(personal, home / ".local" / "share" / "openttd")   # Linux (XDG)
+        ref_tars = [str(t) for t in (arena / "ai").glob("*.tar") if t.name != "PrismaticAI.tar"]
+        subprocess.run(["cp", "-R", str(arena / "ai" / "library"), *ref_tars, str(personal / "ai")],
+                       check=True)
+        if rev:
+            export_tree(cfg["prismatic"]["path"], rev, personal / "ai" / "PrismaticAI.tar")
+        else:
+            subprocess.run(["cp", "-R", str(REPO / cfg["prismatic"]["path"]), str(personal / "ai")],
+                           check=True)
+        console_log = Path(tmp) / "console.log"
+        start, monthly = replay_scripts(console_log)
+        (personal / "scripts" / "game_start.scr").write_text(start)
+        (personal / "scripts" / "monthly.scr").write_text(monthly)
+        (Path(tmp) / "replay.cfg").write_text("[gui]\nautosave = off\n")
+        copy = Path(tmp) / save_path.name
+        if replay_copy(save_path, copy):
+            print(f"replay: {save_path.name}: lzma save unpacked for a binary built without liblzma")
+        t0 = time.time()
+        proc = subprocess.run(
+            [str(exe), "-c", "replay.cfg", "-x", "-v", f"null:ticks={match_ticks(years)}", "-s", "null",
+             "-m", "null", "-g", str(copy), "-d", "script=1"], cwd=tmp, env=dict(os.environ, HOME=str(home)),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=rep.get("timeout_s", 3600))
+        text = console_log.read_text() if console_log.is_file() else ""
+        if log_dir:
+            Path(log_dir).mkdir(parents=True, exist_ok=True)
+            (Path(log_dir) / "console.log").write_text(text)
+            (Path(log_dir) / "game.log").write_text(proc.stdout)
+    series = parse_console(text)
+    company = rep.get("company", 0)
+    print(f"replay: {save_path.name}, PrismaticAI {'at ' + rev if rev else 'of the working tree'}, "
+          f"company {company}, {years} year(s), exit {proc.returncode}, {time.time() - t0:.0f} s")
+    for line in replay_table(series, company):
+        print(line)
+    fails = replay_substitutions(proc.stdout) + replay_verdict(series, company, years, rep.get("rules", {}))
+    if proc.returncode != 0:
+        fails.insert(0, f"the game exited with {proc.returncode}")
+    for f in fails:
+        print(f"replay: FAIL {f}", file=sys.stderr)
+    print(f"replay: {'FAIL' if fails else 'PASS'}")
+    return 10 if fails else 0
 
 # -------------------------------------------------------------------------------------- matches
 
@@ -1103,7 +1366,11 @@ def battle_cfg_text(mc: dict) -> str:
             f"[game_creation]\nlandscape = {mc['landscape']}\nstarting_year = {mc['start_year']}\n"
             f"map_x = {mc['map_x']}\nmap_y = {mc['map_y']}\n"
             "[gui]\nautosave = off\n[graphicsset]\nname = OpenGFX\n"
-            "[game_scripts]\nBattleReferee =\n")
+            "[game_scripts]\nBattleReferee =\n"
+            # The live stack's script budget (mcp-rhai panel.rs SCRIPT_OPCODES; engine default
+            # 10000): a live-like match gives every AI the opcodes per tick it has live.
+            + (f"[script]\nscript_max_opcode_till_suspend = {mc['script_opcodes']}\n"
+               if mc.get("script_opcodes") else ""))
 
 
 def start_script_text(lineup: list[dict]) -> str:
@@ -1245,6 +1512,63 @@ def parse_trainless(text: str) -> dict[int, list[dict]]:
         ids = {int(i) for i in m.group(6).split(",") if i}
         out.setdefault(cid, []).append({"date": f"{y}-{mo:02d}", "rail": rail, "trainless": bare, "ids": ids})
     return out
+
+
+def parse_funnel(text: str) -> dict[int, list[dict]]:
+    """{company id: [{"year", "mode", <stage>: count, ...}, ...] by year, then mode} from a match
+    log's FUNNEL lines (PrismaticAI/funnel.nut). A repeated year and mode keeps the last line."""
+    by_key: dict[tuple, dict] = {}
+    for line in text.splitlines():
+        m = AI_FUNNEL.search(line)
+        if not m:
+            continue
+        cid, year, mode, fields = m.groups()
+        row = {"year": int(year), "mode": mode}
+        row.update({k: int(v) for k, v in REF_FIELD.findall(fields)})
+        by_key[(int(cid), int(year), mode)] = row
+    out: dict[int, list[dict]] = {}
+    for (cid, _y, _mode), row in sorted(by_key.items()):
+        out.setdefault(cid, []).append(row)
+    return out
+
+
+def funnel_most_lost(row: dict) -> list[tuple[str, str, int, int]]:
+    """Per population of one FUNNEL row (FUNNEL_DROPS, in its order), the stage that lost the largest
+    share of what reached it: [(group, stage, lost, of), ...], ties to the larger loss; a group
+    whose stages lost nothing is left out."""
+    best: dict[str, tuple[str, str, int, int]] = {}
+    for group, stage, lost_terms, of_terms in FUNNEL_DROPS.get(row["mode"], []):
+        lost = sum(sign * row.get(k, 0) for k, sign in lost_terms)
+        of = sum(sign * row.get(k, 0) for k, sign in of_terms)
+        if lost <= 0 or of <= 0:
+            continue
+        b = best.get(group)
+        if b is None or (lost / of, lost) > (b[2] / b[3], b[2]):
+            best[group] = (group, stage, lost, of)
+    return list(best.values())
+
+
+def funnel_text(row: dict) -> str:
+    """One FUNNEL row as the fitness check and the post-mortem print it."""
+    counts = " ".join(f"{k}={v}" for k, v in row.items() if k not in ("year", "mode"))
+    lost = ", ".join(f"{g} {st} {n}/{of}" for g, st, n, of in funnel_most_lost(row))
+    return f"{row['mode']} {row['year']}: {counts}; most lost: {lost or 'none'}"
+
+
+def funnel_gaps(m: dict, keys: list[str]) -> list[str]:
+    """The fitness failures of contestants in `keys` (fitness.must_funnel) whose rail funnel misses a
+    game year the match played whole: the line for year Y comes at the first heartbeat of Y+1, so a
+    match of N years from start_year owes start_year .. start_year+N-2 (`m["funnel"]` by key)."""
+    fails = []
+    for c in m["lineup"]:
+        if c["key"] not in keys:
+            continue
+        start, years = m["match_cfg"]["start_year"], m["years"]
+        seen = {r["year"] for r in m.get("funnel", {}).get(c["key"], []) if r["mode"] == "rail"}
+        missing = [y for y in range(start, start + years - 1) if y not in seen]
+        if missing:
+            fails.append(f"{c['key']}: no_funnel: no FUNNEL rail line for {', '.join(map(str, missing))}")
+    return fails
 
 
 def trainless_stations(m: dict, rules: dict) -> list[str]:
@@ -1400,6 +1724,11 @@ def postmortem(m: dict) -> list[dict]:
                 findings.append(f"{mode} profit/yr {mine:,} vs {theirs:,} "
                                 f"({last.get(mode, 0)} vs {wlast.get(mode, 0)} vehicles)")
         findings += [f"anomaly {a}" for a in f.get("anomalies", [])]
+        # The growth funnel's last year per mode, where the contestant logs one (funnel.nut).
+        last_rows: dict[str, dict] = {}
+        for r in m.get("funnel", {}).get(f["key"], []):
+            last_rows[r["mode"]] = r
+        findings += [f"funnel {funnel_text(r)}" for r in last_rows.values()]
         out.append({"contestant": f["key"], "winner": win,
                     "gap": round(wlast.get("value", 0) / max(1, last.get("value", 1)), 2),
                     "behind_since": behind,
@@ -1784,7 +2113,7 @@ class Orchestrator:
         for m in running:
             d = match_dir(host.root, m)
             parts.append(f"echo '@@@ {m['id']}'; cat {d}/exit_code 2>/dev/null || echo RUNNING; "
-                         f"grep -a -E 'REF Q|\\] \\[S\\] ' {d}/match.log 2>/dev/null | tail -n 4000")
+                         f"grep -a -E 'REF Q|\\] \\[S\\] |\\] \\[E\\] FUNNEL ' {d}/match.log 2>/dev/null | tail -n 4000")
         try:
             r = host.sh("; ".join(parts), timeout=30)
         except subprocess.TimeoutExpired:
@@ -1805,6 +2134,7 @@ class Orchestrator:
             # Company ids follow the start order: a `-g` null-driver game has no human company.
             m["series"] = {lineup[c]["key"]: s for c, s in series.items() if c < len(lineup)}
             m["errors"] = {lineup[c]["key"]: n for c, n in errors.items() if c < len(lineup)}
+            m["funnel"] = {lineup[c]["key"]: r for c, r in parse_funnel(body).items() if c < len(lineup)}
             self.watch(m)
             if status_line.strip() != "RUNNING":
                 self.finish(m, int(status_line.strip() or -1))
@@ -2634,6 +2964,7 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
         fails += [f"{c['key']}: {b}" for b in bad]
     fails += sibling_producers(m)
     fails += trainless_stations(m, fit["rules"])
+    fails += funnel_gaps(m, fit.get("must_funnel", []))
     # A contestant held to run trains ends with at least one: the test_trainless lineup refuses every
     # new line's first train, so a train at the end proves KeepTrainlessLine, the adoption and
     # KeepLinesServed's first train (research/incident-2026-11-23-trainless-lines.md).
@@ -2709,6 +3040,7 @@ def cmd_fitness(cfg: dict) -> int:
             m["status"] = match_status(m, proc.returncode)
             m["shared"] = parse_shared(out)
             m["trainless"] = parse_trainless(out)
+            m["funnel"] = {lineup[c]["key"]: r for c, r in parse_funnel(out).items() if c < len(lineup)}
             for c in lineup:
                 s = m["series"].get(c["key"], [])
                 peak, final = fleet_peak_final(s)
@@ -2723,6 +3055,9 @@ def cmd_fitness(cfg: dict) -> int:
                 if cid < len(lineup) and reps and lineup[cid]["ai"].startswith("PrismaticAI"):
                     print(f"fitness[{i}]: {lineup[cid]['key']:26} rail stations {reps[-1]['rail']:>3}, "
                           f"without a train {reps[-1]['trainless']:>3} ({reps[-1]['date']})")
+            for key, rows in m["funnel"].items():
+                for r in rows:
+                    print(f"fitness[{i}]: {key:26} funnel {funnel_text(r)}")
             fails += [f"[{i}] {f}" for f in fitness_verdict(m, fit)]
     for f in fails:
         print(f"fitness: FAIL {f}", file=sys.stderr)
@@ -2929,14 +3264,17 @@ def cmd_status(cfg: dict) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("command", choices=["discover", "fetch", "prepare", "probe", "run", "status",
-                                        "report", "render", "check", "fitness", "ablate", "reap", "power"])
+                                        "report", "render", "check", "fitness", "ablate", "reap", "power",
+                                        "replay"])
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--allow-dirty", action="store_true",
                     help="prepare: export uncommitted PrismaticAI/referee (records are refused)")
     ap.add_argument("--check", action="store_true", help="report: only check, write nothing")
-    ap.add_argument("--seed", type=int, default=930967890, help="ablate: the map seed")
-    ap.add_argument("--years", type=int, default=6, help="ablate: game years")
+    ap.add_argument("--seed", type=int, help="ablate: the map seed (default 930967890; with "
+                                                   "--live-like the live game's, battle.json live_like.seed)")
+    ap.add_argument("--years", type=int, help="ablate: game years (default 6); replay: game years "
+                                               "after the load (default battle.json replay.years)")
     ap.add_argument("--variant", action="append", default=[],
                     help='ablate: "name=setting=v,setting=v" (the first is the baseline), repeatable')
     ap.add_argument("--field", default="AAAHogEx,AdmiralAI", help="ablate: comma-separated opponents")
@@ -2949,7 +3287,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--match", help="ablate: an arena match as <edition prefix>/<m-NNNN>; takes "
                                     "seed, years, field, slot and settings (variant 'arena') from "
                                     "its record")
-    ap.add_argument("--log-dir", help="ablate: keep each variant's full log (script debug level 4) here")
+    ap.add_argument("--log-dir", help="ablate: keep each variant's full log (script debug level 4) "
+                                      "here; replay: keep its console and game log here")
+    ap.add_argument("--live-like", action="store_true",
+                    help="ablate: the live game's world (battle.json live_like): its match settings, "
+                         "rivals, PrismaticAI's slot, seed and arms (unless --variant names others)")
+    ap.add_argument("--save", help="replay: the live save to load (default battle.json replay.save)")
+    ap.add_argument("--rev", help="replay: PrismaticAI at this commit instead of the working tree")
+    ap.add_argument("--binary", help="replay: the OpenTTD binary (default build/openttd)")
     ap.add_argument("--edition", help="report: a past edition (its arena bundle must still be the "
                                       "prepared one, for its provenance)")
     ap.add_argument("--margin", type=float, default=1.10, help="power: the non-inferiority margin, a value ratio")
@@ -2985,12 +3330,18 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_report(cfg, a.check, a.edition)
     elif a.command == "fitness":
         return cmd_fitness(cfg)
+    elif a.command == "replay":
+        return cmd_replay(cfg, a.save, a.years, a.rev, a.binary, a.log_dir)
     elif a.command == "reap":
         Orchestrator(cfg).reap()
     elif a.command == "ablate":
         field, slot, variants = a.field.split(","), a.slot, list(a.variant)
-        seed, years = a.seed, a.years
-        if a.match:
+        seed, years = (930967890 if a.seed is None else a.seed), (6 if a.years is None else a.years)
+        if a.live_like:
+            cfg, seed, field, slot, variants = live_like_ablate(cfg, a.seed, variants)
+            for problem in rival_versions(cfg["cache"] / "arena" / "ai", live_like(cfg)["rivals"]):
+                print(f"ablate: warning: {problem}")
+        elif a.match:
             r = match_replay_inputs(cfg["results"], a.match)
             seed, years, field, slot = r["seed"], r["years"], r["field"], r["slot"]
             if not any(v.partition("=")[0] == "arena" for v in variants):

@@ -491,6 +491,97 @@ mod tests {
         }
     }
 
+    /// A whole replan round, run as the service runs it once (REPLAN_ONCE=1) over host reads
+    /// stubbed here: one plan for every running PrismaticAI company (one api_botPlanned call), each
+    /// company proposed the settings of its own entry in bot_settings.companies that differ from its
+    /// live ones, sent to that company under replan's name; a company whose key names another
+    /// planner proposes nothing, one the plan has no entry for is said so, and nothing is approved.
+    /// Answers the setting calls as `company:name@writer` and the printed lines.
+    fn replan_round(store: &Rc<Shared>) -> (Vec<String>, Vec<String>, usize) {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let printed = Rc::new(RefCell::new(Vec::new()));
+        let planned = Rc::new(RefCell::new(0usize));
+        let mut e = guard_engine(store.clone(), Rc::new(RefCell::new(Vec::new())));
+        let dynamic = |v: Value| rhai::serde::to_dynamic(v).unwrap();
+        let setting = |name: &str, value: i64| json!({"name": name, "value": value});
+        let live = json!([setting("fr_from", -1), setting("fr_to", -1), setting("fr_cargo", -1), setting("own_lines", 8)]);
+        let bots = json!({"running": [{"id": 0, "name": "P0", "ai": "PrismaticAI", "settings": live},
+                                      {"id": 2, "name": "Hog", "ai": "AAAHogEx", "settings": []},
+                                      {"id": 6, "name": "P6", "ai": "PrismaticAI", "settings": live},
+                                      {"id": 7, "name": "P7", "ai": "PrismaticAI", "settings": live}]});
+        e.register_fn("api_bots", move || dynamic(bots.clone()));
+        let line = |p: i64| json!({"mode": "freight_rail", "cargo": "Coal", "cargo_id": 1,
+                                   "from": {"id": format!("industry:{p}"), "name": format!("Mine {p}")}, "to": {"id": "industry:99", "name": "Plant"}});
+        let entry = |c: f64, p: i64| json!({"company": c, "start_ai": format!("fr_from={p},fr_to=99,fr_cargo=1,own_lines=8"),
+                                            "freight": [{"from": p, "to": 99, "cargo_id": 1, "monthly_profit": 5000.0}]});
+        let plan = json!({"settings": "own_lines=8", "portfolio": {"investment_k": 100, "solver": "knapsack-dp", "chosen": [line(1), line(2)],
+                                                                   "priced": {"lines": 2, "with_route": 2}},
+                          "bot_settings": {"companies": [entry(0.0, 1), entry(6.0, 2)]}});
+        let n = planned.clone();
+        e.register_fn("api_botPlanned", move |_: rhai::Map| { *n.borrow_mut() += 1; dynamic(plan.clone()) });
+        let s = sent.clone();
+        e.register_fn("api_botSetting", move |m: rhai::Map| -> rhai::Dynamic {
+            s.borrow_mut().push(format!("{}:{}@{}", m["company"], m["name"], m["writer"]));
+            let id = s.borrow().len() as i64;
+            dynamic(json!({"status": "pending_approval", "approval_id": id}))
+        });
+        e.register_fn("read", move |uri: &str| -> Result<rhai::Dynamic, Box<rhai::EvalAltResult>> {
+            let v = match uri {
+                "openttd://game/state" => json!({"game_date": "1951-03-01", "game_tick": 5, "data": {"paused": false}}),
+                "openttd://companies" => json!({"data": {"companies": [{"id": 0, "name": "P0", "company_value": 900}, {"id": 2, "name": "Hog", "company_value": 2000},
+                                                                       {"id": 6, "name": "P6", "company_value": 800}, {"id": 7, "name": "P7", "company_value": 700}]}}),
+                "openttd://vehicles" => json!({"data": {"vehicles": [{"owner": 0, "type": "train", "age": 400, "profit_last_year": 9000, "orders": [{"destination": 5}]},
+                                                                     {"owner": 2, "type": "train", "age": 400, "profit_last_year": 20000, "orders": [{"destination": 8}]},
+                                                                     {"owner": 6, "type": "train", "age": 400, "profit_last_year": 7000, "orders": [{"destination": 9}]}]}}),
+                _ => return Err(format!("{uri}: not stubbed").into()),
+            };
+            Ok(dynamic(v))
+        });
+        for f in ["Income", "Expenses", "CompanyValue", "PerformanceRating", "CargoDelivered"] {
+            e.register_fn(format!("openttd_api_ScriptCompany_GetQuarterly{f}"), move |_: rhai::Map| dynamic(json!({"ok": true, "result": 100})));
+        }
+        e.register_fn("api_dbNamedRun", move |m: rhai::Map| {
+            dynamic(if m["name"].to_string() == "company_rank" { json!({"rows": [[1, 4, 900, "1951-03-01"]]}) }
+                    else { json!({"rows": [["1951-02", 900, 10, 50, 5, 1]]}) })
+        });
+        e.register_fn("kernel", move |name: &str, _: rhai::Map| {
+            dynamic(if name == "bayes-update" { json!({"mean": 0.8, "lower": 0.6, "upper": 0.9}) } else { json!({"p50": 10.0, "p80": 12.0, "p90": 14.0}) })
+        });
+        e.register_fn("status", move || dynamic(json!({"pending": []})));
+        e.register_fn("http_timeout", |s: i64| s);
+        e.register_fn("con_say", |_: &str| ());
+        e.register_fn("shared_set", |_: &str, _: rhai::Dynamic| ());
+        e.register_fn("to_json", |_: rhai::Dynamic| String::from("{}"));
+        e.register_fn("mesh_record_write", |_: rhai::Map| -> Result<rhai::Dynamic, Box<rhai::EvalAltResult>> { Err("no mesh session".into()) });
+        e.register_fn("env", |k: &str| if k == "REPLAN_ONCE" { "1".to_string() } else { String::new() });
+        let p = printed.clone();
+        e.on_print(move |t| p.borrow_mut().push(t.to_string()));
+        let script = std::fs::read_to_string(format!("{RHAI_DIR}/replan.rhai")).unwrap();
+        e.run(&script).unwrap_or_else(|err| panic!("{err}"));
+        let n = *planned.borrow();
+        (sent.take(), printed.take(), n)
+    }
+
+    #[test]
+    fn replan_proposes_each_company_of_its_ai_its_own_plan() {
+        let store = Rc::new(Shared::default());
+        let (sent, printed, plans) = replan_round(&store);
+        assert_eq!(plans, 1, "one plan for every company");
+        assert_eq!(sent, ["0:fr_cargo@replan", "0:fr_from@replan", "0:fr_to@replan", "6:fr_cargo@replan", "6:fr_from@replan", "6:fr_to@replan"],
+                   "each company its own entry, only what differs from its live settings");
+        let all = printed.join("\n");
+        assert!(all.contains("fr_from = 1: pending approval #2") && all.contains("fr_from = 2: pending approval #5"), "{all}");
+        assert!(all.contains("plan: 2 line(s), investment 100k, predicted 5000 a month (1 line(s) without a price count as 0)"), "{all}");
+        assert!(all.contains("== company 8 (P7): the plan has no entry for it; nothing proposed"), "{all}");
+        assert!(all.contains("mesh: no mesh session"), "{all}");
+        assert!(!all.contains("(Hog): rank"), "another AI's company is not re-planned: {all}");
+
+        store.set("planner.6", json!("battlebrain"), "runbook", Some(0)).unwrap();
+        let (sent, printed, _) = replan_round(&store);
+        assert_eq!(sent, ["0:fr_cargo@replan", "0:fr_from@replan", "0:fr_to@replan"], "company 6 is held by another planner");
+        assert!(printed.iter().any(|l| l.contains("holding: company 6's freight-line slots are planned by battlebrain")), "{printed:?}");
+    }
+
     /// The key's format lives in fr_author.rhai alone: no other script of the library spells it.
     #[test]
     fn no_other_script_spells_the_planner_key() {
