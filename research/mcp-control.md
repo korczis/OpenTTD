@@ -63,6 +63,7 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
 | `POST /api/approve` | `{"id"}` | the owner's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it, 504 when no decision came |
 | `POST /api/deny` | `{"id"}` | withdraw a pending decision through the same core (`prismatic_mcp deny <id>`): it enacts nothing, so no owner secret is needed. 200 with the approval now `denied`, 404 for one the server does not hold, 409 for one not pending, 504 when the server did not mark it denied. The home page's Deny button calls it |
+| `POST /api/approvers` | `{"add": <client id>}`, `{"remove": "<key prefix>"}` or `{}` | the owner says who may approve from inside the game (`prismatic_mcp approvers add\|remove`, or the list); owner secret, else 401; 422 when the game printed a refusal. `/api/console` refuses every `approvers` line |
 | `POST /api/auto-approve` | `{"on": bool}` | `on: true` needs the owner secret (401 without it); `on: false` is open to anyone |
 | `POST /api/owner/login` | `{"secret"}` | the owner signs this browser in: the secret (from its file, see [the owner secret](#approval-is-bound-to-the-owner)) sets the HttpOnly cookie `mcp_owner_<port>` and answers 204; a wrong one 401 after a delay, five within a minute 429 |
 | `POST /api/owner/logout` | | clears that cookie; 204 |
@@ -1622,6 +1623,11 @@ because each of them runs lines the panel cannot read first. The panel splits a 
 character, so a newline inside a value (an AI's settings, a content query) cannot add a second
 command. Approvals go through `POST /api/approve` with the owner secret, or through the game's own
 console. Withdrawing your own request (`deny`) is still allowed. `mcp-panel-check` tests both cases.
+The same refusal covers who may approve in the game (`approvers`, now `POST /api/approvers` with the
+owner secret), the approval core's standing rules (`rule`, `rules`), its channel and result markers
+(`--via`, `--nonce`: the core trusts a stdin line without `--via` as the console's own) and `deny
+all`, in every spelling `console_word` accepts; Rhai's `console()` goes through `/api/console`, so
+it is refused the same.
 
 ### The panel's Approve and Deny, in Chrome
 
