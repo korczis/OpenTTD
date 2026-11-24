@@ -109,6 +109,118 @@ export function ruleBody({ effect, tool, matcher, useMatcher, persist }) {
   return { body };
 }
 
+/** The approval core's glob (prismatic_mcp_rules.h Glob): `*` any run, `?` one character, a
+ *  backslash makes the next character itself. */
+export function coreGlob(pattern, text) {
+  const p = [...pattern]; const t = [...text];
+  let pi = 0; let ti = 0; let star = -1; let mark = 0;
+  while (ti < t.length) {
+    if (p[pi] === '*') { star = pi++; mark = ti; continue; }
+    if (p[pi] === '?') { pi++; ti++; continue; }
+    if (pi < p.length) {
+      const lit = p[pi] === '\\' && pi + 1 < p.length ? pi + 1 : pi;
+      if (p[lit] === t[ti]) { pi = lit + 1; ti++; continue; }
+    }
+    if (star < 0) return false;
+    pi = star + 1; mark++; ti = mark;
+  }
+  while (p[pi] === '*') pi++;
+  return pi === p.length;
+}
+
+/** Whether a glob names more than one tool (an unescaped `*` or `?`). */
+export const hasWildcard = (g) => /(^|[^\\])(\\\\)*[*?]/.test(g);
+
+/** The values a JSON path ($, .name, ['name'], [n], [*], .*, ..name) selects; null when it does not parse. */
+export function pathSelect(root, path) {
+  if (!path.startsWith('$')) return null;
+  const b = path.slice(1);
+  const kids = (n) => (Array.isArray(n) ? n : n && typeof n === 'object' ? Object.values(n) : []);
+  const descend = (n, key, out) => {
+    if (Array.isArray(n)) n.forEach((v) => descend(v, key, out));
+    else if (n && typeof n === 'object') for (const [k, v] of Object.entries(n)) { if (k === key) out.push(v); descend(v, key, out); }
+  };
+  const end = (from) => { const m = b.slice(from).search(/[.[]/); return m < 0 ? b.length : from + m; };
+  let at = [root]; let i = 0;
+  while (i < b.length) {
+    const next = [];
+    if (b.startsWith('..', i)) {
+      const e = end(i + 2); if (e === i + 2) return null;
+      at.forEach((n) => descend(n, b.slice(i + 2, e), next)); i = e;
+    } else if (b[i] === '.') {
+      const e = end(i + 1); if (e === i + 1) return null;
+      const name = b.slice(i + 1, e);
+      at.forEach((n) => { if (name === '*') next.push(...kids(n)); else if (n && typeof n === 'object' && !Array.isArray(n) && name in n) next.push(n[name]); });
+      i = e;
+    } else if (b[i] === '[') {
+      const close = b.indexOf(']', i); if (close < 0) return null;
+      const inner = b.slice(i + 1, close);
+      const quoted = inner.length >= 2 && (inner[0] === "'" || inner[0] === '"') && inner.at(-1) === inner[0];
+      if (!quoted && inner !== '*' && !/^\d{1,9}$/.test(inner)) return null;
+      at.forEach((n) => {
+        if (inner === '*') next.push(...kids(n));
+        else if (quoted) { const k = inner.slice(1, -1); if (n && typeof n === 'object' && !Array.isArray(n) && k in n) next.push(n[k]); }
+        else if (Array.isArray(n) && Number(inner) < n.length) next.push(n[Number(inner)]);
+      });
+      i = close + 1;
+    } else return null;
+    at = next;
+  }
+  return at;
+}
+
+/** Whether `value` matches the JSON matcher `pattern`, as the approval core decides it
+ *  (prismatic_mcp_rules.h Match; panel.rs core_match is the same). */
+export function coreMatch(pattern, value) {
+  if (pattern && typeof pattern === 'object' && !Array.isArray(pattern)) {
+    return Object.entries(pattern).every(([k, p]) => {
+      if (k === '$in') return Array.isArray(p) && p.some((e) => coreMatch(e, value));
+      if (k === '$ne') return !coreMatch(p, value);
+      if (['$lt', '$lte', '$gt', '$gte'].includes(k)) {
+        if (typeof p !== 'number' || typeof value !== 'number') return false;
+        return k === '$lt' ? value < p : k === '$lte' ? value <= p : k === '$gt' ? value > p : value >= p;
+      }
+      if (k.startsWith('$')) { const f = pathSelect(value, k); return !!f && f.length > 0 && f.every((v) => coreMatch(p, v)); }
+      return !!value && typeof value === 'object' && !Array.isArray(value) && k in value && coreMatch(p, value[k]);
+    });
+  }
+  if (typeof pattern === 'string') return pattern === '*' || coreGlob(pattern, typeof value === 'string' ? value : JSON.stringify(value));
+  if (Array.isArray(pattern)) return Array.isArray(value) && value.length === pattern.length && pattern.every((p, i) => coreMatch(p, value[i]));
+  return typeof value === 'string' ? JSON.stringify(pattern) === value : JSON.stringify(pattern) === JSON.stringify(value);
+}
+
+/** The arguments a matcher is tried on: one that takes both is as broad as none (panel.rs PROBE_ARGS). */
+export const PROBES = [{}, { company: 0, x: 1 }];
+/** Whether a matcher takes any arguments (none, or one that takes every probe). */
+export const broad = (m) => m === null || m === undefined || PROBES.every((p) => coreMatch(m, p));
+/** An MCP tool's action type, the other name a glob matches (openttd.cmd.X -> command.X). */
+export const actionOf = (tool) => String(tool).replace(/^openttd\.cmd\./, 'command.').replace(/^openttd\./, '');
+
+/** What a rule would do now: the ids of the waiting, unexpired approvals it would decide (an allow
+ *  rule never an owner-only one), or why it cannot be made (a matcher that is not JSON, a broad
+ *  allow rule over several tools, which the core refuses). */
+export function dryRun(approvals, { effect, tool, matcher, useMatcher }) {
+  const glob = tool.trim();
+  let m = null;
+  if (useMatcher && matcher.trim()) {
+    try { m = JSON.parse(matcher); } catch (e) { return { error: 'the matcher is not JSON yet' }; }
+  }
+  if (!glob) return { error: 'name a tool or a glob' };
+  if (effect === 'allow' && hasWildcard(glob) && broad(m)) return { error: `too broad: an allow rule for every tool of ${glob} with any arguments is refused; narrow the matcher or name one tool` };
+  const ids = (approvals || []).filter((a) => a.state === 'pending' && !a.expired && !(effect === 'allow' && a.owner_only))
+    .filter((a) => (coreGlob(glob, a.tool) || coreGlob(glob, actionOf(a.tool))) && (m === null || coreMatch(m, a.args)))
+    .map((a) => a.id);
+  return { ids };
+}
+
+/** The dry run as a line. */
+export const dryRunText = (d) => (d.error ? d.error : `Would decide ${d.ids.length} waiting approval${d.ids.length === 1 ? '' : 's'} now${d.ids.length ? `: ${d.ids.map((id) => `#${id}`).join(', ')}` : ''}`);
+
+/** The keys that decide (or pick); a held one never repeats them. */
+export const DECISIVE = new Set(['y', 'a', 'n', 'd', 'Enter', ' ']);
+/** How long after a decision, or after the rows moved under the pointer, a key or click is not taken. */
+export const GUARD_MS = 400;
+
 /** One failed id of a bulk answer as a person reads it. */
 export const failureText = (r) => `#${r.id}: ${r.code} ${(r.answer && (r.answer.error || r.answer.status)) || ''}`.trim();
 
@@ -177,6 +289,7 @@ export function editorHtml(a, { ownerOnly = false } = {}) {
         <textarea id="rule-match" rows="4" spellcheck="false" class="block w-full font-mono text-xs ${UI.input}">${esc(m ? JSON.stringify(m, null, 2) : '{}')}</textarea>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Plain keys match a subset; "$.a.b", "$.list[*]" are JSON paths; a string is a glob ("max_*"); "*" is any present value.</p></div>
       <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-white"><input id="rule-persist" type="checkbox" class="${UI.check}">Keep it across restarts</label>
+      <p id="rule-dryrun" aria-live="polite" class="text-sm font-medium text-gray-900 dark:text-white"></p>
       <p id="rule-error" role="alert" class="hidden text-sm font-medium text-red-600 dark:text-red-500"></p>
       <div class="flex justify-end gap-2"><button type="button" data-rule-cancel class="${UI.secondary}">Cancel</button><button type="submit" class="${UI.primary}">Add rule</button></div>
     </form>
@@ -184,21 +297,29 @@ export function editorHtml(a, { ownerOnly = false } = {}) {
 </div>`;
 }
 
-/** The confirmation of a bulk approval, a Flowbite modal naming the count. */
-export function confirmHtml(n, picked) {
+/** A confirmation, a Flowbite modal: the question and the button that answers yes. */
+export function askHtml(question, yes) {
   return `<div id="approve-confirm" role="dialog" aria-modal="true" aria-labelledby="approve-confirm-title" tabindex="-1" class="fixed inset-0 z-50 flex items-center justify-center w-full h-full p-4 bg-gray-900/50 dark:bg-gray-900/80">
   <div class="relative w-full max-w-md p-4 text-center bg-white rounded-lg shadow-sm dark:bg-gray-700">
-    <h3 id="approve-confirm-title" class="mb-4 text-lg font-normal text-gray-700 dark:text-gray-300">Approve ${n} ${picked ? 'selected ' : ''}approval${n === 1 ? '' : 's'}? The game carries each out at once.</h3>
-    <div class="flex justify-center gap-2"><button type="button" data-confirm="no" class="${UI.secondary}">Cancel</button><button type="button" data-confirm="yes" class="${UI.primary}">Approve ${n}</button></div>
+    <h3 id="approve-confirm-title" class="mb-4 text-lg font-normal text-gray-700 dark:text-gray-300">${esc(question)}</h3>
+    <div class="flex justify-center gap-2"><button type="button" data-confirm="no" class="${UI.secondary}">Cancel</button><button type="button" data-confirm="yes" class="${UI.primary}">${esc(yes)}</button></div>
   </div>
 </div>`;
 }
+
+/** The confirmation of a bulk approval, naming the count. */
+export const confirmHtml = (n, picked) => askHtml(`Approve ${n} ${picked ? 'selected ' : ''}approval${n === 1 ? '' : 's'}? The game carries each out at once.`, `Approve ${n}`);
 
 /* ---- the page ------------------------------------------------------------------------------- */
 
 /** The list's state: the server's last answer, the filter, the picked rows, the rows decided here
  *  that the server still lists, the focused row and the anchor of a Shift+click range. */
-const S = { view: null, filter: filterOf(globalThis.location?.search), picked: new Set(), gone: new Set(), current: null, anchor: null };
+const S = { view: null, filter: filterOf(globalThis.location?.search), picked: new Set(), gone: new Set(), current: null, anchor: null,
+  order: '', movedAt: 0, pointerAt: 0, lockUntil: 0 };
+
+/** Whether a pointer click comes too soon after the rows moved under a pointer that has not moved:
+ *  a double click, or a poll that took a row away above, would otherwise decide another row. */
+const tooSoon = (e) => e.detail > 1 || (e.detail >= 1 && Date.now() - S.movedAt < GUARD_MS && S.pointerAt < S.movedAt);
 
 /** The rows on the page now (the decided ones left out). */
 const shown = () => rowsOf(S.view ? S.view.approvals : [], S.filter).filter((a) => !S.gone.has(a.id));
@@ -208,6 +329,7 @@ function render() {
   if (!root || !S.view) return;
   const rows = shown();
   const ids = rows.map((a) => a.id);
+  if (ids.join() !== S.order) { S.order = ids.join(); S.movedAt = Date.now(); }
   for (const id of [...S.picked]) if (!rows.some((a) => a.id === id && decidable(a))) S.picked.delete(id);
   if (!ids.includes(S.current)) S.current = ids[0] ?? null;
   // Focus survives the redraw: the same control of the same row.
@@ -273,6 +395,7 @@ async function decide(id, approve) {
   // The next row's same control takes the focus (its Yes after a Yes), or the row itself after a key.
   const act = document.activeElement;
   const role = act && act.closest && act.closest('#pending') ? act.dataset.role || 'row' : 'row';
+  S.lockUntil = Date.now() + GUARD_MS;
   S.gone.add(id);
   S.picked.delete(id);
   render();
@@ -288,7 +411,8 @@ async function decideBulk(approve) {
   const rows = shown();
   const ids = bulkIds(rows, S.picked);
   if (!ids.length) return;
-  if (approve && !(await confirmBulk(ids.length, S.picked.size > 0))) return;
+  if (approve && !(await ask(confirmHtml(ids.length, S.picked.size > 0)))) return;
+  S.lockUntil = Date.now() + GUARD_MS;
   ids.forEach((id) => S.gone.add(id));
   S.picked.clear();
   render();
@@ -302,10 +426,10 @@ async function decideBulk(approve) {
   refresh();
 }
 
-/** Ask before a bulk approval: true on Approve, false on Cancel or Escape. */
-function confirmBulk(n, picked) {
+/** Ask first (a bulk approval, removing a rule): true on yes, false on Cancel or Escape. */
+function ask(html) {
   return new Promise((resolve) => {
-    document.body.insertAdjacentHTML('beforeend', confirmHtml(n, picked));
+    document.body.insertAdjacentHTML('beforeend', html);
     const box = $('approve-confirm');
     const done = (ok) => { box.remove(); resolve(ok); };
     box.querySelector('[data-confirm="yes"]').onclick = () => done(true);
@@ -324,10 +448,16 @@ function openEditor(id) {
   const close = () => { box.remove(); focusRow(id, 'always'); };
   box.querySelectorAll('[data-rule-cancel]').forEach((b) => { b.onclick = close; });
   box.onkeydown = (e) => { if (e.key === 'Escape') close(); };
+  const fields = () => ({ effect: box.querySelector('input[name="rule-effect"]:checked').value, tool: $('rule-tool').value,
+    matcher: $('rule-match').value, useMatcher: $('rule-use-match').checked, persist: $('rule-persist').checked });
+  // What the rule would decide now, before it is made (a dry run over the rows the page holds).
+  const preview = () => { $('rule-dryrun').textContent = dryRunText(dryRun(S.view.approvals, fields())); };
+  $('rule-form').oninput = preview;
+  $('rule-form').onchange = preview;
+  preview();
   $('rule-form').onsubmit = async (e) => {
     e.preventDefault();
-    const { body, error } = ruleBody({ effect: box.querySelector('input[name="rule-effect"]:checked').value, tool: $('rule-tool').value,
-      matcher: $('rule-match').value, useMatcher: $('rule-use-match').checked, persist: $('rule-persist').checked });
+    const { body, error } = ruleBody(fields());
     const err = $('rule-error');
     if (error) { err.textContent = error; err.classList.remove('hidden'); return; }
     const r = await api('/api/rules', body, { shownIn: err });
@@ -353,6 +483,8 @@ function pick(id, on, range, role = 'pick') {
 /** The keys of the list, while the focus is in it (never while typing, never in a dialog). */
 function onKey(e) {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  // A held key decides one row, never the queue: no auto-repeat, and none just after a decision.
+  if (DECISIVE.has(e.key) && (e.repeat || (e.key !== ' ' && Date.now() < S.lockUntil))) { e.preventDefault(); return; }
   const t = e.target;
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && t.type !== 'checkbox') return;
   const tr = t.closest('tr[data-row]');
@@ -391,11 +523,13 @@ export function mount() {
     for (const a of shown().filter(decidable)) { if (e.target.checked) S.picked.add(a.id); else S.picked.delete(a.id); }
     render();
   };
-  $('approvals-approve-bulk').onclick = () => decideBulk(true);
-  $('approvals-deny-bulk').onclick = () => decideBulk(false);
+  $('approvals-approve-bulk').onclick = (e) => (tooSoon(e) ? undefined : decideBulk(true));
+  $('approvals-deny-bulk').onclick = (e) => (tooSoon(e) ? undefined : decideBulk(false));
+  document.addEventListener('pointermove', () => { S.pointerAt = Date.now(); }, { passive: true });
   $('pending').addEventListener('click', (e) => {
     const t = e.target.closest('[data-approve],[data-deny],[data-select],[data-always],tr[data-row]');
     if (!t) return;
+    if ((t.dataset.approve || t.dataset.deny) && tooSoon(e)) return undefined;
     if (t.dataset.approve) return decide(Number(t.dataset.approve), true);
     if (t.dataset.deny) return decide(Number(t.dataset.deny), false);
     if (t.dataset.select) return pick(Number(t.dataset.select), t.checked, e.shiftKey);
@@ -406,6 +540,8 @@ export function mount() {
   $('approvals-rules').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-rule-remove]');
     if (!b) return;
+    const rule = (S.view.rules || []).find((r) => String(r.id) === b.dataset.ruleRemove) || { id: b.dataset.ruleRemove, effect: '', tool: '' };
+    if (!(await ask(askHtml(`Remove rule #${rule.id} (${ruleText(rule)})? Requests it would have decided wait for you again.`, 'Remove')))) return;
     b.disabled = true;
     const r = await api('/api/rules/remove', { id: Number(b.dataset.ruleRemove) });
     if (r.ok) notify(`Rule #${r.removed} removed`, 'green');

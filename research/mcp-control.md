@@ -1645,6 +1645,12 @@ built for deciding a long queue fast:
   and `/api/deny/many`, one decision per id through the same core, so each id answers as
   `/api/approve` and `/api/deny` would; failures are named in one red toast. (The core's own `approve
   all` takes a glob, not the rows a person picked; `POST /api/approve/all` offers it to clients.)
+- **Guards against deciding the wrong row.** A held key decides one row, never the queue: auto-repeat
+  of y, a, n, d, Enter and Space is ignored, and no decisive key is taken for 400 ms after a decision
+  (a held Enter on a focused Yes included). A double click decides one row. A pointer click within
+  400 ms after the rows moved (a decision, a poll that took a row away above) is ignored unless the
+  pointer moved since, so the row that slid under a still pointer is never decided by accident; the
+  bulk buttons have the same guard.
 - **Selectors.** Tool and company (when the arguments name one) are derived from the queue, with
   counts; a search box over the id, tool and arguments; expired rows hidden unless asked for. The
   filter lives in the address (`a_tool`, `a_company`, `a_q`, `a_expired`).
@@ -1657,8 +1663,13 @@ built for deciding a long queue fast:
   paths, a string is a glob, `"*"` any present value), allow or deny, and "keep across restarts".
   The core (feature/approval-rules) keeps the rules and applies them to waiting and new approvals,
   deny winning over allow, and records `approved_via` with the rule; each approval it matched shows
-  the rule. Below the table, the rules list shows effect, tool glob, matcher, who made it, hits and
-  whether it is kept, each with Remove. While the core keeps no rules (its queue answers no `rules`)
+  the rule. The editor shows its dry run as it is typed: the waiting, unexpired approvals the rule
+  would decide now (an allow rule never an owner-only one), from the core's matcher mirrored in
+  `approvals.js` (`coreMatch`) and `panel.rs` (`core_match`). An allow rule over several tools that
+  takes any arguments (no matcher, `{}`, `{"$": "*"}`, `{"$ne": null}`, or any matcher that takes
+  both probe argument sets, `PROBE_ARGS`) is called too broad there and refused by `rule_line`, as
+  the core's `BroadAllowRefusal` refuses it. Below the table, the rules list shows effect, tool glob,
+  matcher, who made it, hits and whether it is kept, each with Remove, which asks first. While the core keeps no rules (its queue answers no `rules`)
   the list says so and "Always…" is off.
 - **Every line the panel sends to a core that keeps rules carries its channel**: `--via panel` on
   every approve and deny (one, many, all) and every rule, `--via auto` for the auto-approve switch
@@ -1669,7 +1680,11 @@ built for deciding a long queue fast:
 - **One result line per command.** The bulk and rule routes send `--nonce <n>` and wait only for
   the core's `[approval-core] {"nonce", "ok", "decided", "refused", "skipped", "rule_id", "error"}`
   line with that nonce (`core_line`, `core_result`): 200 when ok, 422 with the core's `error`
-  ("is not a tool glob", "the matcher is not JSON"), 504 when none came within 3 s. A matcher travels as
+  ("is not a tool glob", "the matcher is not JSON"), 504 when none came within 3 s. Per id:
+  `decided` 200, `rejected` 422 with the game's reason (approved and carried out, the command
+  refused), `refused` and `skipped` 409 (an entry is an id or `{id, error}`).
+  `tools/research/mcp-rhai/src/fixtures/approval-core-lines.txt` holds the real core's result lines,
+  and `the_real_cores_result_lines_are_read` reads every one. A matcher travels as
   one console token (`matcher_token`): compact JSON, every `"` as `\"` (the game's tokenizer turns it
   back), every `;` as `\u003b`, the whole quoted, so no text inside it can end the line or add a
   command; a glob holds letters, digits and `. _ - * ?` only (`rule_glob`).

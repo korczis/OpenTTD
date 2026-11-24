@@ -1,0 +1,9 @@
+# The approval core's result lines (feature/approval-rules, src/console_cmds.cpp ConPrismaticMcp),
+# one per command sent with --nonce, as the dedicated server prints them. nlohmann::json orders the
+# keys. The core agent replaces these with lines copied from a real run; panel.rs
+# the_real_cores_result_lines_are_read parses every line.
+[approval-core] {"decided":[11,12],"error":"","nonce":"1700000000001","ok":true,"refused":[13],"rule_id":0,"skipped":[]}
+[approval-core] {"decided":[],"error":"'bad tool' is not a tool glob (e.g. openttd.ai.set_setting, openttd.cmd.*, *)","nonce":"1700000000002","ok":false,"refused":[],"rule_id":0,"skipped":[]}
+[approval-core] {"decided":[24,25],"error":"","nonce":"1700000000003","ok":true,"refused":[],"rule_id":1,"skipped":[]}
+[approval-core] {"decided":[],"error":"","nonce":"1700000000004","ok":true,"refused":[],"rule_id":0,"skipped":[]}
+[2026-11-24 18:00:00] [approval-core] {"decided":[30],"error":"","nonce":"1700000000005","ok":true,"refused":[{"error":"not pending","id":31}],"rejected":[{"error":"not enough cash","id":32}],"rule_id":0,"skipped":[]}

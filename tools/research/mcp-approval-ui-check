@@ -151,6 +151,9 @@ try {
     .waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
   const press = async (kind, id) => {
     await page.evaluate(() => document.querySelectorAll('[data-toast]').forEach((t) => t.remove()));
+    // A person moves the pointer to the next button; a click with no move just after the rows
+    // moved is taken for a double click and ignored (static/approvals.js tooSoon).
+    await page.mouse.move(1, 1);
     await page.locator(`#pending [data-${kind}="${id}"]`).click();
   };
   for (const [kind, id, tone, text, name] of [
@@ -364,8 +367,9 @@ async function bulkPhase(page, secret, earlier) {
   await page.mouse.click(x, y);
   check('Yes approves #11 and the next row\'s Yes is under the pointer', await toast('green', '#11 approved') && await settled(async () => (await under()) === '12'));
   check('the focus moved to #12\'s Yes', await page.evaluate(() => document.activeElement?.dataset.approve) === '12');
+  await page.waitForTimeout(450);
   await page.mouse.click(x, y);
-  check('a second click on the same place approves #12', await toast('green', '#12 approved') && (await state(12)).state === 'consumed');
+  check('a second click on the same place, past the guard, approves #12', await toast('green', '#12 approved') && (await state(12)).state === 'consumed');
   const via = async (id) => ((((await get('/api/resources/decisions')).data || {}).decisions || []).find((d) => d.approval_id === id) || {}).approved_via;
   check('the core records the panel\'s Yes as the panel\'s (--via panel)', await via(11) === 'panel' && await via(12) === 'panel');
   await L('[data-deny="13"]').click();
@@ -430,6 +434,7 @@ async function bulkPhase(page, secret, earlier) {
   await ed.locator('button[type="submit"]').click();
   check('a matcher that is not JSON is refused in the box', await page.locator('#rule-error').filter({ hasText: 'not JSON' }).isVisible() && await ed.count() === 1);
   await page.locator('#rule-match').fill('{"company": 3, "name": "max_*"}');
+  check('the editor says what the rule would decide now', await settled(async () => (await page.locator('#rule-dryrun').textContent()) === 'Would decide 2 waiting approvals now: #24, #25'));
   await page.locator('#rule-persist').check();
   await ed.locator('button[type="submit"]').click();
   check('Add rule makes "always allow" with its matcher', await toast('green', 'Rule #1: always allow openttd.ai.set_setting where {"company":3,"name":"max_*"}') && await ed.count() === 0);
@@ -457,15 +462,78 @@ async function bulkPhase(page, secret, earlier) {
   await page.keyboard.press('Escape');
   check('Escape closes it too', await ed.count() === 0);
   // An allow rule over every AI tool: the owner-only row records the match and still waits for the console.
-  await post('/api/console', { command: "fake add openttd.ai.set_setting {'company':5,'name':'x','value':1}" });
+  await post('/api/console', { command: "fake add openttd.ai.set_setting {'company':1,'name':'x','value':1}" });
   await L('[data-always="28"]').click();
   await page.locator('#rule-tool').fill('openttd.ai.*');
   await page.locator('#rule-use-match').uncheck();
+  check('a broad allow rule is called too broad before it is sent', await settled(async () => (await page.locator('#rule-dryrun').textContent()).startsWith('too broad')));
   await ed.locator('button[type="submit"]').click();
-  check('an allow rule never decides the owner-only row', await toast('green', 'Rule #3: always allow openttd.ai.*') && await settled(async () => (await state(28)).state === 'consumed')
+  check('and the panel refuses it, as the core does', await settled(async () => (await page.locator('#rule-error').textContent()).includes('POST /api/rules: 400 an allow rule for every tool')));
+  await page.locator('#rule-use-match').check();
+  await page.locator('#rule-match').fill('{"company": 1}');
+  check('narrowed, it would decide only #28 (never the owner-only #16)', await settled(async () => (await page.locator('#rule-dryrun').textContent()) === 'Would decide 1 waiting approval now: #28'));
+  await ed.locator('button[type="submit"]').click();
+  check('an allow rule never decides the owner-only row', await toast('green', 'Rule #3: always allow openttd.ai.* where {"company":1}') && await settled(async () => (await state(28)).state === 'consumed')
     && (await state(16)).state === 'pending' && await settled(async () => (await L('tr[data-row="16"]').textContent()).includes('rule #3 allow (console decides)')));
   await page.locator('#approvals-rules [data-rule-remove="2"]').click();
+  check('Remove asks first, naming the rule', await confirm.filter({ hasText: 'Remove rule #2 (always deny openttd.cmd.BuildRoad)?' }).count() === 1);
+  await confirm.locator('[data-confirm="no"]').click();
+  check('Cancel keeps the rule', await confirm.count() === 0 && await page.locator('#approvals-rules [data-rule-remove="2"]').count() === 1);
+  await page.locator('#approvals-rules [data-rule-remove="2"]').click();
+  await confirm.locator('[data-confirm="yes"]').click();
   check('Remove takes rule #2 off the list', await toast('green', 'Rule #2 removed') && await settled(async () => (await page.locator('#approvals-rules [data-rule-remove="2"]').count()) === 0));
+
+  // A rejected command, one and many: approved, carried out, refused by the game, and said so.
+  const add = async (tool, args) => {
+    await post('/api/console', { command: `fake add ${tool} ${args}` });
+    const id = Math.max(...(((await get('/api/resources/approvals')).data || {}).approvals || []).map((a) => a.id));
+    await L(`[data-approve="${id}"]`).waitFor({ timeout: 10000 });
+    return id;
+  };
+  const r1 = await add('openttd.game.set_pause', "{'pause':true,'reject':true}");
+  await page.mouse.move(1, 1);
+  await L(`[data-approve="${r1}"]`).click();
+  check('Yes on a command the game rejects says 422 with the reason', await toast('red', '/api/approve: 422'));
+  const r2 = await add('openttd.game.set_pause', "{'pause':false,'reject':true}");
+  await L(`[data-select="${r2}"]`).click();
+  await page.locator('#approvals-approve-bulk').click();
+  await confirm.locator('[data-confirm="yes"]').click();
+  check('Approve selected names a rejected command with its reason (422)', await toast('red', `#${r2}: 422 #${r2} was approved, but the game rejected it: not enough cash`));
+
+  // A held key decides one row, never the queue; a double click one; a click just after the rows
+  // moved under a still pointer none.
+  const q = [];
+  for (let i = 0; i < 6; i++) q.push(await add('openttd.game.set_pause', `{'pause':${i % 2 === 0},'n':${i}}`));
+  const pending = async (id) => (await state(id)).state === 'pending';
+  await page.waitForTimeout(450);
+  await L(`tr[data-row="${q[0]}"] td:nth-child(3)`).click();
+  for (let i = 0; i < 5; i++) await page.keyboard.down('y');
+  await page.keyboard.up('y');
+  check('a held y (5 keydowns, 4 repeats) decides exactly one row', await settled(async () => (await state(q[0])).state === 'consumed') && await pending(q[1]) && await pending(q[2]));
+  await page.waitForTimeout(450);
+  await L(`[data-approve="${q[1]}"]`).focus();
+  for (let i = 0; i < 5; i++) await page.keyboard.down('Enter');
+  await page.keyboard.up('Enter');
+  check('a held Enter on Yes decides exactly one row', await settled(async () => (await state(q[1])).state === 'consumed') && await pending(q[2]) && await pending(q[3]));
+  await page.waitForTimeout(450);
+  await page.mouse.move(1, 1);
+  await L(`[data-approve="${q[2]}"]`).dblclick();
+  check('a double click on Yes approves one row', await settled(async () => (await state(q[2])).state === 'consumed') && await pending(q[3]) && await pending(q[4]));
+  await page.waitForTimeout(450);
+  const yes4 = await L(`[data-approve="${q[4]}"]`).boundingBox();
+  const [x4, y4] = [yes4.x + yes4.width / 2, yes4.y + yes4.height / 2];
+  await page.mouse.move(x4, y4);
+  await post('/api/console', { command: `fake consume ${q[3]}` });
+  await page.waitForFunction((id) => !document.querySelector(`#pending tr[data-row="${id}"]`), q[3], { polling: 'raf', timeout: 10000 });
+  await page.mouse.down();
+  await page.mouse.up();
+  const under5 = await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest('[data-approve]')?.dataset.approve, [x4, y4]);
+  await page.waitForTimeout(300);
+  check('a click just after a row above left, the pointer still, is not taken', under5 === String(q[5]) && await pending(q[4]) && await pending(q[5]), `under ${under5}`);
+  await page.waitForTimeout(450);
+  await page.mouse.down();
+  await page.mouse.up();
+  check('the same click past the guard is', await settled(async () => (await state(q[5])).state === 'consumed'));
   check('the approvals pages threw no error', errors.length === 0, errors.join('; '));
 
   // The 401 class, closed: as 127.0.0.1 and as localhost, after the launcher's signed-in address

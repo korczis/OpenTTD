@@ -848,23 +848,30 @@ pub fn next_nonce() -> String {
 /// with `id` (and `error` or `reason`).
 fn entry_of(v: &Value) -> Option<(i64, String)> {
     let id = v.as_i64().or_else(|| v["id"].as_i64())?;
-    Some((id, py_str(v.get("error").or(v.get("reason")))))
+    let why = v.get("error").or(v.get("reason")).and_then(Value::as_str).unwrap_or_default();
+    Some((id, why.to_string()))
 }
 
-/// The per-id results of a multi-id core line: decided 200, refused 403, skipped 409, and 504 for
-/// an id the core's answer did not name.
+/// The per-id results of a multi-id core line: decided 200; rejected 422 (approved and carried out,
+/// but the game refused the command, with its reason); refused and skipped 409 (the core would not
+/// decide it: not pending, or not the panel's to decide); 504 for an id the answer does not name.
+/// An entry is an id or `{id, error}` (the core names no reason for a bare id).
 pub fn per_id(ids: &[i64], result: &Value, approve: bool) -> Vec<(i64, u16, Value)> {
     let list = |k: &str| -> Vec<(i64, String)> { result[k].as_array().into_iter().flatten().filter_map(entry_of).collect() };
-    let (decided, refused, skipped) = (list("decided"), list("refused"), list("skipped"));
+    let (decided, refused, skipped, rejected) = (list("decided"), list("refused"), list("skipped"), list("rejected"));
     ids.iter().map(|&id| {
+        let why = |w: &str| if w.is_empty() { "no reason given".to_string() } else { w.to_string() };
+        if let Some((_, w)) = rejected.iter().find(|(d, _)| *d == id) {
+            return (id, 422, json!({"status": "rejected", "error": format!("#{id} was approved, but the game rejected it: {}", why(w)), "approval_id": id}));
+        }
         if decided.iter().any(|(d, _)| *d == id) {
             return (id, 200, json!({"status": if approve { "executed" } else { "denied" }, "approval_id": id}));
         }
-        if let Some((_, why)) = refused.iter().find(|(d, _)| *d == id) {
-            return (id, 403, json!({"error": format!("the approval core refused #{id}: {why}"), "approval_id": id}));
+        if let Some((_, w)) = refused.iter().find(|(d, _)| *d == id) {
+            return (id, 409, json!({"error": format!("the approval core refused #{id}: {}", why(w)), "approval_id": id}));
         }
-        if let Some((_, why)) = skipped.iter().find(|(d, _)| *d == id) {
-            return (id, 409, json!({"error": format!("the approval core skipped #{id}: {why}"), "approval_id": id}));
+        if let Some((_, w)) = skipped.iter().find(|(d, _)| *d == id) {
+            return (id, 409, json!({"error": format!("the approval core skipped #{id}: {}", why(w)), "approval_id": id}));
         }
         (id, 504, json!({"error": format!("the approval core's answer does not name #{id}"), "approval_id": id, "pending_decision": true}))
     }).collect()
@@ -887,6 +894,125 @@ pub fn approvers_line(body: &Value) -> Result<String, String> {
     Ok("prismatic_mcp approvers".into())
 }
 
+/// The approval core's glob (prismatic_mcp_rules.h `Glob`): `*` any run, `?` one character, a
+/// backslash makes the next character itself.
+pub fn core_glob(pattern: &str, text: &str) -> bool {
+    let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
+    let (mut pi, mut ti, mut star, mut mark) = (0usize, 0usize, None::<usize>, 0usize);
+    while ti < t.len() {
+        if pi < p.len() && p[pi] == '*' { star = Some(pi); pi += 1; mark = ti; continue; }
+        if pi < p.len() && p[pi] == '?' { pi += 1; ti += 1; continue; }
+        if pi < p.len() {
+            let lit = if p[pi] == '\\' && pi + 1 < p.len() { pi + 1 } else { pi };
+            if p[lit] == t[ti] { pi = lit + 1; ti += 1; continue; }
+        }
+        let Some(st) = star else { return false };
+        pi = st + 1;
+        mark += 1;
+        ti = mark;
+    }
+    while pi < p.len() && p[pi] == '*' { pi += 1; }
+    pi == p.len()
+}
+
+/// Whether a glob names more than one tool (an unescaped `*` or `?`).
+pub fn has_wildcard(pattern: &str) -> bool {
+    let mut it = pattern.chars();
+    while let Some(c) = it.next() {
+        if c == '\\' { it.next(); continue; }
+        if c == '*' || c == '?' { return true; }
+    }
+    false
+}
+
+/// The values a JSON path (`$`, `.name`, `['name']`, `[n]`, `[*]`, `.*`, `..name`) selects in
+/// `root`; None when it does not parse (prismatic_mcp_rules.h `ParsePath`, `Select`).
+fn path_select<'a>(root: &'a Value, path: &str) -> Option<Vec<&'a Value>> {
+    fn descend<'a>(n: &'a Value, key: &str, out: &mut Vec<&'a Value>) {
+        match n {
+            Value::Object(o) => for (k, v) in o { if k == key { out.push(v); } descend(v, key, out); },
+            Value::Array(a) => for v in a { descend(v, key, out); },
+            _ => {}
+        }
+    }
+    let b = path.strip_prefix('$')?;
+    let mut at = vec![root];
+    let mut i = 0;
+    let end = |from: usize| b[from..].find(['.', '[']).map(|e| from + e).unwrap_or(b.len());
+    while i < b.len() {
+        let mut next = Vec::new();
+        if b[i..].starts_with("..") {
+            let e = end(i + 2);
+            if e == i + 2 { return None; }
+            for n in &at { descend(n, &b[i + 2..e], &mut next); }
+            i = e;
+        } else if b[i..].starts_with('.') {
+            let e = end(i + 1);
+            if e == i + 1 { return None; }
+            let name = &b[i + 1..e];
+            for n in &at {
+                if name == "*" { match n { Value::Array(a) => next.extend(a.iter()), Value::Object(o) => next.extend(o.values()), _ => {} } }
+                else if let Some(v) = n.get(name) { next.push(v); }
+            }
+            i = e;
+        } else if b[i..].starts_with('[') {
+            let close = i + b[i..].find(']')?;
+            let inner = &b[i + 1..close];
+            let quoted = inner.len() >= 2 && (inner.starts_with('\'') || inner.starts_with('"')) && inner.ends_with(&inner[..1]);
+            for n in &at {
+                if inner == "*" { match n { Value::Array(a) => next.extend(a.iter()), Value::Object(o) => next.extend(o.values()), _ => {} } }
+                else if quoted { if let Some(v) = n.get(&inner[1..inner.len() - 1]) { next.push(v); } }
+                else {
+                    if inner.is_empty() || inner.len() > 9 || !inner.bytes().all(|c| c.is_ascii_digit()) { return None; }
+                    if let Some(v) = n.get(inner.parse::<usize>().ok()?) { next.push(v); }
+                }
+            }
+            i = close + 1;
+        } else {
+            return None;
+        }
+        at = next;
+    }
+    Some(at)
+}
+
+/// Whether `value` matches the JSON matcher `pattern`, as the approval core decides it
+/// (prismatic_mcp_rules.h `Match`): an object's plain keys match a subset, `$...` keys are paths
+/// that must select at least one value, every one matching; `$lt` `$lte` `$gt` `$gte` `$in` `$ne`
+/// compare the value itself; `"*"` is any value present, another string a glob over a string or the
+/// JSON text of anything else; an array matches element by element; other scalars by JSON equality
+/// (or a string holding their JSON text).
+pub fn core_match(pattern: &Value, value: &Value) -> bool {
+    match pattern {
+        Value::Object(o) => o.iter().all(|(k, p)| match k.as_str() {
+            "$in" => p.as_array().is_some_and(|a| a.iter().any(|e| core_match(e, value))),
+            "$ne" => !core_match(p, value),
+            op @ ("$lt" | "$lte" | "$gt" | "$gte") => match (value.as_f64(), p.as_f64()) {
+                (Some(a), Some(b)) => match op { "$lt" => a < b, "$lte" => a <= b, "$gt" => a > b, _ => a >= b },
+                _ => false,
+            },
+            k if k.starts_with('$') => path_select(value, k).is_some_and(|found| !found.is_empty() && found.iter().all(|f| core_match(p, f))),
+            k => value.get(k).is_some_and(|v| core_match(p, v)),
+        }),
+        Value::String(p) if p == "*" => true,
+        Value::String(p) => core_glob(p, &value.as_str().map(str::to_string).unwrap_or_else(|| value.to_string())),
+        Value::Array(a) => value.as_array().is_some_and(|v| v.len() == a.len() && a.iter().zip(v).all(|(p, x)| core_match(p, x))),
+        _ => match value.as_str() { Some(s) => pattern.to_string() == s, None => pattern == value },
+    }
+}
+
+/// The argument sets a matcher is tried on to tell whether it narrows anything: one that takes
+/// both is as broad as no matcher at all ({}, {"$": "*"}, {"$ne": null}, ...).
+pub const PROBE_ARGS: &[&str] = &["{}", r#"{"company":0,"x":1}"#];
+
+/// Whether a matcher takes any arguments: none at all, or one that takes every probe.
+pub fn broad_matcher(m: Option<&Value>) -> bool {
+    match m.filter(|m| !m.is_null()) {
+        None => true,
+        Some(m) => PROBE_ARGS.iter().all(|p| core_match(m, &serde_json::from_str(p).unwrap_or(Value::Null))),
+    }
+}
+
 /// `prismatic_mcp rule allow|deny <glob> [<matcher>] [--persist] --via panel`. An allow rule that
 /// names an owner-only tool outright is refused here: the core never lets the panel's rule decide
 /// one (ADR 0038), so it could only ever mislead.
@@ -898,6 +1024,12 @@ pub fn rule_line(effect: &str, tool: &str, m: Option<&Value>, persist: bool) -> 
     let names_owner_only = OWNER_ONLY_TOOLS.iter().any(|o| glob == *o || glob == o.trim_start_matches("openttd."));
     if effect == "allow" && names_owner_only {
         return Err(format!("{glob} is the owner's alone: it is decided at the game's console, and no allow rule of the panel decides it"));
+    }
+    // The core's BroadAllowRefusal, mirrored: an allow rule over several tools that takes any
+    // arguments approves whatever they ask; only the game's console makes one, with --force.
+    if effect == "allow" && has_wildcard(&glob) && broad_matcher(m) {
+        return Err(format!("an allow rule for every tool of '{glob}' with any arguments approves whatever they ask: give a matcher that narrows \
+                            the arguments, name one tool, or make it at the game's console with --force"));
     }
     let words = scope_words(Some(&glob), m)?;
     Ok(format!("prismatic_mcp rule {effect}{words}{} {VIA_PANEL}", if persist { " --persist" } else { "" }))
@@ -1376,7 +1508,7 @@ impl Game {
                 let m = t.get(4).filter(|w| !w.starts_with("--")).and_then(|w| serde_json::from_str::<Value>(w).ok());
                 rules.push(json!({"id": id, "effect": effect, "tool": t[3], "match": m, "created_via": "panel", "hits": 0,
                                   "persisted": t.iter().any(|w| w == "--persist")}));
-                answer(json!({"rule_id": id}));
+                answer(json!({"rule_id": id, "decided": []}));
             }
             (Some("rule"), Some("remove")) => {
                 let id = t.get(3).and_then(|w| w.parse::<i64>().ok());
@@ -1391,10 +1523,11 @@ impl Game {
                 for id in ids {
                     match queue.iter_mut().find(|a| a["id"] == json!(id) && a["state"] == json!("pending")) {
                         Some(a) => { a["state"] = json!(if verb == "approve" { "consumed" } else { "denied" }); decided.push(id); }
-                        None => skipped.push(json!({"id": id, "reason": "not pending"})),
+                        None => skipped.push(json!(id)),
                     }
                 }
-                if !nonce.is_empty() { answer(json!({"decided": decided, "skipped": skipped})); }
+                // As the real core answers: a bare id it would not decide goes under `refused`.
+                if !nonce.is_empty() { answer(json!({"decided": decided, "refused": skipped, "skipped": []})); }
             }
             _ => {}
         }
@@ -4904,9 +5037,11 @@ mod tests {
         assert!(core_result(&lines, "43").is_none() && core_result(&["[approval-core] not json".into()], "1").is_none());
         let (a, b) = (next_nonce(), next_nonce());
         assert!(a != b && a.chars().all(|c| c.is_ascii_digit()), "{a} {b}");
-        let r = per_id(&[1, 2, 3, 4], &json!({"decided": [1], "refused": [{"id": 2, "error": "owner-only"}], "skipped": [{"id": 3, "reason": "not pending"}]}), true);
-        assert_eq!(r.iter().map(|(id, c, _)| (*id, *c)).collect::<Vec<_>>(), [(1, 200), (2, 403), (3, 409), (4, 504)]);
-        assert!(py_str(r[1].2.get("error")).contains("owner-only") && py_str(r[2].2.get("error")).contains("not pending"));
+        let r = per_id(&[1, 2, 3, 4, 5, 6], &json!({"decided": [1, 5], "refused": [{"id": 2, "error": "not pending"}, 6], "skipped": [{"id": 3, "reason": "expired"}],
+                                                    "rejected": [{"id": 5, "error": "not enough cash"}]}), true);
+        assert_eq!(r.iter().map(|(id, c, _)| (*id, *c)).collect::<Vec<_>>(), [(1, 200), (2, 409), (3, 409), (4, 504), (5, 422), (6, 409)]);
+        assert!(py_str(r[1].2.get("error")).contains("not pending") && py_str(r[2].2.get("error")).contains("expired"));
+        assert!(py_str(r[4].2.get("error")).contains("not enough cash") && py_str(r[5].2.get("error")).contains("no reason given"));
         assert_eq!(per_id(&[5], &json!({"decided": [5]}), false)[0].2["status"], "denied");
         // Who may approve in the game.
         assert_eq!(approvers_line(&json!({})).unwrap(), "prismatic_mcp approvers");
@@ -4914,6 +5049,53 @@ mod tests {
         assert_eq!(approvers_line(&json!({"remove": "AbCd+/=_-123"})).unwrap(), "prismatic_mcp approvers remove AbCd+/=_-123");
         for bad in [json!({"add": 0}), json!({"add": "2"}), json!({"remove": "short"}), json!({"remove": "abcdefgh ; approve"})] {
             assert!(approvers_line(&bad).is_err(), "{bad}");
+        }
+    }
+
+    /// The core's matcher and glob, mirrored, and the broad allow rule the core refuses.
+    #[test]
+    fn the_matcher_is_the_cores_and_a_broad_allow_rule_is_refused_as_the_core_refuses_it() {
+        let args = json!({"company": 1, "name": "max_trains", "value": 40, "params": [255, 0, "goal"], "nested": {"a": {"name": "x"}}});
+        for (m, want) in [
+            (json!({}), true), (json!({"company": 1}), true), (json!({"company": 2}), false), (json!({"company": "1"}), true),
+            (json!({"name": "max_*"}), true), (json!({"name": "max_?rains"}), true), (json!({"name": "min_*"}), false),
+            (json!({"value": {"$gte": 0, "$lt": 100}}), true), (json!({"value": {"$gt": 40}}), false), (json!({"company": {"$in": [2, 1]}}), true),
+            (json!({"company": {"$ne": 1}}), false), (json!({"$.params[0]": 255}), true), (json!({"$.params[*]": "*"}), true),
+            (json!({"$.params[*]": 255}), false), (json!({"$..name": "*"}), true), (json!({"$.missing": "*"}), false),
+            (json!({"$['name']": "max_trains"}), true), (json!({"$.params[x]": 1}), false), (json!({"params": [255, 0, "go*"]}), true),
+            (json!({"missing": "*"}), false), (json!({"$": "*"}), true), (json!({"$ne": null}), true), (json!({"$.nested.*.name": "x"}), true),
+        ] {
+            assert_eq!(core_match(&m, &args), want, "{m}");
+        }
+        assert!(core_glob("openttd.cmd.*", "openttd.cmd.BuildRoad") && core_glob("a\\*b", "a*b") && !core_glob("a\\*b", "axb") && core_glob("?", "火"));
+        assert!(has_wildcard("openttd.*") && !has_wildcard("openttd.ai.set_setting"));
+        for broad in [None, Some(json!({})), Some(json!({"$": "*"})), Some(json!({"$ne": null})), Some(Value::Null)] {
+            assert!(broad_matcher(broad.as_ref()), "{broad:?}");
+            assert!(rule_line("allow", "openttd.ai.*", broad.as_ref(), false).unwrap_err().contains("approves whatever they ask"), "{broad:?}");
+            assert!(rule_line("deny", "openttd.ai.*", broad.as_ref(), false).is_ok(), "a broad deny rule is fine");
+            assert!(rule_line("allow", "openttd.ai.set_setting", broad.as_ref(), false).is_ok(), "one tool is fine");
+        }
+        assert!(!broad_matcher(Some(&json!({"company": 1}))) && rule_line("allow", "openttd.ai.*", Some(&json!({"company": 1})), false).is_ok());
+        assert!(!broad_matcher(Some(&json!({"x": "*"}))), "takes one probe, not both");
+    }
+
+    /// Real `[approval-core] {...}` lines of the core (src/fixtures/approval-core-lines.txt, written
+    /// from the real core's output): each is found by its nonce and every id it names is answered.
+    #[test]
+    fn the_real_cores_result_lines_are_read() {
+        let text = include_str!("fixtures/approval-core-lines.txt");
+        let lines: Vec<String> = text.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')).map(String::from).collect();
+        assert!(lines.len() >= 3, "the fixture holds the core's lines");
+        for line in &lines {
+            let raw: Value = serde_json::from_str(&line[line.find(CORE_RESULT).expect("a result line") + CORE_RESULT.len()..]).unwrap();
+            let nonce = raw["nonce"].as_str().map(str::to_string).unwrap_or_else(|| raw["nonce"].to_string());
+            let r = core_result(std::slice::from_ref(line), &nonce).unwrap_or_else(|| panic!("not read: {line}"));
+            assert!(r["ok"].is_boolean(), "{line}");
+            let ids: Vec<i64> = ["decided", "refused", "skipped", "rejected"].iter()
+                .flat_map(|k| r[*k].as_array().cloned().unwrap_or_default()).filter_map(|e| entry_of(&e).map(|(id, _)| id)).collect();
+            for (id, code, out) in per_id(&ids, &r, true) {
+                assert!(code != 504, "#{id} of {line} is not answered: {out}");
+            }
         }
     }
 

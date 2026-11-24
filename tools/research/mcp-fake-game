@@ -126,14 +126,16 @@ const takes = (glob, m, a) => (globMatch(glob, a.tool) || globMatch(glob, a.tool
 /** Approve `a` as the core does: consumed, with the decision recorded. */
 function carryOut(a, via) {
   a.state = 'consumed';
-  const o = OUTCOME[a.id] || (rules ? { command_result: 'succeeded', verdict: 'VERIFIED_SUCCESS' } : null);
+  const reject = rules && a.args && a.args.reject ? { command_result: 'rejected', verdict: 'VERIFIED_FAILURE', error: 'not enough cash' } : null;
+  const o = OUTCOME[a.id] || reject || (rules ? { command_result: 'succeeded', verdict: 'VERIFIED_SUCCESS' } : null);
   if (o) decisions.push({ decision_id: 100 + a.id, approval_id: a.id, action: a.tool, approved_via: via, error: '', ...o });
+  return o;
 }
 /** The standing rules over every waiting approval: deny wins, then allow; a panel's rule never
- *  decides an owner-only tool (its approval only records the match). Answers how many it decided. */
+ *  decides an owner-only tool (its approval only records the match). Answers the ids it decided. */
 function applyRules() {
-  if (!rules) return 0;
-  let n = 0;
+  if (!rules) return [];
+  const n = [];
   for (const a of queue.filter((x) => x.state === 'pending' && !x.expired)) {
     const hit = (effect) => rules.find((r) => r.effect === effect && takes(r.tool, r.match, a));
     const r = hit('deny') || hit('allow');
@@ -141,7 +143,7 @@ function applyRules() {
     const decides = !(r.effect === 'allow' && OWNER_ONLY.includes(a.tool) && r.created_via === 'panel');
     a.matched_rule = { id: r.id, effect: r.effect, decides };
     if (!decides) continue;
-    r.hits++; n++;
+    r.hits++; n.push(a.id);
     if (r.effect === 'deny') a.state = 'denied'; else carryOut(a, `rule #${r.id}`);
   }
   return n;
@@ -193,7 +195,7 @@ function rulesLine(w) {
     const r = { id: nextRule++, effect: w[2], tool: s.glob, match: s.m, created_via: s.via, created_tick: 1000, hits: 0, persisted: s.persist };
     rules.push(r);
     const n = applyRules();
-    say(`Rule #${r.id} added: always ${r.effect} ${r.tool}; it decided ${n} waiting approval(s).`);
+    say(`Rule #${r.id} added: always ${r.effect} ${r.tool}; it decided ${n.length} waiting approval(s).`);
     result(w, { rule_id: r.id, decided: n });
     return true;
   }
@@ -214,18 +216,21 @@ function decideLine(w) {
   const ids = [];
   for (const x of w.slice(2)) { if (!/^\d+$/.test(x)) break; ids.push(Number(x)); }
   const via = flag(w, '--via') || 'console';
-  const out = { decided: [], refused: [], skipped: [] };
+  // As the real core answers: an id it would not decide goes under `refused`; one it approved whose
+  // command the game rejected under `rejected` with the reason.
+  const out = { decided: [], refused: [], skipped: [], rejected: [] };
   for (const id of ids) {
     const a = queue.find((x) => x.id === id);
-    if (!a || a.state !== 'pending') { say(`Approval #${id} is not pending.`); out.skipped.push({ id, reason: 'not pending' }); continue; }
+    if (!a || a.state !== 'pending') { say(`Approval #${id} is not pending.`); out.refused.push({ id, error: 'not pending' }); continue; }
     if (w[1] === 'deny') {
-      if (ignored.has(a.id)) { say(`(fake) deny #${a.id} ignored`); out.skipped.push({ id, reason: 'ignored' }); continue; }
+      if (ignored.has(a.id)) { say(`(fake) deny #${a.id} ignored`); out.skipped.push(id); continue; }
       a.state = 'denied';
       say(`Denied approval #${a.id}.`);
     } else {
       if (OWNER_ONLY.includes(a.tool) && via !== 'console') { say(`Refused #${id}: the owner approves it at the console.`); out.refused.push({ id, error: 'owner-only' }); continue; }
-      carryOut(a, via);
+      const o = carryOut(a, via);
       say(`Approved #${a.id}: carried out.`);
+      if (o && o.command_result === 'rejected') { out.rejected.push({ id, error: o.error }); continue; }
     }
     out.decided.push(id);
   }
@@ -258,7 +263,7 @@ export function consoleLine(line) {
   if (w[0] === 'fake' && w[1] === 'add') {
     const id = Math.max(0, ...queue.map((a) => a.id)) + 1;
     queue.push(approval(id, w[2], JSON.parse((w[3] || '{}').replace(/'/g, '"'))));
-    say(`(fake) #${id} waits; rules decided ${applyRules()}`);
+    say(`(fake) #${id} waits; rules decided ${applyRules().length}`);
     return undefined;
   }
   if (w[0] === 'prismatic_mcp' && (w[1] === 'approve' || w[1] === 'deny')) return decideLine(w);

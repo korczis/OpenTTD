@@ -128,3 +128,52 @@ test('the rules list, the bulk confirmation and a failed id', () => {
   assert.equal(A.failureText({ id: 3, code: 409, answer: { error: 'approval #3 is consumed, not pending' } }), '#3: 409 approval #3 is consumed, not pending');
   assert.equal(A.failureText({ id: 4, code: 504, answer: null }), '#4: 504');
 });
+
+test("the core's matcher and glob, mirrored (panel.rs core_match has the same cases)", () => {
+  const args = { company: 1, name: 'max_trains', value: 40, params: [255, 0, 'goal'], nested: { a: { name: 'x' } } };
+  for (const [m, want] of [
+    [{}, true], [{ company: 1 }, true], [{ company: 2 }, false], [{ company: '1' }, true], [{ name: 'max_*' }, true],
+    [{ name: 'max_?rains' }, true], [{ name: 'min_*' }, false], [{ value: { $gte: 0, $lt: 100 } }, true], [{ value: { $gt: 40 } }, false],
+    [{ value: { $lte: 40 } }, true], [{ value: { $lt: 'x' } }, false], [{ company: { $in: [2, 1] } }, true], [{ company: { $in: 1 } }, false],
+    [{ company: { $ne: 1 } }, false], [{ '$.params[0]': 255 }, true], [{ '$.params[*]': '*' }, true], [{ '$.params[*]': 255 }, false],
+    [{ '$..name': '*' }, true], [{ '$.missing': '*' }, false], [{ "$['name']": 'max_trains' }, true], [{ "$['nope']": 1 }, false],
+    [{ '$.params[x]': 1 }, false], [{ '$.params[9]': 1 }, false], [{ params: [255, 0, 'go*'] }, true], [{ params: [255] }, false],
+    [{ missing: '*' }, false], [{ $: '*' }, true], [{ $ne: null }, true], [{ '$.nested.*.name': 'x' }, true], [{ 'x$': 1 }, false],
+    [{ '$x': 1 }, false], [{ '$.': 1 }, false], [{ '$..': 1 }, false], [{ '$[0': 1 }, false], [{ '$.params.*': '*' }, true],
+  ]) assert.equal(A.coreMatch(m, args), want, JSON.stringify(m));
+  assert.equal(A.coreMatch(5, '5'), true, 'a number against the string of its JSON text');
+  assert.equal(A.coreMatch(null, null), true);
+  assert.equal(A.coreMatch({ a: 1 }, null), false);
+  assert.ok(A.coreGlob('openttd.cmd.*', 'openttd.cmd.BuildRoad') && A.coreGlob('a\\*b', 'a*b') && !A.coreGlob('a\\*b', 'axb') && A.coreGlob('?', '火'));
+  assert.ok(!A.coreGlob('a', 'ab') && A.coreGlob('*', '') && A.coreGlob('a**', 'a'));
+  assert.ok(A.hasWildcard('openttd.*') && A.hasWildcard('a?') && !A.hasWildcard('a\\*') && !A.hasWildcard('openttd.ai.set_setting'));
+  assert.equal(A.pathSelect({ a: 1 }, 'a'), null, 'a path starts with $');
+  assert.deepEqual(A.pathSelect({ a: [1, 2] }, '$.a[*]'), [1, 2]);
+  assert.deepEqual(A.pathSelect({ a: { b: 1, c: 2 } }, '$.a.*'), [1, 2]);
+  assert.deepEqual(A.pathSelect([{ name: 1 }, { k: { name: 2 } }], '$..name'), [1, 2]);
+  assert.equal(A.actionOf('openttd.cmd.BuildRoad'), 'command.BuildRoad');
+  assert.equal(A.actionOf('openttd.ai.set_setting'), 'ai.set_setting');
+});
+
+test('a broad matcher, and the dry run of a rule over the rows the page holds', () => {
+  for (const m of [null, undefined, {}, { $: '*' }, { $ne: null }]) assert.ok(A.broad(m), JSON.stringify(m));
+  assert.ok(!A.broad({ company: 1 }) && !A.broad({ x: '*' }));
+  const rows = [row(1, 'openttd.ai.set_setting', { company: 1, name: 'max_trains' }), row(2, 'openttd.ai.set_setting', { company: 2, name: 'max_trains' }),
+    row(3, 'openttd.ai.set_settings', { company: 1 }, { owner_only: true }), row(4, 'openttd.ai.set_setting', { company: 1 }, { expired: true }),
+    row(5, 'openttd.cmd.BuildRoad', { company: 1 }), row(6, 'openttd.ai.set_setting', { company: 1 }, { state: 'consumed' })];
+  const f = { effect: 'allow', tool: 'openttd.ai.*', matcher: '{"company": 1}', useMatcher: true };
+  assert.deepEqual(A.dryRun(rows, f), { ids: [1] }, 'never an owner-only, expired or decided row for allow');
+  assert.deepEqual(A.dryRun(rows, { ...f, effect: 'deny' }), { ids: [1, 3] }, 'a deny rule takes an owner-only one');
+  assert.deepEqual(A.dryRun(rows, { ...f, tool: 'command.Build*' }), { ids: [5] }, 'the action type matches too');
+  assert.match(A.dryRun(rows, { ...f, useMatcher: false }).error, /^too broad/);
+  assert.match(A.dryRun(rows, { ...f, matcher: '{"$ne": null}' }).error, /^too broad/);
+  assert.deepEqual(A.dryRun(rows, { ...f, tool: 'openttd.ai.set_setting', useMatcher: false }), { ids: [1, 2] }, 'one tool with any arguments is fine');
+  assert.match(A.dryRun(rows, { ...f, matcher: '{nope' }).error, /not JSON/);
+  assert.match(A.dryRun(rows, { ...f, tool: ' ' }).error, /name a tool/);
+  assert.equal(A.dryRunText({ ids: [] }), 'Would decide 0 waiting approvals now');
+  assert.equal(A.dryRunText({ ids: [7] }), 'Would decide 1 waiting approval now: #7');
+  assert.equal(A.dryRunText({ ids: [7, 8] }), 'Would decide 2 waiting approvals now: #7, #8');
+  assert.equal(A.dryRunText({ error: 'x' }), 'x');
+  assert.match(A.askHtml('Remove rule #2 (<b>)?', 'Remove'), /Remove rule #2 \(&lt;b&gt;\)\?/);
+  assert.ok(A.DECISIVE.has('Enter') && A.DECISIVE.has(' ') && !A.DECISIVE.has('j') && A.GUARD_MS === 400);
+});
