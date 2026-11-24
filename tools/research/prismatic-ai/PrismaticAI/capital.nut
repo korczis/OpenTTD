@@ -28,13 +28,20 @@
  *   1  keep = max(2 * cash_reserve, quarter running cost) + one loan interval, then RepaySurplus.
  *      StayAfloat borrows in loan intervals, so only a real shortfall of a whole interval now
  *      triggers a rescue (and the freeze behind it).
- *   2  and before repaying: the best measured investment (CapitalBest). A vehicle more on a road,
- *      air or water route is bought while the bank holds keep plus its price, then the candidates
- *      are measured again; a train more on a rail line whose steward target exceeds its running
- *      trains is left to ReconcileLines (lines.nut FundTrain pays from the bank once it holds the
- *      reserve and the price). What the best candidate still needs is held back from repayment, so
- *      the next heartbeats' earnings pay for it; a hold that lasts over a full quarter is dropped
- *      and its candidate skipped for that quarter. With no candidate, the loan is repaid as before.
+ *   2  and before repaying: the best measured investment (CapitalBest), bought while the bank holds
+ *      keep plus its price, then the candidates are measured again. One more vehicle on a road, air
+ *      or water route; or one more train on a rail line that earns, under trains_max, with half a
+ *      trainload waiting or its source station rating the cargo below steward_rating, a source
+ *      platform free and its newest train STEWARD_SETTLE_DAYS old (the in-bot steward's target
+ *      follows). InvestSurplus (fleet.nut) never buys a train, and the steward's monthly round asks
+ *      for one only on its stricter rules, so idle money did not reach rail: in the owner's game of
+ *      seed 10487 company 0 held 165M with 40 trains, and the fitness check's self-steward
+ *      contestant went from 61k to 885k on 32 vehicles in 1964-65. Where an external steward set a
+ *      line's target, only a train it wants and lacks is funded: the money is held and
+ *      ReconcileLines (lines.nut FundTrain) buys it. What the best candidate still needs is held
+ *      back from repayment, so the next heartbeats' earnings pay for it; a hold that lasts over a
+ *      full quarter is dropped and its candidate skipped for that quarter. With no candidate, the
+ *      loan is repaid as before.
  *   3  and a new air route once the previous quarter left money idle at every call (no loan, at
  *      least one plane's price above keep) and the air fleet is proven (CapitalAirProven), one
  *      unproven route at a time, built by AutopilotAir before the repayment.
@@ -67,10 +74,11 @@ function PrismaticAI::CapitalFullYear() {
 	return now - AIDate.GetDate(AIDate.GetYear(now) - 1, 1, 1);
 }
 
-/* The candidate {key, price, profit, sample, rail} with the best return (profit a year per unit of
- * price) whose payback is within invest_ppv_div years, or null. Vehicles: one more on a road, air
- * or water route, behind the fleet's guards. Rail: one more train on a line whose steward target
- * (EffectiveTarget) exceeds its running trains, under trains_max, not halted. */
+/* The candidate {key, price, profit, sample, rail, ...} with the best return (profit a year per
+ * unit of price) whose payback is within invest_ppv_div years, or null. Vehicles: one more on a
+ * road, air or water route, behind the fleet's guards. Rail: one more train on a line that is not
+ * halted and runs under trains_max, by the demand rules of level 2 above (`buys`), or one an
+ * external steward's target asks for (`buys` false: held for ReconcileLines). */
 function PrismaticAI::CapitalBest(b) {
 	local full = PrismaticAI.CapitalFullYear(), div = max(1, b.invest_ppv_div);
 	local best = null;
@@ -99,17 +107,34 @@ function PrismaticAI::CapitalBest(b) {
 	}
 	foreach (i, line in RAIL_LINES) {
 		if (line.closed || PrismaticAI.LineHalted(line)) continue;
-		local k = "line" + (i + 1);
+		local slot = i + 1, k = "line" + slot;
 		if (CAPITAL.skip.rawin(k)) continue;
-		local want = this.EffectiveTarget(i + 1, "trains");
-		local trains = PrismaticAI.TrainsOf(line), running = 0, judged = 0, profit = 0;
+		local trains = PrismaticAI.TrainsOf(line), running = 0, judged = 0, profit = 0, newest = -1, capacity = 0;
 		foreach (t in trains) {
 			if (this.selling.rawin(t)) continue;
 			running++;
+			capacity += max(0, AIVehicle.GetCapacity(t, line.cargo));
+			if (newest == -1 || AIVehicle.GetAge(t) < newest) newest = AIVehicle.GetAge(t);
 			if (AIVehicle.GetAge(t) >= full) { judged++; profit += AIVehicle.GetProfitLastYear(t); }
 		}
-		if (running == 0 || judged == 0 || running >= min(want, line.trains_max)) continue;
-		local c = {key = k, price = PrismaticAI.TrainPrice(trains[0]), profit = profit / judged, sample = trains[0], rail = true};
+		if (running == 0 || judged == 0 || running >= line.trains_max) continue;
+		/* An external steward's target decides the line: only a train it wants and lacks is funded. */
+		local external = PrismaticAI.LineTarget(slot, "trains");
+		if (external >= 0 && running >= external) continue;
+		/* Otherwise demand is the steward's own signals, read here so idle money buys the train the
+		 * monthly round has not asked for yet: half a trainload waiting (the double-track rule), or the
+		 * source station rating the cargo below steward_rating; a source platform free for it, and the
+		 * newest train STEWARD_SETTLE_DAYS old, so each train's effect is measured before the next. */
+		local buys = external < 0;
+		if (buys) {
+			if (!this.steward_on || newest < STEWARD_SETTLE_DAYS) continue;
+			local free = (("platforms" in line) ? line.platforms : 1) - PrismaticAI.TrainsLoadingAt(line, line.a);
+			local rating = PrismaticAI.SourceRating(line), rating_low = AIController.GetSetting("steward_rating");
+			local wants = 2 * PrismaticAI.LineWaiting(line) * running >= capacity || (rating_low > 0 && rating >= 0 && rating < rating_low);
+			if (free <= 0 || !wants) continue;
+		}
+		local c = {key = k, price = PrismaticAI.TrainPrice(trains[0]), profit = profit / judged, sample = trains[0], rail = true,
+			slot = slot, line = line, running = running, buys = buys};
 		if (PrismaticAI.CapitalBetter(c, best, div)) best = c;
 	}
 	return best;
@@ -203,21 +228,28 @@ function PrismaticAI::AllocateCapital(b, afloat) {
 		best = this.CapitalBest(b);
 		if (best == null) break;
 		local bank = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
-		if (!best.rail && bank - keep >= best.price) {
-			local nv = AIVehicle.CloneVehicle(PrismaticAI.DepotFor(best.sample), best.sample, true);
+		if ((!best.rail || best.buys) && bank - keep >= best.price) {
+			local nv = AIVehicle.CloneVehicle(best.rail ? best.line.depot : PrismaticAI.DepotFor(best.sample), best.sample, true);
 			if (!AIVehicle.IsValidVehicle(nv)) {
-				AILog.Warning("PrismaticAI: capital: no vehicle more on route " + best.key + ": " + AIError.GetLastErrorString() + "; skipped this quarter");
+				AILog.Warning("PrismaticAI: capital: no vehicle more on " + best.key + ": " + AIError.GetLastErrorString() + "; skipped this quarter");
 				CAPITAL.skip[best.key] <- true;
 				continue;
 			}
 			AIVehicle.StartStopVehicle(nv);
+			/* The in-bot steward's target follows, so ReconcileLines keeps the train instead of selling
+			 * it as one above target (lines.nut). */
+			if (best.rail) {
+				local cur = this.self_targets.rawin(best.slot) ? this.self_targets[best.slot] : {trains = -1, wagons = -1};
+				this.self_targets[best.slot] <- {trains = best.running + 1, wagons = cur.wagons};
+			}
 			CAPITAL.bought++;
 			CAPITAL.spent += best.price;
-			AILog.Info("PrismaticAI: capital: vehicle " + nv + " on route " + best.key + ", " + best.profit + " a year a vehicle on a price of " +
+			AILog.Info("PrismaticAI: capital: " + (best.rail ? "train " : "vehicle ") + nv + " on " + (best.rail ? "rail " : "route ") + best.key + ", " + best.profit + " a year a vehicle on a price of " +
 				best.price + " (bank " + bank + ", keep " + keep + ")");
 			continue;
 		}
-		/* Not yet affordable, or a train ReconcileLines buys: the money stays for it, for a quarter at most. */
+		/* Not yet affordable, or a train an external steward wants (ReconcileLines buys it): the money
+		 * stays for it, for a quarter at most. */
 		if (CAPITAL.hold_key != best.key) {
 			CAPITAL.hold_key = best.key;
 			CAPITAL.hold_quarter = q;
