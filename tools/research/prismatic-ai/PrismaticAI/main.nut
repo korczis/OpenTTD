@@ -425,9 +425,10 @@ function PrismaticAI::Behaviour() {
  * claimed first was gone. Over four seeds (15805, 2927, 31337, 4242; ablations against the seven
  * live AIs, 2026-11-24) a planned start cost 21.8% (geometric, planned against unplanned in one
  * tree) on master, 22.5% with the pair after the first own line only, and 3.5% with this order
- * (+10.6%, -2.5%, -21.2%, +2.1%; research/results ablation-20261124T1739* to T1820*). On seed 31337
- * the pair, tried once its bound ran out (heartbeat 1951-04 to 1952-08), still cost 21%; without the bound it was never built there, and two
- * of four seeds never built it at all. The wait is not saved: a load starts it again. */
+ * (+10.6%, -2.5%, -21.2%, +2.1%; research/results ablation-20261124T1739* to T1820*). On seed
+ * 31337 the pair, tried once its bound ran out (heartbeat 1951-04 to 1952-08), still cost 21%;
+ * without the bound it was never built there, and two of four seeds never built it at all. The
+ * wait is not saved: a load starts it again. */
 const PAIR_WAIT_DAYS = 730;
 
 function PrismaticAI::PairDue(b) {
