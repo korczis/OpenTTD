@@ -146,6 +146,14 @@ Generated from each document's title and first paragraph (`tools/surfaces/surfac
 | [ablation-20261119T094213-seed1251879686](results/ablation-20261119T094213-seed1251879686.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
 | [ablation-20261119T131147-seed1807087905](results/ablation-20261119T131147-seed1807087905.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
 | [ablation-20261119T140023-seed725554694](results/ablation-20261119T140023-seed725554694.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261124T165730-seed15805](results/ablation-20261124T165730-seed15805.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261124T170132-seed2927](results/ablation-20261124T170132-seed2927.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261124T170455-seed31337](results/ablation-20261124T170455-seed31337.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261124T170702-seed4242](results/ablation-20261124T170702-seed4242.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261124T173942-seed15805](results/ablation-20261124T173942-seed15805.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261124T181319-seed2927](results/ablation-20261124T181319-seed2927.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261124T181712-seed31337](results/ablation-20261124T181712-seed31337.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261124T182047-seed4242](results/ablation-20261124T182047-seed4242.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
 | [battle-20261119T053541-155d18ea](results/battle-20261119T053541-155d18ea.md) | Derived from battle-20261119T053541-155d18ea.json by tools/research/ai-battle/battle.py report; do not edit. |
 | [battle-20261119T054742-91a72662](results/battle-20261119T054742-91a72662.md) | Derived from battle-20261119T054742-91a72662.json by tools/research/ai-battle/battle.py report; do not edit. |
 | [battle-20261119T060827-361b802f](results/battle-20261119T060827-361b802f.md) | Derived from battle-20261119T060827-361b802f.json by tools/research/ai-battle/battle.py report; do not edit. |

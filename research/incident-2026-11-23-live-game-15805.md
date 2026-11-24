@@ -233,8 +233,14 @@ On a mature map, more own lines do not help much. In the headless replay of the 
 by a rival's rail station, and the holder moved 72-91% of their output. The levers left are two.
 One is growing the lines that already earn (more trains, second tracks). The other is claiming
 producers in the first one or two years, before AAAHogEx takes them. In this game AAAHogEx's log
-scored all four producers it later held on 1950-02-15. Neither lever is
-implemented.
+scored all four producers it later held on 1950-02-15. The second lever is partly in place since
+2026-11-24 (`fix/prismatic-planned-and-early-rail`):
+- The unplanned bot already built an own freight line in every heartbeat it could afford from the
+  first one on, right after one air route.
+- A planned bot now does the same. Before, it built the panel's passenger pair first and stopped
+  at `own_lines=4`.
+- What is not addressed is the build rate: one line per heartbeat, and months of game time in path
+  search per line. That bot still ran 2 trains in 1951-01 to AAAHogEx's 6 on seed 15805.
 
 <!-- open-finding kind=staged -->
 The planner still hands company 0 producers that AAAHogEx holds. The first line of the plan of
