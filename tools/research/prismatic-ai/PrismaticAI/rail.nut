@@ -175,8 +175,15 @@ function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, fro
 	budget = min(RAIL_NODES_MAX, max(RAIL_NODES_MIN, budget));
 	local budget0 = budget;
 	while (!open.IsEmpty() && budget-- > 0) {
-		/* A search can take months: the maintenance tick keeps the lines served meanwhile (steward.nut). */
-		if (budget % MAINT_YIELD_NODES == 0) PrismaticAI.MaintenanceYield();
+		/* A search can take months: the maintenance tick keeps the lines served meanwhile (steward.nut),
+		 * and the growth funnel closes a game year that ends inside it (funnel.nut FunnelRoll). Without
+		 * the roll, a heartbeat whose searches ran from 1962 to 1964 on the fitness seed (a 258-tile
+		 * double track, three searches of 80-96 days each) left 1963 with no FUNNEL line, and the
+		 * fitness check failed `no_funnel`. */
+		if (budget % MAINT_YIELD_NODES == 0) {
+			PrismaticAI.MaintenanceYield();
+			PrismaticAI.FunnelRoll();
+		}
 		local cur = open.Pop();
 		if (cur == to) {
 			RAIL_LAST_NODES = budget0 - budget;
