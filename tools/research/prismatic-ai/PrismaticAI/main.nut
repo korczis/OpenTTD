@@ -422,10 +422,12 @@ function PrismaticAI::Behaviour() {
  * PAIR_WAIT_DAYS. Built first, the pair held the first own line back for months of path search:
  * on ablation seed 15805 (2026-11-23) the first heartbeat ran to 1950-11-15 instead of
  * 1950-04-13, Plondham - Ponninghall failed after 176 days, and the coal mine the unplanned bot
- * claimed first was gone. Over four seeds a planned start then cost 21.8% (geometric) against
- * the unplanned bot; with the pair after the first own line only it still cost 22%, and with this
- * order about 2%, inside the noise (research/results ablation-*-seed15805 and its siblings of
- * 2026-11-24, scratch design note). The wait is not saved: a load starts it again. */
+ * claimed first was gone. Over four seeds (15805, 2927, 31337, 4242; ablations against the seven
+ * live AIs, 2026-11-24) a planned start cost 21.8% (geometric, planned against unplanned in one
+ * tree) on master, 22.5% with the pair after the first own line only, and 3.5% with this order
+ * (+10.6%, -2.5%, -21.2%, +2.1%; research/results ablation-20261124T1739* to T1820*). On seed 31337
+ * the pair, built in 1951-04, still cost 21%; without the bound it was never built there, and two
+ * of four seeds never built it at all. The wait is not saved: a load starts it again. */
 const PAIR_WAIT_DAYS = 730;
 
 function PrismaticAI::PairDue(b) {
