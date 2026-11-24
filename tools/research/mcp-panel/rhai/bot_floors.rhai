@@ -11,7 +11,10 @@
 //
 // This library is the panel's one copy of those floors. guard() keeps a proposal from dropping
 // them. The Rust test `the_floors_are_main_nuts_autopilot_block` (src/rhai_shared.rs) reads
-// main.nut and fails when the block and FLOORS drift apart.
+// main.nut and fails when the block and FLOORS drift apart. Should the bot apply the floors planned
+// or not (`if (b.grows)`), the guard costs nothing: the values it files are the ones the bot holds.
+// planned() can only err towards the floors: the bot counts a slot only when all three are set,
+// and also checks it and waits for two reads that agree (main.nut FreightLines).
 //
 // It names no setting of a line (rule project.decision-authority-boundaries B2). The groups of a
 // line come from the names the bot declares: x_from/x_to/x_cargo is a freight line, x_a/x_b a

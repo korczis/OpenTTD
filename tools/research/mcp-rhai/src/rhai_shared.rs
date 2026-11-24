@@ -603,10 +603,15 @@ mod tests {
     }
 
     /// PrismaticAI's autopilot floors are kept once on the panel's side (bot_floors.rhai), and
-    /// that copy is main.nut's `if (b.autopiloted)` block: each `max(b.x, CONST)` an at_least, each
+    /// that copy is main.nut's floor block: each `max(b.x, CONST)` an at_least, each
     /// `min(b.x, CONST)` an at_most, each `b.x = n` an equals, with the AUTOPILOT_* values main.nut
-    /// declares. The planned rule bot_floors applies (one freight line or pair complete) and the
-    /// autopilot default are main.nut's and info.nut's too.
+    /// declares. The block is the first `if (b.autopiloted) {` or `if (b.grows) {` that assigns
+    /// AUTOPILOT_OWN_LINES: master applies the floors to an unplanned bot only, and a branch that
+    /// applies them planned or not (fix/prismatic-planned-and-early-rail) keeps the same five
+    /// assignments. bot_floors' planned rule (one freight line or pair complete) is main.nut's, and
+    /// can only err towards the floors: the bot counts a slot only when all three are set, and also
+    /// checks it and waits for two reads that agree (FreightLines, #271). The autopilot default is
+    /// info.nut's.
     #[test]
     fn the_floors_are_main_nuts_autopilot_block() {
         let bot = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../prismatic-ai/PrismaticAI");
@@ -615,28 +620,36 @@ mod tests {
             .filter_map(|l| l.trim().strip_prefix("const AUTOPILOT_"))
             .filter_map(|l| { let (k, v) = l.split_once('=')?; Some((format!("AUTOPILOT_{}", k.trim()), v.trim().trim_end_matches(';').trim().parse().ok()?)) })
             .collect();
-        let block: Vec<&str> = main.split("if (b.autopiloted) {").nth(1).expect("main.nut has the autopiloted block")
-            .lines().map(str::trim).take_while(|l| *l != "}").filter(|l| !l.is_empty()).collect();
+        let block: Vec<&str> = ["if (b.autopiloted) {", "if (b.grows) {"].iter()
+            .flat_map(|open| main.split(open).skip(1))
+            .map(|after| after.lines().map(str::trim).take_while(|l| *l != "}").filter(|l| !l.is_empty() && !l.starts_with("/*") && !l.starts_with('*')).collect::<Vec<_>>())
+            .find(|b| b.iter().any(|l| l.contains("AUTOPILOT_OWN_LINES")))
+            .expect("main.nut has a floor block that assigns AUTOPILOT_OWN_LINES");
         let mut want = serde_json::Map::new();
+        // A floor is `b.x = max(b.x, AUTOPILOT_*)`, `b.x = min(b.x, AUTOPILOT_*)` or `b.x = <n>`;
+        // any other line of the block (a log line, a call) is not one.
         for l in &block {
-            let (lhs, rhs) = l.trim_end_matches(';').split_once(" = ").unwrap_or_else(|| panic!("not an assignment: {l}"));
-            let name = lhs.trim().strip_prefix("b.").unwrap().to_string();
+            let Some((lhs, rhs)) = l.trim_end_matches(';').split_once(" = ") else { continue };
+            let Some(name) = lhs.trim().strip_prefix("b.") else { continue };
             let floor = if let Some(args) = rhs.strip_prefix("max(").or_else(|| rhs.strip_prefix("min(")) {
-                let c = args.trim_end_matches(')').split(", ").nth(1).unwrap();
+                let Some(c) = args.trim_end_matches(')').split(", ").nth(1).filter(|c| c.starts_with("AUTOPILOT_")) else { continue };
                 let kind = if rhs.starts_with("max(") { "at_least" } else { "at_most" };
                 json!({kind: consts.get(c).unwrap_or_else(|| panic!("{c} is not an AUTOPILOT_ const: {consts:?}"))})
+            } else if let Ok(n) = rhs.trim().parse::<i64>() {
+                json!({"equals": n})
             } else {
-                json!({"equals": rhs.parse::<i64>().unwrap_or_else(|_| panic!("{l}"))})
+                continue;
             };
-            want.insert(name, floor);
+            want.insert(name.to_string(), floor);
         }
         assert!(want.len() >= 4, "the block was read: {block:?}");
         let (got, _) = eval_with(&Rc::new(Shared::default()), r#"import "bot_floors" as bf; bf::floors()"#);
         assert_eq!(got["floors"], Value::Object(want), "bot_floors.rhai FLOORS drifted from main.nut's autopiloted block");
-        assert!(main.contains("b.planned <- b.freight.len() > 0 || (b.air_a >= 0 && b.air_b >= 0) || (b.rail_a >= 0 && b.rail_b >= 0);"),
-                "main.nut's planned rule changed: bot_floors::planned follows it");
-        assert!(main.contains("b.autopiloted <- b.autopilot == 1 && !b.planned;"), "the floors apply to an unplanned bot with the autopilot on");
-        assert!(main.contains("if (line.from >= 0 && line.to >= 0 && line.cargo >= 0) out.push(line);"), "a freight line is complete when all three are set");
+        let planned = main.lines().map(str::trim).find(|l| l.starts_with("b.planned <-")).expect("main.nut names when the bot is planned");
+        for part in ["b.freight.len() > 0", "(b.air_a >= 0 && b.air_b >= 0)", "(b.rail_a >= 0 && b.rail_b >= 0)"] {
+            assert!(planned.contains(part), "main.nut's planned rule changed ({planned}): bot_floors::planned follows it");
+        }
+        assert!(main.contains("if (line.from >= 0 && line.to >= 0 && line.cargo >= 0)"), "the bot counts a freight line only when all three are set");
         let info = std::fs::read_to_string(bot.join("info.nut")).unwrap();
         let decl = info.split(&format!("name = \"{}\"", got["name"].as_str().unwrap())).nth(1).expect("info.nut declares the autopilot setting");
         let decl = decl.split('}').next().unwrap();
