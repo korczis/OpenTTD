@@ -330,6 +330,7 @@ mod tests {
             store.get(key).map(|en| rhai::serde::to_dynamic(en.value).unwrap()).unwrap_or(rhai::Dynamic::UNIT)
         });
         e.register_fn("env", |_: &str| String::new());
+        e.register_fn("status", || -> rhai::Dynamic { rhai::serde::to_dynamic(json!({"event_seq": 9})).unwrap() });
         e.register_fn("api_bots", || -> rhai::Dynamic {
             let names = ["fr_from", "fr_to", "fr_cargo", "fr2_from", "rail_a", "own_lines"];
             rhai::serde::to_dynamic(json!({"running": [{"id": 0, "name": "Prismatic", "ai": "PrismaticAI",
@@ -371,8 +372,11 @@ mod tests {
         let store = Rc::new(Shared::default());
         let script = r#"import "build_plan" as bp;
             let r = bp::apply_as(#{ build: #{ settings: #{ fr_from: 3, fr_to: 18, fr_cargo: 7, rail_a: 2 } } }, "ask_relay");
-            #{ withheld: r.withheld, pending: r.pending.len(), held: r.held, first: r.lines[0] }"#;
+            #{ withheld: r.withheld, pending: r.pending.len(), held: r.held, first: r.lines[0], plan: r.plan }"#;
         let (r, sent) = eval_with(&store, script);
+        // One plan id for the whole call, derived from the company and the panel's event sequence
+        // (no game here: tick 0), so the game settles these settings together.
+        assert_eq!(r["plan"], json!("plan-c0-e9-t0"), "one plan id per apply_to: {r}");
         // Each call names its writer, so the panel's own check of planner.0 (POST /api/bots/setting)
         // lets the freight-line slots through.
         assert_eq!(sent, ["fr_cargo@ask_relay", "fr_from@ask_relay", "fr_to@ask_relay", "rail_a@ask_relay"], "unset: as before");

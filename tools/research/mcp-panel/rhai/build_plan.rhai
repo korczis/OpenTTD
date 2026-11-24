@@ -52,8 +52,10 @@ fn apply_as(a, writer) { apply_to(a, writer, running_bot()) }
 /// from rows of plans months apart (run 12609: #227, #460, #461 completed fr10 over nine months).
 fn plan_id(company) {
     let tick = 0;
+    let seq = 0;
     try { tick = read("openttd://game/state").game_tick ?? 0; } catch { }
-    `plan-c${company}-e${status().event_seq ?? 0}-t${tick}`
+    try { seq = status().event_seq ?? 0; } catch { }
+    `plan-c${company}-e${seq}-t${tick}`
 }
 
 fn apply_to(a, writer, bot) {
