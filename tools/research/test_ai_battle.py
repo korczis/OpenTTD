@@ -216,6 +216,138 @@ class FitnessRun(unittest.TestCase):
         self.assertNotIn("AAAHogEx: trainless", err.getvalue())
 
 
+def funnel(year, cid, mode, fields, level="E"):
+    return f"[2026-11-24 10:00:00] dbg: [script:1] [{cid}] [{level}] FUNNEL year={year} mode={mode} {fields}"
+
+
+RAIL_ROW = ("hb=40 short_hb=3 idle_hb=0 searches=12 found=2 producers=40 ours=3 claimed=20 small=6 "
+            "served=5 no_acceptor=8 pairs_tried=4 tried=4 stations=2 path_fail=1 laid=1 built=1 "
+            "single_track=1 trainless=0 loco_refused_cash=0 trained=1 lines=3 paying=2 trains=5 trains_added=2")
+
+
+class GrowthFunnel(unittest.TestCase):
+    """PrismaticAI's yearly FUNNEL lines (PrismaticAI/funnel.nut): parsed per company, the stage that
+    lost most, the fitness failure of a missing year, the post-mortem, the fitness print and the
+    orchestrator's poll (research/growth-funnel.md)."""
+
+    def test_parse_keeps_the_last_line_of_a_year_and_mode_and_only_error_level(self):
+        text = "\n".join([funnel(1951, 0, "rail", "tried=1"), funnel(1951, 0, "rail", RAIL_ROW),
+                          funnel(1951, 0, "road", "tried=3 stop_fail=2 built=1 vehicles=2 paying=1"),
+                          funnel(1950, 2, "air", "short=4 tried=1 built=1"),
+                          funnel(1952, 0, "rail", "tried=9", level="I"),
+                          "dbg: [script:1] [0] [E] FUNNEL year=x mode=rail tried=1"])
+        got = battle.parse_funnel(text)
+        self.assertEqual(sorted(got), [0, 2])
+        self.assertEqual([(r["year"], r["mode"]) for r in got[0]], [(1951, "rail"), (1951, "road")])
+        self.assertEqual((got[0][0]["claimed"], got[0][0]["trains_added"]), (20, 2))
+        self.assertEqual(got[2], [{"year": 1950, "mode": "air", "short": 4, "tried": 1, "built": 1}])
+
+    def test_most_lost_is_the_largest_share_and_none_without_a_loss(self):
+        row = {"year": 1951, "mode": "rail"}
+        row.update({k: int(v) for k, v in battle.REF_FIELD.findall(RAIL_ROW)})
+        # Per population: producers, tries, lines. Stations lost 2 of 4 tries ties path 1 of 2
+        # stations at a half; the tie goes to the larger loss.
+        self.assertEqual(battle.funnel_most_lost(row), [("discovery", "claimed", 20, 40),
+                                                        ("build", "stations", 2, 4), ("run", "paying", 1, 3)])
+        row.update(claimed=0, ours=0, served=0, no_acceptor=0, lines=0, paying=0)
+        self.assertEqual(battle.funnel_most_lost(row), [("build", "stations", 2, 4)])
+        self.assertEqual(battle.funnel_most_lost({"year": 1951, "mode": "air", "tried": 0}), [])
+        self.assertEqual(battle.funnel_most_lost({"year": 1951, "mode": "unknown", "tried": 5}), [])
+        text = battle.funnel_text({"year": 1951, "mode": "road", "tried": 4, "stop_fail": 3})
+        self.assertEqual(text, "road 1951: tried=4 stop_fail=3; most lost: build stop 3/4")
+        self.assertEqual(battle.funnel_text({"year": 1951, "mode": "ship", "vehicles": 0}),
+                         "ship 1951: vehicles=0; most lost: none")
+
+    def test_a_held_contestant_owes_a_rail_line_for_every_whole_year(self):
+        m = {"lineup": [{"key": "P", "ai": "PrismaticAI"}, {"key": "Q", "ai": "PrismaticAI"}],
+             "years": 3, "match_cfg": {"start_year": 1950}, "status": "done", "errors": {},
+             "series": {"P": [], "Q": []},
+             "funnel": {"P": [{"year": 1950, "mode": "rail"}, {"year": 1951, "mode": "road"}]}}
+        self.assertEqual(battle.funnel_gaps(m, ["P"]), ["P: no_funnel: no FUNNEL rail line for 1951"])
+        self.assertEqual(battle.funnel_gaps(m, []), [])
+        fit = {"rules": {}, "must_be_healthy": [], "must_funnel": ["P", "Q"]}
+        fails = battle.fitness_verdict(m, fit)
+        self.assertIn("P: no_funnel: no FUNNEL rail line for 1951", fails)
+        self.assertIn("Q: no_funnel: no FUNNEL rail line for 1950, 1951", fails)
+
+    def test_postmortem_carries_the_last_funnel_year_of_each_mode(self):
+        lineup = [{"key": "W", "ai": "W"}, {"key": "P", "ai": "PrismaticAI"}]
+        m = {"lineup": lineup, "errors": {}, "series": {
+            "W": [{"t": "1952-01", "value": 1000, "vehicles": 10, "income": 10}],
+            "P": [{"t": "1952-01", "value": 100, "vehicles": 10, "income": 10}]},
+            "funnel": {"P": [{"year": 1950, "mode": "rail", "tried": 9, "stations": 0},
+                             {"year": 1951, "mode": "rail", "tried": 2, "stations": 1, "laid": 1, "built": 1}]}}
+        m["standings"] = battle.standings_of(m)
+        pm = battle.postmortem(m)
+        self.assertIn("funnel rail 1951: tried=2 stations=1 laid=1 built=1; most lost: build stations 1/2", pm[0]["findings"])
+        self.assertFalse(any("1950" in f for f in pm[0]["findings"]))
+
+    def test_fitness_prints_each_funnel_line_and_fails_a_missing_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            repo = tmp / "repo"
+            (repo / "build").mkdir(parents=True)
+            (repo / "ai" / "PrismaticAI").mkdir(parents=True)
+            (repo / "referee" / "BattleReferee").mkdir(parents=True)
+            lines = [ref(1960, 1, c, 10, veh=1) for c in range(3)] + \
+                    [ref(1962, 1, c, 20 + c, veh=2) for c in range(3)] + \
+                    [funnel(1960, 0, "rail", "tried=2 stations=1 laid=1 built=1"), funnel(1960, 0, "road", "tried=1 built=1"),
+                     funnel(1961, 0, "rail", "tried=0"), funnel(1960, 1, "rail", "tried=1"),
+                     funnel(1960, 9, "rail", "tried=1")]
+            fake = repo / "build" / "openttd"
+            fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\n")
+            fake.chmod(0o755)
+            arena = tmp / "cache" / "arena"
+            (arena / "baseset").mkdir(parents=True)
+            (arena / "ai" / "library").mkdir(parents=True)
+            (arena / "ai" / "AAAHogEx.tar").write_bytes(b"")
+            cfg = {"cache": tmp / "cache", "prismatic": {"path": "ai/PrismaticAI"},
+                   "referee": {"path": "referee/BattleReferee"},
+                   "match": {"years": 2, "start_year": 1960, "landscape": "temperate", "map_x": 8, "map_y": 8},
+                   "fitness": {"years": 2, "seed": 1, "rules": {}, "must_be_healthy": [],
+                               "must_funnel": ["P a", "P b"],
+                               "lineups": [[{"ai": "PrismaticAI", "label": "P a"},
+                                            {"ai": "PrismaticAI", "label": "P b"}, {"ai": "AAAHogEx"}]]}}
+            old = battle.REPO
+            battle.REPO = repo
+            out, err = io.StringIO(), io.StringIO()
+            try:
+                with redirect_stdout(out), redirect_stderr(err):
+                    code = battle.cmd_fitness(cfg)
+            finally:
+                battle.REPO = old
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        self.assertIn("P a                        funnel rail 1960: tried=2 stations=1 laid=1 built=1; most lost: build stations 1/2",
+                      out.getvalue())
+        self.assertIn("P a                        funnel road 1960: tried=1 built=1; most lost: none", out.getvalue())
+        self.assertIn("P b                        funnel rail 1960: tried=1; most lost: build stations 1/1", out.getvalue())
+        # Company 9 is not in the lineup; 1961, the last year, is not owed by a match of two years.
+        self.assertNotIn("tried=1; most lost: build stations 1/1\nfitness[0]: P b", out.getvalue())
+        self.assertIn("fitness: PASS", out.getvalue())
+
+    def test_the_orchestrator_poll_reads_funnel_lines_into_the_match(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            orch, host = Guards.orchestrator(tmp)
+            host.state = "online"
+            m = {"id": "m-0001", "host": "h", "edition": "e1", "status": "running", "started_at": 0.0, "seed": 1,
+                 "ticks": 1,
+                 "lineup": [{"key": "A", "ai": "PrismaticAI"}, {"key": "B", "ai": "B"}], "years": 2,
+                 "match_cfg": MC, "series": {}, "errors": {}}
+            orch.matches = {"m-0001": m}
+            body = "\n".join([ref(1960, 1, 0, 5), ref(1960, 1, 1, 6), funnel(1960, 0, "rail", "tried=3 stations=1")])
+            seen = []
+
+            def sh(script, timeout=60):
+                seen.append(script)
+                return subprocess.CompletedProcess(script, 0, f"@@@ m-0001\nRUNNING\n{body}\n", "")
+            host.sh = sh
+            with mock.patch.object(battle, "log"):
+                orch.poll_host(host)
+        self.assertIn("\\] \\[E\\] FUNNEL ", seen[0])
+        self.assertEqual(m["funnel"], {"A": [{"year": 1960, "mode": "rail", "tried": 3, "stations": 1}]})
+
+
 class MatchContract(unittest.TestCase):
     def test_done_needs_exit_zero_and_final_year(self):
         m = match("m-0001", "h", 1, [3, 2, 1])

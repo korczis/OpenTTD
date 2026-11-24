@@ -348,6 +348,14 @@ The first editions showed two failures. The battle now catches both by itself.
   stations kept a year
   ([incident 2026-11-23](../incident-2026-11-23-trainless-lines.md)).
 
+- **The growth funnel (2026-11-24).** Each PrismaticAI logs one
+  `FUNNEL year=<y> mode=<mode> <stage>=<n> ...` line per mode once a game year
+  (`PrismaticAI/funnel.nut`, [growth funnel](../growth-funnel.md)). `battle.py fitness` prints each
+  of them with `most lost:`, the stage of each population (discovery, build, run) that lost the
+  largest share, and the post-mortem of an arena match carries each mode's last line
+  (`parse_funnel`). It fails with `no_funnel: no FUNNEL rail line for <years>` for a contestant
+  in `fitness.must_funnel` whose rail line is missing for a year the match played whole.
+
 **A planned bot that hoards (2026-11-22).** In the owner's live co-play game, company 0 was a
 planned PrismaticAI (`b.planned` in `main.nut`: the panel had set its rail pair). It kept 35-37
 vehicles from 1955 to 1960 while its bank balance grew from 0.6M to 3.77M: five game years of

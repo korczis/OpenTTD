@@ -116,6 +116,7 @@ require("air.nut");
 require("rail.nut");
 require("fleet.nut");
 require("lines.nut");
+require("funnel.nut");
 require("steward.nut");
 require("autopilot.nut");
 require("catchment.nut");
@@ -186,18 +187,21 @@ function PrismaticAI::BuildStarterRoute(aggressiveness, used_towns) {
 
 /* One attempt at a bus route in `town`. See BuildStarterRoute. */
 function PrismaticAI::BuildRouteInTown(town, aggressiveness) {
+	PrismaticAI.Funnel("road", "tried");
 	local center = AITown.GetLocation(town);
 	local stop_a = PrismaticAI.BuildBusStopNear(center, 15, "A in " + AITown.GetName(town));
-	if (stop_a == null) return false;
+	if (stop_a == null) { PrismaticAI.Funnel("road", "stop_fail"); return false; }
 	AIController.Sleep(PACE);
 	/* Stop B in the same town, at least 8 tiles from A, so the two catchments do not overlap (center + 20 used to land in the next town). */
 	local stop_b = PrismaticAI.BuildBusStopAway(center, 12, "B in " + AITown.GetName(town), stop_a);
 	if (stop_b == null || stop_b == stop_a) {
 		AILog.Warning("PrismaticAI: could not find a distinct site for stop B in " + AITown.GetName(town));
+		PrismaticAI.Funnel("road", "stop_fail");
 		return false;
 	}
 	if (!PrismaticAI.RoadConnected(stop_a, stop_b, 4000)) {
 		AILog.Warning("PrismaticAI: stops at tiles " + stop_a + " and " + stop_b + " are on separate road networks; no buses bought");
+		PrismaticAI.Funnel("road", "network_fail");
 		return false;
 	}
 	AIController.Sleep(PACE);
@@ -206,6 +210,7 @@ function PrismaticAI::BuildRouteInTown(town, aggressiveness) {
 	if (depot == null) depot = PrismaticAI.BuildDepotNear(stop_b, 10);
 	if (depot == null) {
 		AILog.Warning("PrismaticAI: could not build a road depot near either stop");
+		PrismaticAI.Funnel("road", "depot_fail");
 		return false;
 	}
 	AIController.Sleep(PACE);
@@ -213,6 +218,7 @@ function PrismaticAI::BuildRouteInTown(town, aggressiveness) {
 	local engine = PrismaticAI.PickPassengerEngine();
 	if (engine == -1) {
 		AILog.Warning("PrismaticAI: no buildable passenger road vehicle available");
+		PrismaticAI.Funnel("road", "vehicle_fail");
 		return false;
 	}
 
@@ -234,6 +240,7 @@ function PrismaticAI::BuildRouteInTown(town, aggressiveness) {
 
 	AILog.Info("PrismaticAI: built a bus route in " + AITown.GetName(town) +
 		" with " + built + "/" + vehicle_count + " vehicle(s) (aggressiveness=" + aggressiveness + ")");
+	PrismaticAI.Funnel("road", (built > 0) ? "built" : "vehicle_fail");
 	return built > 0;
 }
 
@@ -814,6 +821,8 @@ function PrismaticAI::Start() {
 		/* Every rail line keeps a train: one lost at a level crossing or sold is replaced, and a line
 		 * that never had one (KeepTrainlessLine, AdoptTrainlessLines) gets its first. */
 		PrismaticAI.KeepLinesServed(b.cash_reserve);
+		/* The growth funnel's heartbeat counts and, once a game year, its lines (funnel.nut). */
+		PrismaticAI.FunnelTick(b);
 		/* Each line runs what the steward's targets say (lines.nut), and its record is logged again
 		 * once a game month so a steward started late still finds it. */
 		/* With self_steward, the bot sets its own line targets once a game month (steward.nut). */
