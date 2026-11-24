@@ -191,20 +191,28 @@ producer for good.
 How it was checked (PR #277). By the owner's rule, a change passes the fitness check when it shows
 no failure that master does not also show, over repeated runs.
 
-- **Master and the branch on the same yardstick.** Both played all seven fitness lineups on seeds
-  930967890, 31337 and 4242, judged by the same per-cargo referee: master at `e95a0e37aa`, the
-  branch at `7d0a1c1a0e`. Over 21 matches each, master failed 6 times (`hoards` 2,
-  `trainless_stations` 4), the branch 4 times (`hoards` 1, `trainless_stations` 3).
-  `shared_producer` failed 0 times on either.
-- **`battle.py fitness` itself, on the gate's seed.**
-  - The branch, after merging master `59b9432336`: FAIL only on
-    `claim race A: trainless_stations` (station 151). That is a line still being laid when the
-    match ends; its path search alone took 117 days.
-  - Master `59b9432336`: FAIL `hoards` on the PrismaticAI and self-steward lineups.
+- **Master and the branch, after master's #279 and #280 were merged.** Both played all seven
+  fitness lineups on seeds 930967890, 31337 and 4242: master at `1fd84fa0b9`, the branch at
+  `4b3add84eb`. Both used the same per-cargo referee and `fitness_verdict`.
+  - Over 21 matches each, master failed 3: `hoards` twice on 31337, and `trainless_stations` once
+    on 4242.
+  - The branch failed 4, all `trainless_stations`: lineup 4 on the gate's seed, and lineups 1, 4
+    and 6 on 31337.
+  - Neither showed `shared_producer` or `no_funnel`. Summed PrismaticAI value: master 60.55M,
+    branch 60.81M.
+  - Each of the branch's trainless stations is the terminus of a rich-mode line started in the
+    last game year and still being laid when the match ended. Path searches there took 100 to 210
+    days each. The branch spends money that master's 31337 lineups hoarded.
+  - An earlier pair of trees, master `e95a0e37aa` against branch `7d0a1c1a0e`, gave master 6
+    failures (`hoards` 2, `trainless_stations` 4) and the branch 4 (`hoards` 1,
+    `trainless_stations` 3).
+- **The growth funnel.** After the merge, the gate's seed failed `no_funnel` once. One heartbeat
+  had searched a 258-tile double track from 1962 to 1964, and the funnel logs a year only at a
+  heartbeat or an event. `FindRailPath` now rolls the funnel's year at its yield point.
 - **A replay of the owner's live save `final-15805-0106.sav`.** In its first yearly report the
-  branch counted 0 producers claimed and 30 released, where master counted 21 claimed. The 30
-  released producers: 27 move cargo and go to the share test, 3 move none. Rivals move 60% or more
-  of every one of them, so the rich share test, not the claim, is now what limits the bot there.
+  branch counted 0 producers claimed and 30 released, where master counted 21 claimed. Of the 30
+  released, 27 move cargo and go to the share test, and 3 move none. Rivals move 60% or more of
+  every one of them, so on that map the rich share test, not the claim, is what now limits the bot.
 
 These are single matches per seed and side, so they make no tuning claim about value.
 
@@ -244,6 +252,14 @@ holds it, and a processing industry is never held.
 A line that yields to a claim counts as a failed own line (`own_failed` in `main.nut`), and its
 pair stays in `freight_tried`. If the company that kept the producer later fails to build its
 line, neither company returns to that producer.
+
+<!-- open-finding kind=partial -->
+With more producers free, rich mode starts lines in the last game year of a fitness match. Their
+path searches take 100 to 210 days each, so they are still being laid when the match ends. The
+fitness check's `trainless_stations` (four quarterly reports) counts their termini as stations
+without a train: four of the branch's 21 matches on PR #277 failed this way. Master failed it once.
+Either the construction is too slow or the rule's window is too short for it; neither is decided
+here.
 
 <!-- open-finding kind=staged -->
 `FeedNewLine` (`growth.nut`, setting `rail_feed`, default 0) joins feeder platforms at other
