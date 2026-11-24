@@ -416,16 +416,134 @@ function PrismaticAI::Behaviour() {
 	return b;
 }
 
+/* Handed slots already reported as incoherent ("fr3_:31-5-6" -> true), so each state is logged once. */
+FREIGHT_SLOT_BAD <- {};
+/* Each handed slot's tuple at the previous read ("fr3_" -> "31-5-6"): a slot counts once two reads in
+ * a row agree. */
+FREIGHT_SLOT_SEEN <- {};
+/* Reads in a row each handed slot was set (a field >= 0) but did not count ("fr3_" -> 2). */
+FREIGHT_SLOT_PENDING <- {};
+/* Slots of the last read that are set, do not count yet, and have not been pending for
+ * SLOT_PENDING_READS reads: the heartbeat treats them as untried lines (handed_done, the pair's
+ * rail_after), so a slot being rewritten does not let the bot's own line or the passenger pair run
+ * ahead of it. A slot pending longer (a planner that left it incoherent) stops holding them back. */
+FREIGHT_SLOTS_WAITING <- 0;
+const SLOT_PENDING_READS = 6;
+
 /* The planner's freight rail lines in its order: fr_* then fr2_* to fr16_* (as info.nut declares
- * them), those set. */
+ * them), those whole and coherent. The panel and the re-planner change a slot one setting at a time,
+ * each approved on its own and in any order, so a heartbeat can read a slot half updated: the
+ * owner's game of 2026-11-23 (:8800) tried "WOOD Grutford Forest - Ganingstone Factory" and then
+ * "GRAI Grutford Forest - Ganingstone Factory", which no industry produces or accepts, and each
+ * landed in freight_tried. A slot counts only when from, to and cargo are all set, both industries
+ * exist, the producer makes the cargo and the acceptor takes it (FreightSlotWhyNot), and the
+ * previous read held the same tuple. A slot that does not is left out of this read: not tried, not in
+ * freight_tried, not counted by pair_due, handed_done or b.planned; an incoherent one is logged once
+ * per state. The two reads catch a mixed tuple that is coherent by chance (an old coal line's
+ * producer with a new coal line's acceptor) only while it lasts less than a heartbeat: a writer that
+ * leaves it longer still gets it built. Behaviour() reads once a heartbeat, and twice at the start. */
 function PrismaticAI::FreightLines() {
+	local out = [];
+	local waiting = 0;
+	foreach (slot in PrismaticAI.FreightSlots()) {
+		/* An unused slot (the usual case: most of the 16 are) costs nothing more than before. */
+		if (slot[1] < 0 && slot[2] < 0 && slot[3] < 0) {
+			if (FREIGHT_SLOT_SEEN.rawin(slot[0])) { delete FREIGHT_SLOT_SEEN[slot[0]]; FREIGHT_SLOT_PENDING[slot[0]] <- 0; }
+			continue;
+		}
+		local line = {from = slot[1], to = slot[2], cargo = slot[3]};
+		local tuple = line.from + "-" + line.to + "-" + line.cargo;
+		local stable = FREIGHT_SLOT_SEEN.rawin(slot[0]) && FREIGHT_SLOT_SEEN[slot[0]] == tuple;
+		FREIGHT_SLOT_SEEN[slot[0]] <- tuple;
+		local counts = false;
+		if (line.from >= 0 && line.to >= 0 && line.cargo >= 0) {
+			local why = PrismaticAI.FreightSlotWhyNot(line);
+			if (why != null && !FREIGHT_SLOT_BAD.rawin(slot[0] + ":" + tuple)) {
+				FREIGHT_SLOT_BAD[slot[0] + ":" + tuple] <- true;
+				AILog.Warning("PrismaticAI: handed freight slot " + slot[0] + " (" + tuple + ") left out: " + why);
+			}
+			counts = why == null && stable;
+		}
+		if (counts) {
+			out.push(line);
+			FREIGHT_SLOT_PENDING[slot[0]] <- 0;
+			continue;
+		}
+		local reads = FREIGHT_SLOT_PENDING.rawin(slot[0]) ? FREIGHT_SLOT_PENDING[slot[0]] : 0;
+		FREIGHT_SLOT_PENDING[slot[0]] <- reads + 1;
+		if (reads < SLOT_PENDING_READS) waiting++;
+	}
+	::FREIGHT_SLOTS_WAITING = waiting;
+	return out;
+}
+
+/* The handed slots as [prefix, from, to, cargo], fr_ then fr2_ to fr16_ (as info.nut declares them),
+ * or the test hook's (TestFreightSlots). */
+function PrismaticAI::FreightSlots() {
+	if (AIController.GetSetting("test_freight_slots") == 1) return PrismaticAI.TestFreightSlots();
 	local out = [];
 	for (local i = 1; i <= 16; i++) {
 		local p = (i == 1) ? "fr_" : ("fr" + i + "_");
-		local line = {from = AIController.GetSetting(p + "from"), to = AIController.GetSetting(p + "to"), cargo = AIController.GetSetting(p + "cargo")};
-		if (line.from >= 0 && line.to >= 0 && line.cargo >= 0) out.push(line);
+		out.push([p, AIController.GetSetting(p + "from"), AIController.GetSetting(p + "to"), AIController.GetSetting(p + "cargo")]);
 	}
 	return out;
+}
+
+/* test_freight_slots (RESEARCH-ONLY): the line the hook hands over and the reads so far, set once. */
+TEST_SLOTS <- null;
+/* Reads per phase of the test hook (TestFreightSlots). */
+const TEST_SLOT_READS = 6;
+
+/* RESEARCH-ONLY test hook (setting test_freight_slots=1): handed slots written the way the panel and
+ * the re-planner write them, one setting at a time, so a headless match shows that FreightLines
+ * neither tries nor marks a slot until it is whole, coherent and stable. (P, Q, c) is the bot's own
+ * best freight candidate when the hook first runs; Q2 is another industry accepting c. Phases of
+ * TEST_SLOT_READS reads each (a read a heartbeat): 1. fr_ half written (P set, to and cargo -1);
+ * 2. fr_ = P to an industry that does not accept c, and fr2_ = P to Q with a cargo P does not
+ * produce; 3. fr_ flips between P - Q and P - Q2 at every read (coherent, never stable); 4. fr_ =
+ * P - Q with c, built once. Run it with planned_freight_only=1, so no own line takes P first. */
+function PrismaticAI::TestFreightSlots() {
+	if (TEST_SLOTS == null) {
+		local own = PrismaticAI.NextOwnFreightLine({});
+		if (own == null) return [];
+		local bad_to = -1, bad_cargo = -1, to2 = own.to;
+		foreach (i, _ in AIIndustryList()) {
+			local accepts = AIIndustry.IsCargoAccepted(i, own.cargo) != AIIndustry.CAS_NOT_ACCEPTED;
+			if (bad_to == -1 && i != own.from && !accepts) bad_to = i;
+			if (to2 == own.to && i != own.to && i != own.from && accepts) to2 = i;
+		}
+		local made = AICargoList_IndustryProducing(own.from);
+		foreach (c, _ in AICargoList()) {
+			if (AICargo.IsFreight(c) && !made.HasItem(c)) { bad_cargo = c; break; }
+		}
+		::TEST_SLOTS = {reads = 0, phase = 0, line = own, bad_to = bad_to, bad_cargo = bad_cargo, to2 = to2};
+		AILog.Info("PrismaticAI: test_freight_slots: hands " + own.from + "-" + own.to + "-" + own.cargo + " (" +
+			AIIndustry.GetName(own.from) + " - " + AIIndustry.GetName(own.to) + "), alternate acceptor " + to2 +
+			", non-acceptor " + bad_to + ", cargo not produced " + bad_cargo);
+	}
+	local t = TEST_SLOTS, l = TEST_SLOTS.line;
+	local phase = min(4, 1 + t.reads / TEST_SLOT_READS);
+	if (phase != t.phase) {
+		t.phase = phase;
+		AILog.Info("PrismaticAI: test_freight_slots: phase " + phase + " at read " + t.reads);
+	}
+	t.reads++;
+	if (phase == 1) return [["fr_", l.from, -1, -1]];
+	if (phase == 2) return [["fr_", l.from, t.bad_to, l.cargo], ["fr2_", l.from, l.to, t.bad_cargo]];
+	if (phase == 3) return [["fr_", l.from, (t.reads % 2 == 0) ? l.to : t.to2, l.cargo]];
+	return [["fr_", l.from, l.to, l.cargo]];
+}
+
+/* Why the handed line {from, to, cargo} cannot run, or null when it can. */
+function PrismaticAI::FreightSlotWhyNot(line) {
+	if (!AICargo.IsValidCargo(line.cargo)) return "no such cargo";
+	if (!AIIndustry.IsValidIndustry(line.from)) return "no industry " + line.from;
+	if (!AIIndustry.IsValidIndustry(line.to)) return "no industry " + line.to;
+	if (line.from == line.to) return "one industry at both ends";
+	local cargo = AICargo.GetCargoLabel(line.cargo);
+	if (!AICargoList_IndustryProducing(line.from).HasItem(line.cargo)) return AIIndustry.GetName(line.from) + " does not produce " + cargo;
+	if (AIIndustry.IsCargoAccepted(line.to, line.cargo) == AIIndustry.CAS_NOT_ACCEPTED) return AIIndustry.GetName(line.to) + " does not accept " + cargo;
+	return null;
 }
 
 function PrismaticAI::Start() {
@@ -534,7 +652,7 @@ function PrismaticAI::Start() {
 		 * each line is built on borrowed money, so the best first. */
 		local tried = 0;
 		foreach (line in b.freight) if (this.freight_tried.rawin(line.from + "-" + line.to + "-" + line.cargo)) tried++;
-		local pair_due = tried >= min(b.rail_after, b.freight.len());
+		local pair_due = tried >= min(b.rail_after, b.freight.len() + FREIGHT_SLOTS_WAITING);
 		if (!frozen && b.rail_a >= 0 && b.rail_b >= 0 && this.rail_done != rail_key && pair_due) {
 			this.rail_done = rail_key;
 			/* A line pays back over years: borrow up to the limit to build it, as the planner's budget
@@ -559,7 +677,7 @@ function PrismaticAI::Start() {
 		 * budget it was meant to have, the bot built all fourteen planned lines by month 24 on OpenTTD
 		 * seed 31337 and then held 529983 idle at month 36 (research/results duel-20261117T112500).
 		 * One line per heartbeat, when money plus loan headroom reach line_budget, at most own_lines. */
-		local handed_done = true;
+		local handed_done = FREIGHT_SLOTS_WAITING == 0;
 		foreach (line in b.freight) if (!this.freight_tried.rawin(line.from + "-" + line.to + "-" + line.cargo)) handed_done = false;
 		local pair_open = b.rail_a >= 0 && b.rail_b >= 0 && this.rail_done != rail_key;
 		local headroom_own = AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();

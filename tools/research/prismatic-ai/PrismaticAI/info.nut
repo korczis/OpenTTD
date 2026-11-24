@@ -656,6 +656,16 @@ class PrismaticAI extends AIInfo {
 			step_size = 1,
 			flags = CONFIG_NONE,
 		});
+		/* RESEARCH-ONLY test hook (main.nut TestFreightSlots): handed freight slots written one
+		 * setting at a time, as the panel and the re-planner write them. */
+		AddSetting({
+			name = "test_freight_slots",
+			description = "RESEARCH-ONLY test hook. 1: the handed freight slots (fr_*) are not read from the settings but from main.nut TestFreightSlots, which hands the bot's own best freight line half written, then incoherent (an acceptor that does not take the cargo, a cargo the producer does not make), then flipping between two acceptors, then whole; FreightLines must try it once, only when whole. Run it with planned_freight_only=1. 0 (default): off.",
+			min_value = 0, max_value = 1,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			step_size = 1,
+			flags = CONFIG_NONE,
+		});
 	}
 }
 

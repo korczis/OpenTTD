@@ -164,6 +164,9 @@ python3 $B check      # every record valid, every derived file current (exit 10 
 python3 $B fitness    # the working tree's PrismaticAI in one short local match (gate, on change)
 python3 $B ablate --variant "base=..." --variant "x=setting=v" --years 10 --seed S --write
                       # one deterministic local match per settings variant, recorded in research/results
+python3 $B ablate --live-like   # the live world's arms (unplanned, planned) on seed 15805
+python3 $B replay [--rev R] [--save F] [--years N] [--binary B] [--log-dir D]
+                      # a live save loaded headless with this tree's (or R's) PrismaticAI, judged
 python3 $B reap       # stop running matches of older editions on every arena (run does it on start)
 ```
 
@@ -598,6 +601,114 @@ fails when one of them is last on the newest record's leaderboard. `battle.py fi
 when one is last by final value on its seed. It runs one match per PrismaticAI
 configuration (default, self-steward, solo-max, planned), in parallel, each against AAAHogEx,
 LuDiAI AfterFix and AdmiralAI.
+
+## The live-like arena and the 15805 replay
+
+The arena's world is not the owner's live game: the arena starts in 1960 with four rivals and an
+unplanned bot; live games start in 1950 with seven rivals, and the bot is sometimes planned. In
+live game 15805, PrismaticAI ran one train from 1950-04 to 1958-06. In 5,927 arena matches, it had
+at most one train at year 10 in 0.2% of them
+([incident](../incident-2026-11-23-live-game-15805.md)). Two additions bring the live world into
+the battle.
+
+**`live_like` in `battle.json`** declares the live world once:
+
+- Match settings: 1950, 256x256, temperate, reduced breakdowns. These are the engine's defaults,
+  and the live stack keeps them: its `openttd.cfg` (`mcp-rhai` `src/panel.rs` `Panel::start`) sets
+  no world setting.
+- The script budget: `script_max_opcode_till_suspend = 250000`, the panel's `SCRIPT_OPCODES`.
+  The engine default is 10000. `battle_cfg_text` writes it only for a match that sets
+  `script_opcodes`, so the arena's editions keep their configuration.
+- The seven rivals with the versions the live game runs: AAAHogEx 115, LuDiAI AfterFix v27,
+  CivilAI 37, AdmiralAI 25, NoCAB 2.1.4, DictatorAI 183, SimpleAI 14. They were read on
+  2026-11-24 from `GET /api/bots` `running` and `~/Documents/OpenTTD/ai`.
+- PrismaticAI in company slot 0, as live.
+- Seed 15805, the live game's seed.
+- Two arms. `unplanned` is game 15805's genome without planner slots. `planned` is the settings
+  its planner started the bot with on 1950-02-08 (store event `bot.settings`), with its `fr_*`
+  and `rail_*` slots.
+
+Seed 15805 does not give game 15805's map here. In the live-like match, none of the live map's
+towns appears (no Lenhill City, Minnbridge, Flardingham or Dontford in the log). The planned arm
+is therefore a fixed slot set: its ids name other industries and towns on this map, and it is not
+the live plan. Why the same seed gives another map is not known yet. Candidates are a setting the
+live server sets, or the difference between a dedicated server and the null driver. A paired run
+of the planned bot needs a plan made on each map it plays.
+
+`fetch` also downloads the live rivals and names any version it lacks. `ablate --live-like`
+plays the arms through the ordinary `ablate` path: same seed, same field, PrismaticAI's slot.
+`--variant` and `--seed` replace the arms and the seed. It warns when the arena's tars are not
+the live versions.
+
+`ablate --live-like` on lundra, 2026-11-24, gave the following on seed 15805 at 1956-01, after six
+years. All eight companies played. Each arm is one match on one seed, so this is no comparison
+between the arms.
+
+| Arm | PrismaticAI value | Trains | AAAHogEx value | Trains | Ratio |
+|---|---|---|---|---|---|
+| `unplanned` | 1,183,752 | 15 | 4,217,785 | 60 | 0.281 |
+| `planned` | 1,107,319 | 8 | 3,136,655 | 63 | 0.353 |
+
+AAAHogEx grows about as fast as it did live (4.34M at the end of 1955). PrismaticAI does not
+repeat its live failure here: live it was worth 238k at the end of 1955, a ratio of 0.055. A fresh
+live-like start with the same genome therefore does not reproduce game 15805. Several things
+differ from the live game: the map, the approvals, the reloads and the deploys. The save replay
+below is what reproduces the failure.
+
+**`replay`** loads a copy of a live save headless. It uses a scratch HOME, the null drivers, the
+working tree's PrismaticAI (or the one at `--rev`) and the arena's rival tars, and runs for
+`years` game years. The live save is never written. A loaded save keeps its own Game Script, and
+the live game runs none, so the referee cannot report. The console reports instead.
+`game_start.scr` opens a console log (`script`), prints `getdate` and `companies`, and schedules
+`monthly.scr` with `schedule on-next-calendar-month`. `monthly.scr` prints them again and
+schedules itself. The result is one report a month, with every company's money, loan, value and
+train, road, air and ship counts.
+
+An lzma save is unpacked to an uncompressed one (tag `OTTX` to `OTTN`, the same chunks), because a
+binary built without liblzma, such as lundra's, cannot load it. A replay is invalid, and fails, in
+two cases:
+
+- an AI the save names is not available, so the game loads a random one in its place;
+- it reports fewer months than its years.
+
+`battle.json` `replay` judges company 0. It fails when, after `years` (4), any of these holds:
+
+- the bot has fewer than `min_trains` (2) trains;
+- it ran at most one train in every month of the last `one_train_years` (3);
+- its value is under `min_leader_ratio` (0.05) of the best other company.
+
+The thresholds come from the live record. Live, the bot had one train from 1950-04 to 1958-06,
+and at the end of 1956 it was worth 317k against AAAHogEx's 6,302k, a ratio of 0.050. The save
+is game 15805's earliest, `deploy-225.sav`, written at the load of 1952-10-23 that deployed #225.
+The gate does not run `replay`: the save exists only on the owner's machine.
+
+<!-- open-finding kind=failed -->
+`-G 15805` with the live-like match settings does not regenerate live game 15805's map: none of
+its towns appears in the headless log (2026-11-24, lundra, `20261122-master-g2a6a616221`). The
+planned arm is a fixed slot set, not the live plan, and the start of 15805 cannot be replayed from
+its seed. Only its saves can be replayed.
+
+Measured on lundra, 2026-11-24. The binary was `20261122-master-g2a6a616221` (dedicated, without
+liblzma). The rivals were exactly the live versions. Each run took about 380 s.
+
+| PrismaticAI | Trains (end of 1953, 1954, 1955, 1956-10) | Value at 1956-10 | Leader (AAAHogEx) | Ratio | Verdict |
+|---|---|---|---|---|---|
+| `ff03ebb639` (#225, what ran live after that load) | 1, 1, 1, 1 | 309,015 | 5,765,661 (86 trains) | 0.054 | **FAIL**: 1 train at the end; at most one train from 1953-11 to 1956-10 |
+| master `eb0d839ce0` | 2, 2, 3, 3 | 151,321 | 5,172,451 (80 trains) | 0.029 | **FAIL**: value 0.029 of the leader |
+
+The old code reproduces the live failure headless. It ran one train for the whole replay, and its
+value is within 3% of the live one at the same horizon (309k vs 317k at the end of 1956). The
+replay therefore fails on the code path that failed live.
+
+Master no longer runs one train. It equips two more lines by 1955, but it ends worth half as much
+as the old code: 151k against 309k, 0.029 of the leader. The train clauses pass and the value
+clause fails. On this save, master's extra lines cost more than they return within four years.
+That is an open finding, not a pass.
+
+<!-- open-finding kind=failed -->
+On the 15805 save, master's PrismaticAI runs 3 trains instead of 1. Its value after four years is
+151k against the old code's 309k, and 0.029 of AAAHogEx, under the live ratio of 0.050. More lines
+do not yet mean more value on this map.
 
 ## Where we lose: post-mortems, store, throughput
 

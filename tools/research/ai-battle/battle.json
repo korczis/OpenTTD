@@ -221,6 +221,65 @@
     "PrismaticAI",
     "PrismaticAI self-steward"
   ],
+  "live_like": {
+    "why": "The owner's live game, not the arena's: start 1950 and 256x256 temperate with reduced breakdowns are the engine's defaults, which the live stack keeps (its openttd.cfg, mcp-rhai src/panel.rs Panel::start, sets no world setting); its script budget is panel.rs SCRIPT_OPCODES; the rivals and their versions are the live game's (GET /api/bots `running`, ~/Documents/OpenTTD/ai, 2026-11-24); PrismaticAI is company 0 as live. Seed 15805 is live game 15805's seed, but this match does not regenerate that game's map (2026-11-24: none of its towns appears), so the arms are fixed settings, not the live plan: `unplanned` is that game's genome without planner slots, `planned` the settings its planner started the bot with on 1950-02-08 (store event bot.settings), a fixed slot set whose fr_*/rail_* ids name other industries and towns here.",
+    "seed": 15805,
+    "slot": 0,
+    "match": {
+      "start_year": 1950,
+      "landscape": "temperate",
+      "map_x": 8,
+      "map_y": 8,
+      "breakdowns": 1,
+      "script_opcodes": 250000
+    },
+    "rivals": [
+      {
+        "ai": "AAAHogEx",
+        "version": "115"
+      },
+      {
+        "ai": "LuDiAI AfterFix",
+        "version": "v27"
+      },
+      {
+        "ai": "CivilAI",
+        "version": "37"
+      },
+      {
+        "ai": "AdmiralAI",
+        "version": "25"
+      },
+      {
+        "ai": "NoCAB",
+        "version": "2.1.4"
+      },
+      {
+        "ai": "DictatorAI",
+        "version": "183"
+      },
+      {
+        "ai": "SimpleAI",
+        "version": "14"
+      }
+    ],
+    "arms": {
+      "unplanned": "aggressiveness=80,air_add_waiting=90,air_full_load=0,air_grow_money=0,air_keep_last=1,air_level_max=20,air_level_once=1,air_level_step=8,air_max_tiles=440,air_planes=5,air_reuse=1,air_routes_max=2,air_towns=35,cash_reserve=5000,catchment_stops=4,intercity=1,invest_air_cap=10,invest_borrow=1,invest_min=50,invest_ppv_div=6,invest_road_cap=12,line_budget=30000,max_routes=30,own_fail_pause=4,own_lines=4,rail_twin_max=10,self_steward=1,statue_money=0",
+      "planned": "aggressiveness=80,air_add_waiting=90,air_full_load=0,air_grow_money=0,air_keep_last=1,air_level_max=20,air_level_once=1,air_level_step=8,air_max_tiles=440,air_planes=5,air_reuse=1,air_routes_max=2,air_towns=35,cash_reserve=5000,catchment_stops=4,fr10_cargo=1,fr10_from=37,fr10_to=1,fr2_cargo=1,fr2_from=29,fr2_to=39,fr3_cargo=3,fr3_from=33,fr3_to=26,fr4_cargo=1,fr4_from=36,fr4_to=13,fr5_cargo=8,fr5_from=9,fr5_to=6,fr6_cargo=6,fr6_from=24,fr6_to=5,fr7_cargo=8,fr7_from=15,fr7_to=11,fr8_cargo=8,fr8_from=12,fr8_to=11,fr9_cargo=3,fr9_from=8,fr9_to=16,fr_cargo=1,fr_from=0,fr_to=1,intercity=1,invest_air_cap=10,invest_borrow=1,invest_min=50,invest_ppv_div=6,invest_road_cap=12,line_budget=30000,max_routes=30,own_fail_pause=4,own_lines=4,rail_a=1,rail_after=5,rail_b=3,rail_twin_max=10,self_steward=1,statue_money=0"
+    }
+  },
+  "replay": {
+    "why": "Live game 15805's earliest save, written at the load of 1952-10-23 that deployed #225 (ff03ebb639). Live, PrismaticAI (company 0) ran one train from 1950-04 to 1958-06 and was worth 0.050 of AAAHogEx at the end of 1956 (research/incident-2026-11-23-live-game-15805.md). The rules fail a replay that repeats that: fewer than 2 trains after `years`, at most one train in every month of the last `one_train_years`, or a value under the live ratio of the same horizon.",
+    "save": "~/Documents/OpenTTD/save/deploy-225.sav",
+    "company": 0,
+    "years": 4,
+    "timeout_s": 3600,
+    "rules": {
+      "min_trains": 2,
+      "one_train_years": 3,
+      "min_leader_ratio": 0.05
+    }
+  },
   "tuning": {
     "enabled": true,
     "seed": "ga-1",

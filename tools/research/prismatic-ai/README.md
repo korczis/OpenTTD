@@ -139,6 +139,7 @@ The measured effect is in `research/ai-battle/README.md` (section *Double track*
 | `ships_max`, `ships_cap`, `ships_max_tiles` (RESEARCH-ONLY) | the owner, any surface above; not GA genes yet | `ships_max` water routes the bot plans itself (`ships.nut`; 0, default: no ships), at most `ships_cap` ships per route (`fleet.nut`), routes at most `ships_max_tiles` long. Off until measured |
 | `rail_double` | the owner, any surface above | 1: the bot's own new freight lines are double track, see below; 0 (default): single track, unchanged |
 | `autopilot` with a plan | the panel | since 2026-11-19 a plan no longer switches growth off: the planner's lines come first, and then the in-bot steward, the autopilot's own air routes and InvestSurplus run on top (`main.nut` `grows`) |
+| `fr_*` … `fr16_*` written one setting at a time | the panel, the re-planner | a slot counts only when `from`, `to` and `cargo` are all set, both industries exist, the producer makes the cargo and the acceptor takes it, and two reads in a row (a heartbeat apart) agree (`main.nut` `FreightLines`). Until then it is not tried and not marked tried; an incoherent slot is logged once per state; a set slot that does not count yet holds back the bot's own lines and the passenger pair for up to 6 reads. A mixed tuple that is coherent by chance and stays a heartbeat or more is still built: only a writer that publishes a slot whole prevents that. `test_freight_slots=1` (RESEARCH-ONLY) drives every case headless |
 | `self_steward` | the owner, e.g. the headless LAN AI battle ([`research/ai-battle/README.md`](../../../research/ai-battle/README.md)) | 1: lines without a steward's target follow the Rhai steward's policy inside the bot, and idle money funds own lines beyond `own_lines` (`steward.nut`); 0 (default): unchanged |
 | `steward_rating`, `steward_borrow` | the same surfaces | with `self_steward=1`: an earning line gets a train more while its source station rates the cargo below `steward_rating` percent (default 55; 0: off), and `steward_borrow` (default 1) lets such a line borrow for it while the loan stays at most half its limit (`steward.nut`, `lines.nut` `FundTrain`; evidence in [`research/rail-steward.md`](../../../research/rail-steward.md#the-in-bot-stewards-capital)) |
 
@@ -157,7 +158,7 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 
 <!-- prismatic-ai-settings:begin -->
 
-171 settings in 83 declarations, 170 of them live-changeable (`CONFIG_INGAME`), 36 genes of the battle's genetic algorithm (`tuning` in [`battle.json`](../ai-battle/battle.json)). Derived from [`PrismaticAI/info.nut`](PrismaticAI/info.nut) by `derive_docs.py`.
+172 settings in 84 declarations, 170 of them live-changeable (`CONFIG_INGAME`), 36 genes of the battle's genetic algorithm (`tuning` in [`battle.json`](../ai-battle/battle.json)). Derived from [`PrismaticAI/info.nut`](PrismaticAI/info.nut) by `derive_docs.py`.
 
 | Setting | Default | Range / step | Live | GA | Description |
 |---|---|---|---|---|---|
@@ -244,6 +245,7 @@ Every setting `info.nut` declares; [Steering from outside](#steering-from-outsid
 | [`road_probes`](PrismaticAI/info.nut#L635) | 2 | 0 .. 30 | yes |  | Yield: how many bus routes run before any road vehicle is a year old and road_yield can judge them (fleet.nut RoadPays). |
 | [`air_yield_routes`](PrismaticAI/info.nut#L642) | 8 | 0 .. 30 | yes |  | Yield: autopilot air routes beyond air_routes_max, one at a time, each once every air route we fly has planes a year old that earned last year at least their price / invest_ppv_div a plane (autopilot.nut AirRoutesPay; 0: off). |
 | [`test_trainless`](PrismaticAI/info.nut#L651) | 0 | 0 .. 2 | no |  | RESEARCH-ONLY test hook. 1: the first train of every new rail line, and every other new line's depot, is refused as if for money, so the line waits trainless for KeepLinesServed to buy it; 2: as 1, and once a game month the bot forgets its lines that still have no train, as a restart would, so AdoptTrainlessLines (monthly in this mode, yearly otherwise) takes them back from the map. 0 (default): off. |
+| [`test_freight_slots`](PrismaticAI/info.nut#L661) | 0 | 0 .. 1 | no |  | RESEARCH-ONLY test hook. 1: the handed freight slots (fr_*) are not read from the settings but from main.nut TestFreightSlots, which hands the bot's own best freight line half written, then incoherent (an acceptor that does not take the cargo, a cargo the producer does not make), then flipping between two acceptors, then whole; FreightLines must try it once, only when whole. Run it with planned_freight_only=1. 0 (default): off. |
 
 <!-- prismatic-ai-settings:end -->
 

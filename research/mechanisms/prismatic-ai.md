@@ -38,6 +38,12 @@ flowchart TB
   the planner's air pair, freight lines (`fr_*` to `fr16_*`) and passenger rail first, then the
   bot's own lines and buses, the fleet, line reconciliation and the loan. Old vehicles are renewed
   by the game's own autorenew.
+- **Handed slots must be whole** (`main.nut` `FreightLines`). The panel and the re-planner write a
+  freight slot one approved setting at a time, in any order. A slot counts only when it is complete,
+  both industries exist, the producer makes the cargo, the acceptor takes it, and two reads in a row
+  (a heartbeat apart) agree. Until then it is never tried or marked tried. For up to six reads it
+  counts as an untried line, so the bot's own lines and the passenger pair do not run ahead of it.
+  The test hook `test_freight_slots` drives every case headless.
 - **Rail a train can always run** (`rail.nut`). No 90-degree turn anywhere (`Turns90`, because
   `pf.forbid_90_deg` is on by default). Termini with two platforms joined by a throat with path
   signals. A terminus takes the catching site with the most cargo on the axis toward the other end,
