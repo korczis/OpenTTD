@@ -249,8 +249,24 @@ single matches are not a tuning claim, rule `a-tuning-claim-needs-held-start-pai
 | 2927 | variants.txt line 1 | 6,408,652 | 5,782,089 (-9.8%) | 0.0% | 0.0% | 4.74M / 3.69M |
 | 4242 | variants.txt line 1 | 4,223,801 | 4,293,631 (+1.7%) | 6.2% | 0.0% | 2.47M / 2.45M |
 
-Every variant ended with millions in the bank and no loan, and the allocator bought 0-9 vehicles a
-match: once planes reach `invest_air_cap` and lines `trains_max`, little clears the hurdle. The
+With train buying (the same field and seeds, the claim fix as it stood on 2026-11-24, one replay
+each):
+
+| Seed | Settings | Value, level 0 | Value, level 3 | Ours / AAAHogEx, level 0 / 3 | Frozen 1950-52, level 0 / 3 | Allocator purchases, vehicles + trains |
+|---|---|---|---|---|---|---|
+| 15805 | live game | 3,014,151 | 3,755,639 (+24.6%) | 16.7% / 22.4% | 1.6% / 0.0% | 0 + 0 |
+| 2927 | live game | 6,775,941 | 7,783,329 (+14.9%) | 28.1% / 41.6% | 0.0% / 0.0% | 0 + 0 |
+| 4242 | live game | 3,790,137 | 4,029,407 (+6.3%) | 29.6% / 20.6% | 0.4% / 10.1% | 0 + 0 |
+| 15805 | variants.txt line 1 | 3,341,997 | 4,224,362 (+26.4%) | 18.4% / 25.4% | 56.3% / 26.6% | 6 + 1 |
+| 2927 | variants.txt line 1 | 6,196,605 | 5,328,394 (-14.0%) | 27.5% / 29.7% | 0.0% / 0.0% | 6 + 0 |
+| 4242 | variants.txt line 1 | 3,592,213 | 3,532,241 (-1.7%) | 16.1% / 20.3% | 0.4% / 26.7% | 39 + 3 |
+
+Geometric mean +8.4% (round 1: -5.1%), single replays, inconclusive. On 4242 the first freeze
+came from a stay-afloat rescue during a build in 1951Q4, before the allocator bought anything. The
+frozen gate would refuse both levels on 15805 with variants.txt line 1, so early freezes also have
+causes the margin does not touch (money and headroom under two quarters of costs while lines are
+built on the whole loan). Every variant still ended with millions in the bank and no loan, and the
+allocator bought few vehicles a match (four trains in all): once planes reach `invest_air_cap` and lines `trains_max`, little clears the hurdle. The
 heartbeat also ran once in 180-275 days in many quarters, while path searches held it; the
 allocator runs only at its end. The value differences are within single-replay chaos. On the
 fitness seed (930967890, 6 years) the branch fails only the self-steward lineup's hoard, which
