@@ -100,6 +100,15 @@
     "must_run_trains": [
       "PrismaticAI trainless test"
     ],
+    "must_funnel": [
+      "PrismaticAI",
+      "PrismaticAI self-steward",
+      "PrismaticAI solo-max",
+      "PrismaticAI planned",
+      "PrismaticAI sibling A",
+      "PrismaticAI sibling B",
+      "PrismaticAI trainless test"
+    ],
     "lineups": [
       [
         {

@@ -1075,6 +1075,8 @@ function PrismaticAI::AbandonLineStations(sa, sb, len, label, why) {
  * stations, two depots) stood without a train for years while 535k lay in the bank. Returns 1. */
 function PrismaticAI::KeepTrainlessLine(line) {
 	RAIL_LINES.push(line);
+	PrismaticAI.Funnel("rail", "built");
+	PrismaticAI.Funnel("rail", "trainless");
 	AILog.Warning("PrismaticAI: rail line " + line.label + " is built but its first train was not bought (" +
 		line.train_fail + "); it waits for one");
 	AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
@@ -1140,10 +1142,12 @@ function PrismaticAI::TestRefuseDepot() {
  * sets trains up to trains_max and wagons up to wagons_fit. */
 function PrismaticAI::BuildRailLineAndTrain(sa, sb, len, cargo, wagons, first_flags, label) {
 	AILog.Info("PrismaticAI: survey rail line from tile " + sa.exit + " to tile " + sb.exit);
+	PrismaticAI.Funnel("rail", "stations");
 	local throat_a = ("platforms" in sa) && sa.platforms > 1, throat_b = ("platforms" in sb) && sb.platforms > 1;
 	local path = PrismaticAI.FindRailPath(sa.exit, sb.exit, sa.end, sb.end, null, null, throat_a, throat_b);
 	if (path == null) {
 		AILog.Warning("PrismaticAI: no rail path between the stations; removing them");
+		PrismaticAI.Funnel("rail", "path_fail");
 		PrismaticAI.RemoveRailStation(sa, len); PrismaticAI.RemoveRailStation(sb, len);
 		return 0;
 	}
@@ -1157,6 +1161,7 @@ function PrismaticAI::BuildRailLineAndTrain(sa, sb, len, cargo, wagons, first_fl
 		return 0;
 	}
 	AILog.Info("PrismaticAI: rail line " + label + " done, " + laid.len() + " tiles");
+	PrismaticAI.Funnel("rail", "laid");
 	local ld = PrismaticAI.LineDepot(sa, sb, laid);
 	if (ld.depot == null && !ld.cash) {
 		AILog.Warning("PrismaticAI: no rail depot behind a platform or beside the line");
@@ -1178,6 +1183,7 @@ function PrismaticAI::BuildRailLineAndTrain(sa, sb, len, cargo, wagons, first_fl
 		return 0;
 	}
 	RAIL_LINES.push(line);
+	PrismaticAI.Funnel("rail", "built");
 	AILog.Info("PrismaticAI: built a rail route " + label + " with a train of " + AIVehicle.GetNumWagons(train) + " (" + AIEngine.GetName(AIVehicle.GetEngineType(train)) + ")");
 	AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
 	return 1;
@@ -1281,6 +1287,7 @@ function PrismaticAI::RemoveDoubleSpur(d) {
 function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flags, label) {
 	local da = sa.dbl, db = sb.dbl;
 	AILog.Info("PrismaticAI: survey double-track rail line from tile " + sa.exit + " to tile " + sb.exit);
+	PrismaticAI.Funnel("rail", "stations");
 	/* Track A keeps clear of where track B leaves each junction. */
 	local avoid = {};
 	foreach (d in [da, db]) {
@@ -1291,7 +1298,9 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 	local nodes_a = RAIL_LAST_NODES;
 	if (path == null) {
 		AILog.Warning("PrismaticAI: no rail path between the stations; removing them");
+		PrismaticAI.Funnel("rail", "path_fail");
 		PrismaticAI.RemoveRailStation(sa, len); PrismaticAI.RemoveRailStation(sb, len);
+		PrismaticAI.Funnel("rail", "single_track");
 		/* -1: nothing of the line is left, so the caller may try it single track (straight exits
 		 * and the second track's reserved tiles are what a hilly map most often refuses). */
 		return -1;
@@ -1353,8 +1362,10 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 		PrismaticAI.RemoveDoubleSpur(da);
 		PrismaticAI.RemoveDoubleSpur(db);
 		AILog.Warning("PrismaticAI: no second track for " + label + "; it runs single track, " + platforms + " trains");
+		PrismaticAI.Funnel("rail", "single_track");
 	}
 	AILog.Info("PrismaticAI: rail line " + label + " done, " + laid.len() + " tiles");
+	PrismaticAI.Funnel("rail", "laid");
 	local ld = PrismaticAI.LineDepot(sa, sb, laid);
 	if (ld.depot == null && !ld.cash) {
 		AILog.Warning("PrismaticAI: no rail depot behind a platform or beside the line");
@@ -1375,6 +1386,7 @@ function PrismaticAI::BuildDoubleRailLineAndTrain(sa, sb, len, cargo, first_flag
 		return 0;
 	}
 	RAIL_LINES.push(line);
+	PrismaticAI.Funnel("rail", "built");
 	AILog.Info("PrismaticAI: built a rail route " + label + " with a train of " + AIVehicle.GetNumWagons(train) + " (" + AIEngine.GetName(AIVehicle.GetEngineType(train)) + ")");
 	AILog.Info(PrismaticAI.LineRecord(RAIL_LINES.len(), line));
 	return 1;
@@ -1415,6 +1427,7 @@ function PrismaticAI::BuildTrain(line) {
 		line.test_refused <- true;
 		line.train_fail <- "cash";
 		AILog.Warning("PrismaticAI: locomotive not bought: refused by test_trainless");
+		PrismaticAI.Funnel("rail", "loco_refused_cash");
 		return -1;
 	}
 	local e = PrismaticAI.PickRailEngines(line.railtype, line.cargo);
@@ -1428,6 +1441,7 @@ function PrismaticAI::BuildTrain(line) {
 	if (!AIVehicle.IsValidVehicle(train)) {
 		line.train_fail <- (AIError.GetLastError() == AIError.ERR_NOT_ENOUGH_CASH) ? "cash" : AIError.GetLastErrorString();
 		AILog.Warning("PrismaticAI: locomotive not bought: " + AIError.GetLastErrorString());
+		if (line.train_fail == "cash") PrismaticAI.Funnel("rail", "loco_refused_cash");
 		return -1;
 	}
 	local max_len = (("len" in line) ? line.len : 3) * 16;
@@ -1451,6 +1465,7 @@ function PrismaticAI::BuildTrain(line) {
 		return -1;
 	}
 	/* The line's trains are this one and its clones (shared orders, lines.nut TrainsOf). */
+	if (!("first" in line)) PrismaticAI.Funnel("rail", "trained");
 	line.first <- train;
 	if ("train_fail" in line) delete line.train_fail;
 	AIVehicle.StartStopVehicle(train);
@@ -1581,6 +1596,7 @@ function PrismaticAI::BuildRailRoute(a, b, shape) {
 		return 0;
 	}
 	if (!PrismaticAI.UseFirstRailType()) return 0;
+	PrismaticAI.Funnel("rail", "tried");
 	local pax = PrismaticAI.PassengerCargo();
 	local dist = AIMap.DistanceManhattan(AITown.GetLocation(a), AITown.GetLocation(b));
 	AILog.Info("PrismaticAI: planner pair by rail: " + AITown.GetName(a) + " - " + AITown.GetName(b) + " (" + dist + " tiles)");
@@ -1607,6 +1623,8 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
 		return 0;
 	}
 	if (!PrismaticAI.UseFirstRailType(cargo)) return 0;
+	/* A double track retried single (built == -1 below) is a second try: new stations, a new search. */
+	PrismaticAI.Funnel("rail", "tried");
 	local pl = AIIndustry.GetLocation(p), ql = AIIndustry.GetLocation(q);
 	local label = AICargo.GetCargoLabel(cargo) + " " + AIIndustry.GetName(p) + " - " + AIIndustry.GetName(q);
 	local dist = AIMap.DistanceManhattan(pl, ql);
@@ -1722,6 +1740,7 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 			}
 		}
 	}
+	PrismaticAI.FunnelCensus(why, best != null);
 	local year = AIDate.GetYear(AIDate.GetCurrentDate());
 	if (best == null && NO_OWN_LINE_YEAR != year) {
 		NO_OWN_LINE_YEAR = year;
