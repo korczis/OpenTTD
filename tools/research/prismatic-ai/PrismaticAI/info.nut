@@ -439,7 +439,7 @@ class PrismaticAI extends AIInfo {
 		});
 		AddSetting({
 			name = "autopilot",
-			description = "1 (default): the bot grows on its own, with or without a plan from the panel: in-bot steward, own freight lines (at least 10), intercity roads, up to 30 routes and at most a 5000 reserve; a plan's lines are built on top, its passenger pair after the bot's first own freight line. 0: the bot stays as small as its settings say (the duels' rival before 2026-11-19).",
+			description = "1 (default): the bot grows on its own, with or without a plan from the panel: in-bot steward, own freight lines (at least 10), intercity roads, up to 30 routes and at most a 5000 reserve; a plan's lines are built on top, its passenger pair in a heartbeat that starts no own freight line, or after two years of waiting. 0: the bot stays as small as its settings say (the duels' rival before 2026-11-19).",
 			min_value = 0, max_value = 1,
 			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
 			flags = CONFIG_INGAME | CONFIG_BOOLEAN,

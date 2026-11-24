@@ -37,8 +37,9 @@ flowchart TB
 - **Heartbeat** (`main.nut` `Start`). Every round reads the settings again (`Behaviour`). Then come
   the planner's air pair, the autopilot's air routes, the planner's freight lines (`fr_*` to
   `fr16_*`), the bot's own freight line, the planner's passenger rail pair and buses, then the
-  fleet, line reconciliation and the loan. Until the first own line stands, the passenger pair comes
-  after the own line of each heartbeat; after that it comes before the own line (`TryRailPair`).
+  fleet, line reconciliation and the loan. The passenger pair takes a heartbeat in which the bot
+  started no own freight line. Once it has waited two game years it may take any heartbeat
+  (`PairDue`, `TryRailPair`).
   Old vehicles are renewed by the game's own autorenew.
 - **A plan is added on top of the autopilot** (`main.nut` `Behaviour`). With `autopilot=1` a
   planned bot keeps the autopilot's floors: at least 10 own lines, up to 30 routes, intercity roads,
