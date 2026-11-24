@@ -461,6 +461,13 @@ class PrismaticAI extends AIInfo {
 			flags = CONFIG_INGAME,
 		});
 		AddSetting({
+			name = "steward_target",
+			description = "In-bot steward: 1 (default): a freight rail line that earns gets the trains that carry its monthly production (its producer and the ones feeding its source station) over one round trip, in batches (at most doubling a month, up to trains_max), its newest train at least 90 days old (steward.nut LineTrainTarget); 0: only the waiting-cargo and rating rules grow a line, one train at a time.",
+			min_value = 0, max_value = 1,
+			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
+		});
+		AddSetting({
 			name = "steward_borrow",
 			description = "1 (default): a rail line whose trains earn may borrow for the next train the steward set, while the loan stays at most half its limit and the headroom left holds a line budget and two quarters of running costs (lines.nut FundTrain); 0: a new train only from the bank balance, which RepaySurplus keeps near the reserve.",
 			min_value = 0, max_value = 1,
@@ -663,6 +670,15 @@ class PrismaticAI extends AIInfo {
 			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
 			step_size = 1,
 			flags = CONFIG_NONE,
+		});
+		/* RESEARCH-ONLY test hook (lines.nut FundTrain): the borrowing path for a train runs only when the
+		 * bank is short of a train's price, which RepaySurplus and income rarely leave it. */
+		AddSetting({
+			name = "test_borrow",
+			description = "RESEARCH-ONLY test hook. 1: when the steward adds a train, FundTrain counts the bank as holding only the cash reserve, so every such train is borrowed for, within the bounds of steward_borrow (the loan at most half its limit, a line budget and two quarters of running costs left), and RepaySurplus pays it back. 0 (default): off.",
+			min_value = 0, max_value = 1,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			flags = CONFIG_BOOLEAN,
 		});
 		/* RESEARCH-ONLY test hook (main.nut TestFreightSlots): handed freight slots written one
 		 * setting at a time, as the panel and the re-planner write them. */

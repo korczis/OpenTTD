@@ -622,6 +622,7 @@ function PrismaticAI::Start() {
 	 * (rail.nut KeepTrainlessLine), is taken back as a line; then once a game year (lines.nut). */
 	this.adopt_year = PrismaticAI.AdoptKey();
 	this.AdoptTrainlessLines();
+	this.MaintenanceAttach(b.cash_reserve); /* the steward's rounds inside long path searches (steward.nut) */
 
 	local last = "";
 	local disclosed = false;
