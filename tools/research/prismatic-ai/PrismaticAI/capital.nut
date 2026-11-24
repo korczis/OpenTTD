@@ -228,7 +228,14 @@ function PrismaticAI::AllocateCapital(b, afloat) {
 		best = this.CapitalBest(b);
 		if (best == null) break;
 		local bank = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
-		if ((!best.rail || best.buys) && bank - keep >= best.price) {
+		/* Never a purchase that freezes construction: after it, money and loan headroom still cover
+		 * two quarters of running costs, the new vehicle's included (BuildFrozen's first test). In a
+		 * replay of seed 4242 (variants.txt line 1) 39 purchases without this test left the company
+		 * frozen on 26.7% of the days of 1950-1952, against 0.4% with level 0. */
+		local headroom = AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
+		local afloat_after = afloat + AIVehicle.GetRunningCost(best.sample) / 4;
+		local safe = bank - best.price + headroom >= 2 * afloat_after;
+		if ((!best.rail || best.buys) && bank - keep >= best.price && safe) {
 			local nv = AIVehicle.CloneVehicle(best.rail ? best.line.depot : PrismaticAI.DepotFor(best.sample), best.sample, true);
 			if (!AIVehicle.IsValidVehicle(nv)) {
 				AILog.Warning("PrismaticAI: capital: no vehicle more on " + best.key + ": " + AIError.GetLastErrorString() + "; skipped this quarter");
@@ -248,6 +255,7 @@ function PrismaticAI::AllocateCapital(b, afloat) {
 				best.price + " (bank " + bank + ", keep " + keep + ")");
 			continue;
 		}
+		if (!safe) break;
 		/* Not yet affordable, or a train an external steward wants (ReconcileLines buys it): the money
 		 * stays for it, for a quarter at most. */
 		if (CAPITAL.hold_key != best.key) {
