@@ -127,11 +127,11 @@ producer for good.
   one waiting for its first train. From the choice of a line to its first train, PrismaticAI's
   lines took 0 to 18 months, most within 12 (quarter resolution).
 
-  Once a station is older, the producer's transported amount decides, through the filters
+  Once a rival's station is older, the producer's transported amount decides, through the filters
   `NextOwnFreightLine` already has. Outside rich mode, a producer that moved cargo last month is
   skipped. In rich mode it is scored on the share left below `rich_served_below`. A station that
-  only catches a producer no longer holds it for good, for example a rival's passenger station in
-  a town beside a mine, or a station delivering to a power station next to one. The old comment's
+  only catches a producer no longer holds it for good, for example a rival's passenger station in a
+  town beside a mine, or a station delivering to a power station next to one. The old comment's
   premise was wrong: a station that catches a raw industry need not pick up from it.
 
   Nothing else can tell those stations apart:
@@ -139,8 +139,15 @@ producer for good.
     date (`AIStation.IsValidStation` is false for it);
   - the cargo monitor is for Game Scripts only;
   - a pickup station at a mine inside a town accepts passengers too, so acceptance proves nothing;
-  - company names are the game's own unless `disclose_name` is set, so a sibling PrismaticAI
-    cannot be told from a rival either.
+  - company names are the game's own unless `disclose_name` is set.
+
+  A sibling's older station still claims while cargo moves from the producer. The bot knows a
+  sibling by its auto-renew settings (`IsSibling`): every company's are readable, and PrismaticAI
+  sets them at every start to a pair that differs from the game's defaults (-6 months and 30000,
+  against 6 months and 100000). Without this rule, on seed 31337 rich mode built a second coal
+  line at Pruston Coal Mine, beside the sibling's line, whose station rated the coal 49%. The
+  fitness check failed that run with `shared_producer` (cargo 1). Test: `SiblingMark` in
+  `test_ai_battle.py` keeps `main.nut` and `rail.nut` in step.
 
   The first sight is kept per tile, with the owner and the station id. A platform joined to an old
   station, or a station rebuilt on the same tile, is therefore fresh again.
@@ -207,11 +214,9 @@ review, 2026-11-23. Seen once in the claim-race lineup, with different cargoes (
 above), which the per-cargo check no longer counts.
 
 <!-- open-finding kind=partial -->
-In rich mode, a sibling PrismaticAI's established line can get a second line beside it when its
-producer moves less than `rich_served_below` of its output. An AI cannot tell a sibling from a
-rival, and an old station no longer claims. In the claim-race lineup company 0 tried two such lines
-at its sibling's Dindinghall Farm (grain). One was given up when its track met the sibling's; the
-other was still being laid when the match ended. The planner's copy of the claim (`cargo.rs`
+The sibling mark is the pair of auto-renew settings that `main.nut` sets at every start. If a
+person changes those settings in a co-played company, that company stops counting as a sibling,
+and a rival that uses the same pair is taken for one. The planner's copy of the claim (`cargo.rs`
 `CLAIM_RULE`, `mcp-plan --for`) still applies the old rule: any rail station near a raw producer
 holds it, and a processing industry is never held.
 

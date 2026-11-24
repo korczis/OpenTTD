@@ -424,9 +424,12 @@ function PrismaticAI::ForgetGoneClaims() {
  *
  * A claim is a fresh station: a foreign rail station tile catching `p` that this company first saw
  * less than CLAIM_FRESH_DAYS ago (ClaimFresh). That is the line still being built or waiting for its
- * first train, when nothing shows that it will pick up. Once a station is older, what the industry
- * transports decides, not the station: NextOwnFreightLine skips a producer whose output moved last
- * month, and in rich mode (rich.nut) scores it on the share left below RICH_SERVED_BELOW. Before, any
+ * first train, when nothing shows that it will pick up. Once a rival's station is older, what the
+ * industry transports decides, not the station: NextOwnFreightLine skips a producer whose output
+ * moved last month, and in rich mode (rich.nut) scores it on the share left below RICH_SERVED_BELOW.
+ * A sibling's (IsSibling) older station still claims while cargo moves from `p`: in rich mode the
+ * fitness check's sibling lineup (seed 31337) otherwise built a second coal line at Pruston Coal Mine
+ * beside its sibling's, whose station rated the coal 49%. Before, any
  * foreign rail station near a raw industry claimed it for good, so a rival's working line held a
  * producer from rich mode too: in the owner's live game of 2026-11-23 the bot reported 19 to 21
  * producers "claimed" and 0 pairs tried from 1952-10 on, still in rich mode from 1954-03.
@@ -437,10 +440,9 @@ function PrismaticAI::ForgetGoneClaims() {
  * cargo only to a station where a vehicle tried to load it). An AI cannot ask: a foreign station's
  * ratings, waiting cargo, vehicles, name and construction date are refused (AIStation.IsValidStation
  * is false for it), and the cargo monitor is for Game Scripts only. Its acceptance does not decide
- * either: a pickup station at a mine inside a town accepts passengers too. Nor can an AI tell a
- * sibling PrismaticAI company from a rival: company names are the game's own unless disclose_name
- * is set. The one trace of a pickup is the producer's transported amount
- * (AIIndustry.GetLastMonthTransported), for the whole industry and a month late.
+ * either: a pickup station at a mine inside a town accepts passengers too. The one trace of a
+ * pickup is the producer's transported amount (AIIndustry.GetLastMonthTransported), for the whole
+ * industry and a month late.
  *
  * With `fresh_only` (BuildFreightRailRoute's checks after its stations) no release is logged. */
 function PrismaticAI::ForeignRailStationAt(p, fresh_only = false) {
@@ -450,23 +452,49 @@ function PrismaticAI::ForeignRailStationAt(p, fresh_only = false) {
 	tiles.KeepValue(1);
 	/* The lowest claiming company id, so two companies that claim one producer at once settle it the
 	 * same way (BuildFreightRailRoute: the higher id yields). */
-	local holder = null, foreign = 0;
+	local holder = null, foreign = 0, moved = null;
 	foreach (t, _ in tiles) {
 		local o = AITile.GetOwner(t);
 		if (o == me || o == AICompany.COMPANY_INVALID) continue;
 		foreign++;
-		if (PrismaticAI.ClaimFresh(t, o, CLAIM_FRESH_DAYS) && (holder == null || o < holder)) holder = o;
+		local claims = PrismaticAI.ClaimFresh(t, o, CLAIM_FRESH_DAYS);
+		if (!claims && !fresh_only && PrismaticAI.IsSibling(o)) {
+			if (moved == null) moved = PrismaticAI.CargoMoved(p);
+			claims = moved;
+		}
+		if (claims && (holder == null || o < holder)) holder = o;
 	}
 	CLAIM_LAST_LAPSED = (holder == null) ? foreign : 0;
 	if (holder == null && foreign > 0 && !fresh_only && !CLAIM_LAPSED.rawin(p)) {
 		CLAIM_LAPSED[p] <- true;
-		local moved = false;
-		foreach (c, _ in AICargoList_IndustryProducing(p)) if (AIIndustry.GetLastMonthTransported(p, c) > 0) moved = true;
+		if (moved == null) moved = PrismaticAI.CargoMoved(p);
 		AILog.Info("PrismaticAI: no claim on " + AIIndustry.GetName(p) + ": " + foreign +
 			" tile(s) of other companies' rail stations, all seen over " + CLAIM_FRESH_DAYS + " days ago; cargo moved last month: " +
 			(moved ? "yes (scored by the share left)" : "no"));
 	}
 	return holder;
+}
+
+/* Whether any cargo moved from industry `p` last month, whoever moved it. */
+function PrismaticAI::CargoMoved(p) {
+	foreach (c, _ in AICargoList_IndustryProducing(p)) if (AIIndustry.GetLastMonthTransported(p, c) > 0) return true;
+	return false;
+}
+
+/* Auto-renew as PrismaticAI sets it at every start (main.nut: SetAutoRenewMonths, SetAutoRenewMoney):
+ * the mark of a sibling. test_ai_battle.py SiblingMark keeps the two in step. */
+const SIBLING_RENEW_MONTHS = -6;
+const SIBLING_RENEW_MONEY = 30000;
+
+/* Whether company `o` runs PrismaticAI too, as far as an AI can tell. A company's name is the game's
+ * own (disclose_name is off in battles and in the owner's games), but any company's auto-renew
+ * settings are readable (AICompany.GetAutoRenewMonths, GetAutoRenewMoney), and PrismaticAI sets
+ * them to a pair other than the game's defaults (6 months, 100000). A rival that happens to use the
+ * same pair is taken for a sibling, which only keeps its working line from a second line of ours, as
+ * master did for every station. */
+function PrismaticAI::IsSibling(o) {
+	return AICompany.GetAutoRenewStatus(o) && AICompany.GetAutoRenewMonths(o) == SIBLING_RENEW_MONTHS &&
+		AICompany.GetAutoRenewMoney(o) == SIBLING_RENEW_MONEY;
 }
 
 /* Check 2 of BuildFreightRailRoute, after both stations of a line from producer `p` stand: whether

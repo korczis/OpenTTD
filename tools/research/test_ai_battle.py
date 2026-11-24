@@ -1656,5 +1656,26 @@ class Replay(unittest.TestCase):
         return str(conf)
 
 
+class SiblingMark(unittest.TestCase):
+    """rail.nut IsSibling knows a sibling PrismaticAI company by the auto-renew settings main.nut sets
+    at every start; when one side changes and the other does not, siblings stop recognising each
+    other and build second lines beside each other's (research/incident-2026-11-22-sibling-industries.md)."""
+
+    def test_the_mark_rail_nut_reads_is_the_one_main_nut_sets(self):
+        import re
+        src = Path(battle.__file__).parent.parent / "prismatic-ai" / "PrismaticAI"
+        main = (src / "main.nut").read_text()
+        rail = (src / "rail.nut").read_text()
+        self.assertIn("AICompany.SetAutoRenewStatus(true);", main)
+        months = re.search(r"AICompany\.SetAutoRenewMonths\((-?\d+)\);", main)
+        money = re.search(r"AICompany\.SetAutoRenewMoney\((\d+)\);", main)
+        self.assertIsNotNone(months)
+        self.assertIsNotNone(money)
+        self.assertIn(f"const SIBLING_RENEW_MONTHS = {months.group(1)};", rail)
+        self.assertIn(f"const SIBLING_RENEW_MONEY = {money.group(1)};", rail)
+        # Not the game's defaults (company_settings.ini: 6 months, 100000), or every company would match.
+        self.assertNotEqual((int(months.group(1)), int(money.group(1))), (6, 100000))
+
+
 if __name__ == "__main__":
     unittest.main()
