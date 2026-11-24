@@ -4,7 +4,8 @@
 // Run it as a service on the Scripts page (/scripts/replan) or:
 //   curl -X POST 127.0.0.1:8800/api/services/start -d '{"name":"replan"}'
 //
-// Once a game month (EVERY_MONTHS), for the first running company of AI:
+// Once a game month (EVERY_MONTHS), one plan for every running company of AI (step 3), then for
+// each of them:
 //   1. The company's state, from the engine: the last four quarters of income, expenses, company
 //      value, performance rating and cargo delivered (ScriptCompany through MCP), with the trend
 //      between the last two, and its rank by value among all companies from the panel's DuckDB
@@ -15,8 +16,11 @@
 //      the plan says where the others win and where this company is ahead.
 //   3. A fresh plan on today's map and money (api_botPlanned: mcp-plan's portfolio within the loan
 //      limit, rail lines priced on the map by AlgoGlyph's track-planning, the knapsack by
-//      AlgoGlyph). The panel publishes it as plan.portfolio and plan.bot_settings, so it is in the
-//      store and on the bus as well.
+//      AlgoGlyph), one call for all the companies. The panel publishes it as plan.portfolio and
+//      plan.bot_settings, so it is in the store and on the bus as well. Each company's settings are
+//      its own entry of bot_settings.companies: no two companies of the AI are handed one producer,
+//      and none a producer where another company already has a rail station
+//      (research/incident-2026-11-22-sibling-industries.md). A company without an entry is skipped.
 //   4. The switch, modelled before it is proposed. AlgoGlyph's bayes-update turns this company's
 //      own record (lines a year old or more that earned, and those that lost) into the chance that
 //      a new line pays, with a credible interval. AlgoGlyph's pert-monte-carlo then draws the
@@ -24,9 +28,9 @@
 //      upper end, likely at its mean, pessimistic at its lower end. The plan is proposed only when
 //      the lower end is at least MIN_PAYS and 80 % of the draws pay back within HORIZON_MONTHS.
 //      Otherwise the round says why it holds the current plan.
-//   5. A proposed plan goes through build_plan::apply: only the settings that differ from the
-//      bot's live ones, each an openttd.ai.set_setting that waits for the owner's approval. This
-//      script approves nothing.
+//   5. A proposed plan goes through build_plan::apply_to that company: only the settings that
+//      differ from its bot's live ones, each an openttd.ai.set_setting that waits for the owner's
+//      approval. This script approves nothing.
 //   6. The whole round (state, trend, competition, plan, model, verdict) goes on the shared
 //      blackboard as `replan.<company>`; every write is a rhai.shared event, so it lands on the
 //      bus and in the store. It also goes to the Majordomus mesh as a `plan` record when the
@@ -39,7 +43,7 @@ import "ttd" as ttd;
 import "build_plan" as bp;
 import "fr_author" as fa;
 
-// The AI whose company is re-planned: the first running company of it (/api/bots).
+// The AI whose companies are re-planned: every running company of it (/api/bots).
 const AI = "PrismaticAI";
 // This service's name for the planner key planner.<company> (fr_author.rhai): while the key names
 // another writer (Battlebrain's directive during a cutover), a round proposes nothing.
@@ -65,9 +69,33 @@ const TYPES = ["train", "road", "aircraft", "ship"];
 // AI settings PrismaticAI declares there.
 const RECORD_SCOPE = ["tools/research/prismatic-ai/PrismaticAI/info.nut"];
 
-fn bot() {
+fn bots() {
+    let out = [];
     for r in api_bots().running ?? [] {
-        if r.ai == global::AI { return r; }
+        if r.ai == global::AI { out.push(r); }
+    }
+    out
+}
+
+// A company id as an integer, whichever number type the JSON gave.
+fn id_of(x) { if type_of(x) == "f64" { x.to_int() } else { x } }
+
+// One plan for every company of the AI (step 3). The planner prices up to TRACK rail lines with
+// AlgoGlyph: minutes, not seconds, on a busy machine (3:10 at load 50, 2026-11-22), so this one call
+// gets PLAN_TIMEOUT_S.
+fn plan_all() {
+    let before = http_timeout(global::PLAN_TIMEOUT_S);
+    let p = ();
+    try { p = api_botPlanned(#{ ai: global::AI, track: global::TRACK }); } catch (err) { http_timeout(before); throw err; }
+    http_timeout(before);
+    if "http_error" in p { throw `planner: ${p.http_error} ${p.body}`; }
+    p
+}
+
+// The panel's plan for company `id`: its entry of bot_settings.companies, () when it has none.
+fn plan_of(p, id) {
+    for c in (p.bot_settings ?? #{}).companies ?? [] {
+        if id_of(c.company) == id_of(id) { return c; }
     }
     ()
 }
@@ -255,7 +283,12 @@ fn record(company, summary) {
     }
 }
 
-fn plan_round(b) {
+fn plan_round(b, p) {
+    let mine = plan_of(p, b.id);
+    if type_of(mine) == "()" {
+        print(`== company ${b.id + 1} (${b.name}): the plan has no entry for it; nothing proposed`);
+        return ();
+    }
     let r = rank(b.id);
     let f = finances(b.id);
     let q = f.quarters[0];
@@ -278,19 +311,13 @@ fn plan_round(b) {
               else { `${row.leader} earns ${row.leader_per_vehicle} a vehicle, we ${row.ours_per_vehicle ?? "none"} (${row.ours_vehicles} vehicle(s))` });
     }
 
-    // The planner prices up to TRACK rail lines with AlgoGlyph: minutes, not seconds, on a busy
-    // machine (3:10 at load 50, 2026-11-22), so this one call gets PLAN_TIMEOUT_S.
-    let before = http_timeout(global::PLAN_TIMEOUT_S);
-    let p = ();
-    try { p = api_botPlanned(#{ ai: global::AI, track: global::TRACK }); } catch (err) { http_timeout(before); throw err; }
-    http_timeout(before);
-    if "http_error" in p { throw `planner: ${p.http_error} ${p.body}`; }
     let portfolio = p.portfolio ?? #{};
     // The predicted monthly profit of exactly the lines the investment buys: each chosen freight
-    // line matched to its priced entry in bot_settings by producer, acceptor and cargo. A chosen
-    // line without a priced entry adds nothing, so the payback errs on the long side.
+    // line matched to its priced entry in this company's plan by producer, acceptor and cargo. A
+    // chosen line without one (another company's, or unpriced) adds nothing, so the payback errs on
+    // the long side.
     let priced = #{};
-    for l in (p.bot_settings ?? #{}).freight ?? [] { priced[`${l.from}>${l.to}:${l.cargo_id}`] = l.monthly_profit ?? 0.0; }
+    for l in mine.freight ?? [] { priced[`${l.from}>${l.to}:${l.cargo_id}`] = l.monthly_profit ?? 0.0; }
     let chosen = [];
     let monthly = 0;
     let unpriced = 0;
@@ -308,7 +335,7 @@ fn plan_round(b) {
     let m = model(rec, portfolio, monthly);
     print(`   record: ${rec.earned} of ${rec.lines} line(s) a year old earned; ${m.why}`);
 
-    let diff = changes(settings_of(p.settings), b.settings ?? []);
+    let diff = changes(settings_of(mine.start_ai), b.settings ?? []);
     let applied = #{ pending: [], refused: [], lines: [] };
     let waiting = waiting_for_owner(b.id);
     let held = fa::refusal(b.id, global::WRITER);
@@ -319,7 +346,7 @@ fn plan_round(b) {
         // The owner has not answered the last proposal yet; a new one would only pile up beside it.
         print(`   holding: ${waiting} earlier change(s) for company ${b.id + 1} still wait for the owner's approval`);
     } else if m.adopt && !diff.is_empty() {
-        applied = bp::apply_as(#{ build: #{ settings: diff } }, global::WRITER);
+        applied = bp::apply_to(#{ build: #{ settings: diff } }, global::WRITER, b);
         for l in applied.lines { print(`   ${l}`); }
         say(`new plan for ${b.name}: ${diff.len()} setting(s) wait for your approval (${applied.pending}); ${m.why}`);
     } else if diff.is_empty() {
@@ -337,16 +364,28 @@ fn plan_round(b) {
     summary
 }
 
+// One round: one plan for every running company of the AI, then each company's steps 1, 2 and 4
+// to 6; a company whose step fails does not stop the others. False while none runs. Not named
+// `round`: a script fn of that name would also answer `x.round()` on a number, and recurse.
+fn one_round() {
+    let bs = bots();
+    if bs.is_empty() {
+        print(`no running ${global::AI} yet`);
+        return false;
+    }
+    let p = plan_all();
+    for b in bs {
+        try { plan_round(b, p); } catch (err) { print(`replan: company ${b.id + 1}: ${err}`); }
+    }
+    true
+}
+
 let last = ();
 let once = ONCE || env("REPLAN_ONCE") == "1";
 loop {
     try {
-        let b = bot();
         let s = ttd::state();
-        if type_of(b) == "()" {
-            print(`no running ${AI} yet`);
-        } else if type_of(last) == "()" || month_of(s.date) - month_of(last) >= EVERY_MONTHS {
-            plan_round(b);
+        if (type_of(last) == "()" || month_of(s.date) - month_of(last) >= EVERY_MONTHS) && one_round() {
             last = s.date;
         }
     } catch (err) {

@@ -89,18 +89,26 @@ pub struct Args {
     pub web: crate::web_access::Policy,
     /// A savegame to start from instead of a new world (`-g FILE`); its AI companies come with it.
     pub load: Option<String>,
+    /// Where the owner secret lives (`--owner-secret-file`); unset, $PRISMATIC_PANEL_OWNER_SECRET_FILE,
+    /// else ~/.config/prismatic/panel-owner-secret (see [`owner_secret_path`]).
+    pub owner_file: Option<String>,
+    /// A one-shot owner secret kept nowhere (`--ephemeral-owner-secret`): nobody can sign in over
+    /// HTTP, so the owner approves at the game's console (a battle run, a test).
+    pub ephemeral_owner: bool,
 }
 
 pub const USAGE: &str = "usage: mcp-panel --bin <openttd> [--panel-port 8800] [--mcp-port 8731] [--game-port 3979]\n\
                          \x20                [--seed 1] [--ai PrismaticAI] [--auto-approve] [--no-plan-bot] [--load FILE]\n\
                          \x20                [--bind 127.0.0.1] [--allow-origin <origin> ...] [--token <t>]   (src/web_access.rs)\n\
+                         \x20                [--owner-secret-file FILE | --ephemeral-owner-secret]   (the owner's sign-in)\n\
                          \x20      mcp-panel --write-event-kinds   (the knowledge note's table of event kinds, from src/panel_events.rs)\n\
                          \x20      mcp-panel --import-calibration FILE [NAME]   (a retired calibration file's readings, once, into the store)";
 
 /// server.py's command line: `--name value` or `--name=value`.
 pub fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut a = Args { bin: String::new(), panel_port: 8800, mcp_port: 8731, game_port: 3979, seed: 1,
-                       ai: "PrismaticAI".into(), auto_approve: false, plan_bot: true, load: None, web: Default::default() };
+                       ai: "PrismaticAI".into(), auto_approve: false, plan_bot: true, load: None, web: Default::default(),
+                       owner_file: None, ephemeral_owner: false };
     let mut bin = None;
     let mut i = 0;
     while i < argv.len() {
@@ -131,6 +139,8 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             // The one web access policy's own flags (src/web_access.rs).
             web @ ("--bind" | "--allow-origin" | "--token") => { a.web.flag(web, &value(&mut i)?)?; }
             "--load" => a.load = Some(value(&mut i)?),
+            "--owner-secret-file" => a.owner_file = Some(value(&mut i)?),
+            "--ephemeral-owner-secret" => a.ephemeral_owner = true,
             other => return Err(format!("unrecognized arguments: {other}")),
         }
         i += 1;
@@ -577,7 +587,121 @@ pub fn presents_owner(secret: Option<&str>, port: u16, headers: &[(String, Strin
 /// The Set-Cookie header that keeps the owner secret for the page, when `given` (?owner=) is it.
 pub fn owner_cookie(secret: Option<&str>, port: u16, given: Option<&str>) -> Option<String> {
     let (s, g) = (secret?, given?);
-    crate::web_access::same(s, g).then(|| format!("Set-Cookie: {}={s}; HttpOnly; SameSite=Strict; Path=/\r\n", owner_cookie_name(port)))
+    crate::web_access::same(s, g).then(|| owner_set_cookie(port, s))
+}
+
+/// How long the page keeps the owner signed in: a year, since the secret itself outlives restarts.
+pub const OWNER_COOKIE_MAX_AGE: u64 = 365 * 24 * 3600;
+
+/// The Set-Cookie header of a signed-in owner: HttpOnly (no script reads it), SameSite=Strict (no
+/// other site sends it), kept across browser restarts.
+pub fn owner_set_cookie(port: u16, secret: &str) -> String {
+    format!("Set-Cookie: {}={secret}; HttpOnly; SameSite=Strict; Path=/; Max-Age={OWNER_COOKIE_MAX_AGE}\r\n", owner_cookie_name(port))
+}
+
+/// The Set-Cookie header that signs the owner out of this browser.
+pub fn owner_clear_cookie(port: u16) -> String {
+    format!("Set-Cookie: {}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0\r\n", owner_cookie_name(port))
+}
+
+/// The environment variable naming the owner secret's file (the same name mcp-e2e reads).
+pub const OWNER_FILE_ENV: &str = "PRISMATIC_PANEL_OWNER_SECRET_FILE";
+
+/// The file the owner secret lives in: `--owner-secret-file`, else $PRISMATIC_PANEL_OWNER_SECRET_FILE,
+/// else $HOME/.config/prismatic/panel-owner-secret. Err without any of them.
+pub fn owner_secret_path(flag: Option<&str>, env: Option<&str>, home: Option<&str>) -> Result<PathBuf, String> {
+    let nonempty = |v: Option<&str>| v.filter(|v| !v.trim().is_empty()).map(PathBuf::from);
+    nonempty(flag).or_else(|| nonempty(env))
+        .or_else(|| nonempty(home).map(|h| h.join(".config/prismatic/panel-owner-secret")))
+        .ok_or_else(|| format!("no owner secret file: give --owner-secret-file, set {OWNER_FILE_ENV} or HOME"))
+}
+
+/// The owner secret kept in `path`, made once (32 bytes of /dev/urandom as hex, the file 0600 in a
+/// 0700 directory it creates) and read on every later start, so the owner's sign-in survives a
+/// restart. A file others may read, or one that holds no secret, is refused: never weak, never shared.
+pub fn load_owner_secret(path: &Path) -> Result<String, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let shown = path.display();
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty() && !d.exists()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    if !path.exists() {
+        make_owner_secret_file(path)?;
+    }
+    let mode = std::fs::metadata(path).map_err(|e| format!("{shown}: {e}"))?.permissions().mode() & 0o777;
+    if mode & 0o077 != 0 {
+        return Err(format!("{shown} is readable by others (mode {mode:o}); the owner secret must be 0600: chmod 600 {shown}"));
+    }
+    let secret = std::fs::read_to_string(path).map_err(|e| format!("{shown}: {e}"))?.trim().to_string();
+    if secret.len() < 32 || !secret.bytes().all(|c| c.is_ascii_graphic()) {
+        return Err(format!("{shown} holds no owner secret (32 or more printable characters); delete it to make a new one"));
+    }
+    Ok(secret)
+}
+
+/// A new owner secret written to `path`, created 0600 and only if it is not there yet: a panel that
+/// made it first keeps its secret, and this one then reads that.
+pub fn make_owner_secret_file(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let secret = new_owner_secret().ok_or("/dev/urandom is unreadable: no owner secret made")?;
+    match std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
+        Ok(mut f) => f.write_all(format!("{secret}\n").as_bytes()).map_err(|e| format!("{}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// The owner secret of a panel and what its start says about it (never the secret itself): from
+/// its file (see [`owner_secret_path`]), or one-shot with `--ephemeral-owner-secret`. Err when the
+/// file cannot serve, which stops the panel before it starts.
+pub struct Owner {
+    pub secret: Option<String>,
+    /// What the panel's start prints: where the secret lives, never the secret.
+    pub note: String,
+    /// The secret's file, which the sign-in box names; None for a one-shot secret.
+    pub file: Option<String>,
+}
+
+pub fn owner_of(args: &Args, env: Option<&str>, home: Option<&str>) -> Result<Owner, String> {
+    let port = args.panel_port;
+    if args.ephemeral_owner {
+        return Ok(Owner { secret: new_owner_secret(), file: None, note: format!(
+            "mcp-panel: one-shot owner secret, kept nowhere (--ephemeral-owner-secret): approve at the game's console (prismatic_mcp approve <id>); http://127.0.0.1:{port}/") });
+    }
+    let path = owner_secret_path(args.owner_file.as_deref(), env, home)?;
+    let secret = load_owner_secret(&path)?;
+    Ok(Owner { secret: Some(secret), file: Some(path.display().to_string()), note: format!(
+        "mcp-panel: owner secret in {} (sign in once at http://127.0.0.1:{port}/ with it, or send {OWNER_HEADER}: <it>)", path.display()) })
+}
+
+/// Failed owner sign-ins allowed in [`LOGIN_WINDOW`] before every further one is refused (429).
+pub const LOGIN_TRIES: usize = 5;
+pub const LOGIN_WINDOW: Duration = Duration::from_secs(60);
+/// How long a wrong secret waits for its answer: guessing is slow even within the window.
+#[cfg(not(test))]
+pub const LOGIN_DELAY: Duration = Duration::from_secs(1);
+#[cfg(test)]
+pub const LOGIN_DELAY: Duration = Duration::from_millis(0);
+
+/// The owner's sign-in (POST /api/owner/login): Ok when `given` is the secret (compared in constant
+/// time); 401 for any other, with nothing about the secret's length or prefix; 429 while
+/// [`LOGIN_TRIES`] failures fall within [`LOGIN_WINDOW`]. `failures` keeps their times.
+pub fn owner_login(secret: Option<&str>, given: &str, failures: &mut VecDeque<Instant>, now: Instant) -> Result<(), (u16, Value)> {
+    while failures.front().is_some_and(|t| now.duration_since(*t) >= LOGIN_WINDOW) {
+        failures.pop_front();
+    }
+    if failures.len() >= LOGIN_TRIES {
+        return Err((429, json!({"error": format!("{LOGIN_TRIES} wrong owner secrets within {} s: wait, then sign in again", LOGIN_WINDOW.as_secs()),
+                                "refused": "owner_login_rate"})));
+    }
+    match secret {
+        Some(s) if crate::web_access::same(s, given.trim()) => Ok(()),
+        _ => {
+            failures.push_back(now);
+            Err((401, json!({"error": "that is not the owner secret", "refused": "owner_login"})))
+        }
+    }
 }
 
 /// The owner's routes: approving (POST /api/approve) and switching auto-approve on (POST
@@ -589,8 +713,8 @@ pub fn owner_gate(secret: Option<&str>, port: u16, method: &str, path: &str, bod
         return Ok(());
     }
     Err((401, json!({"error": format!(
-        "{path} is the owner's: open the page once as http://127.0.0.1:{port}/?owner=<secret> (the owner secret mcp-panel printed when it started; \
-         it sets an HttpOnly cookie) or send {OWNER_HEADER}: <secret>; or approve at the game's console with prismatic_mcp approve <id>"),
+        "{path} is the owner's: sign in on the panel's page with the owner secret (the file mcp-panel named when it started), \
+         open http://127.0.0.1:{port}/?owner=<secret> once, or send {OWNER_HEADER}: <secret>; or approve at the game's console with prismatic_mcp approve <id>"),
         "refused": "owner_secret"})))
 }
 
@@ -800,9 +924,15 @@ pub struct Game {
     /// Tests stand in for the game server's queue (openttd://approvals) with this.
     #[cfg(test)]
     pub test_approvals: Mutex<Vec<Value>>,
-    /// The owner secret (see [`owner_gate`]): made at start, printed once on the panel's stdout by
-    /// [`Game::start`], never sent to the bus, the store, the event feed or any answer.
+    /// The owner secret (see [`owner_gate`]): read from its 0600 file at start ([`owner_of`]), never
+    /// printed, never sent to the bus, the store, the event feed or any answer.
     owner_secret: Option<String>,
+    /// What [`Game::start`] says about the owner secret (where it lives), or why it cannot serve.
+    owner_note: Result<String, String>,
+    /// The owner secret's file, named to whoever is refused an owner's route.
+    owner_file: Option<String>,
+    /// The times of the recent failed sign-ins ([`owner_login`]).
+    owner_failures: Mutex<VecDeque<Instant>>,
     pub auto_approve: AtomicBool,
     pub mcp_up: AtomicBool,
     pub ai_started: AtomicBool,
@@ -825,6 +955,20 @@ pub const NO_CLIENT: &str = "no GUI client attached (POST /api/view/attach {toke
 impl Game {
     pub fn new(args: Args) -> Arc<Game> {
         let tmp = std::env::temp_dir().join(format!("openttd-mcp-panel.{}.{}", std::process::id(), args.panel_port));
+        // A test panel never touches the person's own secret file: without --owner-secret-file it is one-shot.
+        #[cfg(test)]
+        let (env, home) = (None::<String>, None::<String>);
+        #[cfg(not(test))]
+        let (env, home) = (std::env::var(OWNER_FILE_ENV).ok(), std::env::var("HOME").ok());
+        let owner = if cfg!(test) && args.owner_file.is_none() {
+            owner_of(&Args { ephemeral_owner: true, ..args.clone() }, None, None)
+        } else {
+            owner_of(&args, env.as_deref(), home.as_deref())
+        };
+        let (owner_secret, owner_note, owner_file) = match owner {
+            Ok(o) => (o.secret, Ok(o.note), o.file),
+            Err(e) => (None, Err(e), None),
+        };
         Arc::new(Game {
             auto_approve: AtomicBool::new(args.auto_approve),
             args, tmp,
@@ -834,7 +978,7 @@ impl Game {
             bus: Bus::new(), announced: Mutex::new(HashSet::new()),
             #[cfg(test)]
             test_approvals: Mutex::new(vec![]),
-            owner_secret: new_owner_secret(),
+            owner_secret, owner_note, owner_file, owner_failures: Mutex::new(VecDeque::new()),
             mcp_up: AtomicBool::new(false), ai_started: AtomicBool::new(false), rpc_id: AtomicU64::new(0),
             server_tools: Mutex::new((vec![], None)), client_tools: Mutex::new((vec![], None)),
             owner_q: Mutex::new(None), plans_seen: Mutex::new(HashSet::new()), history: Mutex::new(VecDeque::new()),
@@ -844,12 +988,9 @@ impl Game {
 
     // ------------------------------------------------------------------ process
     pub fn start(self: &Arc<Self>) -> Result<(), String> {
-        // Once, on stdout only: whoever reads it is this panel's owner over HTTP (Approve, auto-approve on).
-        match &self.owner_secret {
-            Some(s) => println!("mcp-panel: owner secret {s}  (Approve: open http://127.0.0.1:{}/?owner={s} once, or send {OWNER_HEADER}: {s})",
-                                self.args.panel_port),
-            None => println!("mcp-panel: no owner secret (/dev/urandom unreadable): approve at the game's console only"),
-        }
+        // Where the owner secret lives, never the secret: stdout ends up in logs anyone may read.
+        // A secret file that cannot serve stops the panel here, before a game starts.
+        println!("{}", self.owner_note.clone()?);
         std::fs::create_dir_all(&self.tmp).map_err(|e| format!("{}: {e}", self.tmp.display()))?;
         let cfg = self.tmp.join("openttd.cfg");
         std::fs::write(&cfg, format!(
@@ -2007,6 +2148,34 @@ fn h_auto(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     ok(json!({"auto_approve": on}))
 }
 
+/// The owner signs in (POST /api/owner/login {secret}): the right secret sets the page's HttpOnly
+/// cookie, the same one ?owner= sets, and answers 204; a wrong one waits [`LOGIN_DELAY`] and answers
+/// 401, and a run of them 429 ([`owner_login`]). The secret reaches no event, log or answer.
+fn h_owner_login(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
+    let given = py_str(i.body.get("secret"));
+    let verdict = owner_login(g.owner_secret.as_deref(), &given, &mut g.owner_failures.lock().unwrap(), Instant::now());
+    match verdict {
+        Ok(()) => {
+            let secret = g.owner_secret.as_deref().unwrap_or_default();
+            crate::web_access::set_headers(&format!("{}{}", crate::web_access::headers(), owner_set_cookie(g.args.panel_port, secret)));
+            g.event("operator", "the owner signed in");
+            Ok((204, Value::Null))
+        }
+        Err((code, why)) => {
+            g.event("operator", if code == 429 { "owner sign-in refused: too many wrong secrets" } else { "owner sign-in refused: wrong secret" });
+            if code == 401 { thread::sleep(LOGIN_DELAY); }
+            Ok((code, why))
+        }
+    }
+}
+
+/// The owner signs this browser out (POST /api/owner/logout): its cookie is cleared; open to anyone,
+/// since it only ever takes the owner's power away from the browser that asks.
+fn h_owner_logout(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
+    crate::web_access::set_headers(&format!("{}{}", crate::web_access::headers(), owner_clear_cookie(g.args.panel_port)));
+    Ok((204, Value::Null))
+}
+
 fn h_start_ai(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     let name = if truthy(i.body.get("ai")) { py_str(i.body.get("ai")) } else { g.args.ai.clone() };
     let settings = py_str(i.body.get("settings").or(Some(&json!("")))).trim().to_string();
@@ -2596,12 +2765,16 @@ pub fn routes() -> Vec<Route> {
           s(json!({"ids": {"type": "array", "items": {"type": "integer"}}, "wait": {"type": "number"}}), &["ids"]), h_content_download),
         r("POST", "/api/pause", "pause", "Pause or resume through the approval-gated MCP tool", true,
           s(json!({"pause": {"type": "boolean"}}), &["pause"]), h_pause),
-        r("POST", "/api/approve", "approve", "The owner's approval of a pending decision, which the game server carries out at once (ADR 0038): the decision it recorded (200), 422 when the game rejected it, 409 for an approval not pending, 404 for one it does not hold, 504 when no decision came. Needs the owner secret mcp-panel printed at start (the cookie ?owner=<secret> sets, or the X-Panel-Owner header), else 401; an owner-only tool (openttd.ai.set_settings, a Battlebrain live decision) is refused with 403 and the console command to type, whoever asks; `by` names the approver it declares (recorded in plan.directive_outcome, not checked)", true,
+        r("POST", "/api/approve", "approve", "The owner's approval of a pending decision, which the game server carries out at once (ADR 0038): the decision it recorded (200), 422 when the game rejected it, 409 for an approval not pending, 404 for one it does not hold, 504 when no decision came. Needs the owner secret (signed in through POST /api/owner/login, the cookie ?owner=<secret> sets, or the X-Panel-Owner header), else 401; an owner-only tool (openttd.ai.set_settings, a Battlebrain live decision) is refused with 403 and the console command to type, whoever asks; `by` names the approver it declares (recorded in plan.directive_outcome, not checked)", true,
           s(json!({"id": {"type": "integer"}, "by": st()}), &["id"]), h_approve),
         r("POST", "/api/deny", "deny", "Deny a pending decision: the game server withdraws it and enacts nothing (ADR 0038), so no owner secret is needed. 200 with the approval now denied, 409 for an approval not pending, 404 for one the server does not hold, 504 when the server did not mark it denied", true,
           s(json!({"id": {"type": "integer"}}), &["id"]), h_deny),
         r("POST", "/api/auto-approve", "autoApprove", "The owner's full-auto switch: on needs the owner secret (as /api/approve), off is open to anyone; it never approves an owner-only tool", false,
           s(json!({"on": {"type": "boolean"}}), &["on"]), h_auto),
+        r("POST", "/api/owner/login", "ownerLogin", "The owner signs in: the owner secret (from the file mcp-panel named at start, $PRISMATIC_PANEL_OWNER_SECRET_FILE or ~/.config/prismatic/panel-owner-secret) sets this browser's HttpOnly cookie, as ?owner= does, and answers 204; a wrong secret 401 (after a delay), five wrong ones within a minute 429", false,
+          s(json!({"secret": {"type": "string"}}), &["secret"]), h_owner_login),
+        r("POST", "/api/owner/logout", "ownerLogout", "Sign this browser out of the owner's routes (its cookie is cleared); 204", false,
+          Some(obj()), h_owner_logout),
         r("POST", "/api/start-ai", "startAi", "Start a company AI with an optional settings string", false,
           s(json!({"ai": st(), "settings": st()}), &[]), h_start_ai),
         r("GET", "/api/bots", "bots", "The AIs the owner can run as their bot, their settings (from openttd.ai.list, else info.nut) and the running AI companies", true,
@@ -2963,6 +3136,8 @@ pub fn read_request(stream: &mut TcpStream) -> Option<Request> {
 }
 
 fn send_json(stream: TcpStream, code: u16, v: &Value) {
+    // 204 carries no body at all (RFC 9110 15.3.5), so a browser's fetch reads none.
+    if code == 204 { return hub::respond(stream, 204, "application/json", b""); }
     hub::respond(stream, code, "application/json", py_json(v).as_bytes());
 }
 
@@ -3274,9 +3449,12 @@ impl Panel {
             if !errs.is_empty() {
                 return (400, json!({"error": format!("invalid body: {}", errs.join("; "))}));
             }
-            if let Err(refusal) = owner_gate(g.owner_secret.as_deref(), g.args.panel_port, method, path, &body, &req.headers) {
+            if let Err((code, mut why)) = owner_gate(g.owner_secret.as_deref(), g.args.panel_port, method, path, &body, &req.headers) {
                 g.event("operator", &format!("refused {path}: no owner secret"));
-                return refusal;
+                // What the page's sign-in box needs: where to sign in, and where the secret lives.
+                why["sign_in"] = json!("/api/owner/login");
+                why["secret_file"] = json!(g.owner_file);
+                return (code, why);
             }
         } else if hit.is_some() {
             let missing = missing_query(path, &req.query);
@@ -3472,8 +3650,9 @@ mod tests {
         // And the strategist and its blackboard (GET /api/strategy, POST /api/strategy/run, GET and
         // POST /api/blackboard; panel_strategy.rs), and the LAN battle's contestants the live arena
         // plays (GET /api/battle/contestants; panel_battle.rs).
-        // And Deny beside Approve (POST /api/deny; ADR 0038).
-        assert_eq!(rs.len(), 82);
+        // And Deny beside Approve (POST /api/deny; ADR 0038), and the owner's sign-in and sign-out
+        // (POST /api/owner/login, /api/owner/logout).
+        assert_eq!(rs.len(), 84);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -3481,7 +3660,7 @@ mod tests {
                        ("GET", "/api/scoreboard"), ("POST", "/api/scoreboard")] {
             assert!(rs.iter().any(|r| r.method == m && r.path == p), "{m} {p}");
         }
-        assert!(rs.iter().filter(|r| !r.needs_mcp).all(|r| ["/api/status", "/api/log", "/api/events", "/api/console", "/api/auto-approve",
+        assert!(rs.iter().filter(|r| !r.needs_mcp).all(|r| ["/api/status", "/api/log", "/api/events", "/api/console", "/api/auto-approve", "/api/owner/login", "/api/owner/logout",
             "/api/start-ai", "/api/bots/start", "/api/ui/classes", "/api/view/attach", "/api/view/tool", "/api/rhai",
             "/api/content", "/api/content/download", "/api/overview/history", "/api/results", "/api/result", "/api/duel", "/api/scoreboard", "/api/calibration",
             "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query", "/api/db/named",
@@ -4188,6 +4367,142 @@ mod tests {
         assert!(!g.auto_approve.load(Ordering::SeqCst));
         let seen = format!("{:?} {:?}", g.bus.since(0, &[], 10_000), g.events.lock().unwrap());
         assert!(seen.contains("refused /api/approve") && !seen.contains(&secret), "{seen}");
+    }
+
+
+    /// A directory of its own for one owner-secret test, removed when the test ends.
+    struct TmpDir(PathBuf);
+    impl TmpDir {
+        fn new(name: &str) -> TmpDir {
+            let d = std::env::temp_dir().join(format!("mcp-panel-owner-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            TmpDir(d)
+        }
+    }
+    impl Drop for TmpDir {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+    fn mode_of(p: &Path) -> u32 {
+        <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::mode(&std::fs::metadata(p).unwrap().permissions()) & 0o777
+    }
+
+    #[test]
+    fn the_owner_secret_lives_in_one_0600_file_and_survives_a_restart() {
+        // Where it lives: the flag, else the environment, else the home directory's config.
+        assert_eq!(owner_secret_path(Some("/f"), Some("/e"), Some("/h")).unwrap(), PathBuf::from("/f"));
+        assert_eq!(owner_secret_path(None, Some("/e"), Some("/h")).unwrap(), PathBuf::from("/e"));
+        assert_eq!(owner_secret_path(Some(" "), Some(""), Some("/h")).unwrap(), PathBuf::from("/h/.config/prismatic/panel-owner-secret"));
+        assert!(owner_secret_path(None, None, None).unwrap_err().contains(OWNER_FILE_ENV));
+        // Made once, 0600 in a 0700 directory it creates, then read on every start.
+        let tmp = TmpDir::new("file");
+        let file = tmp.0.join("prismatic/panel-owner-secret");
+        let first = load_owner_secret(&file).unwrap();
+        assert!(first.len() == 64 && first.bytes().all(|c| c.is_ascii_hexdigit()), "{first}");
+        assert_eq!((mode_of(&file), mode_of(file.parent().unwrap())), (0o600, 0o700));
+        assert_eq!(load_owner_secret(&file).unwrap(), first, "a restart reads the same secret");
+        // A panel that comes second keeps the first one's secret.
+        make_owner_secret_file(&file).unwrap();
+        assert_eq!(load_owner_secret(&file).unwrap(), first);
+        assert!(make_owner_secret_file(&tmp.0.join("no-such-dir/x")).unwrap_err().contains("no-such-dir"));
+        // A file others may read is refused, and so is one that holds no secret.
+        std::fs::set_permissions(&file, <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o644)).unwrap();
+        let refused = load_owner_secret(&file).unwrap_err();
+        assert!(refused.contains("mode 644") && refused.contains("chmod 600") && !refused.contains(&first), "{refused}");
+        let short = tmp.0.join("prismatic/short");
+        std::fs::write(&short, "abc\n").unwrap();
+        std::fs::set_permissions(&short, <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o600)).unwrap();
+        assert!(load_owner_secret(&short).unwrap_err().contains("holds no owner secret"));
+        assert!(load_owner_secret(&tmp.0.join("prismatic")).unwrap_err().contains("prismatic"), "a directory is no secret");
+    }
+
+    #[test]
+    fn a_panel_names_where_its_owner_secret_lives_and_never_the_secret() {
+        let tmp = TmpDir::new("of");
+        let args = |extra: &[&str]| parse_args(&[&["--bin", "/x/openttd", "--panel-port", "18801"], extra].concat().iter().map(|a| a.to_string()).collect::<Vec<_>>()).unwrap();
+        let file = tmp.0.join("secret");
+        let a = args(&["--owner-secret-file", file.to_str().unwrap()]);
+        assert_eq!(a.owner_file.as_deref(), file.to_str());
+        let o = owner_of(&a, Some("/ignored"), None).unwrap();
+        let secret = o.secret.clone().unwrap();
+        assert_eq!(o.file.as_deref(), file.to_str());
+        assert!(o.note.contains(file.to_str().unwrap()) && o.note.contains("http://127.0.0.1:18801/") && !o.note.contains(&secret), "{}", o.note);
+        // The environment names the file when no flag does.
+        let env_file = tmp.0.join("from-env");
+        let o = owner_of(&args(&[]), env_file.to_str(), None).unwrap();
+        assert_eq!(o.file.as_deref(), env_file.to_str());
+        // One-shot: kept nowhere, so the owner approves at the console.
+        let e = args(&["--ephemeral-owner-secret"]);
+        assert!(e.ephemeral_owner);
+        let o = owner_of(&e, env_file.to_str(), None).unwrap();
+        assert!(o.secret.is_some() && o.file.is_none() && o.note.contains("prismatic_mcp approve") && !o.note.contains(&o.secret.clone().unwrap()));
+        assert!(owner_of(&args(&[]), None, None).is_err());
+        // The panel reads the file it was given; a file others may read stops it before any game starts.
+        let g = Game::new(a);
+        assert_eq!(g.owner_secret.as_deref(), Some(secret.as_str()));
+        assert_eq!(g.owner_file.as_deref(), file.to_str());
+        std::fs::set_permissions(&file, <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o640)).unwrap();
+        let g = Game::new(args(&["--owner-secret-file", file.to_str().unwrap()]));
+        assert!(g.owner_secret.is_none());
+        let stopped = g.start().unwrap_err();
+        assert!(stopped.contains("chmod 600") && !g.server_running(), "{stopped}");
+        // A test panel without the flag never touches a person's own file: one-shot.
+        let (g, _) = bare_panel("18802");
+        assert!(g.owner_secret.is_some() && g.owner_file.is_none());
+    }
+
+    #[test]
+    fn the_owner_signs_in_with_the_secret_and_guessing_is_refused_then_slowed() {
+        let mut fails = VecDeque::new();
+        let t0 = Instant::now();
+        assert!(owner_login(Some("s3cret"), " s3cret ", &mut fails, t0).is_ok());
+        let wrong = owner_login(Some("s3cret"), "s3cre", &mut fails, t0).unwrap_err();
+        assert_eq!((wrong.0, wrong.1["refused"].clone()), (401, json!("owner_login")));
+        assert!(!wrong.1.to_string().contains('6') && !wrong.1.to_string().contains("s3c"), "nothing about the secret: {}", wrong.1);
+        assert!(owner_login(None, "", &mut fails, t0).is_err(), "a panel without a secret signs nobody in");
+        for _ in 0..3 { let _ = owner_login(Some("s3cret"), "x", &mut fails, t0); }
+        let limited = owner_login(Some("s3cret"), "s3cret", &mut fails, t0).unwrap_err();
+        assert_eq!((limited.0, limited.1["refused"].clone()), (429, json!("owner_login_rate")), "even the right secret waits out the window");
+        assert!(owner_login(Some("s3cret"), "s3cret", &mut fails, t0 + LOGIN_WINDOW).is_ok(), "the window passes");
+        assert!(fails.is_empty());
+        // The cookies: kept a year, HttpOnly, SameSite=Strict, for this panel's port; sign-out clears it.
+        let c = owner_set_cookie(8800, "s3cret");
+        assert!(c.starts_with("Set-Cookie: mcp_owner_8800=s3cret;") && c.contains("HttpOnly") && c.contains("SameSite=Strict")
+            && c.contains("Path=/") && c.contains(&format!("Max-Age={OWNER_COOKIE_MAX_AGE}")), "{c}");
+        assert_eq!(owner_cookie(Some("s3cret"), 8800, Some("s3cret")), Some(c));
+        let out = owner_clear_cookie(8800);
+        assert!(out.starts_with("Set-Cookie: mcp_owner_8800=;") && out.contains("Max-Age=0") && out.contains("HttpOnly"), "{out}");
+    }
+
+    #[test]
+    fn the_sign_in_routes_set_and_clear_the_owner_cookie() {
+        let (g, p) = bare_panel("18803");
+        let secret = g.owner_secret.clone().unwrap();
+        // Refused an owner's route, the page learns where to sign in and where the secret lives.
+        let refused = post_to(&p, "/api/approve", json!({"id": 1}));
+        assert_eq!((refused.0, refused.1["sign_in"].clone(), refused.1["secret_file"].clone()), (401, json!("/api/owner/login"), Value::Null));
+        crate::web_access::set_headers("");
+        assert_eq!(post_to(&p, "/api/owner/login", json!({"secret": "wrong"})).0, 401);
+        assert!(!crate::web_access::headers().contains("Set-Cookie"), "a wrong secret sets no cookie");
+        assert_eq!(post_to(&p, "/api/owner/login", json!({})).0, 400, "the secret is required");
+        let (code, out) = post_to(&p, "/api/owner/login", json!({"secret": secret}));
+        assert_eq!((code, out), (204, Value::Null));
+        assert!(crate::web_access::headers().contains(&owner_set_cookie(18803, &secret)));
+        crate::web_access::set_headers("");
+        assert_eq!(post_to(&p, "/api/owner/logout", json!({})).0, 204);
+        assert!(crate::web_access::headers().contains("mcp_owner_18803=; HttpOnly"));
+        crate::web_access::set_headers("");
+        let seen = format!("{:?} {:?}", g.bus.since(0, &[], 10_000), g.events.lock().unwrap());
+        assert!(seen.contains("the owner signed in") && seen.contains("wrong secret") && !seen.contains(&secret), "{seen}");
+        for _ in 0..5 { let _ = post_to(&p, "/api/owner/login", json!({"secret": "x"})); }
+        assert_eq!(post_to(&p, "/api/owner/login", json!({"secret": secret})).0, 429);
+        assert!(format!("{:?}", g.events.lock().unwrap()).contains("too many wrong secrets"));
+        // A 204 goes out with no body at all.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        send_json(listener.accept().unwrap().0, 204, &Value::Null);
+        let mut raw = String::new();
+        client.read_to_string(&mut raw).unwrap();
+        assert!(raw.starts_with("HTTP/1.1 204 No Content") && raw.contains("Content-Length: 0") && raw.ends_with("\r\n\r\n"), "{raw}");
     }
 
     #[test]
