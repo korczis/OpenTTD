@@ -439,6 +439,11 @@ function PrismaticAI::FreightLines() {
 	local out = [];
 	local waiting = 0;
 	foreach (slot in PrismaticAI.FreightSlots()) {
+		/* An unused slot (the usual case: most of the 16 are) costs nothing more than before. */
+		if (slot[1] < 0 && slot[2] < 0 && slot[3] < 0) {
+			if (FREIGHT_SLOT_SEEN.rawin(slot[0])) { delete FREIGHT_SLOT_SEEN[slot[0]]; FREIGHT_SLOT_PENDING[slot[0]] <- 0; }
+			continue;
+		}
 		local line = {from = slot[1], to = slot[2], cargo = slot[3]};
 		local tuple = line.from + "-" + line.to + "-" + line.cargo;
 		local stable = FREIGHT_SLOT_SEEN.rawin(slot[0]) && FREIGHT_SLOT_SEEN[slot[0]] == tuple;
@@ -452,8 +457,8 @@ function PrismaticAI::FreightLines() {
 			}
 			counts = why == null && stable;
 		}
-		if (counts) out.push(line);
-		if (counts || (line.from < 0 && line.to < 0 && line.cargo < 0)) {
+		if (counts) {
+			out.push(line);
 			FREIGHT_SLOT_PENDING[slot[0]] <- 0;
 			continue;
 		}
