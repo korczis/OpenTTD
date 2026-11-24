@@ -5085,7 +5085,10 @@ mod tests {
     fn the_real_cores_result_lines_are_read() {
         let text = include_str!("fixtures/approval-core-lines.txt");
         let lines: Vec<String> = text.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')).map(String::from).collect();
-        assert!(lines.len() >= 3, "the fixture holds the core's lines");
+        assert!(lines.len() >= 8, "the fixture holds the core's lines");
+        let failed: Vec<&String> = lines.iter().filter(|l| l.contains(r#""ok":false"#)).collect();
+        assert!(failed.iter().all(|l| { let r = core_result(std::slice::from_ref(l), &serde_json::from_str::<Value>(&l[l.find('{').unwrap()..]).unwrap()["nonce"].as_str().unwrap().to_string()).unwrap(); !r["error"].as_str().unwrap_or_default().is_empty() }),
+                "a refused line names why");
         for line in &lines {
             let raw: Value = serde_json::from_str(&line[line.find(CORE_RESULT).expect("a result line") + CORE_RESULT.len()..]).unwrap();
             let nonce = raw["nonce"].as_str().map(str::to_string).unwrap_or_else(|| raw["nonce"].to_string());
@@ -5095,6 +5098,13 @@ mod tests {
                 .flat_map(|k| r[*k].as_array().cloned().unwrap_or_default()).filter_map(|e| entry_of(&e).map(|(id, _)| id)).collect();
             for (id, code, out) in per_id(&ids, &r, true) {
                 assert!(code != 504, "#{id} of {line} is not answered: {out}");
+                // Each refused, skipped or rejected id answers with its status and the core's reason.
+                for (k, want) in [("refused", 409), ("skipped", 409), ("rejected", 422)] {
+                    if let Some((_, why)) = r[k].as_array().into_iter().flatten().filter_map(entry_of).find(|(e, _)| *e == id) {
+                        assert_eq!(code, want, "#{id} under {k} in {line}");
+                        assert!(py_str(out.get("error")).contains(&why), "#{id}: {out} names {why:?}");
+                    }
+                }
             }
         }
     }

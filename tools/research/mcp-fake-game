@@ -223,7 +223,7 @@ function decideLine(w) {
     const a = queue.find((x) => x.id === id);
     if (!a || a.state !== 'pending') { say(`Approval #${id} is not pending.`); out.refused.push({ id, error: 'not pending' }); continue; }
     if (w[1] === 'deny') {
-      if (ignored.has(a.id)) { say(`(fake) deny #${a.id} ignored`); out.skipped.push(id); continue; }
+      if (ignored.has(a.id)) { say(`(fake) deny #${a.id} ignored`); out.skipped.push({ id, error: 'the server ignored the denial' }); continue; }
       a.state = 'denied';
       say(`Denied approval #${a.id}.`);
     } else {
