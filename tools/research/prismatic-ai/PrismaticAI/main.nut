@@ -45,6 +45,7 @@ class PrismaticAI extends AIController {
 	routes = 0;
 	air_done = ""; /* the planner air pair ("a-b") already tried */
 	rail_done = ""; /* the planner rail pair ("a-b") already tried */
+	pair_due_since = -1; /* the date the planner rail pair first was due (PairDue; not saved) */
 	freight_tried = null; /* the planner freight lines ("from-to-cargo") already tried, a table */
 	own_built = 0; /* freight lines the bot planned itself and built (own_lines caps them) */
 	own_failed = 0; /* own freight lines in a row that were not built (OWN_FAIL_PAUSE) */
@@ -413,26 +414,38 @@ function PrismaticAI::Behaviour() {
 	return b;
 }
 
-/* The planner's passenger pair (rail_a, rail_b), tried once, on borrowed money. Producers nobody
- * serves are taken by rivals within the first years, a pair of towns is not, so the pair no longer
- * runs ahead of the bot's first own freight line (the heartbeat calls it after that line, and before
- * the later ones). Built first, it held the first own line back for months of path search: on
- * ablation seed 15805 (2026-11-23) the first heartbeat ran to 1950-11-15 instead of 1950-04-13,
- * Plondham - Ponninghall failed after 176 days, and the coal mine the unplanned bot claimed first was
- * gone. It waits for the freight lines that score more (rail_after, from the panel) and, like the
- * planner's next freight line, for money plus loan headroom to reach line_budget; the construction
- * freeze is read again, since the builders before it in the heartbeat can take months. Returns true
- * when it was tried. */
-function PrismaticAI::TryRailPair(b, afloat) {
-	local rail_key = b.rail_a + "-" + b.rail_b;
-	if (b.rail_a < 0 || b.rail_b < 0 || this.rail_done == rail_key) return false;
+/* The planner's passenger pair (rail_a, rail_b) is due once its rail_after freight lines were tried
+ * (pending slots count as untried, FreightLines); `pair_due_since` holds the date it first was.
+ * Producers nobody serves are taken by rivals within the first years, and a pair of towns is not.
+ * So the heartbeat gives the pair only a heartbeat in which the bot started no own freight line
+ * (none left, its cap, a failure pause, no budget), or any heartbeat once the pair has waited
+ * PAIR_WAIT_DAYS. Built first, the pair held the first own line back for months of path search:
+ * on ablation seed 15805 (2026-11-23) the first heartbeat ran to 1950-11-15 instead of
+ * 1950-04-13, Plondham - Ponninghall failed after 176 days, and the coal mine the unplanned bot
+ * claimed first was gone. Over four seeds a planned start then cost 21.8% (geometric) against
+ * the unplanned bot; with the pair after the first own line only it still cost 22%, and with this
+ * order about 2%, inside the noise (research/results ablation-*-seed15805 and its siblings of
+ * 2026-11-24, scratch design note). The wait is not saved: a load starts it again. */
+const PAIR_WAIT_DAYS = 730;
+
+function PrismaticAI::PairDue(b) {
+	if (b.rail_a < 0 || b.rail_b < 0 || this.rail_done == b.rail_a + "-" + b.rail_b) return false;
 	local tried = 0;
 	foreach (line in b.freight) if (this.freight_tried.rawin(line.from + "-" + line.to + "-" + line.cargo)) tried++;
 	if (tried < min(b.rail_after, b.freight.len() + FREIGHT_SLOTS_WAITING)) return false;
+	if (this.pair_due_since < 0) this.pair_due_since = AIDate.GetCurrentDate();
+	return true;
+}
+
+/* The planner's passenger pair, tried once, on borrowed money, when PairDue said it is due: it waits
+ * like the planner's next freight line for money plus loan headroom to reach line_budget, and reads
+ * the construction freeze again, since the builders before it in the heartbeat can take months.
+ * Returns true when it was tried. */
+function PrismaticAI::TryRailPair(b, afloat) {
 	if (this.BuildFrozen(afloat)) return false;
 	local headroom = AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
 	if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) + headroom < b.line_budget) return false;
-	this.rail_done = rail_key;
+	this.rail_done = b.rail_a + "-" + b.rail_b;
 	/* A line pays back over years: borrow up to the limit to build it, as the planner's budget
 	 * assumes; when nothing gets built, give the money back so it does not sit there at interest. */
 	local loan_before = AICompany.GetLoanAmount();
@@ -476,6 +489,11 @@ function PrismaticAI::FreightLines() {
 	local out = [];
 	local waiting = 0;
 	foreach (slot in PrismaticAI.FreightSlots()) {
+		/* An unused slot (the usual case: most of the 16 are) costs nothing more than before. */
+		if (slot[1] < 0 && slot[2] < 0 && slot[3] < 0) {
+			if (FREIGHT_SLOT_SEEN.rawin(slot[0])) { delete FREIGHT_SLOT_SEEN[slot[0]]; FREIGHT_SLOT_PENDING[slot[0]] <- 0; }
+			continue;
+		}
 		local line = {from = slot[1], to = slot[2], cargo = slot[3]};
 		local tuple = line.from + "-" + line.to + "-" + line.cargo;
 		local stable = FREIGHT_SLOT_SEEN.rawin(slot[0]) && FREIGHT_SLOT_SEEN[slot[0]] == tuple;
@@ -489,8 +507,8 @@ function PrismaticAI::FreightLines() {
 			}
 			counts = why == null && stable;
 		}
-		if (counts) out.push(line);
-		if (counts || (line.from < 0 && line.to < 0 && line.cargo < 0)) {
+		if (counts) {
+			out.push(line);
 			FREIGHT_SLOT_PENDING[slot[0]] <- 0;
 			continue;
 		}
@@ -684,11 +702,11 @@ function PrismaticAI::Start() {
 		 * 24 on OpenTTD seed 31337 and then held 529983 idle at month 36 (research/results
 		 * duel-20261117T112500).
 		 * One line per heartbeat, when money plus loan headroom reach line_budget, at most own_lines. */
-		/* The planner's passenger pair (TryRailPair) is added on top of the bot's own freight lines: until
-		 * the first own line stands it comes after the own line of the heartbeat, then before it, so
-		 * neither waits for the other for more than one line. */
-		local pair_first = this.own_built > 0;
-		if (!frozen && pair_first && this.TryRailPair(b, afloat)) money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
+		/* The planner's passenger pair (TryRailPair) is added on top of the bot's own freight lines: it
+		 * takes a heartbeat in which no own line was started, or any heartbeat once it has waited
+		 * PAIR_WAIT_DAYS since it became due (PairDue). */
+		local pair_due = this.PairDue(b);
+		local own_started = false;
 		local handed_done = FREIGHT_SLOTS_WAITING == 0;
 		foreach (line in b.freight) if (!this.freight_tried.rawin(line.from + "-" + line.to + "-" + line.cargo)) handed_done = false;
 		local headroom_own = AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
@@ -704,6 +722,7 @@ function PrismaticAI::Start() {
 				money + headroom_own >= b.line_budget) {
 			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried, b.rail_feed, b.rich);
 			if (own != null) {
+				own_started = true;
 				this.freight_tried[own.from + "-" + own.to + "-" + own.cargo] <- true;
 				this.own_built++;
 				AILog.Info("PrismaticAI: own plan " + this.own_built + "/" + own_cap + ": " + AICargo.GetCargoLabel(own.cargo) + " " +
@@ -730,7 +749,8 @@ function PrismaticAI::Start() {
 				money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 			}
 		}
-		if (!frozen && !pair_first && this.TryRailPair(b, afloat)) money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
+		if (!frozen && pair_due && (!own_started || AIDate.GetCurrentDate() - this.pair_due_since >= PAIR_WAIT_DAYS) &&
+				this.TryRailPair(b, afloat)) money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 		/* A small fleet with no air or rail route borrows for its next road route: RepaySurplus pays the loan down to twice the
 		 * reserve after every heartbeat, and a bot whose air and rail openers failed then had too
 		 * little in the bank for any route. On OpenTTD seed 988774025 (company 3) it kept 3 buses on
