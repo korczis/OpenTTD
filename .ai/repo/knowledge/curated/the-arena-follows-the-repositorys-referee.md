@@ -26,9 +26,10 @@ A referee change that adds a field, such as `loan=` in `REF Q`, reaches new aren
 fitness rule can be calibrated on them. Only extra fields come with it; the scoring is unchanged.
 
 Before this, all 11,207 `match.log` files on the owner's Mac came from a referee older than
-`loan=` (2026-11-23). The net-investment hoard rule (`research/design-net-investment-hoard-rule.md`,
-#282) could therefore not be calibrated on arena data, because a bank balance that includes the
-loan reads every repayment as investment.
+`loan=` (2026-11-23). The net-investment hoard rule (its design is in pull request #282,
+https://github.com/korczis/OpenTTD/pull/282, held until calibration) could therefore not be
+calibrated on arena data, because a bank balance that includes the loan reads every repayment as
+investment.
 
 # Evidence
 

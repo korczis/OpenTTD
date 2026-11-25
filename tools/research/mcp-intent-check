@@ -101,6 +101,12 @@ else
 fi
 [[ ${#BOT_SETTINGS[@]} -gt 0 ]] || { echo "mcp-intent-check: no settings from the game or $INFO_NUT" >&2; exit 3; }
 
+# A `plan` line goes to the game's console, which the panel opens to the owner's authority only (its
+# allowlist): the owner secret, read from its 0600 file, travels in a header file of this run.
+OWNER_SECRET_FILE="${PRISMATIC_PANEL_OWNER_SECRET_FILE:-$HOME/.config/prismatic/panel-owner-secret}"
+OWNER_HEADERS="$(mktemp)"; chmod 600 "$OWNER_HEADERS"; trap 'rm -f "$OWNER_HEADERS"' EXIT
+if [[ -r "$OWNER_SECRET_FILE" ]]; then printf 'X-Panel-Owner: %s\n' "$(tr -d '[:space:]' < "$OWNER_SECRET_FILE")" > "$OWNER_HEADERS"; fi
+
 fails=0
 note() { printf '%s\n' "$*"; }
 fail() { printf 'FAIL %s\n' "$*"; fails=$((fails + 1)); }
@@ -109,7 +115,7 @@ fail() { printf 'FAIL %s\n' "$*"; fails=$((fails + 1)); }
 console() {
   python3 -I -c 'import json,sys; print(json.dumps({"command": sys.argv[1], "wait": float(sys.argv[2])}))' \
     "plan $1" "$WAIT" |
-  curl -fsS --max-time "$((WAIT + 20))" -X POST "$PANEL/api/console" \
+  curl -fsS --max-time "$((WAIT + 20))" -X POST "$PANEL/api/console" -H @"$OWNER_HEADERS" \
        -H 'content-type: application/json' --data-binary @- |
   python3 -I -c '
 import json, sys
