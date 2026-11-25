@@ -79,7 +79,9 @@ fn run_with(rounds: i64, env: &'static [(&'static str, &'static str)], pending: 
     let rounds_text = rounds.to_string();
     e.register_fn("env", move |name: &str| -> String {
         if name == "GAP_WATCH_ROUNDS" { return rounds_text.clone(); }
-        env.iter().find(|(k, _)| *k == name).map(|(_, v)| v.to_string()).unwrap_or_default()
+        // The owner plays company 0 (ttd::owner_company()) unless a test names another.
+        let own = if name == "OWNER_COMPANY" { "0" } else { "" };
+        env.iter().find(|(k, _)| *k == name).map(|(_, v)| v.to_string()).unwrap_or_else(|| own.to_string())
     });
     let s = seen.clone();
     e.register_fn("sleep", move |_ms: i64| {
@@ -122,7 +124,7 @@ fn run_with(rounds: i64, env: &'static [(&'static str, &'static str)], pending: 
     let s = seen.clone();
     e.register_fn("status", move || -> super::R<Dynamic> {
         let n = s.lock().unwrap().looks;
-        super::to_dyn(json!({"pending": pending(n)}))
+        super::to_dyn(json!({"pending": pending(n), "ai": "PrismaticAI"}))
     });
     e.register_fn("api_bots", || -> super::R<Dynamic> {
         super::to_dyn(json!({"running": [
@@ -244,6 +246,52 @@ fn gap_watch_flags_tells_once_proposes_one_bounded_plan_and_tracks_its_outcome()
     assert_eq!(seen.news.len(), 2, "every owner line also goes to the game window");
     assert!(seen.news[0].starts_with("[gap-watch] Owner Co: "));
     assert_eq!(seen.shared["gap_watch.owner"]["service"], json!("gap_watch"));
+}
+
+/// R9: the owner decides only for the owner's own company. Every PrismaticAI company is judged and
+/// gets gap.<company>, but a company the owner does not play (here the owner plays company 2, so
+/// company 0 is a rival's in an arena) gets no chat, no news and no proposal, even with the switch
+/// on and every lever due; its record says why.
+#[test]
+fn gap_watch_tells_and_proposes_for_the_owners_company_only() {
+    const RIVAL: &[(&str, &str)] = &[("GAP_WATCH_PROPOSE", "1"), ("OWNER_COMPANY", "2")];
+    let seen = run(6, RIVAL, |_| json!([]), &[("replan.0", replan_key()), ("watchdog.0", watchdog_key())]);
+    let g = &seen.shared["gap.0"];
+    assert_eq!(g["month"], json!("1953-05"), "judged every month all the same");
+    assert_eq!(g["level"], json!(3), "its levers are due");
+    assert_eq!(g["own"], json!(false));
+    assert_eq!(g["held"], json!("not the owner's company: judged and recorded only, nothing said or proposed (R9)"));
+    assert!(seen.proposals.is_empty(), "no approval for a company the owner does not play: {:?}", seen.proposals);
+    assert!(seen.said.is_empty() && seen.news.is_empty(), "no chat or news about it: {:?} {:?}", seen.said, seen.news);
+    assert_eq!(seen.approvals_read, 0, "nothing filed, so no deadline policy read");
+}
+
+/// The bus is read page by page until the answer's last_seq, whatever size the panel's pages are;
+/// without a last_seq, until an empty page; never more than PAGES pages a look.
+#[test]
+fn gap_watch_reads_the_bus_up_to_its_last_seq_whatever_the_page_size() {
+    let read = |pages: Vec<Vec<i64>>, last: Option<i64>| -> Vec<String> {
+        let s = script();
+        let fns = s.split("// --- the loop").next().unwrap().to_string();
+        let mut e = engine();
+        e.register_fn("env", |_: &str| String::new());
+        let calls = Arc::new(Mutex::new(Vec::<i64>::new()));
+        let c = calls.clone();
+        e.register_fn("events", move |since: i64, _kinds: &str| -> super::R<Dynamic> {
+            let mut c = c.lock().unwrap();
+            let page = pages.get(c.len()).cloned().unwrap_or_default();
+            c.push(since);
+            let evs: Vec<Value> = page.iter().map(|q| json!({"seq": q, "kind": "ai.log", "data": {"company": 0, "text": "x"}})).collect();
+            super::to_dyn(match last { Some(l) => json!({"events": evs, "last_seq": l}), None => json!({"events": evs}) })
+        });
+        let b: rhai::Map = e.eval(&format!("{fns}\nread_bus(0, \"1953-01\", #{{}})")).unwrap();
+        vec![b["cursor"].to_string(), format!("{:?}", calls.lock().unwrap())]
+    };
+    assert_eq!(read(vec![vec![1, 2], vec![3, 4], vec![5, 6]], Some(6)), vec!["6", "[0, 2, 4]"], "three pages of two");
+    assert_eq!(read(vec![vec![1, 2, 3]], Some(3)), vec!["3", "[0]"], "caught up after one page");
+    assert_eq!(read(vec![vec![1], vec![2], vec![]], None), vec!["2", "[0, 1, 2]"], "no last_seq: until an empty page");
+    let many: Vec<Vec<i64>> = (1..=20).map(|i| vec![i]).collect();
+    assert_eq!(read(many, Some(20))[0], "10", "at most PAGES pages a look");
 }
 
 /// The first judged month: every tally of the bot's lines, the partial plan, the flags with their

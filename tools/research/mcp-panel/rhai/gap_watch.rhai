@@ -16,10 +16,15 @@
 //     (builds refused, failed or removed, levelling paid for nothing, loan repaid, producers held by
 //     others), the approvals filed for the company and the decisions executed from them;
 //   - the running bot's declared settings (api_bots, once a game month) and pending approvals.
-// Once a game month, for every running company of AI, it classifies the month (flags below), keeps
-// how many months in a row each flag held, and acts through the existing channels only:
+// Once a game month, for every running company of the panel's AI (status().ai), it classifies the
+// month (flags below), keeps how many months in a row each flag held, and acts through the existing
+// channels only:
 //   1. the blackboard key gap.<company> (a rhai.shared event: on the bus and in the store), which
-//      replan and Battlebrain can read; a blackboard write never acts on a game;
+//      replan and Battlebrain can read; a blackboard write never acts on a game. Every company gets
+//      it; steps 2 and 3 are for the owner's company only (ttd::owner_company(): $OWNER_COMPANY,
+//      else where a registered approver plays, else the panel's AI). The owner decides for the
+//      owner's own or co-play company only (R9): in an arena the other PrismaticAI companies are
+//      rivals', so they get no chat, news or proposal, and gap.<company>.held says so;
 //   2. the owner: one console line and one news item when a flag has held two months, or the level
 //      rises; never every month;
 //   3. only when the owner started the panel with GAP_WATCH_PROPOSE=1 (observation only otherwise:
@@ -46,13 +51,13 @@
 // many looks (0 or unset: never). It prints one line a look, so the supervisor's stall limit above
 // is not reached while it works.
 import "fr_author" as fa;
+import "ttd" as ttd;
 
-// The AI whose companies are watched: every running company of it (/api/bots).
-const AI = "PrismaticAI";
 // This service's name as a writer (planner.<company>, fr_author.rhai) and its shared keys' prefix.
 const WRITER = "gap_watch";
 const ROUND_S = 20;
-// The bus kinds read, and how many pages of up to 500 events one look takes at most. The panel's
+// The bus kinds read, and how many pages of events one look takes at most (a page is whatever the
+// panel's /api/events answers; a look stops when it reaches the answer's last_seq). The panel's
 // /api/events envelopes carry no game date, so game.month events ({date: "YYYY-MM-01"}) mark the
 // months: every other event counts for the month the last game.month opened.
 const KINDS = "ai.log,panel.mcp,decision.recorded,game.month";
@@ -502,8 +507,20 @@ fn propose(company, month, levers) {
     out
 }
 
-// One company's month: measure, classify, record; tell the owner and propose when due.
-fn month_of_company(b, month, tallies, executed_all, pending, paused) {
+// The AI whose companies are watched: the panel's own (status().ai, its --ai), "" when it names none.
+fn watched_ai() {
+    let ai = "";
+    try { ai = status().ai ?? ""; } catch { }
+    ai
+}
+
+// Why a company that is not the owner's is only recorded: the owner decides for the owner's own or
+// co-play company only (R9), so a rival's company in an arena gets no chat, news or proposal.
+const NOT_OWNERS = "not the owner's company: judged and recorded only, nothing said or proposed (R9)";
+
+// One company's month: measure, classify, record; when it is the owner's company (`own`), tell the
+// owner and propose when due.
+fn month_of_company(b, month, tallies, executed_all, pending, paused, own) {
     let key = `gap.${b.id}`;
     let prev = shared_get(key) ?? #{};
     // A month already judged (the bus replayed after a restart) is not judged again.
@@ -533,6 +550,7 @@ fn month_of_company(b, month, tallies, executed_all, pending, paused) {
         if proposal.outcome == "applied" { declined = 0; }
     }
     let held = hold_of(b.id, month, levers, pending, proposal, paused, fa::refusal(b.id, global::WRITER), proposing(), declined);
+    if !own && held == () { held = global::NOT_OWNERS; }
     if level == 3 && held == () {
         let same = type_of(proposal) == "map" && proposal.signature == signature_of(levers);
         proposal = propose(b.id, month, levers);
@@ -546,7 +564,7 @@ fn month_of_company(b, month, tallies, executed_all, pending, paused) {
     }
     let said = prev.said ?? [];
     // The month a proposal is filed, its line is the owner's line.
-    let line = if paused || filed_now { () } else { tell_of(b.name, flags, streaks, level, prev) };
+    let line = if paused || filed_now || !own { () } else { tell_of(b.name, flags, streaks, level, prev) };
     if type_of(line) != "()" {
         tell(line);
         said = [];
@@ -559,22 +577,27 @@ fn month_of_company(b, month, tallies, executed_all, pending, paused) {
     value.company = b.id; value.name = b.name; value.flags = flags; value.streaks = streaks;
     value.level = level; value.levers = levers; value.held = held; value.proposal = proposal;
     value.said = kept; value.paused = paused; value.partial_seen = m.plans.partial_months; value.declined = declined; value.proposing = proposing();
+    value.own = own;
     value.reads = [`replan.${b.id}`, `watchdog.${b.id}`, global::DERIVED_SHARE_DROP, "store:company_samples", "bus:" + global::KINDS, "api_bots", "status.pending"];
     shared_set(key, value);
     print(`gap_watch ${month} company ${b.id + 1}: level ${level}, flags ${flags.keys()}, ${if held == () { "proposed" } else { `held: ${held}` }}`);
     value
 }
 
-// Judge `month` (just closed) for every running company of AI; answers the tallies kept (WINDOW
-// months before `next`).
+// Judge `month` (just closed) for every running company of the panel's AI (watched_ai); only the
+// owner's company (ttd::owner_company) is told about and proposed for. Answers the tallies kept
+// (WINDOW months before `next`).
 fn judge(month, next, tallies) {
     let executed_all = [];
     for mo in (tallies["*"] ?? #{}).values() { executed_all += mo.executed; }
     let pending = status().pending ?? [];
     let paused = shared_get("gap_watch.pause") == true;
+    let ai = watched_ai();
+    if ai == "" { print(`gap_watch ${month}: the panel names no AI (status().ai), so no company is judged`); }
+    let owner = ttd::owner_company();
     for b in api_bots().running ?? [] {
-        if b.ai != global::AI { continue; }
-        try { month_of_company(b, month, tallies, executed_all, pending, paused); }
+        if ai == "" || b.ai != ai { continue; }
+        try { month_of_company(b, month, tallies, executed_all, pending, paused, type_of(owner) != "()" && b.id == owner); }
         catch (err) { print(`gap_watch: company ${b.id + 1}: ${err}`); }
     }
     for k in tallies.keys() {
@@ -583,6 +606,33 @@ fn judge(month, next, tallies) {
         tallies[k] = mo;
     }
     tallies
+}
+
+// One look at the bus: every page of KINDS events after `cursor` (at most PAGES), each game.month
+// judging the month it closes and every other event tallied for the month open. A page is whatever
+// /api/events answers; the look ends when a page is empty or the cursor reaches the answer's
+// last_seq, so it does not depend on the panel's page size. Answers #{cursor, current, tallies}.
+fn read_bus(cursor, current, tallies) {
+    let pages = 0;
+    while pages < global::PAGES {
+        let r = events(cursor, global::KINDS);
+        let evs = r.events ?? [];
+        for ev in evs {
+            if ev.seq > cursor { cursor = ev.seq; }
+            if ev.kind == "game.month" {
+                // The month that just closed is judged when the bus opens the next one.
+                let next = month_text((ev.data ?? #{}).date);
+                if current != "" && next != "" && next != current { tallies = judge(current, next, tallies); }
+                if next != "" { current = next; }
+            } else {
+                tallies = tally_event(tallies, ev, current);
+            }
+        }
+        pages += 1;
+        let last = r.last_seq;
+        if evs.is_empty() || (type_of(last) != "()" && cursor >= last) { break; }
+    }
+    #{ cursor: cursor, current: current, tallies: tallies }
 }
 
 // --- the loop --------------------------------------------------------------------------------------
@@ -595,28 +645,12 @@ shared_set("gap_watch.owner", #{ service: "gap_watch", writer: WRITER, session: 
     majordomus_session: env("MAJORDOMUS_SESSION"), started_look: 0,
     stop: "POST /api/rhai/shared {key: gap_watch.stop, value: true}, or POST /api/services/stop {name: gap_watch}",
     pause: "POST /api/rhai/shared {key: gap_watch.pause, value: true}" });
-print(`gap_watch: a look every ${ROUND_S} s; once a game month it judges every running ${AI} company against the leader`);
+print(`gap_watch: a look every ${ROUND_S} s; once a game month it judges every running ${watched_ai()} company against the leader, and tells and proposes for the owner's only`);
 loop {
     if shared_get("gap_watch.stop") == true { print("gap_watch: stopped by gap_watch.stop"); break; }
     try {
-        let pages = 0;
-        while pages < PAGES {
-            let r = events(cursor, KINDS);
-            let evs = r.events ?? [];
-            for ev in evs {
-                if ev.seq > cursor { cursor = ev.seq; }
-                if ev.kind == "game.month" {
-                    // The month that just closed is judged when the bus opens the next one.
-                    let next = month_text((ev.data ?? #{}).date);
-                    if current != "" && next != "" && next != current { tallies = judge(current, next, tallies); }
-                    if next != "" { current = next; }
-                } else {
-                    tallies = tally_event(tallies, ev, current);
-                }
-            }
-            pages += 1;
-            if evs.len() < 500 { break; }
-        }
+        let b = read_bus(cursor, current, tallies);
+        cursor = b.cursor; current = b.current; tallies = b.tallies;
         print(`gap_watch: look ${looks + 1}, bus seq ${cursor}, month ${if current == "" { "not seen yet" } else { current }}`);
     } catch (err) {
         print(`gap_watch: ${err}`);

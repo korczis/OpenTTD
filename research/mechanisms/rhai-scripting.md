@@ -130,6 +130,11 @@ does:
   `gap.<company>.thresholds` names the one used. It keeps how many months in a row each flag
   held, and after a restart it
   skips the months the replayed bus shows that it judged already.
+- **It judges every company of the panel's AI** (`status().ai`) and writes `gap.<company>` for
+  each. It tells and proposes only for the owner's company (`ttd::owner_company()`), because the
+  owner decides only for the owner's own or co-play company (R9). In an arena the other PrismaticAI
+  companies belong to rivals: they get no chat, news or proposal, and `gap.<company>.held` says
+  why (review by openttd-51 of #261).
 - **It acts through the existing channels only:** the blackboard key `gap.<company>` (on the bus
   and in the store); one console line and one news item when a flag has held two months or the
   level rises; and, only when the panel runs with `GAP_WATCH_PROPOSE=1` (the owner's switch), one
