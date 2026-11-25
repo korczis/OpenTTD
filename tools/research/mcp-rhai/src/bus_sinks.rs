@@ -935,6 +935,46 @@ mod tests {
 
     #[cfg(feature = "store")]
     #[test]
+    fn the_capital_months_follow_one_game_across_the_runs_that_continue_it() {
+        // A panel restarted on a save of its own game starts a new run with a new seed (the owner's
+        // game 21647 ran as three runs, 1950-1992, 1992-2009, 2009-2010); its capital watch then
+        // lost every month before the restart, and with them the fleet growth it judges.
+        let mut st = db::Store::open_in_memory("panel-g").unwrap();
+        let sample = |st: &mut db::Store, ts: i64, date: &str, name: &str, fleet: i64| {
+            let s = json!({"t": ts, "date": date, "companies": [{"id": 0, "name": name, "value": 1.0, "money": 1.0, "fleet": fleet}]});
+            st.insert_samples(&sample_rows(&s, ts)).unwrap();
+        };
+        // Run 1: 1951-01..1951-04. Run 2, restarted on a save of 1951-03: its 1951-03 replaces run
+        // 1's, and run 1's 1951-04, the future that save left behind, is gone.
+        st.insert_run(&json!("s"), Some(1), 10, (None, None, None)).unwrap();
+        for (ts, date) in [(11, "1951-01-05"), (12, "1951-02-05"), (13, "1951-03-05"), (14, "1951-04-05")] { sample(&mut st, ts, date, "Ours", 2); }
+        st.insert_run(&json!("s"), Some(2), 20, (None, None, None)).unwrap();
+        for (ts, date) in [(21, "1951-03-06"), (22, "1951-04-06"), (23, "1951-05-06")] { sample(&mut st, ts, date, "Ours", 5); }
+        let capital = sql::query("capital_months").unwrap();
+        let p = |v: Value| v.as_object().unwrap().clone();
+        let months = |st: &db::Store| -> Vec<(String, i64)> {
+            let out = st.reader().unwrap().query_bound(capital, &p(json!({"months": 18}))).unwrap();
+            out["rows"].as_array().unwrap().iter().map(|r| (r[2].as_str().unwrap().to_string(), r[6].as_i64().unwrap())).collect()
+        };
+        let m = |v: &[(&str, i64)]| v.iter().map(|(a, b)| (a.to_string(), *b)).collect::<Vec<_>>();
+        assert_eq!(months(&st), m(&[("1951-01", 2), ("1951-02", 2), ("1951-03", 5), ("1951-04", 5), ("1951-05", 5)]));
+        let games = st.query("SELECT DISTINCT game_ms FROM game_month").unwrap();
+        assert_eq!(games["rows"], json!([[10]]), "one game, named by its first run");
+        // Run 3 is a new game (it starts before run 2 did, under another name): only its months.
+        st.insert_run(&json!("s"), Some(3), 30, (None, None, None)).unwrap();
+        sample(&mut st, 31, "1950-01-02", "Other", 1);
+        assert_eq!(months(&st), m(&[("1950-01", 1)]));
+        // Run 4 starts two months after run 3 ends, so it continues nothing either.
+        st.insert_run(&json!("s"), Some(4), 40, (None, None, None)).unwrap();
+        sample(&mut st, 41, "1950-03-02", "Other", 7);
+        assert_eq!(months(&st), m(&[("1950-03", 7)]));
+        // A run with no month yet has no game: the watch says it has no months rather than read the last one's.
+        st.insert_run(&json!("s"), Some(5), 50, (None, None, None)).unwrap();
+        assert_eq!(months(&st), m(&[]));
+    }
+
+    #[cfg(feature = "store")]
+    #[test]
     fn a_row_names_the_instance_its_envelope_is_about_and_a_publisher_without_ports_records_nulls() {
         let mut st = db::Store::open_in_memory("hub-1").unwrap();
         st.insert_run(&Value::Null, None, 10, (None, None, None)).unwrap();
