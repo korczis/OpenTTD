@@ -129,6 +129,7 @@ require("modernize.nut");
 require("restore.nut");
 require("events.nut");
 require("ships.nut");
+require("capital.nut");
 
 /* Cheapest buildable road engine that carries a passenger-class cargo. */
 function PrismaticAI::PickPassengerEngine() {
@@ -848,8 +849,8 @@ function PrismaticAI::Start() {
 		 * walked again (events.nut). */
 		if (PrismaticAI.MonthKey() != this.month) this.LookAfterVehicles();
 		if (PrismaticAI.MonthKey() != this.month) { this.month = PrismaticAI.MonthKey(); PrismaticAI.LogLines(); }
-		/* Borrowed money that sits idle only costs interest: repay what is above twice the reserve. */
-		PrismaticAI.RepaySurplus(max(2 * b.cash_reserve, afloat));
+		/* Money above the reserve buys the best measured investment, else repays the loan (capital.nut). */
+		this.AllocateCapital(b, afloat);
 		PrismaticAI.StayAfloat(afloat);
 
 		AILog.Info("PrismaticAI heartbeat: date=" + AIDate.GetCurrentDate() +
