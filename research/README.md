@@ -155,6 +155,7 @@ Generated from each document's title and first paragraph (`tools/surfaces/surfac
 | [ablation-20261124T181319-seed2927](results/ablation-20261124T181319-seed2927.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
 | [ablation-20261124T181712-seed31337](results/ablation-20261124T181712-seed31337.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
 | [ablation-20261124T182047-seed4242](results/ablation-20261124T182047-seed4242.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [agent-loop-deps, 2026-11-25T04:42:58Z](results/agent-loop-deps-20261125T044258Z.md) | RESEARCH-ONLY. tools/research/agent-loop-deps (I0171): the cross-repository pieces of the decision path (agent loop). Every line is OBSERVED by this run. |
 | [battle-20261119T053541-155d18ea](results/battle-20261119T053541-155d18ea.md) | Derived from battle-20261119T053541-155d18ea.json by tools/research/ai-battle/battle.py report; do not edit. |
 | [battle-20261119T054742-91a72662](results/battle-20261119T054742-91a72662.md) | Derived from battle-20261119T054742-91a72662.json by tools/research/ai-battle/battle.py report; do not edit. |
 | [battle-20261119T060827-361b802f](results/battle-20261119T060827-361b802f.md) | Derived from battle-20261119T060827-361b802f.json by tools/research/ai-battle/battle.py report; do not edit. |
