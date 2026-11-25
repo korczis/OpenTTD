@@ -1416,11 +1416,13 @@ mod tests {
         let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai/watchdog.rhai")).unwrap();
         e.run(&script).unwrap();
 
-        // A line every round: the heartbeat its `// stall:` declaration needs, and what it found.
+        // A line every round: the heartbeat its `// stall:` declaration needs, and what it found;
+        // before them, once, the cold start and where it came from (here the declared fallback).
         let printed = printed.lock().unwrap();
-        assert_eq!(printed.len(), 6, "the start line and one per round: {printed:?}");
-        assert_eq!(printed[1], "watchdog 1951-01-01: threshold 7 day(s), stalled: none");
-        assert_eq!(printed[5], "watchdog 1951-01-05: threshold 7 day(s), stalled: Owner Co (40 d)");
+        assert_eq!(printed.len(), 7, "the start line, the cold start and one per round: {printed:?}");
+        assert_eq!(printed[1], "watchdog: cold start 7 day(s), fallback: the store did not answer");
+        assert_eq!(printed[2], "watchdog 1951-01-01: threshold 7 day(s), stalled: none");
+        assert_eq!(printed[6], "watchdog 1951-01-05: threshold 7 day(s), stalled: Owner Co (40 d)");
         assert_eq!(*looks.lock().unwrap(), 4, "five rounds, a sleep between each");
         let shared = shared.lock().unwrap();
         let w0 = &shared["watchdog.0"];
