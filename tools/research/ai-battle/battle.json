@@ -515,5 +515,62 @@
     "min_ratio": 1.05,
     "min_pairs_ci": 30,
     "min_ci_low": 1.0
+  },
+  "evolve": {
+    "field": [
+      "AAAHogEx",
+      "LuDiAI AfterFix",
+      "CivilAI",
+      "AdmiralAI",
+      "NoCAB",
+      "DictatorAI",
+      "SimpleAI"
+    ],
+    "reference": "AAAHogEx",
+    "slot": 0,
+    "years": 10,
+    "seeds": [
+      15805,
+      2927,
+      31337,
+      4242
+    ],
+    "confirm_seeds": [
+      20208,
+      930967890,
+      1807087905
+    ],
+    "levers": 3,
+    "step_frac": 0.25,
+    "cover": 0.8,
+    "min_rho": 0.05,
+    "min_history": 200,
+    "min_pairs": 3,
+    "min_gain": 1.05,
+    "budget": 32,
+    "max_minutes": 120,
+    "cooldown_hours": 24,
+    "expiry_hours": 168,
+    "trigger": {
+      "gap_level": 2
+    },
+    "mode_tokens": {
+      "air": [
+        "air"
+      ],
+      "road": [
+        "road",
+        "bus",
+        "routes",
+        "stops"
+      ],
+      "rail": [
+        "rail",
+        "line",
+        "lines",
+        "train"
+      ]
+    },
+    "gene_modes": {}
   }
 }

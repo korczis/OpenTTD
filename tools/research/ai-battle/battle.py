@@ -44,6 +44,13 @@ Commands:
   live-settings  the next live start's PRISMATIC_BOT_SETTINGS, derived from the newest battle record
                  and the live records (--write: research/results/live-start.json; `render` keeps
                  it current and `check` refuses drift)
+  evolve     the config-evolution loop, once: a trigger (--live <live record>, or --panel <url>
+             reading gap.<company> and review.<company>.month; --force with --baseline) -> the gap
+             attributed per mode -> candidate settings from the recorded battles -> paired
+             null-driver matches on battle.json evolve.seeds, the best confirmed on confirm_seeds ->
+             a proposal under <cache>/evolve/ (--propose <url>: also the blackboard key
+             evolve.proposal.<company>). Applies and approves nothing; bounded by evolve.budget and
+             max_minutes, stopped by <cache>/STOP or PAUSED, one at a time (research/config-evolution-loop.md)
 
 Guards (after an incident where `run` kept ~32 matches per host going for three days, drove targets
 to load 86 on 18 cores and 35 of 37 GB swap, and nobody on a target could tell whose they were):
@@ -3735,20 +3742,28 @@ def cmd_power(margin: float, alpha: float, power_: float) -> int:
     return 0 if out["pairs"]["n"] is not None else 12
 
 
-def cmd_ablate(cfg: dict, seed: int, years: int, variants: list[str], field: list[str],
-               write: bool, log_dir: str | None = None, slot: int = 0) -> int:
-    """Run one local match per variant of the working tree's PrismaticAI (settings "name=a=1,b=2"),
-    each against the same field on the same seed, in parallel, and print (and with --write record
-    under research/results/) every variant's final standing. Deterministic: same tree, binary and
-    seed, same table."""
+MODE_KEYS = ("rail", "road", "air", "water", "prail", "proad", "pair", "pwater")
+
+
+def ablate_rows(cfg: dict, seed: int, years: int, variants: list[str], field: list[str],
+                log_dir: str | None = None, slot: int = 0, binary: Path | None = None,
+                owner: str = "", timeout: int = 1800) -> list[dict] | None:
+    """One local null-driver match per variant of the working tree's PrismaticAI (settings
+    "name=a=1,b=2") against the same field on the same seed, in parallel; a row per variant with its
+    final standing and, under `standings`, every company's final value, fleet per mode and last
+    year's profit per mode (company-id order, keyed as the lineup names them). None when the binary
+    or the prepared arena is missing. `owner` goes into every match's environment as
+    TTD_BATTLE_ORCHESTRATOR (rule project.long-runs-are-owned-bounded-and-stoppable). A match that
+    outlives `timeout` is killed, as are the others when one fails, so no game process outlives
+    the call."""
     arena = cfg["cache"] / "arena"
-    binary = REPO / "build" / "openttd"
-    if not binary.is_file() or not (arena / "baseset").is_dir():
-        print("ablate: NOT RUN: needs build/openttd and a prepared arena cache")
-        return 12
+    binary = binary or REPO / "build" / "openttd"
+    if not Path(binary).is_file() or not (arena / "baseset").is_dir():
+        return None
     import tempfile
     mc = dict(cfg["match"], years=years)
     rows = []
+    env_owner = {"TTD_BATTLE_ORCHESTRATOR": owner} if owner else {}
     with tempfile.TemporaryDirectory(prefix="battle-ablate-") as tmp:
         ai = Path(tmp) / "ai"
         ai.mkdir()
@@ -3757,59 +3772,653 @@ def cmd_ablate(cfg: dict, seed: int, years: int, variants: list[str], field: lis
                         if t.name != "PrismaticAI.tar"], str(ai)], check=True)
         (Path(tmp) / "battle.cfg").write_text(battle_cfg_text(mc))
         procs = []
-        for v in variants:
-            name, _, settings = v.partition("=")
-            home = Path(tmp) / f"h-{name}"
-            per = home / "Documents" / "OpenTTD"
-            (per / "scripts").mkdir(parents=True)
-            os.symlink(ai, per / "ai")
-            os.symlink(arena / "baseset", per / "baseset")
-            os.symlink(arena / "game", per / "game")
-            (home / ".local" / "share").mkdir(parents=True)
-            os.symlink(per, home / ".local" / "share" / "openttd")
-            # `slot`: PrismaticAI's place in the start order (company id), as in the arena's match;
-            # who starts first gets the first airport sites, so a replay must keep it.
-            lineup = [{"ai": f, "key": f} for f in field]
-            lineup.insert(min(slot, len(lineup)), {"ai": "PrismaticAI", "key": name, "settings": settings})
-            (per / "scripts" / "game_start.scr").write_text(start_script_text(lineup))
-            procs.append((name, settings, lineup, subprocess.Popen(
-                [str(binary), "-c", "battle.cfg", "-x", "-v", f"null:ticks={match_ticks(years)}", "-s", "null",
-                 "-m", "null", "-g", "-G", str(seed), "-d", f"script={4 if log_dir else 1}"], cwd=tmp,
-                env=dict(os.environ, HOME=str(home)), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)))
-        for name, settings, lineup, proc in procs:
-            out, _ = proc.communicate(timeout=1800)
-            if log_dir:
-                Path(log_dir).mkdir(parents=True, exist_ok=True)
-                (Path(log_dir) / f"{name}.log").write_text(out)
-            series, errors = parse_log(out)
-            me = min(slot, len(field))
-            mine = series.get(me, [])
-            last = mine[-1] if mine else {}
-            field_best = max((s[-1]["value"] for c, s in series.items() if c != me and s), default=0)
-            rows.append({"variant": name, "settings": settings, "exit_code": proc.returncode,
-                         "value": last.get("value", 0), "money": last.get("money", 0),
-                         "vehicles": last.get("vehicles", 0), "rail": last.get("rail"), "road": last.get("road"),
-                         "air": last.get("air"), "errors": errors.get(0, 0), "field_best": field_best,
-                         "t": last.get("t", "")})
+        try:
+            for v in variants:
+                name, _, settings = v.partition("=")
+                home = Path(tmp) / f"h-{name}"
+                per = home / "Documents" / "OpenTTD"
+                (per / "scripts").mkdir(parents=True)
+                os.symlink(ai, per / "ai")
+                os.symlink(arena / "baseset", per / "baseset")
+                os.symlink(arena / "game", per / "game")
+                (home / ".local" / "share").mkdir(parents=True)
+                os.symlink(per, home / ".local" / "share" / "openttd")
+                # `slot`: PrismaticAI's place in the start order (company id), as in the arena's
+                # match; who starts first gets the first airport sites, so a replay must keep it.
+                lineup = [{"ai": f, "key": f} for f in field]
+                lineup.insert(min(slot, len(lineup)), {"ai": "PrismaticAI", "key": name, "settings": settings})
+                (per / "scripts" / "game_start.scr").write_text(start_script_text(lineup))
+                procs.append((name, settings, lineup, subprocess.Popen(
+                    [str(binary), "-c", "battle.cfg", "-x", "-v", f"null:ticks={match_ticks(years)}", "-s", "null",
+                     "-m", "null", "-g", "-G", str(seed), "-d", f"script={4 if log_dir else 1}"], cwd=tmp,
+                    env=dict(os.environ, HOME=str(home), **env_owner), stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, text=True)))
+            for name, settings, lineup, proc in procs:
+                out, _ = proc.communicate(timeout=timeout)
+                if log_dir:
+                    Path(log_dir).mkdir(parents=True, exist_ok=True)
+                    (Path(log_dir) / f"{name}.log").write_text(out)
+                series, errors = parse_log(out)
+                me = min(slot, len(field))
+                mine = series.get(me, [])
+                last = mine[-1] if mine else {}
+                field_best = max((s[-1]["value"] for c, s in series.items() if c != me and s), default=0)
+                standings = []
+                for cid, c in enumerate(lineup):
+                    f = (series.get(cid) or [{}])[-1]
+                    standings.append({"company": cid, "key": c["key"], "value": f.get("value", 0),
+                                      "vehicles": f.get("vehicles", 0), "errors": errors.get(cid, 0),
+                                      **{k: f.get(k, 0) for k in MODE_KEYS}})
+                rows.append({"variant": name, "settings": settings, "exit_code": proc.returncode,
+                             "value": last.get("value", 0), "money": last.get("money", 0),
+                             "vehicles": last.get("vehicles", 0), "rail": last.get("rail"), "road": last.get("road"),
+                             "air": last.get("air"), "errors": errors.get(me, 0), "field_best": field_best,
+                             "t": last.get("t", ""), "standings": standings})
+        finally:
+            for *_, proc in procs:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+                proc.stdout.close()
+    return rows
+
+
+def ablation_record(cfg: dict, seed: int, years: int, field: list[str], slot: int, rows: list[dict]) -> dict:
+    """The ablation record of one seed's rows (research/results/ablation-<utc>-seed<seed>.json)."""
+    now = dt.datetime.now(dt.timezone.utc)
+    return {"schema": ABLATION_SCHEMA, "id": f"ablation-{now.strftime('%Y%m%dT%H%M%S')}-seed{seed}",
+            "generated_at": now.isoformat(timespec="seconds"), "seed": seed, "years": years, "field": field,
+            "slot": slot, "match_cfg": dict(cfg["match"], years=years), "rev": git("rev-parse", "HEAD"),
+            "tree_dirty": bool(git("status", "--porcelain", "--", cfg["prismatic"]["path"])), "rows": rows}
+
+
+def write_ablation(rec: dict) -> None:
+    for e in validate_ablation(rec, f"{rec['id']}.json"):
+        log(f"warning: {e}")
+    (RESULTS_DIR / f"{rec['id']}.json").write_text(json.dumps(rec, indent=1) + "\n")
+    # The page (table and charts) is derived from the JSON alone, as `render` re-derives it.
+    (RESULTS_DIR / f"{rec['id']}.md").write_text(render_ablation_md(rec))
+    log(f"wrote research/results/{rec['id']}.{{json,md}}")
+
+
+def cmd_ablate(cfg: dict, seed: int, years: int, variants: list[str], field: list[str],
+               write: bool, log_dir: str | None = None, slot: int = 0) -> int:
+    """Run one local match per variant of the working tree's PrismaticAI (ablate_rows), print (and
+    with --write record under research/results/) every variant's final standing. Deterministic:
+    same tree, binary and seed, same table."""
+    rows = ablate_rows(cfg, seed, years, variants, field, log_dir, slot)
+    if rows is None:
+        print("ablate: NOT RUN: needs build/openttd and a prepared arena cache")
+        return 12
     for r, vs in zip(rows, ablation_vs_first(rows)):
         r["vs_first"] = vs
         print(f"ablate: {r['variant']:12} value {r['value']:>12,} ({r['vs_first']:+.1%})  veh {r['vehicles']:>4} "
               f"rail {r['rail']} road {r['road']} air {r['air']}  err {r['errors']}  [{r['settings']}]")
     if write:
-        now = dt.datetime.now(dt.timezone.utc)
-        rid = f"ablation-{now.strftime('%Y%m%dT%H%M%S')}-seed{seed}"
-        rec = {"schema": ABLATION_SCHEMA, "id": rid, "generated_at": now.isoformat(timespec="seconds"),
-               "seed": seed, "years": years, "field": field, "slot": slot, "match_cfg": mc,
-               "rev": git("rev-parse", "HEAD"), "tree_dirty": bool(git("status", "--porcelain", "--",
-                                                                        cfg["prismatic"]["path"])),
-               "rows": rows}
-        for e in validate_ablation(rec, f"{rid}.json"):
-            log(f"warning: {e}")
-        (RESULTS_DIR / f"{rid}.json").write_text(json.dumps(rec, indent=1) + "\n")
-        # The page (table and charts) is derived from the JSON alone, as `render` re-derives it.
-        (RESULTS_DIR / f"{rid}.md").write_text(render_ablation_md(rec))
-        log(f"wrote research/results/{rid}.{{json,md}}")
+        write_ablation(ablation_record(cfg, seed, years, field, slot, rows))
     return 0
+
+
+# ------------------------------------------------------------------------- config evolution (evolve)
+#
+# The closed loop from "we fall behind" to a tested settings proposal (research/config-evolution-loop.md):
+# a trigger (the gap watch's gap.<company>, the strategy review's review.<company>.month, or a live
+# outcome record live-*.json) -> the gap attributed per transport mode from the referee's profit per
+# mode -> candidate settings: the GA genes of the losing modes and of capital, ranked and directed by
+# their recorded association with the ratio to the reference AI -> every candidate and the baseline in
+# paired null-driver matches on the same seeds -> the best candidate confirmed on fresh seeds -> a
+# proposal record, and with --propose a blackboard key. The loop never applies a setting and never
+# approves anything (rule project.decision-authority-boundaries): the owner, or the executor ADR 0042
+# names, files it as one approval.
+
+EVOLVE_SCHEMA = "config-evolution/v1"
+# The referee's transport modes and the blackboard's names for them (gap_watch, ADR 0042 reviews).
+MODE_ALIASES = {"rail": "rail", "train": "rail", "road": "road", "bus": "road", "truck": "road",
+                "air": "air", "aircraft": "air", "plane": "air", "water": "water", "ship": "water"}
+EVOLVE_LIFECYCLE = ["proposed", "requested", "approved|denied|retired", "applied", "verified|failed"]
+
+
+def evolve_cfg(cfg: dict) -> dict:
+    """The loop's policy: battle.json's `evolve`, under the configuration's own when it has one."""
+    base = json.loads(DEFAULT_CONFIG.read_text()).get("evolve", {})
+    return {**base, **cfg.get("evolve", {})}
+
+
+def gene_mode(gene: str, ev: dict) -> str:
+    """The transport mode a GA gene steers: battle.json evolve.gene_modes when it names the gene, else
+    the first token of its name that evolve.mode_tokens lists (air_routes_max: air; max_routes: road),
+    else "capital" (reserve, investment pace, aggressiveness: they move every mode)."""
+    if gene in ev.get("gene_modes", {}):
+        return ev["gene_modes"][gene]
+    for tok in gene.split("_"):
+        for mode, toks in ev.get("mode_tokens", {}).items():
+            if tok in toks:
+                return mode
+    return "capital"
+
+
+def mode_gaps(ours: dict, rival: dict) -> dict:
+    """The gap to the rival per mode from two final referee samples (ADR 0042, section 2): the profit
+    gap P_R - P_O, its volume term (n_R - n_O) x p_R and its yield term n_O x (p_R - p_O), where n is
+    the fleet of the mode and p its profit last year per vehicle. A mode the rival does not run has
+    no volume term; one we do not run has no yield term."""
+    out = {}
+    for mode in MODES:
+        n_o, n_r = ours.get(mode) or 0, rival.get(mode) or 0
+        p_o, p_r = ours.get("p" + mode) or 0, rival.get("p" + mode) or 0
+        y_o, y_r = (p_o / n_o if n_o else 0.0), (p_r / n_r if n_r else 0.0)
+        out[mode] = {"gap": p_r - p_o, "volume": round((n_r - n_o) * y_r), "yield": round(n_o * (y_r - y_o)),
+                     "ours": n_o, "rival": n_r}
+    return out
+
+
+def attributed_modes(gaps: dict, cover: float) -> list[str]:
+    """The modes that make up `cover` of the positive volume gap, largest first; when no mode has a
+    positive volume term (we run as many vehicles but each earns less), the same over the positive
+    profit gap."""
+    for term in ("volume", "gap"):
+        pos = sorted(((g[term], m) for m, g in gaps.items() if g[term] > 0), reverse=True)
+        total = sum(v for v, _ in pos)
+        if total > 0:
+            out, acc = [], 0.0
+            for v, m in pos:
+                out.append(m)
+                acc += v
+                if acc >= cover * total:
+                    break
+            return out
+    return []
+
+
+def sum_gaps(per_seed: list[dict]) -> dict:
+    out = {m: {"gap": 0, "volume": 0, "yield": 0, "ours": 0, "rival": 0} for m in MODES}
+    for g in per_seed:
+        for m, v in g.items():
+            for k in out[m]:
+                out[m][k] += v[k]
+    return out
+
+
+def trigger_gaps(value) -> dict | None:
+    """A review record's per-type gap terms (`gaps: [{type, volume, yield}]`, ADR 0042) as mode_gaps'
+    shape, None when the trigger carries none."""
+    if not isinstance(value, dict) or not isinstance(value.get("gaps"), list):
+        return None
+    out = {m: {"gap": 0, "volume": 0, "yield": 0, "ours": 0, "rival": 0} for m in MODES}
+    for g in value["gaps"]:
+        m = MODE_ALIASES.get(str(g.get("type", "")).lower())
+        if m:
+            vol, yld = int(g.get("volume") or 0), int(g.get("yield") or 0)
+            out[m].update(volume=out[m]["volume"] + vol, gap=out[m]["gap"] + vol + yld,
+                          **{"yield": out[m]["yield"] + yld})
+    return out
+
+
+def _ranks(xs: list[float]) -> list[float]:
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    ranks = [0.0] * len(xs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            ranks[order[k]] = (i + j) / 2
+        i = j + 1
+    return ranks
+
+
+def spearman(x: list[float], y: list[float]) -> float:
+    rx, ry = _ranks(x), _ranks(y)
+    n = len(x)
+    mx, my = sum(rx) / n, sum(ry) / n
+    sxy = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    sxx, syy = sum((a - mx) ** 2 for a in rx), sum((b - my) ** 2 for b in ry)
+    return 0.0 if sxx == 0 or syy == 0 else sxy / math.sqrt(sxx * syy)
+
+
+def lever_evidence(records: list[dict], t: dict, reference: str) -> dict:
+    """What the recorded battles say about each gene: {gene: {rho, n, values}}, rho being Spearman's
+    correlation between the gene's value in a PrismaticAI configuration and log(value / reference's
+    value) in the same match, the log ratio centred per arena edition (code changed between them).
+    Finished, non-replay matches only, each configuration once per edition and seed across records. Hypothesis
+    generation only: the GA's genes co-vary, so a correlation is a direction to try, never a cause."""
+    obs: list[tuple[str, dict, float]] = []
+    seen = set()
+    for rec in records:
+        ident = {c["key"]: c for c in rec.get("contestants", [])}
+        for m in rec.get("matches", []):
+            if m.get("status") != "done" or m.get("replica_of"):
+                continue
+            vals = {f["key"]: f["value"] for f in m.get("standings") or []}
+            if not vals.get(reference):
+                continue
+            for k, v in vals.items():
+                c = ident.get(k, {})
+                if c.get("ai") != "PrismaticAI":
+                    continue
+                key = (rec.get("edition", ""), c.get("settings", ""), m.get("seed"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                genes = live_genes(t, settings_dict(c.get("settings", "")))
+                obs.append((rec.get("edition", ""), genes, math.log(max(1, v) / vals[reference])))
+    by_ed: dict[str, list[float]] = {}
+    for ed, _, y in obs:
+        by_ed.setdefault(ed, []).append(y)
+    mean = {ed: sum(ys) / len(ys) for ed, ys in by_ed.items()}
+    ys = [y - mean[ed] for ed, _, y in obs]
+    out = {}
+    for g in t["space"]:
+        xs = [genes[g] for _, genes, _ in obs]
+        out[g] = {"rho": round(spearman(xs, ys), 4) if len(xs) > 2 else 0.0, "n": len(xs),
+                  "values": len(set(xs))}
+    return out
+
+
+def evolve_candidates(base: dict, space: dict, evidence: dict, modes: list[str], ev: dict) -> list[dict]:
+    """Candidate gene settings from the data: the genes of the attributed modes, then those of
+    capital; within each, those with a recorded direction (|rho| >= min_rho over >= min_history
+    matches, over three distinct values or every value a switch has) first by |rho|. Each is moved
+    step_frac of its range from the baseline in that direction (both directions for a gene without
+    one): at most `levers` single-gene candidates, then one with every directed move together. A move
+    a bound swallows is skipped."""
+    pool = [g for g in space if gene_mode(g, ev) in set(modes) | {"capital"}]
+
+    def directed(g):
+        e = evidence.get(g, {})
+        lo, hi, step = space[g]
+        ok = (abs(e.get("rho", 0)) >= ev["min_rho"] and e.get("n", 0) >= ev["min_history"]
+              and e.get("values", 0) >= min(3, (hi - lo) // step + 1))
+        return (1 if e["rho"] > 0 else -1) if ok else 0
+    order = sorted(pool, key=lambda g: (directed(g) == 0, gene_mode(g, ev) == "capital",
+                                        -abs(evidence.get(g, {}).get("rho", 0)), g))
+    out, moves = [], {}
+    for g in order:
+        lo, hi, step = space[g]
+        delta = max(step, round(ev["step_frac"] * (hi - lo) / step) * step)
+        d = directed(g)
+        for sign in ([d] if d else [1, -1]):
+            if len(out) >= ev["levers"]:
+                break
+            b = base.get(g, lo)
+            v = clamp_gene(space, g, b + sign * delta)
+            if v == b:
+                continue
+            out.append({"name": f"c{len(out) + 1}", "changed": {g: [b, v]},
+                        "why": f"{g} ({gene_mode(g, ev)}) {'up' if v > b else 'down'}: "
+                               + (f"rho {evidence[g]['rho']:+.3f} over {evidence[g]['n']} recorded matches"
+                                  if d else "no recorded direction, both tried")})
+            if d:
+                moves[g] = [b, v]
+    if len(moves) >= 2:
+        out.append({"name": "combo", "changed": dict(moves), "why": "every directed move together"})
+    return out
+
+
+def apply_changes(settings: dict, changed: dict) -> str:
+    return settings_str({**settings, **{g: v for g, (_, v) in changed.items()}})
+
+
+def rival_of(row: dict, reference: str) -> int:
+    return next((s["value"] for s in row.get("standings", []) if s["key"] == reference), 0)
+
+
+def pair_of(seed: int, base: dict, cand: dict, reference: str) -> dict:
+    """One held pair: the candidate against the baseline on one seed. `ours` is the value ratio,
+    `spread` how far the unchanged reference AI moved between the two arms (what the change did to the
+    field, read as the pair's noise), `relative` the change in our ratio to the reference. It favours
+    the candidate only beyond the spread (rule project.a-tuning-claim-needs-held-start-pairs)."""
+    rb, rc = rival_of(base, reference), rival_of(cand, reference)
+    ours = max(1, cand["value"]) / max(1, base["value"])
+    spread = abs(max(1, rc) / max(1, rb) - 1)
+    rel = (max(1, cand["value"]) / max(1, rc)) / (max(1, base["value"]) / max(1, rb))
+    ok = cand["exit_code"] == 0 and cand["errors"] <= base["errors"]
+    return {"seed": seed, "base": base["value"], "cand": cand["value"], "rival_base": rb, "rival_cand": rc,
+            "ours": round(ours, 4), "spread": round(spread, 4), "relative": round(rel, 4),
+            "errors": [base["errors"], cand["errors"]], "favours": ok and ours > 1 + spread}
+
+
+def geo(xs: list[float]) -> float:
+    return round(math.exp(sum(math.log(max(1e-9, x)) for x in xs) / len(xs)), 4) if xs else 0.0
+
+
+def judge(pairs: list[dict], ev: dict) -> tuple[bool, str]:
+    """A candidate is kept when it has min_pairs pairs, every pair favours it beyond the reference's
+    spread, and its geometric mean value ratio reaches min_gain."""
+    if len(pairs) < ev["min_pairs"]:
+        return False, f"{len(pairs)} pair(s), {ev['min_pairs']} needed"
+    lost = [p["seed"] for p in pairs if not p["favours"]]
+    if lost:
+        return False, f"not beyond the reference's spread (or more errors) on seed(s) {', '.join(map(str, lost))}"
+    g = geo([p["ours"] for p in pairs])
+    if g < ev["min_gain"]:
+        return False, f"geometric mean {g:.3f} under min_gain {ev['min_gain']}"
+    return True, f"every pair favours it, geometric mean {g:.3f}"
+
+
+class EvolveGuard:
+    """Owned, bounded and stoppable (rule project.long-runs-are-owned-bounded-and-stoppable): a lock
+    directory with an OWNER file (host, pid, start, commit, how to stop), refused while a live process
+    holds it; before every batch the STOP and PAUSED files of the cache root, the match budget, the
+    wall-clock cap and this machine's load and disk floor (battle.json resource_floor)."""
+
+    def __init__(self, root: Path, budget: int, max_minutes: float, floor: dict, clock=time.time):
+        self.root, self.budget, self.floor, self.clock = root, budget, floor, clock
+        self.deadline = clock() + max_minutes * 60
+        self.used = 0
+        self.lock = root / "evolve" / "lock"
+        self.marker = "evolve:" + owner_marker(socket.gethostname(), os.getpid())
+
+    def acquire(self) -> str | None:
+        self.lock.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.lock.mkdir()
+        except FileExistsError:
+            held = (self.lock / "OWNER").read_text() if (self.lock / "OWNER").is_file() else ""
+            m = re.search(r"^pid=(\d+)$", held, re.M)
+            h = re.search(r"^host=(.*)$", held, re.M)
+            alive = False
+            if m and h and h.group(1) == socket.gethostname():
+                try:
+                    os.kill(int(m.group(1)), 0)
+                    alive = True
+                except (OSError, ValueError):
+                    alive = False
+            if alive or not m:
+                return f"held: {held.strip() or self.lock}"
+            log(f"evolve: taking over the lock of dead pid {m.group(1)}")
+        (self.lock / "OWNER").write_text(
+            f"# battle.py evolve (tools/research/ai-battle/battle.py): headless matches for a settings proposal\n"
+            f"host={socket.gethostname()}\npid={os.getpid()}\nstarted_at={dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')}\n"
+            f"commit={git('rev-parse', 'HEAD')}\nmarker=TTD_BATTLE_ORCHESTRATOR={self.marker}\n"
+            f"how_to_stop=create {self.root}/STOP (no new batch; the running one finishes) or "
+            f"kill -TERM {os.getpid()}\n")
+        return None
+
+    def release(self) -> None:
+        for f in (self.lock / "OWNER",):
+            if f.is_file():
+                f.unlink()
+        if self.lock.is_dir():
+            self.lock.rmdir()
+
+    def admit(self, want: int) -> tuple[int, str]:
+        """How many matches the next batch may start: 0 with the reason when it must not."""
+        why = stop_requested(self.root)
+        if why:
+            return 0, f"STOP: {why}"
+        paused = sorted(self.root.glob("PAUSED*"))
+        if paused:
+            first = (paused[0].read_text(errors="replace").splitlines() or [""])[0].strip()
+            return 0, f"PAUSED: {first or paused[0]}"
+        if self.clock() >= self.deadline:
+            return 0, "wall-clock cap reached"
+        left = self.budget - self.used
+        if left <= 0:
+            return 0, f"match budget {self.budget} spent"
+        try:
+            load = os.getloadavg()[0]
+        except OSError:
+            load = None
+        import shutil
+        free = shutil.disk_usage(self.root).free // 1024
+        n, why = floor_decision(load, os.cpu_count(), free, min(want, left), self.floor)
+        return n, ("" if n else why or "no room")
+
+
+def evolve_batches(run, guard: EvolveGuard, seeds: list[int], variants: list[str],
+                   have: dict | None = None) -> tuple[dict, str]:
+    """{seed: {variant: row}} of every variant on every seed, a batch at a time (each as large as the
+    guard admits), and why it stopped early ("" when complete). `have` holds rows already played:
+    the null-driver match is deterministic, so a baseline played once per seed is not played again."""
+    rows = {s: dict(v) for s, v in (have or {}).items()}
+    for seed in seeds:
+        rows.setdefault(seed, {})
+        todo = [v for v in variants if v.partition("=")[0] not in rows[seed]]
+        while todo:
+            n, why = guard.admit(len(todo))
+            if n <= 0:
+                return rows, why
+            batch, todo = todo[:n], todo[n:]
+            got = run(seed, batch)
+            if got is None:
+                return rows, "NOT RUN: needs build/openttd and a prepared arena cache"
+            guard.used += len(batch)
+            for r in got:
+                rows[seed][r["variant"]] = r
+    return rows, ""
+
+
+def http_json(url: str, body: dict | None = None, timeout: int = 30):
+    """GET (or POST `body`) JSON from a panel; None for a 404."""
+    import urllib.error
+    import urllib.request
+    base = re.match(r"^(https?://[^/]+)", url)
+    req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"content-type": "application/json",
+                                          "origin": base.group(1) if base else url})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
+def shared_value(panel: str, key: str):
+    """A blackboard key's value (GET /api/rhai/shared?key=), None when absent."""
+    d = http_json(f"{panel.rstrip('/')}/api/rhai/shared?key={urllib.parse.quote(key)}")
+    return d.get("value") if isinstance(d, dict) else None
+
+
+def evolve_trigger(a, ev: dict, t_cfg: dict) -> dict:
+    """What set the loop off, read-only: {fired, kind, source, company, why, baseline, gaps, levers}.
+    A live outcome record fires when live_entries judges the company's configuration lost (battle.json
+    tuning.live: under loss_ratio of the reference, or of the game's best PrismaticAI); a panel fires on gap.<company> at level >= trigger.gap_level or an alarm in review.<company>.month;
+    --force fires with --baseline alone. The baseline is --baseline, else the record's start settings,
+    else the running bot's settings (GET /api/bots)."""
+    tr = ev["trigger"]
+    t = {"fired": False, "kind": "manual", "source": "", "company": a.company, "why": "", "baseline": None,
+         "gaps": None, "levers": []}
+    if a.live:
+        rec = json.loads(Path(a.live).read_text())
+        t.update(kind="live", source=rec.get("id", str(a.live)))
+        e = next((e for e in live_entries([rec], t_cfg) if e["company"] == a.company), None)
+        if e is None:
+            t["why"] = f"company {a.company} is not a PrismaticAI company of {t['source']}"
+        else:
+            t.update(baseline=e["settings"], fired=bool(e.get("lost")),
+                     why=("lost: " if e.get("lost") else "not lost: ") + e["why"])
+    elif a.panel:
+        gap = shared_value(a.panel, f"gap.{a.company}")
+        review = shared_value(a.panel, f"review.{a.company}.month")
+        t.update(kind="panel", source=a.panel)
+        why = []
+        if isinstance(gap, dict) and (gap.get("level") or 0) >= tr["gap_level"]:
+            why.append(f"gap.{a.company} level {gap['level']} ({', '.join(sorted(gap.get('flags') or {}))})")
+            t["levers"] = [lv.get("name") for lv in gap.get("levers") or [] if isinstance(lv, dict)]
+        if isinstance(review, dict) and review.get("alarms"):
+            why.append(f"review.{a.company}.month alarms {review['alarms']}")
+            t["gaps"] = trigger_gaps(review)
+        t["fired"] = bool(why)
+        t["why"] = "; ".join(why) or (f"gap.{a.company} level {(gap or {}).get('level', 'absent')}, "
+                                      f"review.{a.company}.month {'without alarms' if review else 'absent'}")
+        if t["fired"] and not a.baseline:
+            bots = http_json(f"{a.panel.rstrip('/')}/api/bots") or {}
+            run = next((b for b in bots.get("running", []) if b.get("id") == a.company), {})
+            t["baseline"] = ",".join(f"{s['name']}={s['value']}" for s in run.get("settings", [])
+                                     if isinstance(s, dict) and "name" in s and "value" in s)
+    if a.force:
+        t["fired"], t["why"] = True, (t["why"] + "; " if t["why"] else "") + "forced (--force)"
+    if a.baseline:
+        t["baseline"] = a.baseline
+    return t
+
+
+def cmd_evolve(cfg: dict, a, run=None, records: list[dict] | None = None, live: list[dict] | None = None) -> int:
+    """The config-evolution loop, once (research/config-evolution-loop.md). Exit 0 when it ran to a
+    verdict or had nothing to do, 10 when another evolve holds the lock, 12 when it could not run a
+    match, 2 on a trigger without a baseline."""
+    ev = evolve_cfg(cfg)
+    # load_config has resolved a configuration's genes already (space and defaults); a raw one is resolved here.
+    tun = cfg.get("tuning") or json.loads(DEFAULT_CONFIG.read_text())["tuning"]
+    t_cfg = tun if "defaults" in tun else live_tuning({"tuning": tun, "prismatic": cfg.get("prismatic", {})})
+    t = evolve_trigger(a, ev, t_cfg)
+    print(f"evolve: trigger {t['kind']} {t['source']}: {t['why']}")
+    if not t["fired"]:
+        print("evolve: no trigger fired; nothing run")
+        return 0
+    if not t["baseline"]:
+        print("evolve: no baseline settings (give --baseline)", file=sys.stderr)
+        return 2
+    base_settings = settings_dict(t["baseline"])
+    base_text = settings_str(base_settings)
+    out_dir = cfg["cache"] / "evolve"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    sig = hashlib.sha256(json.dumps([t["kind"], t["source"], t["company"], base_text], sort_keys=True).encode()).hexdigest()[:16]
+    last_f = out_dir / "last.json"
+    last = json.loads(last_f.read_text()) if last_f.is_file() else {}
+    if not a.force and sig in last and time.time() - last[sig] < ev["cooldown_hours"] * 3600:
+        print(f"evolve: the same trigger ran {(time.time() - last[sig]) / 3600:.1f} h ago "
+              f"(cooldown {ev['cooldown_hours']} h); nothing run")
+        return 0
+    base_genes = live_genes(t_cfg, base_settings)
+    guard = EvolveGuard(cfg["cache"], a.budget or ev["budget"], a.max_minutes or ev["max_minutes"],
+                        cfg.get("resource_floor", {}))
+    held = guard.acquire()
+    if held:
+        print(f"evolve: another evolve runs ({held}); nothing run", file=sys.stderr)
+        return 10
+    binary = Path(a.binary) if a.binary else None
+    run = run or (lambda seed, vs: ablate_rows(cfg, seed, ev["years"], vs, ev["field"], None, ev["slot"],
+                                               binary, guard.marker))
+    try:
+        rec = evolve_once(cfg, ev, t, run, guard, base_settings, base_genes, t_cfg, records, live)
+    finally:
+        guard.release()
+    played = rec.pop("_rows")
+    last[sig] = time.time()
+    last_f.write_text(json.dumps(last, indent=1) + "\n")
+    path = out_dir / f"{rec['id']}.json"
+    path.write_text(json.dumps(rec, indent=1) + "\n")
+    print(f"evolve: {rec['status']}: {rec['verdict']}")
+    print(f"evolve: wrote {path}")
+    if a.write:
+        for seed, rows in played.items():
+            ordered = [rows[n] for n in ["baseline"] + [c["name"] for c in rec["candidates"]] if n in rows]
+            if not ordered or ordered[0]["variant"] != "baseline":
+                continue
+            for r, vs in zip(ordered, ablation_vs_first(ordered)):
+                r["vs_first"] = vs
+            write_ablation(ablation_record(cfg, seed, ev["years"], ev["field"], ev["slot"], ordered))
+    if a.propose:
+        key = f"evolve.proposal.{t['company']}" if rec["status"] == "proposed" else f"evolve.status.{t['company']}"
+        http_json(f"{a.propose.rstrip('/')}/api/rhai/shared", {"key": key, "value": rec, "writer": "evolve"})
+        print(f"evolve: blackboard {key} on {a.propose} (a record; it applies nothing)")
+    return 12 if rec["status"] == "not_run" else 0
+
+
+def evolve_once(cfg: dict, ev: dict, t: dict, run, guard: EvolveGuard, base_settings: dict,
+                base_genes: dict, t_cfg: dict, records: list[dict] | None, live: list[dict] | None) -> dict:
+    """One pass: baseline on the screening seeds, attribution, candidates (a configuration that lost a
+    live game is vetoed, the winner of a paired live comparison joins: live_veto, live_seeds),
+    screening, confirmation; the record (its `_rows` holds every row, for --write)."""
+    space = t_cfg["space"]
+    now = dt.datetime.now(dt.timezone.utc)
+    seeds, confirm = list(ev["seeds"]), list(ev["confirm_seeds"])
+    base_v = f"baseline={settings_str(base_settings)}"
+    rec = {"schema": EVOLVE_SCHEMA, "id": f"evolve-{now.strftime('%Y%m%dT%H%M%S')}-c{t['company']}",
+           "generated_at": now.isoformat(timespec="seconds"), "status": "incomplete", "verdict": "",
+           "lifecycle": EVOLVE_LIFECYCLE, "trigger": {k: v for k, v in t.items() if k != "fired"},
+           "binds": {"company": t["company"], "source": t["source"], "rev": git("rev-parse", "HEAD"),
+                     "baseline": settings_str(base_settings),
+                     "baseline_sha": hashlib.sha256(settings_str(base_settings).encode()).hexdigest(),
+                     "field": ev["field"], "slot": ev["slot"], "years": ev["years"], "reference": ev["reference"],
+                     "seeds": seeds, "confirm_seeds": confirm},
+           "expires_at": (now + dt.timedelta(hours=ev["expiry_hours"])).isoformat(timespec="seconds"),
+           "apply": "never by this loop: the owner (or the executor ADR 0042 names) files it as one "
+                    "set_settings approval; a committed default still needs held-start pairs",
+           "attribution": None, "evidence": {}, "candidates": [], "winner": None, "matches": 0, "_rows": {}}
+    rows, why = evolve_batches(run, guard, seeds, [base_v])
+    rec["_rows"], rec["matches"] = rows, guard.used
+    if why:
+        rec.update(status="not_run" if why.startswith("NOT RUN") else "incomplete", verdict=f"baseline: {why}")
+        return rec
+    per_seed = []
+    for seed in seeds:
+        b = rows[seed]["baseline"]
+        me = next((s for s in b["standings"] if s["key"] == "baseline"), {})
+        rv = next((s for s in b["standings"] if s["key"] == ev["reference"]), {})
+        per_seed.append(mode_gaps(me, rv))
+    headless = sum_gaps(per_seed)
+    gaps = t.get("gaps") or headless
+    modes = attributed_modes(gaps, ev["cover"])
+    rec["attribution"] = {"source": "trigger" if t.get("gaps") else "baseline matches", "modes": modes,
+                          "gaps": gaps, "headless": headless}
+    evidence = lever_evidence(records if records is not None else
+                              [json.loads(f.read_text()) for f in tracked_records(RECORD_GLOB)],
+                              t_cfg, ev["reference"])
+    cands = evolve_candidates(base_genes, space, evidence, modes, ev)
+    live = live_entries(live_records(), t_cfg) if live is None else live
+    tried = [base_genes] + [dict(base_genes, **{g: v for g, (_, v) in c["changed"].items()}) for c in cands]
+    for k, (genes, source) in enumerate(live_seeds(t_cfg, live, tried)):
+        changed = {g: [base_genes[g], v] for g, v in genes.items() if v != base_genes[g]}
+        if changed:
+            cands.append({"name": f"live{k + 1}", "changed": changed,
+                          "why": f"won a paired live comparison ({source}); the arena measures it"})
+    rec["vetoed"] = []
+    for c in list(cands):
+        veto = live_veto(t_cfg, dict(base_genes, **{g: v for g, (_, v) in c["changed"].items()}), live)
+        if veto:
+            cands.remove(c)
+            rec["vetoed"].append({"name": c["name"], "changed": c["changed"],
+                                  "by": f"{veto['record']}:{veto['company']}", "why": veto["why"]})
+    # The budget holds every candidate on every screening seed and two confirmation arms per seed.
+    room = (guard.budget - guard.used - 2 * len(confirm)) // max(1, len(seeds))
+    cands = cands[:max(0, room)]
+    rec["evidence"] = {g: dict(evidence[g], mode=gene_mode(g, ev)) for g in space
+                       if gene_mode(g, ev) in set(modes) | {"capital"}}
+    rec["candidates"] = [dict(c, settings=apply_changes(base_settings, c["changed"])) for c in cands]
+    if not cands:
+        rec.update(status="inconclusive", verdict=f"no candidate for modes {modes} within the budget")
+        return rec
+    rows, why = evolve_batches(run, guard, seeds, [f"{c['name']}={c['settings']}" for c in rec["candidates"]], rows)
+    rec["_rows"], rec["matches"] = rows, guard.used
+    for c in rec["candidates"]:
+        c["pairs"] = [pair_of(s, rows[s]["baseline"], rows[s][c["name"]], ev["reference"])
+                      for s in seeds if c["name"] in rows[s]]
+        c["kept"], c["judged"] = judge(c["pairs"], ev)
+        c["relative"] = geo([p["relative"] for p in c["pairs"]])
+    if why:
+        rec.update(status="incomplete", verdict=f"screening: {why}")
+        return rec
+    kept = sorted((c for c in rec["candidates"] if c["kept"]), key=lambda c: -c["relative"])
+    if not kept:
+        rec.update(status="inconclusive", verdict="no candidate favoured on every screening seed: "
+                   + "; ".join(f"{c['name']} {c['judged']}" for c in rec["candidates"]))
+        return rec
+    best = kept[0]
+    rows, why = evolve_batches(run, guard, confirm, [base_v, f"{best['name']}={best['settings']}"], rows)
+    rec["_rows"], rec["matches"] = rows, guard.used
+    best["confirm"] = [pair_of(s, rows[s]["baseline"], rows[s][best["name"]], ev["reference"])
+                       for s in confirm if best["name"] in rows.get(s, {})]
+    ok, judged = judge(best["confirm"], ev)
+    if why:
+        rec.update(status="incomplete", verdict=f"confirmation of {best['name']}: {why}")
+    elif not ok:
+        rec.update(status="inconclusive", verdict=f"{best['name']} won the screening but not the "
+                                                   f"confirmation seeds: {judged}")
+    else:
+        rec["winner"] = {"name": best["name"], "settings": best["settings"], "changed": best["changed"],
+                         "screening": best["judged"], "confirmation": judged,
+                         "relative": geo([p["relative"] for p in best["pairs"] + best["confirm"]])}
+        rec.update(status="proposed", verdict=f"{best['name']} ({', '.join(f'{g} {a}->{b}' for g, (a, b) in best['changed'].items())}): "
+                                              f"{judged} on the confirmation seeds")
+    rec["proposal_sha"] = hashlib.sha256(json.dumps({k: rec[k] for k in ("binds", "winner", "expires_at")},
+                                                    sort_keys=True).encode()).hexdigest()
+    return rec
 
 
 def cmd_status(cfg: dict) -> None:
@@ -3830,7 +4439,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("command", choices=["discover", "fetch", "prepare", "probe", "run", "status",
                                         "report", "render", "check", "fitness", "ablate", "reap", "power",
-                                        "live-export", "live-settings", "replay"])
+                                        "live-export", "live-settings", "replay", "evolve"])
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--allow-dirty", action="store_true",
@@ -3862,15 +4471,22 @@ def main(argv: list[str] | None = None) -> int:
                          "rivals, PrismaticAI's slot, seed and arms (unless --variant names others)")
     ap.add_argument("--save", help="replay: the live save to load (default battle.json replay.save)")
     ap.add_argument("--rev", help="replay: PrismaticAI at this commit instead of the working tree")
-    ap.add_argument("--binary", help="replay: the OpenTTD binary (default build/openttd)")
+    ap.add_argument("--binary", help="replay, evolve: the OpenTTD binary (default build/openttd)")
     ap.add_argument("--edition", help="report: a past edition (its arena bundle must still be the "
                                       "prepared one, for its provenance)")
     ap.add_argument("--margin", type=float, default=1.10, help="power: the non-inferiority margin, a value ratio")
     ap.add_argument("--alpha", type=float, default=0.05, help="power: the one-sided significance level")
     ap.add_argument("--power", type=float, default=0.80, help="power: the power at no true difference")
     ap.add_argument("--game-seed", type=int, help="live-export: the map seed of the live game")
-    ap.add_argument("--panel", help="live-export: the panel to read, e.g. http://127.0.0.1:8800 (read-only SQL)")
+    ap.add_argument("--panel", help="live-export: the panel to read, e.g. http://127.0.0.1:8800 (read-only SQL); evolve: the panel whose blackboard\n(gap.<company>, review.<company>.month) is the trigger, read only")
     ap.add_argument("--db", type=Path, help="live-export: a copy of the panel's DuckDB store (never the live file)")
+    ap.add_argument("--live", help="evolve: a live outcome record (research/results/live-*.json) as the trigger")
+    ap.add_argument("--company", type=int, default=0, help="evolve: the company the trigger is about")
+    ap.add_argument("--baseline", help="evolve: the baseline settings (else the trigger's)")
+    ap.add_argument("--force", action="store_true", help="evolve: run without a fired trigger and past the cooldown")
+    ap.add_argument("--budget", type=int, help="evolve: at most this many matches (battle.json evolve.budget)")
+    ap.add_argument("--max-minutes", type=float, help="evolve: wall-clock cap (battle.json evolve.max_minutes)")
+    ap.add_argument("--propose", help="evolve: a panel to write the proposal to as a blackboard key")
     a = ap.parse_args(argv)
     if a.command == "live-export":
         return cmd_live_export(a.game_seed, a.panel, a.db)
@@ -3916,6 +4532,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_replay(cfg, a.save, a.years, a.rev, a.binary, a.log_dir)
     elif a.command == "reap":
         Orchestrator(cfg).reap()
+    elif a.command == "evolve":
+        return cmd_evolve(cfg, a)
     elif a.command == "ablate":
         field, slot, variants = a.field.split(","), a.slot, list(a.variant)
         seed, years = (930967890 if a.seed is None else a.seed), (6 if a.years is None else a.years)
