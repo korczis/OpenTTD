@@ -31,6 +31,16 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
-updated_at: 2026-11-22T15:47:16Z
+updated_at: 2026-11-25T04:16:01Z
 started_at: 2026-11-22T15:47:16Z
 started_event: sha256:9ffcefff8cf91ba0877ad919cfecfa3bce7985c4d83d62fd0c512d650c4a5628
+verified_at: 2026-11-25T04:15:24Z
+verified_event: sha256:9c9998d5f966e311722be6c08f30cf359ba053c5b27b50424e116c81db4da63c
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "build-mcp/openttd_test '[prismatic_mcp]' (lundra, OPTION_DEDICATED=ON, OPTION_RESEARCH_INSTRUMENTATION=ON, OPTION_PRISMATIC_MCP_SERVER=ON, RelWithDebInfo)"
+    result: "Delivered by PR #221 (merge 4ca2d9fca9). At adab4ea0: All tests passed (1177 assertions in 43 test cases), PR #221 comment. AC1 prismatic_mcp_server.cpp:200-204 with rules in prismatic_mcp_detail.h:641-646 and CapabilitiesOf :663-707; AC2 GetStatusLine server.cpp:2030-2042 via detail::CapabilitiesLine; AC3 test_prismatic_mcp.cpp:900-967 (mutating registry read_only false, none read_only true, unarmed vs armed) and :970 live dispatch; AC5 07-resource-catalog.md:10,55,63-64 and 10-in-game-runbook.md:69-78. AC4 (default OFF build compiles, tests pass): shown by later gates on trees containing #221, e.g. PR #275 tools/gate.sh change PASS with the default build and ctest 98/98; tools/gate.sh change of this reconciliation is recorded separately."
+    artifact: "https://github.com/korczis/OpenTTD/pull/221"
+    commit: eed5cb5fc51439b56924840ff6a6a5fef8753a4f
+    recorded_at: 2026-11-25T04:16:01Z

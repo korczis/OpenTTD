@@ -57,4 +57,14 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
-updated_at: '2026-11-22'
+updated_at: 2026-11-25T04:15:08Z
+started_at: 2026-11-25T04:14:39Z
+started_event: sha256:afe469119ae388511b189e021e1ae4b5d6ebc3d528c956384b29c5a74356b310
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "tools/research/algoglyph-pin check && python3 -B -m unittest tools/research/test_algoglyph_pin.py && tools/surfaces/surfaces check && tools/knowledge/refs check"
+    result: "Delivered by PR #192 (merge 5233db039f). Re-run 2026-11-25 on origin/master eed5cb5fc5: algoglyph-pin check 'pinned at 1b8e009059c2, record current'; test_algoglyph_pin.py 13 tests OK; surfaces check 0 findings; refs check 0 failures. ACs located: gitlink and pin.json both 1b8e009 (git ls-tree); pin.json lists knapsack-dp, track-planning, transport-investment, action-plan; hub_algoglyph.rs:243 (submodule default, pinned ~/dev fallback); algoglyph_native.rs:217,229 (native-rust entries after the runner's), :263,:306 (in-process answer, malformed input refused); battlebrain_contract.rs:1874 (native-rust never matched without an adapter); test_algoglyph_pin.py:83,119,132,195-216 (install, check, bump, status). The cargo --no-default-features run is recorded separately."
+    artifact: "https://github.com/korczis/OpenTTD/pull/192"
+    commit: eed5cb5fc51439b56924840ff6a6a5fef8753a4f
+    recorded_at: 2026-11-25T04:15:08Z

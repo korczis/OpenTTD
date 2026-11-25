@@ -48,6 +48,12 @@ observations:
 - id: rhai-ide-milestone-done
   statement: "Added 2026-11-22: milestone rhai-is-a-live-ide is 6/6 done (I0088-I0093), but its criterion's evidence (tools/research/mcp-scripts-check and cargo llvm-cov on mcp-rhai) was not re-run when this gap was re-read"
   source: file:.ai/repo/project/milestones/rhai-is-a-live-ide.yaml
+- id: fr-writers-mostly-bound
+  statement: "Added 2026-11-25 at origin/master eed5cb5fc5: the Battlebrain freight-slot write is one openttd.ai.set_settings carrying expires_tick (tools/research/mcp-rhai/src/panel_decision.rs:770, test :1058-1060) and the other fr_* writers stand down for another planner's key (panel_bot.rs:1533,1558; rhai_shared.rs:455 replan_stands_down_for_another_planner_only), all from commits of 2026-11-22 before PRs #225-#284; a directive is refused for lacking a decision block only when it sets fr_* (fr_needs_decision, panel_decision.rs:698), and .ai/repo/rules/project/decision-authority-boundaries.v1.md:82-86 still lists B2 in a running game as open; PR #271 is bot-side slot coherence only (I0151 partly met)"
+  source: file:tools/research/mcp-rhai/src/panel_decision.rs
+- id: approver-partly-authenticated
+  statement: "Added 2026-11-25 at origin/master eed5cb5fc5: the panel's approve route needs the owner secret (panel.rs approving_and_auto_approve_on_need_the_owner_secret), PR #242 keeps one owner secret across restarts, PR #228 lets only a registered approver key approve in game (src/tests/test_prismatic_mcp.cpp:1242-1259 NotAnApprover), PRs #258/#273 make /api/approvers owner-only; but approved_by still records a declared name with owner_secret:true and no authenticated principal (panel.rs:2592; panel_decision.rs:1312), no test shows the agent token cannot approve its own request, and research/mcp-hub.md:250 still says the hub has no authentication of its own (I0182 partly met)"
+  source: file:tools/research/mcp-rhai/src/panel.rs
 conditions:
 - criterion: the-bridge-steers-a-company
   state: satisfied
@@ -106,9 +112,10 @@ conditions:
   - planner-reads-one-at-a-time
 - criterion: battlebrain-decides-live-with-rollback
   state: missing
-  because: "milestone battlebrain-decides-live-with-rollback owns the fix; nothing in it has started"
+  because: "milestone battlebrain-decides-live-with-rollback owns the fix; re-observed 2026-11-25: none of its issues is done; I0151 is partly met by the executor binding of 2026-11-22"
   observations:
   - battlebrain-gate-cannot-pass
+  - fr-writers-mostly-bound
 - criterion: prismatic-closes-one-real-loop
   state: missing
   because: "milestone prismatic-closes-one-real-loop owns the fix; nothing in it has started"
@@ -116,9 +123,10 @@ conditions:
   - loop-not-joined
 - criterion: governed-access-is-authenticated-and-exercised
   state: missing
-  because: "milestone governed-access-is-authenticated-and-every-capability-reaches-every-surface owns the fix; nothing in it has started"
+  because: "milestone governed-access-is-authenticated-and-every-capability-reaches-every-surface owns the fix; re-observed 2026-11-25: none of its issues is done; I0182 is partly met by PRs #228, #242, #258 and #273"
   observations:
   - approver-self-declared
+  - approver-partly-authenticated
 - criterion: algoglyph-plans-are-accountable
   state: missing
   because: "milestone algoglyph-is-accountable owns the fix; nothing in it has started"

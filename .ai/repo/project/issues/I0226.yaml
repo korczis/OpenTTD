@@ -38,4 +38,14 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
-updated_at: '2026-11-22'
+updated_at: 2026-11-25T04:14:29Z
+started_at: 2026-11-25T04:13:58Z
+started_event: sha256:d01ccac170dfc600ce025aa630ecb7fa5e850c29c5751ea2236d572dfb992ae3
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "tools/surfaces/surfaces check && python3 -B -m unittest discover -s tools/surfaces -p 'test_findings.py' && tools/knowledge/refs check"
+    result: "Delivered by PR #97 (merge e24a011713; its body describes I0110/I0111, not this change). Re-run 2026-11-25 on origin/master eed5cb5fc5 (worktree doc/plan-reconcile-merged-work): surfaces check 909 documents, 0 findings; test_findings 19 tests OK (1 skipped; 'every line of findings.py ran, exemptions: none'); refs check 3343 references, 0 failures. ACs: research/open-findings.md lists the four facts (:239 AlgoGlyph contract handoff, :174 I0098 non_scope, :68 I0114 blocked on I0111, :184 January 1954 track-planning failure), each row with kind, evidence, follow-up and label; findings.py hard-codes only --config surfaces.toml (:468); test_findings.py :167,:294,:304,:460 cover stale page, malformed marker, undeclared kind and an unknown follow-up id. tools/gate.sh change is recorded separately."
+    artifact: "https://github.com/korczis/OpenTTD/pull/97"
+    commit: eed5cb5fc51439b56924840ff6a6a5fef8753a4f
+    recorded_at: 2026-11-25T04:14:29Z

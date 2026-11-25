@@ -37,7 +37,7 @@ unknown attribute, a follow-up that names no issue, or a closing marker with no 
 pie showData title Open findings by kind
     %% links: open-findings.md?col=Kind&filter=blocked#findings | open-findings.md?col=Kind&filter=out-of-scope#findings | open-findings.md?col=Kind&filter=not-run#findings | open-findings.md?col=Kind&filter=partial#findings | open-findings.md?col=Kind&filter=staged#findings | open-findings.md?col=Kind&filter=unreviewed#findings | open-findings.md?col=Kind&filter=failed#findings | open-findings.md?col=Kind&filter=handoff#findings
     "blocked" : 71
-    "out-of-scope" : 40
+    "out-of-scope" : 43
     "not-run" : 21
     "partial" : 17
     "staged" : 16
@@ -53,7 +53,7 @@ pie showData title Open findings by kind
 | Kind | Count | Meaning |
 |---|---|---|
 | blocked | 71 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
-| out-of-scope | 40 | A finished issue left this out (its non_scope) and no open issue names it |
+| out-of-scope | 43 | A finished issue left this out (its non_scope) and no open issue names it |
 | failed | 7 | A run or check the records say failed |
 | not-run | 21 | A validation the records say did not run |
 | partial | 17 | A capability or run the records say is only partly there |
@@ -64,7 +64,7 @@ pie showData title Open findings by kind
 
 | Kind | Finding | Evidence | Follow-up | Label |
 |---|---|---|---|---|
-| blocked | No tracked text claims a shipped MCP capability is absent or planned: the server header and research/mcp-control.md describe today's code — waits on I0110 (active) | [I0111](../.ai/repo/project/issues/I0111.yaml):17 | [I0110](../.ai/repo/project/issues/I0110.yaml) | DERIVED |
+| blocked | No tracked text claims a shipped MCP capability is absent or planned: the server header and research/mcp-control.md describe today's code — waits on I0110 (verified) | [I0111](../.ai/repo/project/issues/I0111.yaml):17 | [I0110](../.ai/repo/project/issues/I0110.yaml) | DERIVED |
 | blocked | One capability matrix states, per capability, its owner, code path, live input, fallback, tests and end-to-end status, labelled OBSERVED/DERIVED/INFERRED, and a check keeps it honest — waits on I0111 (open) | [I0114](../.ai/repo/project/issues/I0114.yaml):20 | [I0111](../.ai/repo/project/issues/I0111.yaml) | DERIVED |
 | blocked | The research/prismatic-mcp contributor catalogue takes each document's title and kind from the document itself; nothing is written by hand — waits on I0111 (open) | [I0115](../.ai/repo/project/issues/I0115.yaml):18 | [I0111](../.ai/repo/project/issues/I0111.yaml) | DERIVED |
 | blocked | The battle referee's REF Q sample carries every company's loan and maximum loan, and the battle record and charts use them — waits on I0118 (open) | [I0119](../.ai/repo/project/issues/I0119.yaml):19 | [I0118](../.ai/repo/project/issues/I0118.yaml) | DERIVED |
@@ -175,6 +175,9 @@ pie showData title Open findings by kind
 | out-of-scope | Any change in algoglyph or prismatic-platform | [I0221](../.ai/repo/project/issues/I0221.yaml):24 | none — needs an issue | DERIVED |
 | out-of-scope | How the AlgoGlyph checkout is located, the flow serve and the catalogue discovery of the hub (feature/algoglyph-submodule) | [I0221](../.ai/repo/project/issues/I0221.yaml):25 | none — needs an issue | DERIVED |
 | out-of-scope | Kernel calls outside the planner: the hub's algoglyph. methods, the Rhai rail steward, mcp-human, the action plan and the kernel feed | [I0221](../.ai/repo/project/issues/I0221.yaml):26 | none — needs an issue | DERIVED |
+| out-of-scope | Any change in algoglyph or prismatic-platform | [I0228](../.ai/repo/project/issues/I0228.yaml):19 | none — needs an issue | DERIVED |
+| out-of-scope | Pinning AlgoGlyph as a submodule (feature/algoglyph-submodule) | [I0228](../.ai/repo/project/issues/I0228.yaml):20 | none — needs an issue | DERIVED |
+| out-of-scope | Routing the planner's kernel calls through the matcher (feature/planner-kernels-by-capability) | [I0228](../.ai/repo/project/issues/I0228.yaml):21 | none — needs an issue | DERIVED |
 | failed | -G 15805 with the live-like match settings does not regenerate live game 15805's map: none of its towns appears in the headless log (2026-11-24, lundra, 20261122-master-g2a6a616221). The planned arm is a fixed slot set, not the live plan, and the start of 15805 cannot be… | [research/ai-battle/README.md](ai-battle/README.md):712 | none — needs an issue | OBSERVED |
 | failed | On the 15805 save, master's PrismaticAI runs 3 trains instead of 1. Its value after four years is 151k against the old code's 309k, and 0.029 of AAAHogEx, under the live ratio of 0.050. More lines do not yet mean more value on this map. | [research/ai-battle/README.md](ai-battle/README.md):735 | none — needs an issue | OBSERVED |
 | failed | On seed 4242 the self-steward lineup hoards after the change (hoards:1964-04..1966-01:716618->1549902@60v), where it did not before. Producers that rivals claimed are no longer candidates, and the bot has no other sink for the money. The gate's seed passes. The sink that is… | [research/incident-2026-11-22-sibling-industries.md](incident-2026-11-22-sibling-industries.md):221 | none — needs an issue | OBSERVED |

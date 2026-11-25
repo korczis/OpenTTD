@@ -39,6 +39,15 @@ observations:
 - id: crawl-not-recorded
   statement: "Added 2026-11-22 from an external review re-checked on master: CI only checks that every page is declared and runs the node tests (.github/workflows/surfaces.yml:56, :65); the crawl's only result lives in the PR #47 description, and it fetches links without following them (tools/research/mcp-ui-crawl-check:15, :155-165) (I0203-I0211)"
   source: file:tools/research/mcp-ui-crawl-check
+- id: status-surfaces-partly-true
+  statement: "Re-observed 2026-11-25 at origin/master eed5cb5fc5: openttd://mcp/status derives capabilities and read_only from the registry (PR #221; src/prismatic_mcp/prismatic_mcp_server.cpp:200-204), the server header and research/mcp-control.md describe today's code and tools/check-prismatic-docs.sh refuses a regression, research/capability-matrix.md passes refs check --strict-lines (142 references, 0 failures; PRs #102, #226), and research/open-findings.md is derived by tools/surfaces/findings.py (PR #97): I0110, I0111, I0114 and I0226 are done. Feature maturity (I0112), the agent-channels gap re-observation (I0113), the derived contributor catalogue (I0115) and the gate-on-PR ADR (I0116: branch protection requires only Check and build, no ADR decides it) remain"
+  source: file:research/capability-matrix.md
+- id: changed-line-gate-partial-browser
+  statement: "Added 2026-11-25 at origin/master eed5cb5fc5: tools/research/mcp-approval-ui-check collects Chrome V8 coverage for app.js and shell.js on one page and refused two unreachable lines (PR #229), and CI runs it (.github/workflows/research-rust.yml:200-208), but its coverage does not feed a changed-line gate and the web-ui-is-covered-end-to-end rule cites none (I0181 partly met; I0180 not started)"
+  source: file:tools/research/mcp-approval-ui-check
+- id: replan-holds-say-why
+  statement: "Added 2026-11-25 at origin/master eed5cb5fc5: since PR #275 a re-plan judges each mode on its own lines and a held round proposes nothing and records why as free text in replan.<company> (tools/research/mcp-panel/rhai/replan.rhai:393-419; tests rhai_shared.rs:785,821), but there is no cooldown or hysteresis band, no event-triggered round and no typed hold kind among the plan.* events (I0197 partly met)"
+  source: file:tools/research/mcp-panel/rhai/replan.rhai
 conditions:
 - criterion: ground-rules-are-one-source
   state: satisfied
@@ -72,9 +81,10 @@ conditions:
   - pages-off
 - criterion: status-surfaces-match-the-code
   state: missing
-  because: "the MCP status, the server header, mcp-control.md and the feature records contradict master; milestone records-and-status-tell-the-truth owns the fix"
+  because: "milestone records-and-status-tell-the-truth owns the fix; re-observed 2026-11-25: I0110, I0111, I0114 and I0226 are done, I0112, I0113, I0115 and I0116 remain"
   observations:
   - status-surfaces-contradict-code
+  - status-surfaces-partly-true
 - criterion: no-open-dependency-alert
   state: satisfied
   because: "re-observed 2026-11-22T13:49Z: PR #63 (3dbdba818d) moved duckdb to 1.10506.1 and zip to 9.8.1; Dependabot marked alerts 1-4 fixed at 13:30:15Z and the open-alert count is 0. The periodic check from the milestone's third criterion is not written yet"
@@ -83,14 +93,16 @@ conditions:
   - zip-advisories-fixed
 - criterion: every-changed-line-is-tested
   state: missing
-  because: "milestone every-changed-line-is-tested owns the fix; nothing in it has started"
+  because: "milestone every-changed-line-is-tested owns the fix; re-observed 2026-11-25: none of its issues is done; I0181 is partly met by the browser coverage of PR #229"
   observations:
   - no-changed-line-gate
+  - changed-line-gate-partial-browser
 - criterion: the-workbench-drives-the-game-end-to-end
   state: missing
-  because: "milestone the-live-agent-workbench owns the fix; nothing in it has started"
+  because: "milestone the-live-agent-workbench owns the fix; re-observed 2026-11-25: none of its issues is done; I0197 is partly met by PR #275"
   observations:
   - workbench-not-joined
+  - replan-holds-say-why
 - criterion: every-panel-control-works
   state: missing
   because: "milestone the-panel-has-integrity owns the fix; nothing in it has started"

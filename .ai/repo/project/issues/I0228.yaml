@@ -33,3 +33,16 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
+started_at: 2026-11-25T04:11:22Z
+started_event: sha256:70a7c80d9700e1c40502e4df61e97081b4bc01299b072307321269ec468bbd09
+updated_at: 2026-11-25T04:12:11Z
+completed_at: 2026-11-25T04:12:11Z
+completed_event: sha256:4ea87bbbeaf1da62eff59a1d9eb0872ffeb7e820cf9a8cac32b1448ad52b2d1d
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "cargo test --release --offline --no-default-features --manifest-path tools/research/mcp-rhai/Cargo.toml --bin algoglyph-contracts --bin battlebrain --bin mcp-panel --bin mcp-plan --bin mcp-intent; algoglyph-contracts --check"
+    result: "Delivered by PR #212 (merge c5bf32182a). Run on lundra on base e9d25667 plus the change, --no-default-features: 10/61/259/68/61 passed, 0 failed; algoglyph-contracts --check exited 0; deriver line coverage 99.86% (cargo llvm-cov). Reconciled 2026-11-25 against origin/master eed5cb5fc5: AC1 algoglyph_contracts.rs:2363-2501,2681 (knapsack-dp {weights integer[], values, capacity} -> {best, items}; track-planning requires from,to; 53 contracts at 1b8e009); AC2 :2636-2662,2681; AC3 battlebrain_contract.rs:1067-1084, tests :1653,1715-1742 (other-commit fallback :1725-1733); AC4 research/algoglyph-contract-proposal.md:127. Caveat: the source-equality test needs an AlgoGlyph checkout and is not run by Research Rust CI; the artifact's top-level schema is algoglyph-derived-contracts/v1 with per-kernel algoglyph-kernel-contract shape. Not re-run in this reconciliation."
+    artifact: "https://github.com/korczis/OpenTTD/pull/212"
+    commit: eed5cb5fc51439b56924840ff6a6a5fef8753a4f
+    recorded_at: 2026-11-25T04:11:51Z
