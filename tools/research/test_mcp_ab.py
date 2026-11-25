@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""RESEARCH-ONLY. Tests for tools/research/mcp-ab's page and charts, offline: no game, no panel, no
-stack.
+"""RESEARCH-ONLY. Tests for tools/research/mcp-ab's page, charts and company binding, offline: no
+game, no panel, no stack (a run is driven against fake panels).
 
 Run: python3 -B tools/research/test_mcp_ab.py
 (or python3 -B -m unittest discover -s tools/research -p 'test_*.py', as tools/gate.sh change does).
@@ -18,7 +18,9 @@ import sys
 import tempfile
 import types
 import unittest
+import urllib.error
 from pathlib import Path
+from unittest import mock
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
@@ -116,7 +118,8 @@ class Charts(unittest.TestCase):
         self.assertLess(md.index("**Final company value: A 300000000 vs B 7"), md.index(ab.CHARTS_BEGIN))
         self.assertLess(md.index(ab.CHARTS_END), md.index(f"## {ab.A_HEADING}"))
         self.assertEqual(ab.with_charts(md, ab.charts(self.rec(), "ab-x.md", ROOT)), md)
-        self.assertIn("| 3 | None | 300000000 | 100 | 300000 | 3 | 2 |", md)
+        self.assertIn("| 3 | None |  | 300000000 | 100 | 300000 | 3 | 2 |", md)  # a row naming no company
+        self.assertIn("each of the\ncompany the arm's bot holds: the record does not say which.", md)
 
     def test_render_inserts_the_charts_above_the_a_table_and_then_checks_current(self):
         with tempfile.TemporaryDirectory() as d:
@@ -162,6 +165,171 @@ class Charts(unittest.TestCase):
         self.assertIn("tools/research/mcp-ab --render [--check]", r.stdout)
         r = subprocess.run([str(SCRIPT), "--bogus"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
+
+
+def line(n, name, value, founded=1950, road=1, planes=0):
+    """One company of the console's `companies` dump, as the game prints it."""
+    return (f"#:{n}(Red) Company Name: '{name}'  Year Founded: {founded}  Money: 100  Loan: 300000  "
+            f"Value: {value}  (T:0, R:{road}, P:{planes}, S:0)")
+
+
+class FakePanels:
+    """Two arms' panels for mcp-ab's main(), keyed by port: each serves GET /api/status, /api/bots,
+    the game.month events (one more month on every read after the first), the game date and ai.log,
+    and POST /api/console `companies` from its roster of the current month."""
+
+    def __init__(self, arms):
+        self.arms = arms  # port: {"ai", "bots", "rosters": [month 0's dump lines, month 1's, ...]}
+        self.month = {p: 0 for p in arms}
+        self.reads = {p: 0 for p in arms}
+
+    def get(self, port, path):
+        arm = self.arms[port]
+        if path == "/api/status":
+            return {"ai": arm["ai"], "ai_started": True, "events": [{"kind": "ai", "text": "planner: x"}]}
+        if path == "/api/bots":
+            if isinstance(arm["bots"], Exception):
+                raise arm["bots"]
+            return {"running": arm["bots"]}
+        if path.startswith("/api/events?since=0&kinds=game.month"):
+            if self.reads[port]:
+                self.month[port] += 1
+                assert self.month[port] < len(arm["rosters"]), f"month {self.month[port]} read past the rosters"
+            self.reads[port] += 1
+            return {"events": [{}] * self.month[port]}
+        if path == "/api/resources/game/state":
+            return {"game_date": f"1950-{self.month[port] + 1:02d}-01"}
+        if path.startswith("/api/events?since=0&kinds=ai.log"):
+            return {"events": [{"data": {"text": "built a bus line"}}]}
+        raise AssertionError(path)
+
+    def post(self, port, path, body):
+        assert (path, body["command"]) == ("/api/console", "companies"), (path, body)
+        return {"output": self.arms[port]["rosters"][self.month[port]]}
+
+
+class TestedCompany(unittest.TestCase):
+    """Every observation is of the company the arm's tested agent holds, told by --company or by the
+    game, never of whichever company the dump lists first; a run that cannot tell it refuses."""
+    RIVAL_FIRST = [line(1, "Rival Transport", 999999), line(2, "Prismatic Transport", 1234, road=3)]
+
+    def fake(self, **arms):
+        panels = FakePanels(arms)
+        return mock.patch.multiple(ab, get=panels.get, post=panels.post), panels
+
+    def test_the_tested_company_is_observed_when_the_dump_lists_another_first(self):
+        rows = ab.companies(self.RIVAL_FIRST)
+        self.assertEqual([r["id"] for r in rows], [1, 2])
+        got = ab.observe(rows, {"company": 2, "founded": 1950})
+        self.assertEqual((got["company"], got["name"], got["value"], got["road"], got["present"]),
+                         (2, "Prismatic Transport", 1234, 3, True))
+
+    def test_the_first_row_never_stands_in_for_the_tested_company(self):
+        source = re.search(r"<<'PY'\n(.*?)\nPY\n", SCRIPT.read_text(), re.S)[1]
+        self.assertNotIn("rows[0]", source)
+        gone = ab.observe(ab.companies(self.RIVAL_FIRST[:1]), {"company": 2, "founded": 1950})
+        self.assertEqual(gone, {"company": 2, "present": False, "note": "#2 is not among the game's companies"})
+        taken = ab.observe(ab.companies([line(2, "Newcomer", 5, founded=1952)]), {"company": 2, "founded": 1950})
+        self.assertEqual((taken["present"], "value" in taken), (False, False))
+        self.assertIn("#2 is now 'Newcomer', founded 1952: not the tested company (founded 1950)", taken["note"])
+
+    def test_the_game_tells_the_company_of_the_panels_ai(self):
+        bots = [{"id": 0, "ai": "RivalAI", "running": True}, {"id": 1, "ai": "PrismaticAI", "running": True},
+                {"id": 2, "ai": "PrismaticAI", "running": False}]
+        patch, _ = self.fake(**{"7": {"ai": "PrismaticAI", "bots": bots, "rosters": [self.RIVAL_FIRST]}})
+        with patch:
+            self.assertEqual(ab.bind("7"), {"company": 2, "name": "Prismatic Transport", "founded": 1950,
+                                            "from": "GET /api/bots: the one running company of PrismaticAI"})
+            self.assertEqual(ab.bind("7", "1")["name"], "Rival Transport")  # --company wins over the game
+
+    def test_a_company_that_cannot_be_told_is_refused(self):
+        two = [{"id": 0, "ai": "PrismaticAI"}, {"id": 3, "ai": "PrismaticAI"}]
+        cases = [({"ai": "", "bots": [], "rosters": [self.RIVAL_FIRST]}, "", "the panel names no AI"),
+                 ({"ai": "PrismaticAI", "bots": two, "rosters": [self.RIVAL_FIRST]}, "",
+                  "2 running companies of PrismaticAI (#1, #4): pass --company N"),
+                 ({"ai": "PrismaticAI", "bots": urllib.error.URLError("refused"), "rosters": [self.RIVAL_FIRST]}, "",
+                  "GET /api/bots did not answer"),
+                 ({"ai": "PrismaticAI", "bots": [{"id": 0, "ai": "RivalAI"}], "rosters": [self.RIVAL_FIRST]}, "",
+                  "no running company of PrismaticAI in GET /api/bots after 4 s"),
+                 ({"ai": "PrismaticAI", "bots": [{"id": 4, "ai": "PrismaticAI"}], "rosters": [self.RIVAL_FIRST]}, "",
+                  "#5 is not among the game's companies after 4 s"),
+                 ({"ai": "PrismaticAI", "bots": [], "rosters": [self.RIVAL_FIRST]}, "9",
+                  "#9 is not among the game's companies after 4 s")]
+        for arm, given, why in cases:
+            patch, _ = self.fake(**{"7": arm})
+            with self.subTest(why=why), patch, mock.patch.object(ab.time, "sleep") as sleep:
+                with self.assertRaises(ab.Unbound) as cm:
+                    ab.bind("7", given, tries=2, pause=2.0)
+                self.assertIn(why, str(cm.exception))
+                self.assertLessEqual(sleep.call_count, 1)
+
+    def run_main(self, arms, company=""):
+        patch, _ = self.fake(**arms)
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        root = Path(d.name)
+        (root / ab.STYLE).parent.mkdir(parents=True)
+        shutil.copy(ROOT / ab.STYLE, root / ab.STYLE)
+        with patch, mock.patch.object(ab.time, "sleep"), contextlib.redirect_stdout(io.StringIO()) as out, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            try:
+                ab.main(["mcp-ab", "1", "2", "3", "4242", "", str(root), company])
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        results = root / "research" / "results"
+        records = sorted(results.glob("ab-*.json")) if results.is_dir() else []
+        return code, out.getvalue(), err.getvalue(), [json.loads(r.read_text()) for r in records], \
+            [r.with_suffix(".md").read_text() for r in records]
+
+    def test_a_roster_change_mid_run_keeps_every_month_on_the_tested_company(self):
+        # A: a rival is #1 and the bot #2; a company joins as #3 in month 2, the rival leaves in month 3
+        # (the bot is then first in the dump). B: the bot is #1; it goes bankrupt in month 2 and a
+        # company founded in 1951 takes #1, which is not the bot and is not reported as it.
+        a = {"ai": "PrismaticAI", "bots": [{"id": 0, "ai": "RivalAI"}, {"id": 1, "ai": "PrismaticAI"}],
+             "rosters": [self.RIVAL_FIRST,
+                         [line(1, "Rival Transport", 900), line(2, "Prismatic Transport", 10)],
+                         [line(1, "Rival Transport", 800), line(2, "Prismatic Transport", 20), line(3, "Joiner", 7)],
+                         [line(2, "Prismatic Transport", 30, planes=2), line(3, "Joiner", 8)]]}
+        b = {"ai": "PrismaticAI", "bots": [{"id": 0, "ai": "PrismaticAI"}],
+             "rosters": [[line(1, "Plain Transport", 1)], [line(1, "Plain Transport", 5)],
+                         [line(1, "Successor", 66666, founded=1951)], [line(1, "Successor", 77777, founded=1951)]]}
+        code, out, err, (rec,), (page,) = self.run_main({"1": a, "2": b})
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("A observes #2 'Prismatic Transport' (GET /api/bots: the one running company of PrismaticAI)", out)
+        self.assertEqual({k: (t["company"], t["name"]) for k, t in rec["tested"].items()},
+                         {"A": (2, "Prismatic Transport"), "B": (1, "Plain Transport")})
+        self.assertEqual([(r["company"], r["value"]) for r in rec["series"]["A"]], [(2, 10), (2, 20), (2, 30)])
+        self.assertEqual([(r["company"], r["present"], r.get("value")) for r in rec["series"]["B"]],
+                         [(1, True, 5), (1, False, None), (1, False, None)])
+        self.assertTrue(all(r["company"] for side in rec["series"].values() for r in side))  # each names its company
+        self.assertEqual(rec["value_delta"], 30)
+        self.assertIn("A #2 'Prismatic Transport' (founded 1950, from GET /api/bots: the one running company of "
+                      "PrismaticAI); B #1 'Plain Transport'", page)
+        self.assertIn("| 3 | 1950-04-01 | #2 Prismatic Transport | 30 |", page)
+        self.assertIn("| 2 | 1950-03-01 | #1 (absent) |  |", page)
+        self.assertNotIn("66666", page)
+        self.assertIn('x-axis ["1950-02"]', page)  # only the month both arms observed their company is charted
+
+    def test_the_given_company_binds_both_arms(self):
+        arm = {"ai": "", "bots": [], "rosters": [self.RIVAL_FIRST] * 4}
+        code, out, _, (rec,), _ = self.run_main({"1": arm, "2": dict(arm)}, company="2")
+        self.assertEqual(code, 0)
+        self.assertEqual([(t["company"], t["from"]) for t in rec["tested"].values()], [(2, "--company"), (2, "--company")])
+        self.assertEqual([r["value"] for r in rec["series"]["A"] + rec["series"]["B"]], [1234] * 6)
+
+    def test_a_run_that_cannot_tell_its_company_refuses_and_writes_nothing(self):
+        arm = {"ai": "PrismaticAI", "bots": [{"id": 0, "ai": "PrismaticAI"}, {"id": 1, "ai": "PrismaticAI"}],
+               "rosters": [self.RIVAL_FIRST]}
+        code, out, err, records, _ = self.run_main({"1": arm, "2": dict(arm)})
+        self.assertEqual((code, records, out), (3, [], ""))
+        self.assertIn("mcp-ab: A: refused, the tested company cannot be told (2 running companies of PrismaticAI "
+                      "(#1, #2): pass --company N); no other company's figures are reported in its place", err)
+
+    def test_a_company_that_is_not_a_console_number_is_refused_before_any_game(self):
+        r = subprocess.run([str(SCRIPT), "--company", "first"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--company is the console's company number", r.stderr)
 
 
 if __name__ == "__main__":
