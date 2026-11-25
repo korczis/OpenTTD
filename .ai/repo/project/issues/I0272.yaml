@@ -1,0 +1,29 @@
+id: I0272
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "Regime thresholds come from regimes.json alone, baselines from derived.*, and every other constant is a declared bootstrap or owner policy"
+slug: one-source-of-thresholds
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: S (feature/failure-regime-detector, regimes.json), R (feature/rhai-self-evaluation, derived.*), J (gap_watch reads them). The panel serves regimes.json's rules to Rhai (Rhai reads no files). gap_watch's losing_ground, idle_capital and plans_not_landing become the live reading of S's regimes (widening gap, no expansion, losing on a mode, unapplied plan) with S's thresholds; SHARE_DROP and the watchdog's cold start come from R's derived.<service>.<param> when present, else their constant marked bootstrap. PERSIST, COOLDOWN_MONTHS, DECLINED, MIN_PAYS and HORIZON_MONTHS are declared owner policy with a version."
+why: "J, S and R each define a gap threshold today; three definitions of one regime drift apart."
+scope:
+- "tools/research/ai-battle/regimes.json"
+- "tools/research/mcp-rhai/src/panel.rs"
+- "tools/research/mcp-panel/rhai/gap_watch.rhai"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0270
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "changing a rule in regimes.json changes both the fitness check's verdict and gap_watch's flag on the same series (one test per side)"
+- "every threshold gap_watch reports carries its source: regimes, derived or bootstrap"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+- "python3 -m unittest tools/research/test_ai_battle.py"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

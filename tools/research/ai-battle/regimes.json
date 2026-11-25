@@ -1,0 +1,22 @@
+{
+  "schema": "failure-regimes-rules/v1",
+  "description": "The thresholds of the failure-regime detector (research/failure-regimes.md), one source for every reader: tools/research/ai-battle/regimes.py loads them (RULES), battle.json fitness.regimes overrides any of them for the headless check, and `regimes.py --panel URL --post` writes them to the blackboard key regime.rules for Rhai services.",
+  "rules": {
+    "window_months": 24,
+    "slack": 0.1,
+    "gap_factor": 2.0,
+    "pay_share": 0.5,
+    "pay_years": 2,
+    "plan_rounds": 3,
+    "gate": ["no_expansion"]
+  },
+  "why": {
+    "window_months": "A regime lasts at least this many game months between its first and last sample: two game years, the fitness hoard window (8 quarterly samples span 21 months, so it is counted in elapsed months).",
+    "slack": "Flat: the fleet's maximum stays within this fraction above its count at the run's start; the fitness rules' hoard_fleet_slack.",
+    "gap_factor": "Material: over the span we lose at least this factor of value against the strongest rival relative to the median other rival.",
+    "pay_share": "A mode underperforms when our profit a vehicle is below every rival running it and below this share of their median.",
+    "pay_years": "Year ends in a row a mode must lose money or underperform.",
+    "plan_rounds": "The planner's cycle: a plan is filed in one round, decided by the next and seen applied by the third.",
+    "gate": "The regimes that fail the headless fitness check. mode_underperforms is a diagnosis: AAAHogEx, which won every recorded match, shows it for its road vehicles in 5 of the 6 fitness matches of master 2026-11-23. mode_never_pays fires on the default PrismaticAI on rival seed 1383023900 (its aircraft lose money), so gating it would fail every change until that is fixed. widening_gap is reported, not gated: master's bot at 42cae0fc33 shows it for the planned lineup in two of two fitness runs and for the default lineup in one of two (lundra, 2026-11-25, PR #266), so gating it would fail every change until PrismaticAI closes its gap to AAAHogEx."
+  }
+}
