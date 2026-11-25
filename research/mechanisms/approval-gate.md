@@ -154,7 +154,17 @@ queue:
 | Verdict | At the deadline |
 |---|---|
 | `keep` (the default) | retired unanswered (`denied`, `settled_by: deadline keep`): nothing is enacted, the game keeps what it has, and the requester may ask again |
-| `approve` | executed through the one execution path, recorded with `approved_via: deadline (...)`, but only when a chat approver could decide it (`detail::ChatScoped`: one company's own AI, or a company-level command); anything wider is retired as under `keep` |
+| `approve` | executed through the one execution path, recorded with `approved_via: deadline (...)` and `settled_by: deadline approve (approver in company N)`, but only when a chat approver could decide it (`detail::ChatScoped`: one company's own AI, or a company-level command) **and** a registered approver played the company it names both when it was asked and at the deadline; anything else is retired as under `keep`, with `settled_by` naming why |
+
+`approve` stands in for the owner's own answer, so it acts only where the owner could have answered
+(the owner's decision, 2026-11-23). The server derives that from facts it holds, never from names:
+the approver keys (`prismatic_mcp approvers`) and the company each connected client plays
+(`detail::ApproverSeats`). openttd://approvals lists the result as `approver_companies`
+(`{company, client_id, key_fp}`), each approval's `approver_at_creation`, and the last changes as
+`approver_events` (`joined`, `left`, `shared`), which the log repeats. An approval that names no
+company is never settled by `approve`. OpenTTD admits two connections with one key, so a registered
+key that two clients present at once is no approver from either of them: it has no seat, and its
+`!approve` is refused (`SharedKey`), so a copied key cannot approve from a second client.
 
 - **The default:** one game month (30 days), which is the cadence `replan.rhai` plans at, with the
   verdict `keep`. So a plan nobody answered is settled before the next one is asked for, and

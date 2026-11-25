@@ -1261,7 +1261,7 @@ TEST_CASE("A chat decision names the condition that failed, and only an approver
 	CHECK(DecideChat(with([](ChatFacts &f) { f.injecting = true; }), false) == ChatVerdict::Allow);
 
 	for (ChatVerdict v : {ChatVerdict::Allow, ChatVerdict::NoSuchApproval, ChatVerdict::NotPending, ChatVerdict::Expired, ChatVerdict::ServerOnly,
-			ChatVerdict::Spectator, ChatVerdict::NotYourCompany, ChatVerdict::NotAnApprover, ChatVerdict::Injected}) {
+			ChatVerdict::Spectator, ChatVerdict::NotYourCompany, ChatVerdict::NotAnApprover, ChatVerdict::Injected, ChatVerdict::SharedKey}) {
 		CHECK_FALSE(ChatVerdictText(v).empty());
 	}
 	CHECK(ChatVerdictText(ChatVerdict::NotAnApprover).find("approvers add") != std::string_view::npos);
@@ -1315,19 +1315,19 @@ TEST_CASE("An unanswered approval is settled at its deadline with the operator's
 	CHECK_FALSE(DeadlineTick(1000, 0).has_value());
 
 	const uint64_t due = 1000 + keep.ticks;
-	CHECK(DeadlineDue(true, 1000, due - 1, keep, true) == DeadlineAction::None);
-	CHECK(DeadlineDue(true, 1000, due, keep, true) == DeadlineAction::Retire);
-	CHECK(DeadlineDue(true, 1000, due + 5000, keep, false) == DeadlineAction::Retire);
+	CHECK(DeadlineDue(true, 1000, due - 1, keep, true, true) == DeadlineAction::None);
+	CHECK(DeadlineDue(true, 1000, due, keep, true, true) == DeadlineAction::Retire);
+	CHECK(DeadlineDue(true, 1000, due + 5000, keep, false, false) == DeadlineAction::Retire);
 	/* Decided already: the deadline has nothing to settle. */
-	CHECK(DeadlineDue(false, 1000, due + 1, keep, true) == DeadlineAction::None);
+	CHECK(DeadlineDue(false, 1000, due + 1, keep, true, true) == DeadlineAction::None);
 
 	DeadlinePolicy approve{keep.ticks, DeadlineVerdict::Approve};
-	CHECK(DeadlineDue(true, 1000, due, approve, true) == DeadlineAction::Execute);
+	CHECK(DeadlineDue(true, 1000, due, approve, true, true) == DeadlineAction::Execute);
 	/* Wider than a chat approver may decide (a server setting, starting an AI): retired, never executed. */
-	CHECK(DeadlineDue(true, 1000, due, approve, false) == DeadlineAction::Retire);
+	CHECK(DeadlineDue(true, 1000, due, approve, false, true) == DeadlineAction::Retire);
 
 	DeadlinePolicy off{0, DeadlineVerdict::Approve};
-	CHECK(DeadlineDue(true, 1000, UINT64_MAX, off, true) == DeadlineAction::None);
+	CHECK(DeadlineDue(true, 1000, UINT64_MAX, off, true, true) == DeadlineAction::None);
 
 	CHECK(DeadlineVerdictName(DeadlineVerdict::Keep) == "keep");
 	CHECK(DeadlineVerdictName(DeadlineVerdict::Approve) == "approve");
@@ -2316,3 +2316,71 @@ TEST_CASE("An allow matcher is broad when it constrains no value, whatever keys 
 }
 
 #endif /* OTTD_PRISMATIC_MCP_SERVER */
+
+TEST_CASE("The deadline's approve stands in only for a registered approver of the company it names, when asked and at the deadline", "[prismatic_mcp]")
+{
+	DeadlinePolicy approve{30 * DEADLINE_DAY_TICKS, DeadlineVerdict::Approve};
+	const uint64_t due = 1000 + approve.ticks;
+	/* An approver played the company when it was asked and plays it now: executed. */
+	CHECK(DeadlineDue(true, 1000, due, approve, true, true) == DeadlineAction::Execute);
+	/* No approver plays that company (an agent's request for another company): retired, nothing enacted. */
+	CHECK(DeadlineDue(true, 1000, due, approve, true, false) == DeadlineAction::Retire);
+	/* Not due yet: nothing, approver or not. */
+	CHECK(DeadlineDue(true, 1000, due - 1, approve, true, false) == DeadlineAction::None);
+
+	std::vector<ApproverSeat> seats = {{1, 7, "owner-key-fp"}};
+	CHECK(ApproverPlays(seats, 1));
+	CHECK_FALSE(ApproverPlays(seats, 2));
+	/* An approval that names no company is never the approver's. */
+	CHECK_FALSE(ApproverPlays(seats, -1));
+	CHECK_FALSE(ApproverPlays({}, 1));
+}
+
+TEST_CASE("Approver seats are the companies registered approvers play, one client per key, never a spectator", "[prismatic_mcp]")
+{
+	const std::string owner = "OWNERKEY0123456789abcdef";
+	const std::string agent = "AGENTKEY0123456789abcdef";
+	std::vector<ClientSeat> clients = {
+		{2, 1, owner},  // the owner plays company 1
+		{1, -1, agent}, // a spectator with an unregistered key
+		{5, 3, agent},  // the agent's company, not registered
+	};
+	std::vector<std::string> registered = {owner};
+	auto seats = ApproverSeats(clients, registered);
+	REQUIRE(seats.size() == 1);
+	CHECK(seats[0] == ApproverSeat{1, 2, KeyFingerprint(owner)});
+	CHECK(seats[0].key_fp == "OWNERKEY0123");
+
+	/* The registered approver as a spectator plays no company: no seat. */
+	CHECK(ApproverSeats({{2, -1, owner}}, registered).empty());
+	/* Not connected: no seat. */
+	CHECK(ApproverSeats({{5, 3, agent}}, registered).empty());
+	/* Nothing registered: no seat, whoever plays. */
+	CHECK(ApproverSeats(clients, {}).empty());
+
+	/* Two registered approvers in two companies, sorted by company. */
+	auto two = ApproverSeats({{9, 4, agent}, {2, 1, owner}}, {agent, owner});
+	REQUIRE(two.size() == 2);
+	CHECK(two[0].company == 1);
+	CHECK(two[1].company == 4);
+}
+
+TEST_CASE("A registered key that a second client connects with approves from neither and has no seat", "[prismatic_mcp]")
+{
+	const std::string owner = "OWNERKEY0123456789abcdef";
+	/* OpenTTD admits two connections with one key: the owner's client and a copy of its key. */
+	std::vector<ClientSeat> clients = {{2, 1, owner}, {6, 1, owner}};
+	CHECK(ClientsWithKey(clients, owner) == 2);
+	CHECK(ClientsWithKey(clients, "") == 0);
+	CHECK(ClientsWithKey({{2, 1, owner}}, owner) == 1);
+	CHECK(ApproverSeats(clients, {owner}).empty());
+
+	ChatFacts f;
+	f.exists = f.pending = f.chat_decidable = f.valid_company = f.same_company = f.key_registered = true;
+	CHECK(DecideChat(f, true) == ChatVerdict::Allow);
+	f.key_shared = true;
+	CHECK(DecideChat(f, true) == ChatVerdict::SharedKey);
+	/* A deny executes nothing, so a shared key still withdraws its own company's approval. */
+	CHECK(DecideChat(f, false) == ChatVerdict::Allow);
+	CHECK(ChatVerdictText(ChatVerdict::SharedKey).find("connected twice") != std::string_view::npos);
+}

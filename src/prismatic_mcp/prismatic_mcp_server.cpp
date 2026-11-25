@@ -587,11 +587,27 @@ struct PendingApproval {
 	std::string mcp_tool;        ///< the MCP tool as it was called (openttd.ai.set_setting), for openttd://approvals
 	std::string mcp_args;        ///< its arguments as called, serialized
 	uint64_t superseded_by = 0;  ///< the newer approval that withdrew this one (state Denied), else 0
-	std::string settled_by;      ///< "deadline keep" / "deadline approve" when the deadline settled it, else empty
+	std::string settled_by;      ///< "deadline keep" / "deadline approve (approver in company N)" when the deadline settled it, else empty
+	bool approver_at_creation = false; ///< a registered approver played the company it names when it was asked (detail::ApproverSeats)
 	uint64_t created_tick = 0;
 	uint64_t expiry_tick = 0;
 	ApprovalState state = ApprovalState::Pending;
 };
+
+} // anonymous namespace
+/* Defined below, with the chat channel and the approvers, outside the anonymous namespace. */
+static int CompanyOf(const PendingApproval &a);
+static std::vector<detail::ApproverSeat> CurrentApproverSeats();
+namespace {
+
+/** One change of who approves from where: an approver joined or left a company, or its key was connected twice. */
+struct ApproverEvent {
+	uint64_t tick = 0;
+	std::string change; ///< "joined", "left" or "shared"
+	detail::ApproverSeat seat;
+};
+static std::vector<ApproverEvent> _approver_events; ///< the last MAX_APPROVER_EVENTS, oldest first (openttd://approvals)
+static constexpr size_t MAX_APPROVER_EVENTS = 32;
 
 /** Bounded provenance record: decision -> approval -> command -> observed verdict. */
 struct ProvenanceRecord {
@@ -704,7 +720,7 @@ json ResourceApprovals()
 				{"state", a.superseded_by != 0 ? "superseded" : st}, {"superseded_by", a.superseded_by}, {"expired", a.state == ApprovalState::Pending && now > a.expiry_tick},
 				{"created_tick", a.created_tick}, {"expires_tick", a.expiry_tick},
 				{"deadline_tick", detail::DeadlineTick(a.created_tick, _deadline_policy.ticks).value_or(0)},
-				{"settled_by", a.settled_by}});
+				{"approver_at_creation", a.approver_at_creation}, {"settled_by", a.settled_by}});
 			if (a.state == ApprovalState::Pending) {
 				Rules::Verdict v = RuleVerdict(a, json::parse(a.canonical_args, nullptr, false));
 				if (const Rules::Rule *r = v.decides != nullptr ? v.decides : v.blocked; r != nullptr) {
@@ -715,7 +731,15 @@ json ResourceApprovals()
 	}
 	json rules = json::array();
 	for (const auto &r : _rules) rules.push_back(Rules::ToJson(r));
+	/* Where registered approvers play now: the companies the deadline's approve may stand in for. */
+	json seats = json::array();
+	for (const auto &s : CurrentApproverSeats()) seats.push_back({{"company", s.company}, {"client_id", s.client_id}, {"key_fp", s.key_fp}});
+	json events = json::array();
+	for (const auto &e : _approver_events) {
+		events.push_back({{"tick", e.tick}, {"change", e.change}, {"company", e.seat.company}, {"client_id", e.seat.client_id}, {"key_fp", e.seat.key_fp}});
+	}
 	env["data"] = json{{"approvals", std::move(arr)}, {"capacity", MAX_APPROVALS}, {"rules", std::move(rules)},
+		{"approver_companies", std::move(seats)}, {"approver_events", std::move(events)},
 		{"deadline", {{"ticks", _deadline_policy.ticks}, {"days", _deadline_policy.ticks / detail::DEADLINE_DAY_TICKS},
 			{"verdict", detail::DeadlineVerdictName(_deadline_policy.verdict)}}}};
 	return env;
@@ -1225,6 +1249,8 @@ json HandleToolsCall(const json &id, const json &params)
 		pa.mcp_tool = std::string(name);
 		pa.mcp_args = args.dump();
 		pa.created_tick = now;
+		/* The deadline's approve stands in only for an approver who played this company when it was asked. */
+		pa.approver_at_creation = detail::ApproverPlays(CurrentApproverSeats(), CompanyOf(pa));
 		/* An action that names its own stale date (ai.set_settings' expires_tick, bound with the args)
 		 * expires then, if that is sooner than the TTL; its execution re-checks the date as well. */
 		pa.expiry_tick = detail::ApprovalExpiry(now, APPROVAL_TTL_TICKS, detail::BoundExpiresTick(type, aargs));
@@ -1714,6 +1740,7 @@ void OnGameModeChanged()
 static uint64_t _last_poll_tick = 0;
 
 static void SettleDueApprovals(); // below, with the approvers
+static void RecordApproverSeatChanges(); // below, with the approvers
 
 void Poll()
 {
@@ -1760,7 +1787,9 @@ void Poll()
 	/* Service existing connections. */
 	for (auto &c : _mcp.conns) ServiceConnection(c);
 
-	/* An approval nobody answered is settled at its deadline, so no requester waits forever. */
+	/* Who could approve from where, recorded as it changes; then an approval nobody answered is
+	 * settled at its deadline, so no requester waits forever. */
+	RecordApproverSeatChanges();
 	SettleDueApprovals();
 
 	/* Reap closed connections. */
@@ -2196,6 +2225,61 @@ static bool ChatDecidable(const PendingApproval &a)
 	return detail::ChatScoped(a.tool, d.value("flags", json::array()), d.value("category", ""));
 }
 
+/** The clients connected to this server as the approver seats see them; none when this process serves no game. */
+static std::vector<detail::ClientSeat> ConnectedClientSeats()
+{
+	std::vector<detail::ClientSeat> clients;
+	if (!_network_server) return clients;
+	for (const NetworkClientInfo *ci : NetworkClientInfo::Iterate()) {
+		int company = Company::IsValidID(ci->client_playas) ? ci->client_playas.base() : -1;
+		clients.push_back({static_cast<uint32_t>(to_underlying(ci->client_id)), company, ci->public_key});
+	}
+	return clients;
+}
+
+static std::vector<detail::ApproverSeat> CurrentApproverSeats()
+{
+	LoadApprovers();
+	return detail::ApproverSeats(ConnectedClientSeats(), _approver_keys);
+}
+
+/**
+ * Record every change of the approver seats since the last poll in openttd://approvals and the log:
+ * an approver who joined or left a company, and a registered key a second client connected with
+ * (which then approves from neither). The audit trail of who could approve from where, and when.
+ */
+static void RecordApproverSeatChanges()
+{
+	static std::vector<detail::ApproverSeat> last;
+	static std::vector<std::string> last_shared;
+	if (!_network_server) return;
+	LoadApprovers();
+	std::vector<detail::ClientSeat> clients = ConnectedClientSeats();
+	std::vector<detail::ApproverSeat> seats = detail::ApproverSeats(clients, _approver_keys);
+	std::vector<std::string> shared;
+	for (const auto &k : _approver_keys) {
+		if (detail::ClientsWithKey(clients, k) > 1) shared.push_back(detail::KeyFingerprint(k));
+	}
+	if (seats == last && shared == last_shared) return;
+	const uint64_t now = (uint64_t)TimerGameTick::counter;
+	auto record = [now](std::string_view change, const detail::ApproverSeat &seat) {
+		if (_approver_events.size() >= MAX_APPROVER_EVENTS) _approver_events.erase(_approver_events.begin());
+		_approver_events.push_back({now, std::string(change), seat});
+		Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approver {}: key {} client {} company {}", change, seat.key_fp, seat.client_id, seat.company);
+	};
+	for (const auto &s : seats) {
+		if (std::find(last.begin(), last.end(), s) == last.end()) record("joined", s);
+	}
+	for (const auto &s : last) {
+		if (std::find(seats.begin(), seats.end(), s) == seats.end()) record("left", s);
+	}
+	for (const auto &fp : shared) {
+		if (std::find(last_shared.begin(), last_shared.end(), fp) == last_shared.end()) record("shared", detail::ApproverSeat{-1, 0, fp});
+	}
+	last = std::move(seats);
+	last_shared = std::move(shared);
+}
+
 /** The company an approval acts on, from the arguments it binds to; -1 when it names none. */
 static int CompanyOf(const PendingApproval &a)
 {
@@ -2258,6 +2342,7 @@ bool ChatApproval(uint32_t client_id, int company, std::string_view key, bool in
 		f.key_in_allow_list = !c->allow_any && c->allow_list.Contains(key);
 	}
 	f.injecting = injecting;
+	f.key_shared = f.key_registered && detail::ClientsWithKey(ConnectedClientSeats(), key) > 1;
 	bool approving = req.verb == detail::ChatRequest::Verb::Approve;
 	detail::ChatVerdict v = detail::DecideChat(f, approving);
 	if (v != detail::ChatVerdict::Allow) {
@@ -2289,17 +2374,26 @@ static void SettleDueApprovals()
 	if (_deadline_policy.ticks == 0) return;
 	const uint64_t now = (uint64_t)TimerGameTick::counter;
 	const uint64_t days = _deadline_policy.ticks / detail::DEADLINE_DAY_TICKS;
+	std::optional<std::vector<detail::ApproverSeat>> seats; // read once, and only when one is due
 	for (auto &a : _approvals) {
 		/* Due at all? ChatDecidable reads the command catalogue, so it is asked only of a due one. */
-		if (detail::DeadlineDue(a.state == ApprovalState::Pending, a.created_tick, now, _deadline_policy, false) == detail::DeadlineAction::None) continue;
-		if (detail::DeadlineDue(true, a.created_tick, now, _deadline_policy, ChatDecidable(a)) == detail::DeadlineAction::Execute) {
-			a.settled_by = "deadline approve";
+		if (detail::DeadlineDue(a.state == ApprovalState::Pending, a.created_tick, now, _deadline_policy, false, false) == detail::DeadlineAction::None) continue;
+		if (!seats.has_value()) seats = CurrentApproverSeats();
+		const int company = CompanyOf(a);
+		const bool chat_scoped = ChatDecidable(a);
+		const bool approver_company = a.approver_at_creation && detail::ApproverPlays(*seats, company);
+		if (detail::DeadlineDue(true, a.created_tick, now, _deadline_policy, chat_scoped, approver_company) == detail::DeadlineAction::Execute) {
+			a.settled_by = fmt::format("deadline approve (approver in company {})", company);
 			std::string message;
-			bool executed = ApproveById(a.id, message, "deadline (the operator's standing verdict: approve)");
+			bool executed = ApproveById(a.id, message, fmt::format("deadline (the operator's standing verdict: approve; a registered approver plays company {})", company));
 			Debug(Facility::Net, Severity::Error, "[prismatic-mcp] deadline: approval #{} unanswered after {} game day(s): {}", a.id, days, message);
 			if (executed || a.state != ApprovalState::Pending) continue;
 			/* Refused (expired, say): retired, never tried again at every poll. */
 			a.settled_by = "deadline keep (approve refused: " + message + ")";
+		} else if (_deadline_policy.verdict == detail::DeadlineVerdict::Approve && chat_scoped) {
+			/* approve stands in only for an approver of the company it names, when asked and now. */
+			a.settled_by = company < 0 ? "deadline keep (it names no company)"
+				: fmt::format("deadline keep (no registered approver played company {} {})", company, a.approver_at_creation ? "at the deadline" : "when it was asked");
 		} else {
 			a.settled_by = "deadline keep";
 		}
@@ -2327,7 +2421,7 @@ std::string DescribeApprovalDeadline()
 	return fmt::format("approval deadline: {} game day(s), then {} ({})", _deadline_policy.ticks / detail::DEADLINE_DAY_TICKS,
 		detail::DeadlineVerdictName(_deadline_policy.verdict),
 		_deadline_policy.verdict == detail::DeadlineVerdict::Approve
-			? "executes what a chat approver may decide, retires the rest"
+			? "executes what a chat approver may decide for a company a registered approver plays, retires the rest"
 			: "retires it unanswered, enacting nothing");
 }
 
