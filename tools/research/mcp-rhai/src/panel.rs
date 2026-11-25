@@ -18,7 +18,7 @@
 //! launchers match `"mcp_up": true` in /api/status text.
 
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -95,12 +95,17 @@ pub struct Args {
     /// A one-shot owner secret kept nowhere (`--ephemeral-owner-secret`): nobody can sign in over
     /// HTTP, so the owner approves at the game's console (a battle run, a test).
     pub ephemeral_owner: bool,
+    /// The run token of this stack's own processes (`--run-token-file`, a 0600 file the launcher
+    /// writes): its helpers send it in [`RUN_TOKEN_HEADER`]. Without it the panel makes one for its
+    /// in-process scripts alone.
+    pub run_token_file: Option<String>,
 }
 
 pub const USAGE: &str = "usage: mcp-panel --bin <openttd> [--panel-port 8800] [--mcp-port 8731] [--game-port 3979]\n\
                          \x20                [--seed 1] [--ai PrismaticAI] [--auto-approve] [--no-plan-bot] [--load FILE]\n\
                          \x20                [--bind 127.0.0.1] [--allow-origin <origin> ...] [--token <t>]   (src/web_access.rs)\n\
                          \x20                [--owner-secret-file FILE | --ephemeral-owner-secret]   (the owner's sign-in)\n\
+                         \x20                [--run-token-file FILE]   (the token this stack's own helpers send, never an owner's)\n\
                          \x20      mcp-panel --write-event-kinds   (the knowledge note's table of event kinds, from src/panel_events.rs)\n\
                          \x20      mcp-panel --import-calibration FILE [NAME]   (a retired calibration file's readings, once, into the store)";
 
@@ -108,7 +113,7 @@ pub const USAGE: &str = "usage: mcp-panel --bin <openttd> [--panel-port 8800] [-
 pub fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut a = Args { bin: String::new(), panel_port: 8800, mcp_port: 8731, game_port: 3979, seed: 1,
                        ai: "PrismaticAI".into(), auto_approve: false, plan_bot: true, load: None, web: Default::default(),
-                       owner_file: None, ephemeral_owner: false };
+                       owner_file: None, ephemeral_owner: false, run_token_file: None };
     let mut bin = None;
     let mut i = 0;
     while i < argv.len() {
@@ -141,6 +146,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--load" => a.load = Some(value(&mut i)?),
             "--owner-secret-file" => a.owner_file = Some(value(&mut i)?),
             "--ephemeral-owner-secret" => a.ephemeral_owner = true,
+            "--run-token-file" => a.run_token_file = Some(value(&mut i)?),
             other => return Err(format!("unrecognized arguments: {other}")),
         }
         i += 1;
@@ -740,6 +746,22 @@ pub fn owner_gate(secret: Option<&str>, port: u16, method: &str, path: &str, bod
 /// research/mechanisms/approval-gate.md); the panel only reports it.
 pub const DEADLINE_ENV: &str = "PRISMATIC_MCP_APPROVAL_DEADLINE";
 
+/// The header the stack's own processes send the panel's run token in (`--run-token-file`): it names
+/// the caller as the stack's own (credential `token`, role `run`) and never opens an owner's route.
+pub const RUN_TOKEN_HEADER: &str = crate::rhai_host::RUN_TOKEN_HEADER;
+
+/// The panel's run token by its URL, for the scripts it runs in process ([`spawn_script`]): a test
+/// process runs several panels, each on a port of its own.
+fn run_tokens() -> &'static Mutex<HashMap<String, String>> {
+    static T: std::sync::OnceLock<Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
+    T.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The run token of the panel at `base`, if this process runs it.
+pub fn run_token_for(base: &str) -> Option<String> {
+    run_tokens().lock().unwrap().get(base.trim_end_matches('/')).cloned()
+}
+
 /// The header the panel itself puts on a request with the address it came from (`Panel::handle`);
 /// a client's own header of that name is dropped first, so it cannot claim another address.
 pub const PEER_HEADER: &str = "X-Panel-Peer";
@@ -751,6 +773,9 @@ pub const PEER_HEADER: &str = "X-Panel-Peer";
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Who {
     pub credential: &'static str,
+    /// Whose credential it is: `owner` (the owner secret, by cookie or header), `run` (the stack's
+    /// run token) or `none`.
+    pub role: &'static str,
     pub origin: Option<String>,
     pub user_agent: Option<String>,
     pub peer: Option<String>,
@@ -759,7 +784,7 @@ pub struct Who {
 impl Who {
     /// No request at all: a flag or the environment at start.
     pub fn none() -> Who {
-        Who { credential: "none", ..Who::default() }
+        Who { credential: "none", role: "none", ..Who::default() }
     }
 
     /// Who sent `headers`, judged against the owner `secret` of the panel on `port`.
@@ -769,7 +794,18 @@ impl Who {
         let from_cookie = header("Cookie").and_then(|c| c.split(';').find_map(|kv| kv.trim().strip_prefix(cookie.as_str())?.strip_prefix('=').map(str::to_string)));
         let matches = |given: Option<String>| secret.zip(given).is_some_and(|(s, g)| crate::web_access::same(s, &g));
         let credential = if matches(from_cookie) { "owner-cookie" } else if matches(header(OWNER_HEADER)) { "token" } else { "none" };
-        Who { credential, origin: header("Origin"), user_agent: header("User-Agent"), peer: header(PEER_HEADER) }
+        let role = if credential == "none" { "none" } else { "owner" };
+        Who { credential, role, origin: header("Origin"), user_agent: header("User-Agent"), peer: header(PEER_HEADER) }
+    }
+
+    /// [`Who::of`], and the stack's run `token` in [`RUN_TOKEN_HEADER`] when no owner secret came.
+    pub fn of_run(secret: Option<&str>, token: Option<&str>, port: u16, headers: &[(String, String)]) -> Who {
+        let w = Who::of(secret, port, headers);
+        let given = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(RUN_TOKEN_HEADER)).map(|(_, v)| v.trim().to_string());
+        if w.role == "none" && token.zip(given).is_some_and(|(t, g)| crate::web_access::same(t, &g)) {
+            return Who { credential: "token", role: "run", ..w };
+        }
+        w
     }
 }
 
@@ -1005,6 +1041,9 @@ pub struct Game {
     owner_file: Option<String>,
     /// The times of the recent failed sign-ins ([`owner_login`]).
     owner_failures: Mutex<VecDeque<Instant>>,
+    /// The stack's run token ([`RUN_TOKEN_HEADER`]): from `--run-token-file`, else made for the
+    /// panel's in-process scripts; Err when the file cannot serve (the panel stops at start).
+    run_token: Result<String, String>,
     pub auto_approve: AtomicBool,
     pub mcp_up: AtomicBool,
     pub ai_started: AtomicBool,
@@ -1045,7 +1084,15 @@ impl Game {
         let deadline = None::<String>;
         #[cfg(not(test))]
         let deadline = std::env::var(DEADLINE_ENV).ok();
+        let run_token = match &args.run_token_file {
+            Some(f) => crate::rhai_host::read_secret_file(f),
+            None => crate::web_access::random_hex(32).ok_or_else(|| "no run token: /dev/urandom cannot be read".to_string()),
+        };
+        if let Ok(t) = &run_token {
+            run_tokens().lock().unwrap().insert(format!("http://127.0.0.1:{}", args.panel_port), t.clone());
+        }
         let g = Arc::new(Game {
+            run_token,
             auto_approve: AtomicBool::new(args.auto_approve),
             args, tmp,
             child: Mutex::new(None), running: AtomicBool::new(false),
@@ -1069,6 +1116,7 @@ impl Game {
         // Where the owner secret lives, never the secret: stdout ends up in logs anyone may read.
         // A secret file that cannot serve stops the panel here, before a game starts.
         println!("{}", self.owner_note.clone()?);
+        self.run_token.as_ref().map_err(String::clone)?;
         std::fs::create_dir_all(&self.tmp).map_err(|e| format!("{}: {e}", self.tmp.display()))?;
         let cfg = self.tmp.join("openttd.cfg");
         std::fs::write(&cfg, format!(
@@ -1603,7 +1651,7 @@ impl Game {
         let clock = self.latest_sample().unwrap_or(Value::Null);
         self.bus.publish("governance.changed", json!({
             "setting": setting, "from": from, "to": to, "via": via, "credential": who.credential,
-            "origin": who.origin, "user_agent": who.user_agent, "peer": who.peer,
+            "role": who.role, "origin": who.origin, "user_agent": who.user_agent, "peer": who.peer,
             "game_date": clock.get("date").cloned().unwrap_or(Value::Null),
             "game_tick": clock.get("t").cloned().unwrap_or(Value::Null)}))
     }
@@ -3221,7 +3269,7 @@ pub enum ScriptLine {
 pub fn spawn_script(base: String, script: String, abort: Arc<AtomicBool>, tx: mpsc::Sender<ScriptLine>) -> thread::JoinHandle<i32> {
     thread::spawn(move || {
         let hub = std::env::var("MCP_HUB").ok().filter(|h| !h.is_empty());
-        let mut engine = rhai_host::host(&base, hub.as_deref());
+        let mut engine = rhai_host::host_as(&base, hub.as_deref(), run_token_for(&base));
         let out = tx.clone();
         engine.on_print(move |s| for l in s.split('\n') { let _ = out.send(ScriptLine::Out(l.to_string())); });
         let out = tx.clone();
@@ -3625,7 +3673,7 @@ impl Panel {
                 if r.needs_mcp && !up {
                     return Ok((503, json!({"error": "MCP server not up yet"})));
                 }
-                let who = Who::of(g.owner_secret.as_deref(), g.args.panel_port, &req.headers);
+                let who = Who::of_run(g.owner_secret.as_deref(), g.run_token.as_deref().ok(), g.args.panel_port, &req.headers);
                 let input = Input { query: req.query.clone(), body: if method == "POST" { body.clone() } else { json!({}) }, who };
                 return (r.handler)(g, &input);
             }
@@ -4982,8 +5030,9 @@ mod tests {
         assert_eq!(Who::of(Some("s3cret"), 8801, &h(&[("Cookie", &cookie("s3cret"))])).credential, "none", "another port's cookie");
         assert_eq!(Who::of(None, 8800, &h(&[(OWNER_HEADER, "")])).credential, "none", "no secret, no owner");
         let w = Who::of(Some("s3cret"), 8800, &h(&[("origin", "http://127.0.0.1:8800"), ("User-Agent", "curl/8"), (PEER_HEADER, "127.0.0.1")]));
-        assert_eq!(w, Who { credential: "none", origin: Some("http://127.0.0.1:8800".into()), user_agent: Some("curl/8".into()), peer: Some("127.0.0.1".into()) });
-        assert_eq!(Who::none(), Who { credential: "none", origin: None, user_agent: None, peer: None });
+        assert_eq!(w, Who { credential: "none", role: "none", origin: Some("http://127.0.0.1:8800".into()), user_agent: Some("curl/8".into()), peer: Some("127.0.0.1".into()) });
+        assert_eq!(Who::none(), Who { credential: "none", role: "none", origin: None, user_agent: None, peer: None });
+        assert_eq!(Who::of(Some("s3cret"), 8800, &h(&[(OWNER_HEADER, "s3cret")])).role, "owner");
     }
 
     #[test]
@@ -5014,7 +5063,7 @@ mod tests {
         let ev = governance_since(&g, since);
         assert_eq!(ev.len(), 3, "{ev:?}");
         assert_eq!(ev[0], json!({"setting": "auto_approve", "from": false, "to": true, "via": "POST /api/auto-approve", "credential": "token",
-                                 "origin": "http://127.0.0.1:18811", "user_agent": "check/1", "peer": "127.0.0.1",
+                                 "role": "owner", "origin": "http://127.0.0.1:18811", "user_agent": "check/1", "peer": "127.0.0.1",
                                  "game_date": "1951-03-07", "game_tick": 4242}));
         assert_eq!((ev[1]["from"].clone(), ev[1]["to"].clone(), ev[1]["credential"].clone()), (json!(true), json!(false), json!("owner-cookie")));
         assert_eq!((ev[2]["from"].clone(), ev[2]["credential"].clone(), ev[2]["origin"].clone()), (json!(false), json!("none"), Value::Null));
@@ -5110,5 +5159,82 @@ mod tests {
         let ev = governance_since(&g, since);
         assert_eq!(ev.len(), 1, "{ev:?}");
         assert_eq!(ev[0]["peer"], json!("127.0.0.1"), "the claimed 10.9.9.9 is dropped");
+    }
+
+    /// A 0600 file holding `text`, in a fresh directory of this test.
+    fn secret_file(name: &str, text: &str, mode: u32) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mcp-panel-run-token-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("run-token");
+        std::fs::write(&f, text).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(mode)).unwrap();
+        f
+    }
+
+    #[test]
+    fn the_run_token_names_the_stacks_own_callers_and_never_opens_an_owners_route() {
+        let f = secret_file("route", "rt0ken-abc\n", 0o600);
+        let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", "18821", "--run-token-file", f.to_str().unwrap()].map(String::from)).unwrap();
+        assert_eq!(args.run_token_file.as_deref(), f.to_str());
+        let g = Game::new(args);
+        g.mcp_up.store(true, Ordering::SeqCst);
+        let p = Panel { game: g.clone(), routes: routes() };
+        assert_eq!(g.run_token.as_deref(), Ok("rt0ken-abc"), "the file's text, trimmed");
+        assert_eq!(run_token_for("http://127.0.0.1:18821/").as_deref(), Some("rt0ken-abc"));
+        let run = [(RUN_TOKEN_HEADER, "rt0ken-abc")];
+        // The run token is no owner secret: approving and switching auto-approve on stay the owner's.
+        assert_eq!(post_as(&p, "/api/approve", json!({"id": 1}), &run).0, 401);
+        assert_eq!(post_as(&p, "/api/auto-approve", json!({"on": true}), &run).0, 401);
+        assert_eq!(post_as(&p, "/api/approvers", json!({"add": 2}), &run).0, 401);
+        let since = g.bus.seq();
+        assert_eq!(post_as(&p, "/api/auto-approve", json!({"on": false}), &run).0, 200);
+        let ev = governance_since(&g, since);
+        assert_eq!((ev[0]["credential"].clone(), ev[0]["role"].clone()), (json!("token"), json!("run")), "{ev:?}");
+        let h = |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>();
+        let owner = g.owner_secret.clone().unwrap();
+        assert_eq!(Who::of_run(Some(&owner), Some("rt0ken-abc"), 18821, &h(&[(OWNER_HEADER, &owner), (RUN_TOKEN_HEADER, "rt0ken-abc")])).role, "owner",
+                   "the owner secret wins");
+        assert_eq!(Who::of_run(Some(&owner), Some("rt0ken-abc"), 18821, &h(&[(RUN_TOKEN_HEADER, "wrong")])).role, "none");
+        assert_eq!(Who::of_run(Some(&owner), None, 18821, &h(&[(RUN_TOKEN_HEADER, "rt0ken-abc")])).role, "none", "a panel without a token");
+        assert!(!format!("{:?}", g.bus.since(0, &[], 10_000)).contains("rt0ken-abc"), "the token reaches no event");
+    }
+
+    #[test]
+    fn a_run_token_file_others_may_read_stops_the_panel_at_start() {
+        let f = secret_file("wide", "rt0ken-wide", 0o644);
+        let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", "18822", "--run-token-file", f.to_str().unwrap()].map(String::from)).unwrap();
+        let g = Game::new(args);
+        let why = g.start().unwrap_err();
+        assert!(why.contains("readable beyond its owner") && why.contains("chmod 600"), "{why}");
+        assert!(!g.server_running(), "no game starts");
+        assert!(run_token_for("http://127.0.0.1:18822").is_none());
+        // Without --run-token-file the panel makes one of its own for its in-process scripts.
+        let (g, _) = bare_panel("18823");
+        assert_eq!(g.run_token.as_ref().map(String::len), Ok(64));
+        assert_eq!(run_token_for("http://127.0.0.1:18823"), g.run_token.clone().ok());
+    }
+
+    #[test]
+    fn a_script_the_panel_runs_sends_its_run_token() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let (tx_h, rx_h) = mpsc::channel();
+        thread::spawn(move || for mut c in l.incoming().flatten() {
+            if let Some(req) = read_request(&mut c) { let _ = tx_h.send((req.path, req.headers)); }
+            hub::respond(c, 200, "application/json", b"{}");
+        });
+        let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", &port.to_string()].map(String::from)).unwrap();
+        let g = Game::new(args);
+        let (tx, rx) = mpsc::channel();
+        let h = spawn_script(g.panel_url(), "status()".into(), Arc::new(AtomicBool::new(false)), tx);
+        assert_eq!(h.join().unwrap(), 0, "{:?}", rx.try_iter().collect::<Vec<_>>().len());
+        let seen: Vec<(String, Vec<(String, String)>)> = rx_h.try_iter().collect();
+        assert!(seen.iter().any(|(path, _)| path == "/api/status"), "{seen:?}");
+        for (path, headers) in &seen {
+            let sent = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(RUN_TOKEN_HEADER)).map(|(_, v)| v.clone());
+            assert_eq!(sent, g.run_token.clone().ok(), "{path} carries the run token");
+        }
     }
 }
