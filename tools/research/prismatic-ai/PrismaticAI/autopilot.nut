@@ -165,10 +165,11 @@ function PrismaticAI::AutopilotAir(b) {
 	if (plane == -1) return false;
 	local need = max(AUTOPILOT_AIR_BUDGET, 2 * AIAirport.GetPrice(type) + b.air_planes * AIEngine.GetPrice(plane) +
 		2 * AIR_LEVEL_MAX + b.cash_reserve);
-	if (money + headroom < need) return false;
+	if (money + headroom < need) { PrismaticAI.Funnel("air", "short"); return false; }
 	local pair = this.NextAutopilotAirPair(b);
-	if (pair == null) return false;
+	if (pair == null) { PrismaticAI.Funnel("air", "no_pair"); return false; }
 	this.air_tried[pair[2]] <- true;
+	PrismaticAI.Funnel("air", "tried");
 	AILog.Info("PrismaticAI: autopilot air " + (this.auto_air + 1) + "/" + routes_max + ": " +
 		AITown.GetName(pair[0]) + " - " + AITown.GetName(pair[1]) + ", " + pair[3] + " tiles");
 	local loan_before = AICompany.GetLoanAmount();
@@ -178,6 +179,7 @@ function PrismaticAI::AutopilotAir(b) {
 		this.air_towns[pair[1]] <- true;
 		this.auto_air++;
 		this.routes++;
+		PrismaticAI.Funnel("air", "built");
 		return true;
 	}
 	AICompany.SetLoanAmount(loan_before);

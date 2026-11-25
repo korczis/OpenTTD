@@ -78,6 +78,8 @@ function PrismaticAI::Save() {
 		air_bad_towns = AIR_BAD_TOWNS,
 		failed_pairs = FAILED_PAIRS,
 		modernize_set = MODERNIZE_SET,
+		/* rail.nut ClaimFresh: when each foreign rail station tile near a producer was first seen. */
+		claims_seen = CLAIM_SEEN,
 	};
 }
 
@@ -114,12 +116,13 @@ function PrismaticAI::Restore(b) {
 	this.loaded = null;
 	RESTORE_DONE = true;
 	if (how == null) return;
+	local old_claims = PrismaticAI.ClaimsAfterRestart();
 	local freight = 0;
 	foreach (line in RAIL_LINES) if ("from" in line) freight++;
 	AILog.Info("PrismaticAI: restored after a restart: " + RAIL_LINES.len() + " rail lines (" + freight + " freight), " +
 		this.auto_air + " autopilot air routes, " + this.routes + " routes, " + this.freight_tried.len() + " freight lines tried, " +
 		this.own_built + " own, " + this.twins + " twins, " + this.used_towns.len() + " road towns, " + AIR_PORTS.len() +
-		" airports (" + how + ")");
+		" airports, " + old_claims + " foreign rail station tiles of unknown age taken as old (" + how + ")");
 }
 
 /* own_built after a load: the own freight lines built (restored RAIL_LINES whose producer,
@@ -180,6 +183,7 @@ function PrismaticAI::RestoreFromSave(data) {
 	PrismaticAI.RestoreFill(AIR_BAD_TOWNS, PrismaticAI.RestoreField(data, "air_bad_towns", {}));
 	PrismaticAI.RestoreFill(FAILED_PAIRS, PrismaticAI.RestoreField(data, "failed_pairs", {}));
 	PrismaticAI.RestoreFill(MODERNIZE_SET, PrismaticAI.RestoreField(data, "modernize_set", {}));
+	PrismaticAI.RestoreFill(CLAIM_SEEN, PrismaticAI.RestoreField(data, "claims_seen", {}));
 }
 
 /* How many tiles of station `st`'s platforms of direction `dir` follow `tile` by the step `d`. */
