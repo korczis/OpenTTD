@@ -60,7 +60,7 @@ function PrismaticAI::MemoSave(store, max) {
  * Why, and how long it is believed (days), and what clears it before that:
  *  - "authority": the authority refused a stop. Cleared once the company's rating band in the
  *    town (AITown.GetRating) is above the one it had at the refusal. A town whose band surely
- *    refuses is skipped before any survey anyway (main.nut BuildStarterRoute); this record keeps
+ *    refuses is skipped before any survey anyway (RoadTownRefuses); this record keeps
  *    out a town refused all the same, e.g. by the authority of a neighbour closer to the site
  *    (CheckIfAuthorityAllowsNewStation asks the town closest to the tile). The rating rises by
  *    at most RATING_GROWTH_UP_STEP a month without a served station, so it takes months.
@@ -84,8 +84,20 @@ function PrismaticAI::RememberRoadTown(town, why, a, b) {
 	PrismaticAI.MemoRemember(ROAD_TOWN_FAILED, town, ROAD_FAIL_DAYS[why], rec);
 	local u = rec.until;
 	AILog.Info("PrismaticAI: road route in " + AITown.GetName(town) + " remembered as failed (" + why + ") until " +
-		AIDate.GetYear(u) + "-" + AIDate.GetMonth(u) + "-" + AIDate.GetDayOfMonth(u) +
-		(why == "authority" ? "; " + PrismaticAI.TownReport(town) : ""));
+		AIDate.GetYear(u) + "-" + AIDate.GetMonth(u) + "-" + AIDate.GetDayOfMonth(u) + ", rating band " + rec.band);
+}
+
+/* Whether the authority of `town` surely refuses us a new station: CheckIfAuthorityAllowsNewStation
+ * (src/town_cmd.cpp) wants a rating above RATING_VERYPOOR (-200), and the bands AITown.GetRating
+ * gives end there exactly (VERY_POOR is -399 .. -200, POOR starts at -199), so the band answers it.
+ * Never with a permissive council (town_council_tolerance 3), which allows every station. Written
+ * here and not from town.nut: town_model.nut does not compile as Squirrel (its bands use the
+ * keyword `enum` as a key), so town.nut is not loaded. */
+function PrismaticAI::RoadTownRefuses(town) {
+	if (AIGameSettings.IsValid("difficulty.town_council_tolerance") &&
+			AIGameSettings.GetValue("difficulty.town_council_tolerance") == 3) return false;
+	local r = AITown.GetRating(town, AICompany.COMPANY_SELF);
+	return r == AITown.TOWN_RATING_APPALLING || r == AITown.TOWN_RATING_VERY_POOR;
 }
 
 /* Whether the failure remembered for `town` can no longer hold (see ROAD_TOWN_FAILED). */

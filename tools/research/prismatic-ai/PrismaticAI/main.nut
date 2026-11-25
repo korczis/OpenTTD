@@ -111,8 +111,6 @@ const AUTOPILOT_MAX_ROUTES = 30;
 const AUTOPILOT_CASH_RESERVE = 5000;
 
 /* After the class: intercity.nut adds methods to it. */
-require("town_model.nut");
-require("town.nut");
 require("memory.nut");
 require("roadstop.nut");
 require("intercity.nut");
@@ -181,9 +179,9 @@ function PrismaticAI::BuildStarterRoute(aggressiveness, used_towns) {
 	for (local town = towns.Begin(); !towns.IsEnd() && tried < max_towns && failed < ROAD_FAILS_PER_CALL; town = towns.Next()) {
 		if (used_towns.rawin(town)) continue;
 		/* A town remembered as failed (memory.nut ROAD_TOWN_FAILED), or one whose authority surely
-		 * refuses a new station (the rating's band is at most VERY_POOR, whose highest value is
-		 * TOWN_MODEL.new_station_above), is skipped without a survey and not counted as tried. */
-		if (PrismaticAI.RoadTownFailed(town) != null || !PrismaticAI.TownSurelyAllowsStation(town, 0)) { skipped++; continue; }
+		 * refuses a new station (memory.nut RoadTownRefuses), is skipped without a survey and not
+		 * counted as tried. */
+		if (PrismaticAI.RoadTownFailed(town) != null || PrismaticAI.RoadTownRefuses(town)) { skipped++; continue; }
 		tried++;
 		if (PrismaticAI.BuildRouteInTown(town, aggressiveness)) return town;
 		failed++;
