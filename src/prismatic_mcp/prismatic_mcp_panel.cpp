@@ -196,6 +196,16 @@ std::optional<std::string> ConsentRefusal(bool approve)
 	return std::nullopt;
 }
 
+std::optional<std::string> RuleRefusal(Rules::Effect effect, const Rules::Spec &spec)
+{
+	if (auto refused = ConsentRefusal(effect == Rules::Effect::Allow); refused.has_value()) return refused;
+	/* The core refuses a broad allow from the window (Rules::BroadAllowRefusal, IsBroadMatcher):
+	 * the window says so with the same words, before it asks the owner to confirm the rule. */
+	Rules::Spec from_window = spec;
+	from_window.via = "window";
+	return Rules::BroadAllowRefusal(effect, from_window);
+}
+
 std::string ConsentCommand(bool approve, const std::vector<uint64_t> &ids)
 {
 	std::string line = fmt::format("prismatic_mcp {}", approve ? "approve" : "deny");
@@ -289,8 +299,11 @@ std::vector<Row> Rows(const json &s, const View &view)
 	heading(fmt::format("Standing rules ({})", rules.size()));
 	if (rules.empty()) text("none: every approval waits for you; Always... on an approval makes one");
 	for (const json &r : rules) {
-		rows.push_back({Row::Kind::Rule, fmt::format("{}  hits={} via={}{}", StringAt(r, "text"), IdAt(r, "hits"), StringAt(r, "created_via"),
-			FlagAt(r, "persisted") ? " persisted" : ""), IdAt(r, "id"), StringAt(r, "effect") == "allow"});
+		const bool allow = StringAt(r, "effect") == "allow";
+		const bool from_file = StringAt(r, "created_via") == "file";
+		rows.push_back({Row::Kind::Rule, fmt::format("{}  hits={} via={}{}{}", StringAt(r, "text"), IdAt(r, "hits"), StringAt(r, "created_via"),
+			FlagAt(r, "persisted") ? " persisted" : "", allow && from_file ? "  -- " + Rules::FileRuleNote(IdAt(r, "id")) : ""),
+			IdAt(r, "id"), allow});
 	}
 	heading("Latest decisions: what ran, and what the game showed afterwards");
 	if (decisions.empty()) text("no decision has run yet");
@@ -711,16 +724,8 @@ struct ControlWindow : Window {
 	 */
 	void MakeRule(Rules::Effect effect, const Rules::Spec &spec, bool confirmed = false)
 	{
-		if (auto refused = ConsentRefusal(effect == Rules::Effect::Allow); refused.has_value()) {
+		if (auto refused = RuleRefusal(effect, spec); refused.has_value()) {
 			IConsolePrint(CC_ERROR, "Prismatic control: {}", *refused);
-			return;
-		}
-		/* The core refuses a broad allow from the window (Rules::BroadAllowRefusal, IsBroadMatcher):
-		 * say so here, with the same words, before asking the owner to confirm it. */
-		Rules::Spec from_window = spec;
-		from_window.via = "window";
-		if (auto broad = Rules::BroadAllowRefusal(effect, from_window); broad.has_value()) {
-			IConsolePrint(CC_ERROR, "Prismatic control: {}", *broad);
 			return;
 		}
 		if (effect == Rules::Effect::Allow && !confirmed) {

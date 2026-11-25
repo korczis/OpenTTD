@@ -129,6 +129,25 @@ like a single approval, and every one of them is recorded.
      last heard it and send one `!approve <id>` per id. Rules live on the server only, and a
      client's console refuses `rule` and `rules`.
 
+## Attended and unattended decisions (with #264)
+
+#264 holds the deadline's approve, an unattended default, to one company's own action for a
+company a registered approver played when the approval was asked and plays now. The same
+condition (`approver_at_creation` and `ApproverPlays`) holds every decision made without the
+owner present:
+- the panel's auto-approve loop, `--via auto`: per id, `approve all`, and any rule made via auto;
+- an allow rule loaded from the rules file (`created_via file`). Any process running as this user
+  can write that file, so a loaded rule is not the owner's present act. The load says so for each
+  such rule.
+
+A held decision is reported as "held: no registered approver plays company N".
+
+A rule made at the console, in the window or through the owner-authenticated panel route, and an
+approve all from those, is the owner's explicit, recorded act, the "always allow" asked for. It is
+not held, so it works in a local game without approver seats. Deny rules are never held:
+denying enacts nothing. Owner-only tools are never decided by a rule, and every rule decision
+records the rule and the channel it was made through.
+
 ## The trust boundary of the console line
 
 The core cannot tell who typed a console line. A line on the dedicated server's stdin without

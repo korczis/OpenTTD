@@ -119,6 +119,13 @@ struct BulkOutcome {
  */
 std::string ResultLine(std::string_view nonce, const BulkOutcome &out, std::string_view error);
 
+/**
+ * Why an unattended channel ("auto", "file") may not approve pending approval \p id, by #264's
+ * condition: one company's own action, for a company a registered approver played when it was
+ * asked and plays now. Empty when it may, for any other channel, and for an id not pending.
+ */
+std::string UnattendedHoldOf(uint64_t id, std::string_view via);
+
 /** Whether approval \p id was approved and run (its command posted or refused), not merely pending or denied. */
 bool HasRun(uint64_t id);
 

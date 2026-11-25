@@ -2274,8 +2274,11 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 			std::string msg;
 			bool ok = false;
 			const bool was_pending = PrismaticMCP::HoldsPending(item.id);
+			std::string hold = approving ? PrismaticMCP::UnattendedHoldOf(item.id, via) : std::string{};
 			if (approving && !PrismaticMCP::Rules::MayDecide(PrismaticMCP::Rules::Effect::Allow, via, item.tool)) {
 				msg = fmt::format("refused: {} is the owner's alone, approved only at the game's console", item.tool);
+			} else if (!hold.empty()) {
+				msg = "refused: " + hold; // the auto channel decides unattended (#264's condition)
 			} else {
 				ok = approving ? PrismaticMCP::ApproveById(item.id, msg, via)
 				               : PrismaticMCP::DenyById(item.id, msg, via == "console" ? std::string_view{} : std::string_view{via});

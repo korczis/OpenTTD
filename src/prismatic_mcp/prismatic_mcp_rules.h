@@ -49,6 +49,44 @@ struct Rule {
 };
 
 /**
+ * Whether a channel decides unattended: the panel's auto-approve loop ("auto") and a rule read from
+ * the rules file ("file"), which any process running as this user can write. Every other channel is
+ * the owner's present act: the console, the window, the owner-authenticated panel route.
+ * @param via The channel.
+ * @return True for "auto" and "file".
+ */
+inline bool Unattended(std::string_view via)
+{
+	return via == "auto" || via == "file";
+}
+
+/**
+ * Whether a decision through a channel may approve an approval, by the condition #264 put on the
+ * deadline's unattended approve: an unattended channel approves only what a chat approver may
+ * decide (one company's own action), for a company a registered approver played when it was asked
+ * and plays now. The owner's present channels are not held to it.
+ * @param via The channel that decides.
+ * @param chat_scoped The approval acts on one company only (detail::ChatScoped).
+ * @param company The company it names; -1 for none.
+ * @param approver_company A registered approver played that company when it was asked and plays it now.
+ * @return Whether it may approve.
+ */
+inline bool UnattendedMayApprove(std::string_view via, bool chat_scoped, int company, bool approver_company)
+{
+	return !Unattended(via) || (chat_scoped && company >= 0 && approver_company);
+}
+
+/**
+ * The words that say a rule from the rules file is held to a company a registered approver plays.
+ * @param id The rule's id.
+ * @return The line the console prints at load and the window shows beside the rule.
+ */
+inline std::string FileRuleNote(uint64_t id)
+{
+	return fmt::format("rule #{} (from the rules file) decides only for companies a registered approver plays; remake it at the console to make it unconditional", id);
+}
+
+/**
  * Whether a rule or a bulk approval made through a channel may decide an owner-only tool.
  * @param via The channel: "console", "window", "panel", "auto" or "file".
  * @return True for the game's console and the owner's click in the game ("window") only.

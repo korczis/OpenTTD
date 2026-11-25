@@ -126,6 +126,18 @@ permission rules do.
     empty string, any other glob, `$in`, a bound or an array narrows.
   - Removing a deny rule is refused to armed or injected input, like an allow rule.
   - Rules decide a request before the queue's cap.
+- **Attended and unattended channels** (with #264). #264 holds the deadline's unattended approve
+  to one company's own action for a company a registered approver played when it was asked and
+  plays now (`approver_at_creation`, `ApproverPlays`). The same condition holds every other
+  unattended decision: the panel's auto-approve loop (`--via auto`: per id, `approve all`, and a
+  rule made via auto) and an allow rule loaded from the rules file (`created_via file`, since any
+  process running as this user can write the file). Such a decision is held, reported as
+  "held: no registered approver plays company N", and the load says of each file allow rule that it
+  "decides only for companies a registered approver plays; remake it at the console to make it
+  unconditional". A rule the owner makes at the console, in the window or through the
+  owner-authenticated panel route, and an approve all from those, is the owner's explicit act and is
+  not held, so it works in a local game without approver seats. Owner-only tools are never decided by
+  a rule, and every rule decision records the rule and the channel it was made through.
 - **For programs:** `--via panel|auto|window` names the channel. With `--nonce <n>` the console
   prints one line, `[approval-core] {"nonce", "ok", "decided": [ids], "refused": [{id, error}],
   "rejected": [{id, error}], "skipped": [{id, error}], "rule_id", "error"}`. Refused means not run

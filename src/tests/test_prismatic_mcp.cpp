@@ -2315,6 +2315,65 @@ TEST_CASE("An allow matcher is broad when it constrains no value, whatever keys 
 	ClearRulesAndQueue();
 }
 
+TEST_CASE("The window refuses a broad allow and an injected allow rule with the core's words, before it asks to confirm", "[prismatic_mcp]")
+{
+	namespace P = PrismaticMCP::Panel;
+	namespace R = PrismaticMCP::Rules;
+	namespace U = PrismaticMCP::UI;
+	R::Spec broad;
+	broad.tool = "openttd.*";
+	broad.match = {{"company", "*"}};
+	broad.force = true; // the window never forces: it says "window", and --force is the console's
+	auto refused = P::RuleRefusal(R::Effect::Allow, broad);
+	REQUIRE(refused.has_value());
+	R::Spec as_core = broad;
+	as_core.via = "window";
+	CHECK(*refused == *R::BroadAllowRefusal(R::Effect::Allow, as_core));
+	CHECK_FALSE(P::RuleRefusal(R::Effect::Deny, broad).has_value()); // a broad deny enacts nothing
+	R::Spec one_tool;
+	one_tool.tool = "openttd.ai.set_setting"; // "Always allow X (any arguments)"
+	CHECK_FALSE(P::RuleRefusal(R::Effect::Allow, one_tool).has_value());
+	R::Spec narrow = broad;
+	narrow.match = {{"company", 1}};
+	CHECK_FALSE(P::RuleRefusal(R::Effect::Allow, narrow).has_value());
+	{
+		U::InjectionScope script;
+		CHECK(P::RuleRefusal(R::Effect::Allow, one_tool) == P::ConsentRefusal(true));
+		CHECK_FALSE(P::RuleRefusal(R::Effect::Deny, one_tool).has_value());
+	}
+}
+
+TEST_CASE("Unattended channels approve only for a company a registered approver plays, as #264's deadline does", "[prismatic_mcp]")
+{
+	namespace R = PrismaticMCP::Rules;
+	CHECK(R::Unattended("auto"));
+	CHECK(R::Unattended("file"));
+	for (const char *via : {"console", "window", "panel"}) {
+		INFO(via);
+		CHECK_FALSE(R::Unattended(via));
+		CHECK(R::UnattendedMayApprove(via, false, -1, false)); // the owner's present act is not held
+	}
+	for (const char *via : {"auto", "file"}) {
+		INFO(via);
+		CHECK(R::UnattendedMayApprove(via, true, 2, true));    // one company's action, its approver plays
+		CHECK_FALSE(R::UnattendedMayApprove(via, true, 2, false)); // no registered approver plays company 2
+		CHECK_FALSE(R::UnattendedMayApprove(via, true, -1, true)); // it names no company
+		CHECK_FALSE(R::UnattendedMayApprove(via, false, 2, true)); // wider than one company: the operator's
+	}
+	CHECK(R::FileRuleNote(7) == "rule #7 (from the rules file) decides only for companies a registered approver plays; remake it at the console to make it unconditional");
+	/* The window shows the note beside an allow rule from the file, not beside a deny rule or one made in the game. */
+	namespace P = PrismaticMCP::Panel;
+	const json s = {{"rules", json::array({{{"id", 7}, {"effect", "allow"}, {"text", "rule #7 allow ai.set_setting"}, {"created_via", "file"}, {"persisted", true}},
+		{{"id", 8}, {"effect", "deny"}, {"text", "rule #8 deny *"}, {"created_via", "file"}},
+		{{"id", 9}, {"effect", "allow"}, {"text", "rule #9 allow ai.set_setting"}, {"created_via", "console"}}})}};
+	std::vector<P::Row> rules;
+	for (const auto &r : P::Rows(s)) if (r.kind == P::Row::Kind::Rule) rules.push_back(r);
+	REQUIRE(rules.size() == 3);
+	CHECK(rules[0].text.find(R::FileRuleNote(7)) != std::string::npos);
+	CHECK(rules[1].text.find("from the rules file") == std::string::npos);
+	CHECK(rules[2].text.find("from the rules file") == std::string::npos);
+}
+
 #endif /* OTTD_PRISMATIC_MCP_SERVER */
 
 TEST_CASE("The deadline's approve stands in only for a registered approver of the company it names, when asked and at the deadline", "[prismatic_mcp]")
@@ -2382,5 +2441,67 @@ TEST_CASE("A registered key that a second client connects with approves from nei
 	CHECK(DecideChat(f, true) == ChatVerdict::SharedKey);
 	/* A deny executes nothing, so a shared key still withdraws its own company's approval. */
 	CHECK(DecideChat(f, false) == ChatVerdict::Allow);
-	CHECK(ChatVerdictText(ChatVerdict::SharedKey).find("connected twice") != std::string_view::npos);
+	CHECK(ChatVerdictText(ChatVerdict::SharedKey).find("connecte
+TEST_CASE("A rule from the rules file and the auto channel hold where #264's deadline would, and say so", "[prismatic_mcp]")
+{
+	namespace R = PrismaticMCP::Rules;
+	ClearRulesAndQueue();
+	IConsoleStdLibRegister();
+	/* A file-loaded allow rule: said at load, and held for an approval no registered approver's company owns. */
+	const uint16_t port = _settings_client.network.server_port;
+	_settings_client.network.server_port = 40421;
+	{
+		std::ofstream f(PrismaticMCP::RulesFile());
+		f << R"({"rules": [{"effect": "allow", "tool": "game.set_pause", "match": {"pause": false}, "created_via": "console"}]})";
+	}
+	std::filesystem::permissions(PrismaticMCP::RulesFile(), std::filesystem::perms::owner_read | std::filesystem::perms::owner_write, std::filesystem::perm_options::replace);
+	auto said = PrismaticMCP::LoadApprovalRules();
+	REQUIRE(said.size() == 2);
+	const uint64_t file_rule = PrismaticMCP::ApprovalRules().front().id;
+	CHECK(said[1] == R::FileRuleNote(file_rule));
+	CHECK(PrismaticMCP::ApprovalRules().front().created_via == "file");
+	json held = AskPause(false);
+	CHECK(held["status"] == "pending_approval"); // game.set_pause is wider than one company: no approver can own it
+	const uint64_t id = held["approval_id"].get<uint64_t>();
+	auto pending = PrismaticMCP::PendingApprovals();
+	REQUIRE(pending.size() == 1);
+	CHECK((pending[0].matched_rule == file_rule && !pending[0].rule_decides));
+	CHECK(PrismaticMCP::ApprovalRules().front().hits == 0);
+	CHECK(PrismaticMCP::UnattendedHoldOf(id, "file").find("held: a rule from the rules file approves only one company's own action") == 0);
+	CHECK(PrismaticMCP::UnattendedHoldOf(id, "auto").find("held: the auto channel") == 0);
+	CHECK(PrismaticMCP::UnattendedHoldOf(id, "panel").empty()); // the owner's route is not held
+	CHECK(PrismaticMCP::UnattendedHoldOf(999999, "auto").empty());
+	ClearRulesAndQueue();
+	std::filesystem::remove(PrismaticMCP::RulesFile());
+	_settings_client.network.server_port = port;
+
+	/* The auto channel: a rule made via auto is held as it is added, approve all --via auto skips, per id is refused. */
+	const uint64_t resume = AskPause(false)["approval_id"].get<uint64_t>();
+	R::Spec by_auto;
+	by_auto.tool = "game.set_pause";
+	by_auto.match = {{"pause", false}};
+	by_auto.via = "auto";
+	auto added = PrismaticMCP::AddApprovalRule(R::Effect::Allow, by_auto);
+	REQUIRE(added.ok);
+	CHECK((added.decided == 0 && added.skipped == 1));
+	REQUIRE(added.skipped_ids.size() == 1);
+	CHECK(added.skipped_ids[0].error.find("held: the auto channel approves only one company's own action") == 0);
+	std::string m;
+	PrismaticMCP::RemoveApprovalRule(added.rule_id, m);
+	R::Spec all;
+	all.tool = "game.set_pause";
+	all.via = "auto";
+	auto out = PrismaticMCP::DecideAll(true, all);
+	CHECK((out.decided == 0 && out.skipped == 1));
+	CHECK(out.skipped_ids[0].id == resume);
+	IConsoleCmdExec(fmt::format("prismatic_mcp approve {} --via auto", resume));
+	CHECK(PrismaticMCP::HoldsPending(resume));
+	/* The owner's own channels decide it: the console, the window, the owner-authenticated panel route. */
+	all.via = "panel";
+	out = AsNetworkClient([&] { return PrismaticMCP::DecideAll(true, all); });
+	CHECK(out.skipped == 0);
+	CHECK_FALSE(PrismaticMCP::HoldsPending(resume));
+	ClearRulesAndQueue();
 }
+
+#endif /* OTTD_PRISMATIC_MCP_SERVER */

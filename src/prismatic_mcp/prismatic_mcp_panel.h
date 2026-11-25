@@ -154,6 +154,16 @@ std::optional<int> CompanyNamed(const nlohmann::json &args);
 std::optional<std::string> ConsentRefusal(bool approve);
 
 /**
+ * Why the window will not make a standing rule, or nullopt when it may ask the owner to confirm it:
+ * an allow rule from injected input (ConsentRefusal), or a broad allow, which the core refuses from
+ * the window (Rules::BroadAllowRefusal with via "window"), said with the core's own words.
+ * @param effect The rule's effect.
+ * @param spec The tool glob and matcher, as Always... or its query gives them.
+ * @return Why not; nullopt when it may.
+ */
+std::optional<std::string> RuleRefusal(Rules::Effect effect, const Rules::Spec &spec);
+
+/**
  * The console command a consent from the window runs: `prismatic_mcp approve <id> [<id> ...] --via window`
  * or `prismatic_mcp deny ...`. The window goes through the console's own path, so wherever that path
  * leads (this process's queue, or the game server's) the window follows.

@@ -598,6 +598,7 @@ struct PendingApproval {
 /* Defined below, with the chat channel and the approvers, outside the anonymous namespace. */
 static int CompanyOf(const PendingApproval &a);
 static std::vector<detail::ApproverSeat> CurrentApproverSeats();
+static bool ChatDecidable(const PendingApproval &a);
 namespace {
 
 /** One change of who approves from where: an approver joined or left a company, or its key was connected twice. */
@@ -669,6 +670,35 @@ Rules::Verdict RuleVerdict(const PendingApproval &a, const json &args)
 	return Rules::Decide(_rules, Rules::Subject{a.mcp_tool, a.tool, args});
 }
 
+/**
+ * Why an unattended channel (Rules::Unattended: the auto-approve loop, a rule from the rules file)
+ * may not approve an approval, by the condition #264 put on the deadline's approve: only one
+ * company's own action, for a company a registered approver played when it was asked and plays
+ * now (approver_at_creation, detail::ApproverPlays).
+ * @param a The approval.
+ * @param via The channel that would approve it.
+ * @return Why not; empty when it may.
+ */
+std::string UnattendedHold(const PendingApproval &a, std::string_view via)
+{
+	if (!Rules::Unattended(via)) return {};
+	const int company = CompanyOf(a);
+	const bool chat_scoped = ChatDecidable(a);
+	const bool approver_company = a.approver_at_creation && detail::ApproverPlays(CurrentApproverSeats(), company);
+	if (Rules::UnattendedMayApprove(via, chat_scoped, company, approver_company)) return {};
+	if (!chat_scoped) return fmt::format("held: {} approves only one company's own action", via == "file" ? "a rule from the rules file" : "the auto channel");
+	if (company < 0) return "held: it names no company";
+	return fmt::format("held: no registered approver plays company {}", company);
+}
+
+/** Whether the verdict's rule decides the approval now: a deny rule always; an allow rule unless it expired or an unattended rule is held. */
+bool RuleDecidesNow(const PendingApproval &a, const Rules::Verdict &v, uint64_t now)
+{
+	if (v.decides == nullptr) return false;
+	if (v.decides->effect == Rules::Effect::Deny) return true;
+	return now <= a.expiry_tick && UnattendedHold(a, v.decides->created_via).empty();
+}
+
 using detail::IsKnownActionType;
 
 /* ---- JSON-RPC dispatch (main thread) -------------------------------------- */
@@ -724,7 +754,7 @@ json ResourceApprovals()
 			if (a.state == ApprovalState::Pending) {
 				Rules::Verdict v = RuleVerdict(a, json::parse(a.canonical_args, nullptr, false));
 				if (const Rules::Rule *r = v.decides != nullptr ? v.decides : v.blocked; r != nullptr) {
-					arr.back()["matched_rule"] = {{"id", r->id}, {"effect", Rules::EffectName(r->effect)}, {"decides", v.decides != nullptr && !(r->effect == Rules::Effect::Allow && now > a.expiry_tick)}};
+					arr.back()["matched_rule"] = {{"id", r->id}, {"effect", Rules::EffectName(r->effect)}, {"decides", v.decides == r && RuleDecidesNow(a, v, now)}};
 				}
 			}
 		}
@@ -803,7 +833,8 @@ std::optional<json> ApplyRules(PendingApproval &a)
 	Rules::Rule &rule = *std::ranges::find_if(_rules, [&v](const Rules::Rule &r) { return &r == v.decides; });
 	const bool expired = (uint64_t)TimerGameTick::counter > a.expiry_tick;
 	const uint64_t rule_id = rule.id;
-	const std::string via = Rules::Describe(rule);
+	/* Recorded with the rule and the channel it was made through. */
+	const std::string via = fmt::format("{} (made via {})", Rules::Describe(rule), rule.created_via);
 	if (rule.effect == Rules::Effect::Deny) {
 		rule.hits++;
 		a.state = ApprovalState::Denied;
@@ -813,6 +844,8 @@ std::optional<json> ApplyRules(PendingApproval &a)
 			{"message", fmt::format("denied by the owner's standing {}; nothing was enacted", via)}};
 	}
 	if (expired) return std::nullopt;
+	/* An unattended rule (the auto channel's, the rules file's) holds where #264's deadline would. */
+	if (!UnattendedHold(a, rule.created_via).empty()) return std::nullopt;
 	rule.hits++;
 	a.state = ApprovalState::Approved;
 	Debug(Facility::Net, Severity::Error, "[prismatic-mcp] approval #{} ({}) approved by {}", a.id, a.tool, via);
@@ -1259,7 +1292,7 @@ json HandleToolsCall(const json &id, const json &params)
 		 * still does not fit is refused, with the reason, rather than silently pushing out one the
 		 * operator has not answered (ADR 0038). One a standing rule decides at once (ADR 0041) waits
 		 * for nobody, so it is decided even when the queue is full. */
-		const bool ruled = RuleVerdict(pa, aargs).decides != nullptr;
+		const bool ruled = RuleDecidesNow(pa, RuleVerdict(pa, aargs), now);
 		if (_approvals.size() >= MAX_APPROVALS) {
 			std::erase_if(_approvals, [now](const PendingApproval &a) { return a.state != ApprovalState::Pending || now > a.expiry_tick; });
 		}
@@ -1875,7 +1908,7 @@ std::vector<PendingApprovalInfo> PendingApprovals()
 		Rules::Verdict v = RuleVerdict(a, json::parse(a.canonical_args, nullptr, false));
 		if (const Rules::Rule *r = v.decides != nullptr ? v.decides : v.blocked; r != nullptr) {
 			info.matched_rule = r->id;
-			info.rule_decides = v.decides != nullptr && !(r->effect == Rules::Effect::Allow && info.expired);
+			info.rule_decides = v.decides == r && RuleDecidesNow(a, v, now);
 		}
 		out.push_back(std::move(info));
 	}
@@ -1972,6 +2005,8 @@ std::vector<std::string> LoadApprovalRules()
 		r->created_via = "file";
 		_rules.push_back(*r);
 		said.push_back(fmt::format("standing approval {} loaded from {} (made via {} at {})", Rules::Describe(*r), RulesFile(), made_via, r->created_at));
+		/* Anyone running as this user can write the file: its allow rules are held like the auto channel's. */
+		if (r->effect == Rules::Effect::Allow) said.push_back(Rules::FileRuleNote(r->id));
 	}
 	if (doc.is_discarded()) said.push_back(fmt::format("rules file {} is not JSON; no rule loaded from it", RulesFile()));
 	return say();
@@ -2020,11 +2055,12 @@ BulkOutcome AddApprovalRule(Rules::Effect effect, const Rules::Spec &spec)
 			}
 			continue;
 		}
-		auto ruled = ApplyRules(a);
+		const std::string hold = r.effect == Rules::Effect::Allow ? UnattendedHold(a, r.created_via) : std::string{};
+		auto ruled = hold.empty() ? ApplyRules(a) : std::nullopt;
 		if (!ruled.has_value()) {
 			out.skipped++;
-			out.skipped_ids.push_back({a.id, "expired"});
-			out.lines.push_back(OutcomeLine(a, "skipped: expired"));
+			out.skipped_ids.push_back({a.id, hold.empty() ? std::string{"expired"} : hold});
+			out.lines.push_back(OutcomeLine(a, "skipped: " + out.skipped_ids.back().error));
 			continue;
 		}
 		const std::string status = (*ruled)["status"].get<std::string>();
@@ -2061,6 +2097,12 @@ void Tally(BulkOutcome &out, uint64_t id, bool was_pending, bool ok, const std::
 	}
 	out.refused++;
 	(was_pending && HasRun(id) ? out.rejected_ids : out.refused_ids).push_back({id, msg});
+}
+
+std::string UnattendedHoldOf(uint64_t id, std::string_view via)
+{
+	const PendingApproval *a = FindApproval(id);
+	return a == nullptr || a->state != ApprovalState::Pending ? std::string{} : UnattendedHold(*a, via);
 }
 
 bool HasRun(uint64_t id)
@@ -2106,6 +2148,14 @@ BulkOutcome DecideAll(bool approve, const Rules::Spec &spec)
 			out.skipped_ids.push_back({id, "an owner-only tool: decided only at the game's console or by the owner's click in the game"});
 			out.lines.push_back(OutcomeLine(*a, "skipped: " + out.skipped_ids.back().error));
 			continue;
+		}
+		if (approve) {
+			if (std::string hold = UnattendedHold(*a, spec.via); !hold.empty()) {
+				out.skipped++;
+				out.skipped_ids.push_back({id, hold});
+				out.lines.push_back(OutcomeLine(*a, "skipped: " + hold));
+				continue;
+			}
 		}
 		std::string msg;
 		bool ok = approve ? ApproveById(id, msg, via) : DenyById(id, msg, via);
