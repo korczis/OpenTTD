@@ -155,6 +155,7 @@ B=tools/research/ai-battle/battle.py
 python3 $B discover   # scan the local /24 for SSH, probe each machine, write ~/ttd-battle/hosts.json
 python3 $B fetch      # BaNaNaS contestants into ~/ttd-battle/content (loopback-only -D server)
 python3 $B prepare    # arena bundle from HEAD; refuses uncommitted PrismaticAI or referee
+python3 $B prepare --referee-only   # only the referee, to the repository's (run does it on start)
 python3 $B probe      # which arenas are usable now
 python3 $B run        # tournament + dashboard on http://127.0.0.1:8765/ (SIGTERM / Ctrl-C stops)
 python3 $B status     # leaderboard and replays of the current edition
@@ -208,9 +209,26 @@ across editions. A new PrismaticAI commit, AI version, referee, contestant, sett
 parameter is a new edition.
 
 `prepare` exports PrismaticAI (`tools/research/prismatic-ai/PrismaticAI`) and the referee with
-`git archive` at one commit. It strips the parent directories, so each tar has its script folder
-at the top. The commit is written into `PROVENANCE.json`. `--allow-dirty` exports the working
-tree instead and marks the edition dirty. `check` refuses every record from a dirty edition.
+`git archive`. It strips the parent directories, so each tar has its script folder at the top.
+PrismaticAI comes from `prismatic.rev` and the referee from `referee.rev` in `battle.json`, both
+`HEAD` by default. `PROVENANCE.json` records the first as `rev` and the second as `referee_rev`,
+and a record page names both when they differ. `--allow-dirty` exports the working tree instead
+and marks the edition dirty. `check` refuses every record from a dirty edition.
+
+**The arena follows the repository's referee (2026-11-25).** The arena prepared on 2026-11-21
+kept a referee that logged no `loan=`, so none of the arena's match logs had it.
+The referee gains fields over time (`loan=`, `REF S`, `REF T`) without changing the score, so it
+follows the repository on its own. `prepare --referee-only`
+(`tools/research/ai-battle/battle.py:1079:refresh_referee`) exports the
+referee at `referee.rev` and leaves PrismaticAI, the AIs and `rev` as they are. It writes the new
+tar beside the old one and renames it over the old one, so a running match keeps the file it
+opened. It then records `referee_rev` and `referee_prepared_at`. When the files are unchanged it
+does nothing, so the edition stays the same. `run` does the same on start
+(`tools/research/ai-battle/battle.py:1110:follow_referee`;
+`referee.follow: false` turns it off). A different referee is a new edition, like any other
+change to the bundle. An arena host gets the new tar on the orchestrator's next sync of the
+arena. The orchestrator therefore needs a checkout that has this change, and then a restart of
+`run`.
 
 ## How a match runs
 
@@ -623,8 +641,8 @@ the battle.
 **`live_like` in `battle.json`** declares the live world once:
 
 - Match settings: 1950, 256x256, temperate, reduced breakdowns. These are the engine's defaults,
-  and the live stack keeps them: its `openttd.cfg` (`mcp-rhai` `src/panel.rs` `Panel::start`) sets
-  no world setting.
+  and the live stack keeps them: its `openttd.cfg`
+  (`tools/research/mcp-rhai/src/panel.rs:start`, `Panel::start`) sets no world setting.
 - The script budget: `script_max_opcode_till_suspend = 250000`, the panel's `SCRIPT_OPCODES`.
   The engine default is 10000. `battle_cfg_text` writes it only for a match that sets
   `script_opcodes`, so the arena's editions keep their configuration.
@@ -737,7 +755,10 @@ do not yet mean more value on this map.
 - **Store.** Everything is written to `~/ttd-battle/results/battle.sqlite`:
   - tables `matches` (with the lineup as `{key, ai, settings}`), `samples`, `standings`,
     `postmortems`, `host_perf` and `events`,
-  - column names are only ever added, never renamed,
+  - column names are only ever added, never renamed, and a store made before a column existed gets
+    it added when it opens; its older rows read NULL there ("not recorded"). The sample's `loan`
+    was added on 2026-11-25: before that the store dropped it, so stored `money` from earlier
+    matches cannot be judged net of the loan,
   - DuckDB reads it with `ATTACH '<file>' (TYPE sqlite)`,
   - `GET /api/query?sql=` runs one read-only `SELECT`/`WITH` on it.
 - **Throughput.** `host_perf` and `/api/perf` give game years per wall-clock minute per arena.
