@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# RESEARCH-ONLY. The mcp-rhai helpers of a stack never outlive it: the supervisor loop mcp-e2e runs
+# (tools/research/lib/rhai-helper.sh) is started against a stand-in panel; the panel is killed with
+# SIGKILL, as a crash or `kill -9` does, and within 30 s no `mcp-rhai --panel <url>` process and no
+# pidfile is left. Then the same with the supervisor killed first (the stack's script gone, the panel
+# still up until it is killed too), and a second copy of one helper is refused by its pidfile.
+# Found 2026-11-23: helpers ran 6.5 h under pid 1 after their stack had stopped.
+#
+# Usage: tools/research/mcp-rhai-helper-check   (needs tools/research/mcp-rhai built: cargo build --release)
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+RHAI="${RHAI:-$ROOT_DIR/tools/research/mcp-rhai/target/release/mcp-rhai}"
+[[ -x "$RHAI" ]] || { echo "mcp-rhai-helper-check: build tools/research/mcp-rhai (cargo build --release)" >&2; exit 3; }
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/mcp-rhai-helper-check.XXXXXX")"
+RHAI_PIDDIR="$WORK" RHAI_GIVE_UP=2
+PIDS=()
+cleanup() {
+  for p in ${PIDS[@]+"${PIDS[@]}"}; do kill -9 "$p" 2>/dev/null || true; done
+  rhai_helpers_stop 2>/dev/null || true
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+# shellcheck source=lib/rhai-helper.sh
+. "$ROOT_DIR/tools/research/lib/rhai-helper.sh"
+
+PASS=0 FAIL=0
+check() { if [[ "$2" == 1 ]]; then echo "  ok   $1"; PASS=$((PASS + 1)); else echo "  FAIL $1"; FAIL=$((FAIL + 1)); fi; }
+
+# A stand-in panel: every GET and POST answers {}.
+panel() {
+  python3 -I -c '
+import http.server, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def answer(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n: self.rfile.read(n)
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", "2"); self.end_headers(); self.wfile.write(b"{}")
+    do_GET = do_POST = answer
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+print(s.server_port, flush=True)
+s.serve_forever()' > "$WORK/$1.port" &
+  PANEL_PID=$!
+  PIDS+=("$PANEL_PID")
+  for ((i = 0; i < 50; i++)); do [[ -s "$WORK/$1.port" ]] && break; sleep 0.1; done
+  URL="http://127.0.0.1:$(head -1 "$WORK/$1.port")"
+}
+running() { pgrep -f "mcp-rhai --panel $1 " >/dev/null 2>&1 && echo 1 || echo 0; }
+gone_within() {  # gone_within URL SECONDS: 1 when no helper of URL runs within SECONDS
+  local i
+  for ((i = 0; i < $2 * 2; i++)); do [[ "$(running "$1")" == 0 ]] && { echo 1; return; }; sleep 0.5; done
+  echo 0
+}
+SCRIPT="$WORK/for_ever.rhai"
+echo 'loop { sleep(200); }' > "$SCRIPT"
+
+echo "==> the panel is killed: its helpers stop (helpers given the stack's run token file)"
+RHAI_TOKEN_FILE="$WORK/run-token"
+( umask 077; printf 'check-token\n' > "$RHAI_TOKEN_FILE" )
+panel a
+rhai_helper alpha "$WORK/alpha.log" "$PANEL_PID" "$URL" "$SCRIPT"
+PIDS+=($!)
+rhai_helper beta "$WORK/beta.log" "$PANEL_PID" "$URL" "$SCRIPT" MCP_PANEL_URL="$URL"
+PIDS+=($!)
+for ((i = 0; i < 40; i++)); do [[ -f "$WORK/alpha.pid" && -f "$WORK/beta.pid" ]] && break; sleep 0.5; done
+check "both helpers run and hold their pidfiles" "$([[ "$(running "$URL")" == 1 && -f "$WORK/alpha.pid" && -f "$WORK/beta.pid" ]] && echo 1 || echo 0)"
+"$RHAI" --panel "$URL" --pidfile "$WORK/alpha.pid" "$SCRIPT" 2>"$WORK/second.log" && code=0 || code=$?
+check "a second copy of one helper is refused (exit $code)" "$([[ "$code" == 5 ]] && echo 1 || echo 0)"
+kill -9 "$PANEL_PID"
+check "no helper of the killed panel runs within 30 s" "$(gone_within "$URL" 30)"
+check "their pidfiles are gone" "$([[ ! -e "$WORK/alpha.pid" && ! -e "$WORK/beta.pid" ]] && echo 1 || echo 0)"
+grep -q "has not answered" "$WORK/alpha.log" && said=1 || said=0
+check "the helper says why it stopped" "$said"
+
+echo "==> the stack's script is killed first: its helper stops with the panel (no run token)"
+unset RHAI_TOKEN_FILE
+panel b
+( rhai_helper gamma "$WORK/gamma.log" "$PANEL_PID" "$URL" "$SCRIPT"; wait ) &
+STACK=$!
+for ((i = 0; i < 40; i++)); do [[ -f "$WORK/gamma.pid" ]] && break; sleep 0.5; done
+check "the helper runs" "$(running "$URL")"
+kill -9 "$STACK"
+kill -9 "$PANEL_PID"
+check "no helper runs within 30 s of its stack and panel being killed" "$(gone_within "$URL" 30)"
+
+echo "mcp-rhai-helper-check: $PASS passed, $FAIL failed"
+[[ "$FAIL" -eq 0 ]]

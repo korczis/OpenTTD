@@ -2,7 +2,9 @@
 //! `mcp-bus-blackboard` and `mcp-hub serve` binaries, started as a person or a script starts them,
 //! stop on their own when their Majordomus server, parent, working directory, registry or panel is
 //! gone, and a pidfile refuses a second copy. Found 2026-11-22: a bus bridge that ran 13.5 h after
-//! its server exited, and a hub that ran 7 h after its worktree and panel were deleted.
+//! its server exited, and a hub that ran 7 h after its worktree and panel were deleted. The same for
+//! the `mcp-rhai` helpers (director, narrator, steward, ask relay), found 2026-11-23 running 6.5 h
+//! under pid 1 after their stack had stopped.
 
 #[path = "../src/fake_mcp.rs"]
 #[allow(dead_code)]
@@ -14,6 +16,7 @@ use std::time::{Duration, Instant};
 
 const BUS: &str = env!("CARGO_BIN_EXE_mcp-bus-blackboard");
 const HUB: &str = env!("CARGO_BIN_EXE_mcp-hub");
+const RHAI: &str = env!("CARGO_BIN_EXE_mcp-rhai");
 
 fn tmp(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("mcp-rhai-daemons-{}-{name}", std::process::id()));
@@ -203,5 +206,83 @@ fn the_hub_stops_when_its_registry_its_panel_or_its_parent_is_gone() {
     let log = d.join("orphan.log");
     let hub = orphan(HUB, &format!("serve --port 0 --no-store --audit-every 0 --registry '{}' --exit-with-parent", registry.display()), &log, &registry);
     until("an orphaned hub stops", Duration::from_secs(20), || !alive(hub));
+    assert!(log_of(&log).contains("its parent"), "{}", log_of(&log));
+}
+
+/// A stand-in panel that answers every request with `{}` until `stop` is set, then refuses
+/// connections (its listener is closed): a panel that stopped.
+fn fake_panel() -> (String, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    l.set_nonblocking(true).unwrap();
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let s = stop.clone();
+    std::thread::spawn(move || {
+        while !s.load(Ordering::SeqCst) {
+            match l.accept() {
+                Ok((mut c, _)) => {
+                    let _ = c.set_nonblocking(false);
+                    let _ = c.set_read_timeout(Some(Duration::from_secs(2)));
+                    let mut buf = [0u8; 8192];
+                    let _ = c.read(&mut buf);
+                    let _ = c.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+    });
+    (url, stop)
+}
+
+/// A script that never ends on its own: only its guard stops it.
+const FOR_EVER: &str = "loop { sleep(200); }";
+
+#[test]
+fn a_rhai_helper_stops_when_its_panel_stops_and_its_pidfile_refuses_a_second_copy() {
+    let d = tmp("rhai");
+    let (url, stop) = fake_panel();
+    let (pid, log) = (d.join("helper.pid"), d.join("helper.log"));
+    let guard = ["--give-up", "1", "--pidfile", pid.to_str().unwrap()];
+    let mut helper = cmd(RHAI, &log).args(["--panel", &url]).args(guard).args(["-e", FOR_EVER]).spawn().unwrap();
+    until("the helper claims its pidfile", Duration::from_secs(20), || pid.exists());
+    let log2 = d.join("second.log");
+    let mut second = cmd(RHAI, &log2).args(["--panel", &url]).args(guard).args(["-e", FOR_EVER]).spawn().unwrap();
+    assert_eq!(wait_exit(&mut second, Duration::from_secs(10)).code(), Some(5), "{}", log_of(&log2));
+    assert!(log_of(&log2).contains("already running as pid"), "{}", log_of(&log2));
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(helper.try_wait().unwrap().is_none(), "a panel that answers keeps the helper: {}", log_of(&log));
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(wait_exit(&mut helper, Duration::from_secs(10)).code(), Some(4), "{}", log_of(&log));
+    assert!(log_of(&log).contains("has not answered"), "{}", log_of(&log));
+    assert!(!pid.exists(), "the pidfile goes with the helper");
+
+    let bad = d.join("bad.log");
+    let mut b = cmd(RHAI, &bad).args(["--give-up", "0", "-e", "1"]).spawn().unwrap();
+    assert_eq!(wait_exit(&mut b, Duration::from_secs(10)).code(), Some(2), "{}", log_of(&bad));
+    let help = Command::new(RHAI).arg("--help").output().unwrap();
+    assert!(help.status.success() && String::from_utf8_lossy(&help.stdout).contains("--give-up SECS"), "{help:?}");
+    let usage = Command::new(RHAI).arg("--exit-with-parent").output().unwrap();
+    assert_eq!(usage.status.code(), Some(2), "no script is a usage error");
+    assert!(String::from_utf8_lossy(&usage.stderr).contains("--pidfile PATH"), "{usage:?}");
+    let fine = d.join("fine.log");
+    let mut f = cmd(RHAI, &fine).args(["--panel", "http://127.0.0.1:1", "--pidfile", d.join("one.pid").to_str().unwrap(), "-e", "40 + 2"])
+        .stdout(Stdio::piped()).spawn().unwrap();
+    assert_eq!(wait_exit(&mut f, Duration::from_secs(20)).code(), Some(0), "{}", log_of(&fine));
+    assert!(!d.join("one.pid").exists(), "a script that ends releases its pidfile");
+    let err = d.join("err.log");
+    let mut e = cmd(RHAI, &err).args(["--panel", "http://127.0.0.1:1", "--pidfile", d.join("two.pid").to_str().unwrap(), "-e", "throw \"boom\""]).spawn().unwrap();
+    assert_eq!(wait_exit(&mut e, Duration::from_secs(20)).code(), Some(1), "{}", log_of(&err));
+    assert!(log_of(&err).contains("boom") && !d.join("two.pid").exists(), "{}", log_of(&err));
+}
+
+#[test]
+fn a_rhai_helper_stops_when_its_parent_is_gone() {
+    let d = tmp("rhai-parent");
+    let (url, _stop) = fake_panel();
+    let log = d.join("orphan.log");
+    let helper = orphan(RHAI, &format!("--panel {url} --exit-with-parent -e '{FOR_EVER}'"), &log, &d);
+    until("an orphaned helper stops", Duration::from_secs(20), || !alive(helper));
     assert!(log_of(&log).contains("its parent"), "{}", log_of(&log));
 }

@@ -763,7 +763,12 @@ game's commands and their approval (rule `game-state-mutates-only-through-comman
 - **`mcp-e2e` supervises its own children** with a shell loop each: the GUI or windowless client,
   the director, the narrator, `steward.rhai` and the ask relay. Whichever exits while the panel
   runs is started again after 3 s, without a limit. A child that hangs without exiting is not
-  noticed.
+  noticed. The `mcp-rhai` helpers run through `tools/research/lib/rhai-helper.sh`: their loop
+  also ends with the script that started it, and each helper stops itself (exit 4) when its
+  supervisor is gone (`--exit-with-parent`) or the panel's `/api/status` has not answered for 20 s
+  (`--give-up`), holding `$TMP/<name>.pid` so a second copy is refused (exit 5) and the cleanup
+  finds it. `tools/research/mcp-rhai-helper-check` kills the panel with SIGKILL and finds no
+  helper left within 30 s (found 2026-11-23: helpers ran 6.5 h under pid 1 after their stack).
 - **The panel supervises its services** (`src/panel_scripts.rs` `supervise`) on the watcher
   thread that also hot-reloads them, once a second. A service that ends with an error (a
   non-zero exit, or none) is started again on its file's current text after a wait that doubles
