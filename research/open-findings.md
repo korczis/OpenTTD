@@ -42,7 +42,7 @@ pie showData title Open findings by kind
     "partial" : 17
     "staged" : 16
     "unreviewed" : 9
-    "failed" : 7
+    "failed" : 8
     "handoff" : 4
 ```
 <!-- surfaces:end open-findings -->
@@ -54,7 +54,7 @@ pie showData title Open findings by kind
 |---|---|---|
 | blocked | 68 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
 | out-of-scope | 58 | A finished issue left this out (its non_scope) and no open issue names it |
-| failed | 7 | A run or check the records say failed |
+| failed | 8 | A run or check the records say failed |
 | not-run | 29 | A validation the records say did not run |
 | partial | 17 | A capability or run the records say is only partly there |
 | staged | 16 | Designed and written down, not implemented |
@@ -190,6 +190,7 @@ pie showData title Open findings by kind
 | out-of-scope | Any change in algoglyph or prismatic-platform | [I0228](../.ai/repo/project/issues/I0228.yaml):19 | none — needs an issue | DERIVED |
 | out-of-scope | Pinning AlgoGlyph as a submodule (feature/algoglyph-submodule) | [I0228](../.ai/repo/project/issues/I0228.yaml):20 | none — needs an issue | DERIVED |
 | out-of-scope | Routing the planner's kernel calls through the matcher (feature/planner-kernels-by-capability) | [I0228](../.ai/repo/project/issues/I0228.yaml):21 | none — needs an issue | DERIVED |
+| failed | the gate is FAIL on master for that unrelated reason, not PASS. | [I0110](../.ai/repo/project/issues/I0110.yaml):52 | none — needs an issue | OBSERVED |
 | failed | -G 15805 with the live-like match settings does not regenerate live game 15805's map: none of its towns appears in the headless log (2026-11-24, lundra, 20261122-master-g2a6a616221). The planned arm is a fixed slot set, not the live plan, and the start of 15805 cannot be… | [research/ai-battle/README.md](ai-battle/README.md):764 | none — needs an issue | OBSERVED |
 | failed | On the 15805 save, master's PrismaticAI runs 3 trains instead of 1. Its value after four years is 151k against the old code's 309k, and 0.029 of AAAHogEx, under the live ratio of 0.050. More lines do not yet mean more value on this map. | [research/ai-battle/README.md](ai-battle/README.md):787 | none — needs an issue | OBSERVED |
 | failed | On seed 4242 the self-steward lineup hoards after the change (hoards:1964-04..1966-01:716618->1549902@60v), where it did not before. Producers that rivals claimed are no longer candidates, and the bot has no other sink for the money. The gate's seed passes. The sink that is… | [research/incident-2026-11-22-sibling-industries.md](incident-2026-11-22-sibling-industries.md):221 | none — needs an issue | OBSERVED |
