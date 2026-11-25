@@ -82,7 +82,8 @@ flowchart LR
   parameters, which come from DuckDB's prepared statement and are never declared twice.
   `POST /api/db/named {name, params}` runs one with the values bound, never pasted into the text.
   Rhai reaches both as `api_dbNamed()` and `api_dbNamedRun(#{name: "company_rank", params:
-  #{company: 0}})`. `replan.rhai` reads `company_rank` and `company_trend`; `newest_events` is what
+  #{company: 0}})`. `replan.rhai` reads `company_rank` and `company_trend`, `capital_watch.rhai` reads
+  `capital_months` (every company's month-end net and vehicles of the latest run); `newest_events` is what
   `/api/db/query` answers without `?sql=`. The panel's own reads are named queries too:
   `calibration_readings` (the calibration), `duel_outcomes` (own_lines from duels),
   `kernel_window` (an action plan's books, `mcp-kernel-feed`), `company_samples` (the history a

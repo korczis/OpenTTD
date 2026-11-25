@@ -34,10 +34,25 @@ flowchart TB
   ST -->|"openttd.ai.set_setting, gated"| SET
 ```
 
-- **Heartbeat** (`main.nut` `Start`). Every round reads the settings again (`Behaviour`), then:
-  the planner's air pair, freight lines (`fr_*` to `fr16_*`) and passenger rail first, then the
-  bot's own lines and buses, the fleet, line reconciliation and the loan. Old vehicles are renewed
-  by the game's own autorenew.
+- **Heartbeat** (`main.nut` `Start`). Every round reads the settings again (`Behaviour`). Then come
+  the planner's air pair, the autopilot's air routes, the planner's freight lines (`fr_*` to
+  `fr16_*`), the bot's own freight line, the planner's passenger rail pair and buses, then the
+  fleet, line reconciliation and the loan. The passenger pair takes a heartbeat in which the bot
+  started no own freight line. Once it has waited two game years it may take any heartbeat
+  (`PairDue`, `TryRailPair`).
+  Old vehicles are renewed by the game's own autorenew.
+- **A plan is added on top of the autopilot** (`main.nut` `Behaviour`). With `autopilot=1` a
+  planned bot keeps the autopilot's floors: at least 10 own lines, up to 30 routes, intercity roads,
+  at most a 5000 reserve. Producers nobody serves are taken by rivals within the first years, and a
+  town pair is not, so the planner's passenger pair no longer runs ahead of the bot's first own
+  freight line. On the live settings a planned start cost 25-35% (headless ablation, 2026-11-23).
+  The passenger pair took months of path search in the first heartbeat, and the planned bot held
+  four own lines while its bank doubled.
+- **Handed slots must be whole** (`main.nut` `FreightLines`). The panel and the re-planner write a
+  freight slot one approved setting at a time. A slot counts only when it is complete, both
+  industries exist, the producer makes the cargo and the acceptor takes it, and two reads in a row
+  agree. Until then it is never tried or marked tried. The test hook `test_freight_slots` drives
+  every case.
 - **Rail a train can always run** (`rail.nut`). No 90-degree turn anywhere (`Turns90`, because
   `pf.forbid_90_deg` is on by default). Termini with two platforms joined by a throat with path
   signals. A terminus takes the catching site with the most cargo on the axis toward the other end,
@@ -201,6 +216,81 @@ more planes); `load_add_min=0` with `road_yield=0` at +21.3% (20 better). So `lo
 default and `road_yield` stays at 20. Not measured: held-start pairs; `road_probes` and
 `air_yield_routes` alone.
 
+## Capital allocator
+
+`capital.nut` decides, once a heartbeat in place of the plain loan repayment, where the money above
+the reserve goes (setting `capital_alloc`, levels below). Evidence from the owner's live game
+(seed 12609, company 0, 1950-1953, panel store and `openttd://vehicles`, read-only):
+
+| Gate that kept money from earning | How often |
+|---|---|
+| `RepaySurplus` repaid every heartbeat's earnings down to about 10k | 42 repayments, 1.19M (about 590k of them returns of build draws) |
+| `BuildFrozen` after "stay afloat" borrowing | 525 of 1,096 days of 1950-1952 (47.9%); four rescues in 1952 came 278-994 below the floor right after a repayment and kept construction frozen 170 days |
+| InvestSurplus's usable money (20 reserves = 100k with `invest_borrow` 0) | all 232 heartbeats; first plane 1953-09-23, though route 0,10 earned 20-24k a plane on a price of about 30k |
+| `trains_max` 2 on single-track lines | 5 of 7 lines; double track refused "for funds" three times while the line was built on the whole loan |
+| `AirRoutesPay` (every route must pay) | no new air route since 1951-07; two weak routes blocked it while the fleet earned 16.9k a plane |
+| No free producer | 19 of 48 producers held by another company's rail station |
+| Correct refusals | `RoadPays` (buses 13% of price), `load_add_min` on routes 3% and 9% full |
+
+The 372k in the bank with a 300k loan on 1953-06 was `TwinLines` drawing the whole loan for a
+34-day twin build, repaid on the day it was built; interest in 1953 came to about 1.2k. The leak is
+unspent money: the loan was 0 from 1953-04 and the bank rose to 182k by 1954-01, below the 250k at
+which rich growth spends.
+
+Levels: 1 keeps one loan interval above `StayAfloat`'s floor, so a few days of costs no longer
+trigger a rescue and its 90-day freeze; 2 (and 1) buys, before repaying, the investment with the
+best measured return whose payback is within `invest_ppv_div` years: one more road, air or water
+vehicle behind the fleet's caps and load guards, or one more train on an earning line under
+`trains_max` with half a trainload waiting or its source rating below `steward_rating` (the in-bot
+steward's target follows), and holds the money for it when the bank is short; 3 (default, and 2)
+adds one new air route after a quarter of idle money with no loan, where the air fleet as a whole
+pays, one unproven route at a time; 0 is the old repayment. Profit is last year's, of vehicles that
+ran all of last year. Every quarter the bot logs a `capital report` warning with the days
+construction stood frozen, which `battle.py fitness` reads (rule: at most `frozen_max` 15% of the
+days of a healthy contestant's first `frozen_years` 3 years).
+
+Headless replays (2026-11-23, `battle.py ablate`, 10 years from 1950, field AAAHogEx, LuDiAI
+AfterFix, CivilAI, AdmiralAI, NoCAB, DictatorAI, SimpleAI, the bot with the unmerged claim fix of
+`fix/prismatic-claims-clean` applied, level 3 without train buying against level 0, one replay each:
+single matches are not a tuning claim, rule `a-tuning-claim-needs-held-start-pairs`):
+
+| Seed | Settings | Value, level 0 | Value, level 3 | Frozen 1950-52, level 0 | Frozen, level 3 | Money at the end, level 0 / 3 |
+|---|---|---|---|---|---|---|
+| 15805 | live game | 2,616,816 | 3,530,211 (+34.9%) | 3.7% | 2.6% | 1.96M / 2.75M |
+| 2927 | live game | 6,354,702 | 7,474,622 (+17.6%) | 26.4% | 0.0% | 5.21M / 5.55M |
+| 4242 | live game | 4,468,923 | 3,379,850 (-24.4%) | 8.1% | 7.2% | 2.74M / 2.48M |
+| 15805 | variants.txt line 1 | 4,275,405 | 2,816,872 (-34.1%) | 26.5% | 26.6% | 3.37M / 1.12M |
+| 2927 | variants.txt line 1 | 6,408,652 | 5,782,089 (-9.8%) | 0.0% | 0.0% | 4.74M / 3.69M |
+| 4242 | variants.txt line 1 | 4,223,801 | 4,293,631 (+1.7%) | 6.2% | 0.0% | 2.47M / 2.45M |
+
+With train buying (the same field and seeds, the claim fix as it stood on 2026-11-24, one replay
+each):
+
+| Seed | Settings | Value, level 0 | Value, level 3 | Ours / AAAHogEx, level 0 / 3 | Frozen 1950-52, level 0 / 3 | Allocator purchases, vehicles + trains |
+|---|---|---|---|---|---|---|
+| 15805 | live game | 3,014,151 | 3,755,639 (+24.6%) | 16.7% / 22.4% | 1.6% / 0.0% | 0 + 0 |
+| 2927 | live game | 6,775,941 | 7,783,329 (+14.9%) | 28.1% / 41.6% | 0.0% / 0.0% | 0 + 0 |
+| 4242 | live game | 3,790,137 | 4,029,407 (+6.3%) | 29.6% / 20.6% | 0.4% / 10.1% | 0 + 0 |
+| 15805 | variants.txt line 1 | 3,341,997 | 4,224,362 (+26.4%) | 18.4% / 25.4% | 56.3% / 26.6% | 6 + 1 |
+| 2927 | variants.txt line 1 | 6,196,605 | 5,328,394 (-14.0%) | 27.5% / 29.7% | 0.0% / 0.0% | 6 + 0 |
+| 4242 | variants.txt line 1 | 3,592,213 | 3,532,241 (-1.7%) | 16.1% / 20.3% | 0.4% / 26.7% | 39 + 3 |
+
+Geometric mean +8.4% (round 1: -5.1%), single replays, inconclusive. On 4242 the first freeze
+came from a stay-afloat rescue during a build in 1951Q4, before the allocator bought anything. The
+frozen gate would refuse both levels on 15805 with variants.txt line 1, so early freezes also have
+causes the margin does not touch (money and headroom under two quarters of costs while lines are
+built on the whole loan). Every variant still ended with millions in the bank and no loan, and the
+allocator bought few vehicles a match (four trains in all): once planes reach `invest_air_cap` and lines `trains_max`, little clears the hurdle. The
+heartbeat also ran once in 180-275 days in many quarters, while path searches held it; the
+allocator runs only at its end. The value differences are within single-replay chaos. On the
+fitness seed (930967890, 6 years) the branch fails only the self-steward lineup's hoard, which
+master fails too, and no longer hoards with the default lineup (master: 341k to 1.08M on 26
+vehicles in 1964-66). The self-steward hoard is not a money gate: its seven lines rate their cargo
+72-87% with nothing waiting, a train more on its best line did not raise its profit (3 to 4 trains,
+164.9k to 162.5k a year), 57 own-line searches in 1964 found no producer (14 held by others, 12
+under 40 a month), and its planes fly 0-13% full. Lowering the own-line floor to 20 a month while
+rich removed that hoard in a replay and cost 4.8% of value, so it is not part of this change.
+
 ## Where it lives
 
 | File | What it holds |
@@ -213,6 +303,8 @@ default and `road_yield` stays at 20. Not measured: held-start pairs; `road_prob
 | [`PrismaticAI/fleet.nut`](../../tools/research/prismatic-ai/PrismaticAI/fleet.nut) | road, air and ship capacity from waiting cargo and the link graph; the yield gates (`RouteLoad`, `RoadPays`) and the road report |
 | [`PrismaticAI/ships.nut`](../../tools/research/prismatic-ai/PrismaticAI/ships.nut) | ship routes behind `ships_max`: candidates, dock sites, the water path check, docks, depot, ships |
 | [`PrismaticAI/roadstop.nut`](../../tools/research/prismatic-ai/PrismaticAI/roadstop.nut), [`intercity.nut`](../../tools/research/prismatic-ai/PrismaticAI/intercity.nut), [`air.nut`](../../tools/research/prismatic-ai/PrismaticAI/air.nut) | bus stops and depots, intercity roads, airports |
+| [`PrismaticAI/capital.nut`](../../tools/research/prismatic-ai/PrismaticAI/capital.nut) | the capital allocator (`capital_alloc`): measured-payback purchases before repayment, the stay-afloat margin, the quarterly capital report |
+| [`PrismaticAI/funnel.nut`](../../tools/research/prismatic-ai/PrismaticAI/funnel.nut) | the yearly growth funnel, one `FUNNEL` line per mode (RESEARCH-ONLY observability; [growth funnel](../growth-funnel.md)) |
 | [`install`](../../tools/research/prismatic-ai/install) | links the bot into the personal `ai/` folder; `--check` verifies it |
 | [`tools/research/mcp-rhai/src/panel_bot.rs`](../../tools/research/mcp-rhai/src/panel_bot.rs) | the panel side: planned start, settings, running bots |
 
@@ -224,6 +316,8 @@ default and `road_yield` stays at 20. Not measured: held-start pairs; `road_prob
   [`research/results/`](../results/).
 - `cargo test` in `tools/research/mcp-rhai` runs the Rhai side that reads the bot's records
   (`rail_*` tests on fixtures in `main.rs`).
+- `battle.py fitness` runs the bot in short headless matches and fails one whose contestants
+  in `fitness.must_funnel` miss a yearly `FUNNEL` line ([growth funnel](../growth-funnel.md)).
 - `tools/research/prismatic-ai/install --check` exits 0 when the game loads this checkout's bot.
 - `tools/research/mcp-carryout-check` checks that proposed settings reach the running bot only
   through the gate.
