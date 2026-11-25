@@ -210,7 +210,9 @@ try {
     .waitFor({ timeout: 10000 }).then(() => true).catch(() => false) && !(await autoOn()));
   await owner.locator('#owner-secret').fill(secret);
   await owner.locator('#owner-signin-form button[type="submit"]').click();
-  check('the right secret signs in and the switch goes on', await until(async () => (await box.count()) === 0 && autoOn()));
+  // autoOn() is awaited: an unawaited Promise is truthy, so the wait ended when the box closed, before
+  // the sign-in's answer set the cookie read next (the check failed on master about half the time).
+  check('the right secret signs in and the switch goes on', await until(async () => (await box.count()) === 0 && await autoOn()));
   const cookie = (await fresh.cookies(base)).find((c) => c.name === `mcp_owner_${panelPort}`);
   check('the sign-in cookie is HttpOnly, SameSite=Strict and outlives the browser session', !!cookie && cookie.httpOnly && cookie.sameSite === 'Strict' && cookie.expires > Date.now() / 1000 + 300 * 86400);
   const toggleWithoutBox = async (want) => {
