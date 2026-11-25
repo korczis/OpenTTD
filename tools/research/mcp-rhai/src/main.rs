@@ -1519,6 +1519,54 @@ mod tests {
                              "nothing that holds it is visible; the bot itself chose to build nothing"]);
     }
 
+    /// replan's monthly profit (mcp-panel/rhai/replan.rhai): the plan's freight price of a chosen
+    /// line, else the planner's own monthly profit of its option, else the record's realised profit
+    /// per earning line of its mode, else nothing. Game 21647's passenger plan predicted 0 a month
+    /// in every round while 11 of 12 lines earned.
+    #[test]
+    fn replan_prices_an_unpriced_line_at_the_records_realised_profit() {
+        let e = lib_engine();
+        let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai/replan.rhai")).unwrap();
+        // The script's functions and its constants, not its loop.
+        let fns = e.compile(&script).unwrap().clone_functions_only();
+        let consts: String = script.lines().filter(|l| l.starts_with("const ")).map(|l| format!("{l}\n")).collect();
+        let out: rhai::Array = e.eval_ast(&e.compile(consts + r#"
+            // Company 0 (game 21647, 2000-09-12): six rail lines, one of them of two trains and one
+            // earning nothing, two road lines and a young one, and a line of another company.
+            let v = |owner, t, dests, profit, age| #{ owner: owner, type: t, age: age, profit_last_year: profit,
+                                                      orders: dests.map(|d| #{ destination: d }) };
+            let vs = [v.call(0, "train", [1, 2], 101035, 900), v.call(0, "train", [2, 1], 101035, 800), v.call(0, "train", [3, 4], 192455, 900),
+                      v.call(0, "train", [5, 6], 119870, 900), v.call(0, "train", [7, 8], 70719, 900),
+                      v.call(0, "train", [9, 10], 43915, 900), v.call(0, "train", [11, 12], 0, 900),
+                      v.call(0, "road", [13, 14], 4690, 900), v.call(0, "road", [15, 16], 204.0, 900),
+                      v.call(0, "road", [17, 18], 9999, 100), v.call(1, "aircraft", [19, 20], 391755, 900)];
+            let rec = record_of(0, vs);
+            let line = |mode, from, to, cargo_id| #{ mode: mode, from: #{ id: from, name: "x" }, to: #{ id: to, name: "y" }, cargo_id: cargo_id };
+            let two = line.call("rail", 3, 12, ()); two.vehicles = 2.0;
+            let rail = predicted_monthly([two], #{}, rec);
+            let own = line.call("air", 6, 7, ()); own.monthly_profit = 777.0;
+            let zero = line.call("bus", 8, 9, ()); zero.monthly_profit = 0.0;
+            // Another company's freight line: no price in this company's plan, so nothing, whatever its option says.
+            let theirs = line.call("freight_rail", 8, 9, 1); theirs.monthly_profit = 400.0; theirs.kind = "freight";
+            let mixed = predicted_monthly([line.call("freight_rail", 7, 9, 1), line.call("bus", 1, 2, ()), own, line.call("air", 4, 5, ()), zero, theirs],
+                                          #{ "7>9:1": 5300.4 }, rec);
+            let losing = record_of(0, [v.call(0, "road", [1, 2], -500, 900)]);
+            [rec.lines, rec.earned, rec.by_mode.rail.profit, rec.by_mode.road.lines,
+             realised_monthly(rec, "rail"), realised_monthly(rec, "freight_rail"), realised_monthly(rec, "bus"),
+             type_of(realised_monthly(rec, "air")), type_of(realised_monthly(losing, "bus")),
+             rail.monthly, rail.planner, rail.record, rail.unpriced, rail.earned.rail,
+             mixed.monthly, mixed.planner, mixed.record, mixed.unpriced, mixed.earned.road,
+             predicted_monthly([], #{}, rec).monthly]
+        "#).unwrap().merge(&fns)).unwrap();
+        let v: Vec<String> = out.iter().map(|x| x.to_string()).collect();
+        // Rail per vehicle: 101035 (the two-train line), 192455, 119870, 70719, 43915 over 5 earning
+        // lines and 12: 8799, times the 2 vehicles the chosen option buys. Mixed: 5300 + 203 + 777 +
+        // 203 (a planner price of 0 falls to the record), with the foreign aircraft's line and another
+        // company's freight line unpriced.
+        assert_eq!(v, vec!["8", "7", "629029", "2", "8799", "8799", "203", "()", "()",
+                           "17598", "0", "1", "0", "5", "6483", "2", "2", "2", "2", "0"]);
+    }
+
     fn strategy(script: &str) -> Vec<String> {
         let out: rhai::Array = lib_engine().eval(&format!("import \"strategy_lib\" as sl;\n{script}")).unwrap();
         out.iter().map(|x| x.to_string()).collect()
