@@ -1377,8 +1377,6 @@ TEST_CASE("Only an action on one company is decided in the game's chat, classifi
 	CHECK(KeyFingerprint("short") == "short");
 }
 
-#endif /* OTTD_PRISMATIC_MCP_SERVER */
-
 TEST_CASE("The deadline's approve stands in only for a registered approver of the company it names, when asked and at the deadline", "[prismatic_mcp]")
 {
 	DeadlinePolicy approve{30 * DEADLINE_DAY_TICKS, DeadlineVerdict::Approve};
@@ -1446,3 +1444,5 @@ TEST_CASE("A registered key that a second client connects with approves from nei
 	CHECK(DecideChat(f, false) == ChatVerdict::Allow);
 	CHECK(ChatVerdictText(ChatVerdict::SharedKey).find("connected twice") != std::string_view::npos);
 }
+
+#endif /* OTTD_PRISMATIC_MCP_SERVER */
