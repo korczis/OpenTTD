@@ -25,4 +25,18 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
-updated_at: '2026-11-22'
+updated_at: 2026-11-25T04:44:51Z
+started_at: 2026-11-25T03:52:40Z
+started_event: sha256:4205901ba4e76159a95167a268a2bc5d9117c8f54dd465690e02f940b446ce45
+verified_at: 2026-11-25T04:42:59Z
+verified_event: sha256:93db786ee163b3eb0ad061e66c84cd5a80fb9dce574ae93a6e70c8de6c4e7165
+completed_at: 2026-11-25T04:44:51Z
+completed_event: sha256:319621c0e3e0b86d416dca66ba39ae6d0908ce86d8a36fafdb5e87958e6f557a
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "majordomus product validate; majordomus plan validate; majordomus doctor; tools/surfaces/surfaces sync && tools/surfaces/surfaces check; tools/knowledge/refs check; bash tools/research/test/research_test.sh; python3 -B tools/research/ai-battle/battle.py check; cargo test --release --offline --no-default-features --bin battle-postmortem && battle-postmortem check"
+    result: "On origin/master 99e98b8adc plus this branch: .ai/repo/features/README.md defines stable (five criteria: complete on master, a feature-specific check with how it runs, its last recorded pass on a master-history commit, a current body, no product-validate error), draft (the unmet criterion named) and deprecated; the schema enum cannot carry it and product validate does not check it, which the README says. Every record has a Maturity section: embedded-mcp-server, event-bus-and-store, lan-ai-battle and battle-postmortem promoted to stable, prismatic-bridge kept draft (ADR 0032 client unbuilt, Phase 3 Partial, I0168), the five stable ones re-graded with their evidence. product validate 0 errors (was 1: published-surfaces cited tools/surfaces/README.md, not a discovered document), plan validate 0 failures, doctor exit 0, surfaces 909 documents 0 findings, refs 3376 references 0 failures, research_test.sh 51/51, battle.py check 351 records valid, battle-postmortem 22/22 and check 0 stale (eed5cb5fc5). Codex consulted (alternative; adopted: feature-specific check, evidence commit named)."
+    artifact: "doc/truthful-records"
+    commit: 99e98b8adc9f7b646a19ca75651a2acc3890afba
+    recorded_at: 2026-11-25T04:43:29Z

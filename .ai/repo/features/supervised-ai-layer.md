@@ -25,3 +25,15 @@ plan's state is derived from the recorded stamps and evidence.
 ## What it does not do
 
 It does not accept a proposed ADR. That is the owner's act.
+
+## Maturity
+
+**stable** (definition: `README.md#what-a-status-means`).
+
+- Complete: the `.ai/` layer and the hooks that `majordomus update` installs are in place
+  (`.ai/manifest.yaml`).
+- Own check: the installed pre-commit hook runs `majordomus doctor` on every commit, and the
+  pre-push hook runs `majordomus finish --check`. `majordomus plan validate` checks the plan.
+  Majordomus installs both hooks per clone, and CI runs neither.
+- Last recorded pass: `majordomus plan validate` and `majordomus product validate` with 0
+  errors at 99e98b8adc (2026-11-25, I0112).

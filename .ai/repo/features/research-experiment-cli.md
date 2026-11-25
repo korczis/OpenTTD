@@ -28,3 +28,13 @@ mismatched build directory, and keeps the system compiler whenever it supports
 
 It does not make the stdin start-up race deterministic, and the `research-asan` profile is
 configure-only.
+
+## Maturity
+
+**stable** (definition: `README.md#what-a-status-means`).
+
+- Complete: `tools/research/research` is on master with its four build profiles
+  (`research/tooling.md`).
+- Own check: `bash tools/research/test/research_test.sh`. It is run by hand, and neither CI nor a
+  gate tier runs it.
+- Last recorded pass: 51 passed and 0 failed at 99e98b8adc (master, 2026-11-25, I0112).

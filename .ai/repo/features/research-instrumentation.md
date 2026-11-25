@@ -27,3 +27,17 @@ counts. It mutates nothing.
 
 It is not a stable API, and an instrumented result says nothing about release behaviour without
 separate evidence.
+
+## Maturity
+
+**stable** (definition: `README.md#what-a-status-means`).
+
+- Complete: `OPTION_RESEARCH_INSTRUMENTATION` and the `research_status` console command are on
+  master.
+- Own check: `tools/gate.sh research` proves that `research_status` is compiled into the research
+  binary (`tools/gate.sh:736-742`). `tools/gate.sh change` proves on every run that the default
+  build carries no research code (`default_build_free_of_research`, `tools/gate.sh:700`). CI does
+  not build the research options.
+- Last recorded pass: the default-build half passed inside `tools/gate.sh change` at df0bb80a0b
+  (PR #280). The research-binary half was last recorded at 81b26a6497 (I0030): 2 matches in the
+  research-debug binary, 0 in the baseline-release binary.

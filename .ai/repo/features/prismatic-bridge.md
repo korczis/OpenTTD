@@ -32,5 +32,17 @@ the same.
 Prismatic still decides from one read of the companies and a hand growth model, not from recorded
 history (ADR 0034). This fork's half is done (I0085): the panel offers each company's history (the
 bus endpoint and a store query of its samples) and records the fit a directive reports, or states
-the fallback; fitting it is `prismatic-platform`'s own change. The Rust rewrite of the bridge client (ADR 0032, proposed) is not done. On a
+the fallback; fitting it is `prismatic-platform`'s own change. The Rust rewrite of the bridge client (ADR 0032, accepted) is not done. On a
 vanilla server the only control is still rcon `start_ai`/`reload_ai`, which restarts the AI.
+
+## Maturity
+
+**draft** (definition: `README.md#what-a-status-means`). Criterion 1 is not met: the feature is
+not complete on master. The bridge itself is a sibling repository
+(`~/dev/openttd-prismatic-bridge`, Python/FastAPI), and the native Rust client that ADR 0032
+decides has not been built. Phase 3 is Partial in the phase table of
+`research/prismatic-bridge/ARCHITECTURE.md`. Prismatic's own decision is not yet run live, with
+its effect read back from the game (I0168, milestone `prismatic-closes-one-real-loop`).
+Criterion 2 is met only by hand: `tools/research/bridge-live-check` needs the sibling bridge
+checkout, and neither CI nor a gate tier runs it. Its last recorded PASS was on 2026-11-16 at
+f5ffdf3b17 (I0025).

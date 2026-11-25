@@ -37,7 +37,7 @@ unknown attribute, a follow-up that names no issue, or a closing marker with no 
 pie showData title Open findings by kind
     %% links: open-findings.md?col=Kind&filter=blocked#findings | open-findings.md?col=Kind&filter=out-of-scope#findings | open-findings.md?col=Kind&filter=not-run#findings | open-findings.md?col=Kind&filter=partial#findings | open-findings.md?col=Kind&filter=staged#findings | open-findings.md?col=Kind&filter=unreviewed#findings | open-findings.md?col=Kind&filter=failed#findings | open-findings.md?col=Kind&filter=handoff#findings
     "blocked" : 71
-    "out-of-scope" : 40
+    "out-of-scope" : 42
     "not-run" : 21
     "partial" : 17
     "staged" : 16
@@ -53,7 +53,7 @@ pie showData title Open findings by kind
 | Kind | Count | Meaning |
 |---|---|---|
 | blocked | 71 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
-| out-of-scope | 40 | A finished issue left this out (its non_scope) and no open issue names it |
+| out-of-scope | 42 | A finished issue left this out (its non_scope) and no open issue names it |
 | failed | 7 | A run or check the records say failed |
 | not-run | 21 | A validation the records say did not run |
 | partial | 17 | A capability or run the records say is only partly there |
@@ -172,6 +172,8 @@ pie showData title Open findings by kind
 | out-of-scope | Any change in prismatic-platform or algoglyph | [I0097](../.ai/repo/project/issues/I0097.yaml):18 | none — needs an issue | DERIVED |
 | out-of-scope | Any change in algoglyph or prismatic-platform (the AlgoGlyph-side gap is a written proposal only) | [I0098](../.ai/repo/project/issues/I0098.yaml):16 | none — needs an issue | DERIVED |
 | out-of-scope | Routing the planner's own kernel calls (cargo.rs, linecost.rs, mcp-plan.rs) through the matcher | [I0098](../.ai/repo/project/issues/I0098.yaml):17 | none — needs an issue | DERIVED |
+| out-of-scope | Changing what any feature does | [I0112](../.ai/repo/project/issues/I0112.yaml):13 | none — needs an issue | DERIVED |
+| out-of-scope | Generated regions between majordomus:begin/end markers (edit the policy or templates instead) | [I0112](../.ai/repo/project/issues/I0112.yaml):14 | none — needs an issue | DERIVED |
 | out-of-scope | Any change in algoglyph or prismatic-platform | [I0221](../.ai/repo/project/issues/I0221.yaml):24 | none — needs an issue | DERIVED |
 | out-of-scope | How the AlgoGlyph checkout is located, the flow serve and the catalogue discovery of the hub (feature/algoglyph-submodule) | [I0221](../.ai/repo/project/issues/I0221.yaml):25 | none — needs an issue | DERIVED |
 | out-of-scope | Kernel calls outside the planner: the hub's algoglyph. methods, the Rhai rail steward, mcp-human, the action plan and the kernel feed | [I0221](../.ai/repo/project/issues/I0221.yaml):26 | none — needs an issue | DERIVED |

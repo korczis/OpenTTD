@@ -6,7 +6,7 @@ title: Cross-match post-mortem of the LAN AI battle
 short_title: Battle post-mortem
 headline: After each round, a Rust tool analyses every finished match in parallel, names why each contestant lost against fixed thresholds, counts PrismaticAI's last places, and proposes settings for the next edition.
 summary: tools/research/mcp-rhai battle-postmortem reads the battle's machine store (battle.sqlite, read-only) or an edition's JSON match records, analyses each match on rayon's pool (src/postmortem.rs), writes research/results/postmortem-<edition>.json and the .md derived from it, and fills DuckDB tables (analyses, contestants, proposals) that join with the store; tools/gate.sh change runs its check.
-status: draft
+status: stable
 weight: 46
 areas: [agent-integration]
 audiences: [prismatic-integrator]
@@ -41,3 +41,18 @@ It reads and proposes only. It opens the store read-only, never edits `battle.js
 and makes no claim about defaults (rule `project.a-tuning-claim-needs-held-start-pairs`).
 `battle.py check` enforces that PrismaticAI is never last (rule `project.prismatic-ai-is-never-last`).
 The post-mortem is the diagnosis when that rule fails.
+
+## Maturity
+
+**stable** (definition: `README.md#what-a-status-means`).
+
+- Complete: `tools/research/mcp-rhai/src/postmortem.rs` and its binary `battle-postmortem` are on
+  master. One recorded analysis is committed: `research/results/postmortem-155d18ea50071e72.json`
+  and its `.md`, 259 analyses of edition 155d18ea50071e72 (82c3c2fc0b, 2026-11-19).
+- Own check: `cargo test --bin battle-postmortem` (the five causes, their thresholds and the
+  proposals) is run by hand. Neither CI nor a gate tier runs it. `battle-postmortem check`, which
+  re-derives every committed `.md` from its `.json`, runs in `tools/gate.sh change` whenever a
+  post-mortem record exists (`tools/gate.sh:654-662`).
+- Last recorded pass: at eed5cb5fc5 (master, 2026-11-25, I0112): `cargo test --release --offline
+  --no-default-features --bin battle-postmortem` passed 22 tests with 0 failed, and
+  `battle-postmortem check` reported "1 record(s), 0 stale".

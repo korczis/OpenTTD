@@ -28,3 +28,15 @@ full ctest suite and an untracked-file review, and `full` rebuilds from scratch 
 
 It does not lint or format, because the codebase has no such tool, and it does not install the
 base graphics set its regression cases need on macOS.
+
+## Maturity
+
+**stable** (definition: `README.md#what-a-status-means`).
+
+- Complete: `tools/gate.sh` is on master with the `smoke`, `change`, `research`, `research-free`
+  and `full` tiers. The report taxonomy is defined in `research/README.md`.
+- Own check: the gate checks itself. Every code change runs `tools/gate.sh change`
+  (`.ai/repo/workflows/delivery.md`). CI does not run it, and whether CI should is the open
+  decision of I0116.
+- Last recorded pass: `tools/gate.sh change` PASS (exit 0) at df0bb80a0b, which is in master's
+  history (PR #280).

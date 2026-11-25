@@ -6,7 +6,7 @@ title: LAN AI battle between company AIs on every reachable machine
 short_title: AI battle
 headline: Every SSH-reachable machine runs headless free-for-all matches between PrismaticAI and BaNaNaS AIs, the leaderboard is a derived record, and a browser dashboard shows the run live.
 summary: tools/research/ai-battle/battle.py discovers arenas on the local /24, exports PrismaticAI and a read-only referee Game Script from a commit, schedules null-driver matches onto every arena without end, replays some on another arena to measure cross-machine determinism, and writes research/results/battle-*.json from which the README leaderboard is derived.
-status: draft
+status: stable
 weight: 45
 areas: [agent-integration]
 audiences: [prismatic-integrator]
@@ -51,5 +51,25 @@ elitism, crossover and mutation, one record and one edition per generation, at `
 It does not hand the panel's planner lines to PrismaticAI. The bot plays alone, so a battle
 result is not a held-start duel and does not justify changing a default (rule
 `project.a-tuning-claim-needs-held-start-pairs`). It does not build OpenTTD on an arena; a machine
-without a binary is listed and skipped. It compares nothing across editions or match parameters.
-The dashboard is not a page of the panel shell.
+without a binary is listed and skipped. It does not compare one edition with another. `ablate`, by contrast,
+runs the working tree's PrismaticAI in several settings variants on one seed and records the
+standings under `research/results/ablation-*`. Why each company won or lost is not yet part of
+every match record (milestone `every-battle-match-explains-itself`, I0118-I0124). The dashboard
+is not a page of the panel shell.
+
+## Maturity
+
+**stable** (definition: `README.md#what-a-status-means`).
+
+- Complete: `tools/research/ai-battle/battle.py` is on master with every command named above
+  (`discover`, `fetch`, `prepare`, `run`, `report`, `check`, `fitness`, `ablate`, `replay`).
+  The most recent recorded edition is `research/results/battle-20261122T045411-a80cc94a.json`
+  (45 matches, PrismaticAI from 8c8d025388, committed in 79cd782452).
+- Own check: `battle.py fitness` runs the working tree's PrismaticAI in one short headless match
+  and fails on a crash or a collapsing fleet. `tools/gate.sh change` runs it whenever the bot or
+  the battle tooling changes (`tools/gate.sh:684-685`). `battle.py check` keeps every record and
+  the README leaderboard derived, and it runs on every change (`tools/gate.sh:637-638`).
+  `tools/research/test_ai_battle.py` is not run by CI or by any gate tier.
+- Last recorded pass: `tools/gate.sh change` PASS including `battle.py fitness` PASS at
+  df0bb80a0b, which is in master's history (PR #280). `battle.py check` also passed at
+  99e98b8adc on 2026-11-25 (351 records and 23 ablation records valid, I0112).

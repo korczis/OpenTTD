@@ -10,7 +10,7 @@ status: stable
 weight: 60
 areas: [validation]
 audiences: [research-owner]
-docs: [tools/surfaces/README.md, README.md]
+docs: [README.md]
 adrs: [adr-0012]
 related: [supervised-ai-layer]
 tags: [site, wiki, pages, documentation, derivation]
@@ -41,3 +41,16 @@ tags: [site, wiki, pages, documentation, derivation]
 It publishes nothing a person writes for the site alone, and it does not edit upstream's
 documents: those are exempted from the link check by path in `surfaces.toml`. The wiki is
 overwritten on every sync, so an edit made there is lost.
+
+## Maturity
+
+**stable** (definition: `README.md#what-a-status-means`).
+
+- Complete: `tools/surfaces/` (documented in `tools/surfaces/README.md`) and
+  `.github/workflows/surfaces.yml` are on master.
+- Own check: `tools/surfaces/surfaces check` and
+  `python3 -B -m unittest discover -s tools/surfaces -p 'test_*.py'`. CI runs both
+  (`.github/workflows/surfaces.yml`, job "Check and build", a required check of master). The
+  pre-commit hook and `tools/gate.sh change` (`tools/gate.sh:633-634`) also run
+  `surfaces check`.
+- Last recorded pass: CI run 45542407385 at 99e98b8adc (master, 2026-11-25).
