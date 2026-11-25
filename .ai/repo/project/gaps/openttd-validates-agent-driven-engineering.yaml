@@ -24,6 +24,9 @@ observations:
 - id: status-surfaces-contradict-code
   statement: "Added 2026-11-22 at origin/master 73ccdde469 from an external review checked against the repository: prismatic_mcp_server.cpp:176 and :1665 hard-code read_only=true beside approval-gated mutations, its header (:15-18) says no mutation is exposed, research/mcp-control.md:671 lists shipped openttd.ai.* tools and client mode as planned, five feature records are draft with no definition of draft, and no single capability matrix exists (I0110-I0116)"
   source: file:src/prismatic_mcp/prismatic_mcp_server.cpp
+- id: status-surfaces-partly-fixed
+  statement: "Added 2026-11-25 at origin/master 2dbd575447d (I0113, re-observing status-surfaces-contradict-code): RESOLVED by #221 (I0110, I0111): read_only is derived from the registry (src/prismatic_mcp/prismatic_mcp_server.cpp:200-203), the server header lists the shipped mutations, and tools/check-prismatic-docs.sh (exit 0) refuses the false phrases. RESOLVED by #102 (I0114): research/capability-matrix.md exists with a check. LIVE: five feature records are still draft with no definition of draft (I0112, in progress), the contributor catalogue still holds hand-written entries (I0115, BLOCKED on I0111's record) and no ADR decides where tools/gate.sh change runs (I0116)"
+  source: file:research/capability-matrix.md
 - id: zip-advisories-open
   statement: "Added 2026-11-22: Dependabot, enabled that day, reports four open advisories on zip 6.0.0 in tools/research/mcp-rhai/Cargo.lock (1 critical, 2 high, 1 medium; fixed in >= 9.0.5), pulled in only as a build-dependency of libduckdb-sys (I0220)"
   source: file:tools/research/mcp-rhai/Cargo.lock
@@ -72,9 +75,10 @@ conditions:
   - pages-off
 - criterion: status-surfaces-match-the-code
   state: missing
-  because: "the MCP status, the server header, mcp-control.md and the feature records contradict master; milestone records-and-status-tell-the-truth owns the fix"
+  because: "re-observed 2026-11-25 at 2dbd575447d: the MCP status, the server header, mcp-control.md and the capability matrix now match master (#221, #102); the feature records' maturity (I0112), the hand-written catalogue entries (I0115) and the gate's CI tier (I0116) are still open in milestone records-and-status-tell-the-truth"
   observations:
   - status-surfaces-contradict-code
+  - status-surfaces-partly-fixed
 - criterion: no-open-dependency-alert
   state: satisfied
   because: "re-observed 2026-11-22T13:49Z: PR #63 (3dbdba818d) moved duckdb to 1.10506.1 and zip to 9.8.1; Dependabot marked alerts 1-4 fixed at 13:30:15Z and the open-alert count is 0. The periodic check from the milestone's third criterion is not written yet"
