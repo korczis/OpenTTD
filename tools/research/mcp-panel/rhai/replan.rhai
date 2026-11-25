@@ -31,13 +31,15 @@
 //      pert-monte-carlo then draws the months the new portfolio needs to pay back its investment:
 //      optimistic at the interval's upper end, likely at its mean, pessimistic at its lower end.
 //      The monthly profit it pays back from is the planner's price of each chosen line: its
-//      freight price in the company's plan, else the monthly profit of the option the planner chose
-//      for it (the portfolio's `monthly_profit`, a passenger pair's). A line with neither counts at
-//      this company's realised profit per earning line of that mode: last year's profit of its
-//      earning lines a year old, over their number and 12. It is the profit of a line that pays,
-//      since the bayes-update above already weighs the chance that it does. In game 21647 every
-//      round predicted 0 for its passenger plan, so none was ever modelled ("no payback to model")
-//      while 11 of 12 lines earned. A mode with no earning line in the record still counts 0.
+//      freight price in the company's plan, else the monthly profit above 0 of the option the
+//      planner chose for it (the portfolio's `monthly_profit`, a passenger pair's). A line with
+//      neither counts at this company's realised profit per vehicle of its earning lines of that
+//      mode a year old (last year's, over 12), times the vehicles the option buys (1 when it does
+//      not say): the profit of a line that pays, since the bayes-update above already weighs the
+//      chance that it does, and per vehicle, since a mature line's fleet is not a new line's. In
+//      game 21647 every round predicted 0 for its passenger plan, so none was ever modelled
+//      ("no payback to model") while 11 of 12 lines earned. A mode with no earning line in the
+//      record still counts 0.
 //      The plan is proposed only when the lower end is at least MIN_PAYS and 80 % of the draws pay
 //      back within HORIZON_MONTHS. Otherwise the round says why it holds the current plan.
 //   5. A proposed plan goes through build_plan::apply_to that company: only the settings that
@@ -224,6 +226,7 @@ fn competition(company, stats, names) {
 // in all and per mode (`by_mode`, MODE_OF_TYPE).
 fn record_of(company, vs) {
     let lines = #{};
+    let vehicles = #{};
     let mode_of = #{};
     for v in vs {
         if v.owner != company || v.age < global::RECORD_AGE_DAYS || v.orders.is_empty() { continue; }
@@ -232,48 +235,58 @@ fn record_of(company, vs) {
         stops.sort();
         let k = `${v.type}:${stops}`;
         lines[k] = (lines[k] ?? 0) + v.profit_last_year;
+        vehicles[k] = (vehicles[k] ?? 0) + 1;
         mode_of[k] = global::MODE_OF_TYPE[v.type] ?? v.type;
     }
     let won = 0; let lost = 0;
     let by_mode = #{};
     for k in lines.keys() {
         let m = mode_of[k];
-        if !(m in by_mode) { by_mode[m] = #{ lines: 0, earned: 0, lost: 0, profit: 0, earned_profit: 0 }; }
+        if !(m in by_mode) { by_mode[m] = #{ lines: 0, earned: 0, lost: 0, profit: 0, earned_per_vehicle: 0.0 }; }
         let r = by_mode[m];
         r.lines += 1;
         r.profit += lines[k];
-        if lines[k] > 0 { won += 1; r.earned += 1; r.earned_profit += lines[k]; } else { lost += 1; r.lost += 1; }
+        // An earning line's profit per vehicle: a mature line of four trains says what one train earns.
+        let p = if type_of(lines[k]) == "f64" { lines[k] } else { lines[k].to_float() };
+        if p > 0.0 { won += 1; r.earned += 1; r.earned_per_vehicle += p / vehicles[k].to_float(); } else { lost += 1; r.lost += 1; }
         by_mode[m] = r;
     }
     #{ lines: lines.len(), earned: won, lost: lost, by_mode: by_mode }
 }
 
-// A company's realised monthly profit per earning line of a portfolio line's mode, from its record:
-// last year's profit of that mode's earning lines over their number and 12, a whole number; () when
-// the record has no earning line of that mode. Conditional on earning, because model()'s
-// bayes-update already weighs the chance that a new line earns.
+// A company's realised monthly profit per vehicle of an earning line of a portfolio line's mode, from
+// its record: the mean over that mode's earning lines of last year's profit per vehicle, over 12, a
+// whole number; () when the record has no earning line of that mode. Conditional on earning, because
+// model()'s bayes-update already weighs the chance that a new line earns; per vehicle, because a
+// mature line's fleet is not what a new line buys.
 fn realised_monthly(rec, plan_mode) {
     let r = rec.by_mode[global::MODE_OF_PLAN[plan_mode] ?? plan_mode];
     if type_of(r) == "()" || (r.earned ?? 0) == 0 { return (); }
-    let profit = if type_of(r.earned_profit) == "f64" { r.earned_profit } else { r.earned_profit.to_float() };
-    (profit / r.earned.to_float() / 12.0).floor().to_int()
+    (r.earned_per_vehicle / r.earned.to_float() / 12.0).floor().to_int()
 }
 
 // The predicted monthly profit of exactly the lines the investment buys. Each chosen line is matched
 // to its priced entry in the company's plan (`priced`, producer>acceptor:cargo -> monthly profit);
-// one without it counts at the planner's own monthly profit of its chosen option, else at the
-// record's realised profit per earning line of its mode (realised_monthly), and one without any
-// adds nothing, so the payback errs on the long side.
+// one without it counts at the planner's own monthly profit of its chosen option when that is above
+// 0, else at the record's realised profit per vehicle (realised_monthly) times the vehicles its
+// option buys (1 when it does not say), and one without any adds nothing. `earned` names, per mode,
+// how many earning lines a record price came from.
 fn predicted_monthly(chosen, priced, rec) {
-    let out = #{ monthly: 0, planner: 0, record: 0, unpriced: 0 };
+    let out = #{ monthly: 0, planner: 0, record: 0, unpriced: 0, earned: #{} };
     for c in chosen {
         let id = |x| { let s = `${x.id ?? x}`; let p = s.split(":"); p[p.len() - 1] };
         let k = `${id.call(c.from)}>${id.call(c.to)}:${c.cargo_id ?? ""}`;
         if k in priced { out.monthly += priced[k].to_int(); out.planner += 1; continue; }
         let own = c.monthly_profit;
-        if type_of(own) == "f64" || type_of(own) == "i64" { out.monthly += own.to_int(); out.planner += 1; continue; }
+        if (type_of(own) == "f64" || type_of(own) == "i64") && own > 0 { out.monthly += own.to_int(); out.planner += 1; continue; }
         let r = realised_monthly(rec, c.mode);
-        if type_of(r) == "()" { out.unpriced += 1; } else { out.monthly += r; out.record += 1; }
+        if type_of(r) == "()" { out.unpriced += 1; continue; }
+        let n = c.vehicles;
+        let n = if type_of(n) == "i64" && n > 0 { n } else if type_of(n) == "f64" && n >= 1.0 { n.to_int() } else { 1 };
+        out.monthly += r * n;
+        out.record += 1;
+        let m = global::MODE_OF_PLAN[c.mode] ?? c.mode;
+        out.earned[m] = rec.by_mode[m].earned;
     }
     out
 }
@@ -452,7 +465,7 @@ fn plan_round(b, p) {
     let summary = #{ date: r.date, company: b.id, bot: b.name, rank: r.rank, of: r.of, value: r.value, value_by_month: r.months,
                      finances: f, competitors: others, competition: comp, portfolio: chosen,
                      investment_k: portfolio.investment_k, predicted_monthly: monthly,
-                     monthly_from: #{ planner: pm.planner, record: pm.record, unpriced: pm.unpriced }, record: rec,
+                     monthly_from: #{ planner: pm.planner, record: pm.record, unpriced: pm.unpriced, earned: pm.earned }, record: rec,
                      model: m, floors: #{ raised: g.raised, lost: g.lost, grouped: g.grouped, planned_before: g.planned_before,
                                                   planned_after: g.planned_after, modes: g.added_modes },
                      proposed: if type_of(by) == "()" { diff.keys() } else { [] }, sent: send.keys(), held: held, held_by: by,
