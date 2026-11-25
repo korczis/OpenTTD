@@ -37,6 +37,8 @@ mod hub_algoglyph;
 mod invest;
 #[path = "../src/linecost.rs"]
 mod linecost;
+#[path = "../src/outcome.rs"]
+mod outcome;
 #[path = "../src/plan.rs"]
 mod plan;
 #[path = "../src/plan_pipeline.rs"]
