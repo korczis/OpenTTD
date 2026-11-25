@@ -624,6 +624,10 @@ fn main() {
     }
 }
 
+// The capital watch's tests (mcp-panel/rhai/capital_watch.rhai), a file of their own.
+#[cfg(test)]
+mod capital_watch_tests;
+
 #[cfg(test)]
 mod tests {
     #[test]

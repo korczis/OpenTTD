@@ -1,0 +1,59 @@
+{
+ "schema": "ai-battle-ablation/v1",
+ "id": "ablation-20261124T181712-seed31337",
+ "generated_at": "2026-11-24T18:17:12+00:00",
+ "seed": 31337,
+ "years": 10,
+ "field": [
+  "AAAHogEx",
+  "LuDiAI AfterFix",
+  "CivilAI",
+  "AdmiralAI",
+  "NoCAB",
+  "DictatorAI",
+  "SimpleAI"
+ ],
+ "slot": 0,
+ "match_cfg": {
+  "years": 10,
+  "start_year": 1950,
+  "landscape": "temperate",
+  "map_x": 8,
+  "map_y": 8,
+  "breakdowns": 1
+ },
+ "rev": "c67212f7f07017c825fd3c41030138482b8642a1",
+ "tree_dirty": false,
+ "rows": [
+  {
+   "variant": "u",
+   "settings": "aggressiveness=80,air_add_waiting=90,air_full_load=0,air_grow_money=0,air_keep_last=1,air_level_max=20,air_level_once=1,air_level_step=8,air_max_tiles=440,air_planes=5,air_reuse=1,air_routes_max=2,air_towns=35,cash_reserve=5000,catchment_stops=4,intercity=1,invest_air_cap=10,invest_borrow=1,invest_min=50,invest_ppv_div=6,invest_road_cap=12,line_budget=30000,max_routes=30,own_fail_pause=4,own_lines=4,rail_twin_max=10,self_steward=1,statue_money=0",
+   "exit_code": 0,
+   "value": 4642238,
+   "money": 2607215,
+   "vehicles": 83,
+   "rail": 22,
+   "road": 4,
+   "air": 57,
+   "errors": 0,
+   "field_best": 13865640,
+   "t": "1960-01",
+   "vs_first": 0.0
+  },
+  {
+   "variant": "p",
+   "settings": "aggressiveness=80,air_add_waiting=90,air_full_load=0,air_grow_money=0,air_keep_last=1,air_level_max=20,air_level_once=1,air_level_step=8,air_max_tiles=440,air_planes=5,air_reuse=1,air_routes_max=2,air_towns=35,cash_reserve=5000,catchment_stops=4,intercity=1,invest_air_cap=10,invest_borrow=1,invest_min=50,invest_ppv_div=6,invest_road_cap=12,line_budget=30000,max_routes=30,own_fail_pause=4,own_lines=4,rail_twin_max=10,self_steward=1,statue_money=0,rail_a=0,rail_b=1",
+   "exit_code": 0,
+   "value": 3657580,
+   "money": 1994450,
+   "vehicles": 70,
+   "rail": 20,
+   "road": 4,
+   "air": 46,
+   "errors": 0,
+   "field_best": 14755585,
+   "t": "1960-01",
+   "vs_first": -0.2121
+  }
+ ]
+}

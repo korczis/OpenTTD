@@ -308,6 +308,7 @@ function PrismaticAI::InvestSurplus(b) {
 	local nv = AIVehicle.CloneVehicle(depot, best.sample, true);
 	if (AIVehicle.IsValidVehicle(nv)) {
 		AIVehicle.StartStopVehicle(nv);
+		PrismaticAI.Funnel(PrismaticAI.FunnelMode(best.type), "invested");
 		AILog.Info("PrismaticAI: invest: " + best_ppv + " a year per vehicle on route " + PrismaticAI.RouteKey(best.sample) +
 			"; added vehicle " + nv + " (" + (best.count + 1) + " on the route, money " + money + ")");
 	}
