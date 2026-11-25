@@ -55,7 +55,9 @@ gone_within() {  # gone_within URL SECONDS: 1 when no helper of URL runs within 
 SCRIPT="$WORK/for_ever.rhai"
 echo 'loop { sleep(200); }' > "$SCRIPT"
 
-echo "==> the panel is killed: its helpers stop"
+echo "==> the panel is killed: its helpers stop (helpers given the stack's run token file)"
+RHAI_TOKEN_FILE="$WORK/run-token"
+( umask 077; printf 'check-token\n' > "$RHAI_TOKEN_FILE" )
 panel a
 rhai_helper alpha "$WORK/alpha.log" "$PANEL_PID" "$URL" "$SCRIPT"
 PIDS+=($!)
@@ -71,7 +73,8 @@ check "their pidfiles are gone" "$([[ ! -e "$WORK/alpha.pid" && ! -e "$WORK/beta
 grep -q "has not answered" "$WORK/alpha.log" && said=1 || said=0
 check "the helper says why it stopped" "$said"
 
-echo "==> the stack's script is killed first: its helper stops with the panel"
+echo "==> the stack's script is killed first: its helper stops with the panel (no run token)"
+unset RHAI_TOKEN_FILE
 panel b
 ( rhai_helper gamma "$WORK/gamma.log" "$PANEL_PID" "$URL" "$SCRIPT"; wait ) &
 STACK=$!

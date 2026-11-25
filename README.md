@@ -500,6 +500,7 @@ decides when a measurement may change a default.
 | [A road depot or bay stop faces its front tile but is not connected to it; drive-through stops run along the road's axis](.ai/repo/knowledge/curated/road-stops-and-depots-need-their-entrance-road.md) | When a bot, a Rhai script or an MCP caller builds a road station, a road depot, a rail depot or a train station. |
 | [AIs and the Game Script run only on the server, and the Game Script keeps ticking while the game is paused](.ai/repo/knowledge/curated/scripts-run-only-on-the-server-and-the-game-script-runs-while-paused.md) | Before designing a bridge, MCP or experiment flow that pauses the game or expects script activity on clients. |
 | [A TextEffectID stored in a game object is per-client view state; game logic must never branch on it](.ai/repo/knowledge/curated/text-effect-ids-are-client-local.md) | When reading or adding a TextEffectID (loading indicators, income text) in a vehicle, station or other pooled object. |
+| [The AI-battle arena runs the repository's current BattleReferee, so its matches log what the fitness rules judge (owner, 2026-11-25)](.ai/repo/knowledge/curated/the-arena-follows-the-repositorys-referee.md) | When provisioning or updating the ttd-battle arena, calibrating a fitness rule on arena matches, or wondering why arena match logs lack a field the referee logs. |
 | [PrismaticAI's rail pathfinder: land, level crossings, bridges and tunnels, each taken only as the game allows it](.ai/repo/knowledge/curated/the-bots-rail-pathfinder-lays-plain-track-only.md) | When choosing which planned rail line the owner's bot builds, or reading why a bot company has no trains. |
 | [-c makes the file's folder the working-dir search path, the config directory and the personal directory](.ai/repo/knowledge/curated/the-config-flag-moves-the-personal-directory.md) | When starting OpenTTD with -c for an experiment, a test or a second instance, and looking for its saves, logs, crash files or downloaded content. |
 | [Multiplayer desync detection compares only random.state[0] at sync frames; a divergence that never feeds Random() goes unseen](.ai/repo/knowledge/curated/the-desync-check-compares-only-the-game-random-state.md) | When using 'no desync reported' as evidence that a hook or experiment left clients in step. |
@@ -791,18 +792,18 @@ from the code. The right-hand column says what was counted.
 | **24** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
 | **46** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **62** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **63** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **24** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **38** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **209** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
-| **99** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
+| **100** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 62
+    "research tools and checks (tools/research/, shell and Python)" : 63
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 13
     "Rhai scripts that drive a live game (director, narrator, steward, …)" : 24
 ```
@@ -1363,6 +1364,7 @@ itself (generated):
 | [Battle post-mortem](research/battle-postmortem.md) | RESEARCH-ONLY. After each round of the LAN AI battle, the post-mortem answers where each contestant loses, and PrismaticAI above all. battle.py already writes a post-mortem per match into its machine store.... |
 | [Capability matrix: what every capability runs on today](research/capability-matrix.md) | RESEARCH-ONLY. One row per capability of this fork: who owns it, the code that does it (cited as path:line:Symbol), what it reads from a live game, what happens when that input or its engine is missing, where its... |
 | [Co-play: the owner and the bot in one company](research/coplay.md) | RESEARCH-ONLY, UNSTABLE. A server-side join policy behind OPTION_RESEARCH_INSTRUMENTATION. Default off. |
+| [Design note: the owner's companies settle their approvals by a countdown](research/design-approval-countdown-owner-companies.md) | RESEARCH-ONLY. Status: revision 2, not implemented. It went to review before any code, under the owner's order of 2026-11-23 to consult other models and peers first. Peer session openttd-36 reviewed it. A three-pass... |
 | [Duel evidence audit and a frozen duel set](research/duel-evidence-audit.md) | RESEARCH-ONLY. What the recorded duels (research/results/duel-.json) hold constant and what they let vary, and one set of duels run with every input frozen and named. Tool: tools/research/mcp-duel; scoreboard:... |
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |
 | [PrismaticAI's growth funnel: where a line stops before it pays](research/growth-funnel.md) | PrismaticAI logs one FUNNEL line per transport mode once a game year. Each line counts the stages a new line passes: candidate discovery, affordability, construction, and operation that pays. The code is... |

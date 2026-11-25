@@ -1692,8 +1692,23 @@ pending request (red-team residual risk 3). Approval is now bound to the owner i
   (a `prismatic_mcp approval_deadline` line sent through `POST /api/console`, or
   `$PRISMATIC_MCP_APPROVAL_DEADLINE` at start). `credential` says which credential the request
   carried, never the credential: `owner-cookie` (the page's cookie), `token` (the secret in
-  `X-Panel-Owner`) or `none` (nothing, a wrong secret, or the panel's own start). `peer` is the
-  address the panel saw the request come from; a client's own `X-Panel-Peer` header is dropped.
+  `X-Panel-Owner`, or the run token) or `none` (nothing, a wrong secret, or the panel's own start),
+  and `role` whose it is: `owner`, `run` or `none`. `peer` is the address the panel saw the request
+  come from; a client's own `X-Panel-Peer` header is dropped.
+- **The stack's own processes carry a run token**, never the owner secret. mcp-e2e writes a fresh
+  one per run into a 0600 file (`make_run_token`), hands its path to the panel
+  (`--run-token-file`) and to every helper (`mcp-rhai --panel-token-file`), and sends it itself
+  (`stack_post`, on curl's stdin) in `X-Panel-Token`: on no command line, in no log, in no
+  environment. A file its group or others may read stops the panel at start. Without the flag the
+  panel makes one for the scripts it runs in process (`run_token_for`), so its own services carry
+  it too. The run token names a caller as the stack's own (`credential: token`, `role: run`) and
+  opens no owner's route: approving, auto-approve on and the approvers stay the owner secret's.
+  `mcp-duel` holds the token of the stack it drives through `$MCP_E2E_RUN_TOKEN_FILE`.
+- **The owner client's key is the owner's alone.** A client's personal directory
+  (`$TMP/client-home`) holds its `secrets.cfg`, the key that makes the owner's client an approver:
+  mcp-e2e starts every client under `umask 077`, closes the directory to 0700 and the file to 0600
+  (`seal_client_home`), and says so when a `secrets.cfg` is still readable beyond the owner
+  (`open_client_secrets`).
 - **Scripts never approve.** The Rhai `approve(id)` and `auto_approve(true)` raise an error that
   names the console command. They hold no secret, so `POST /api/rhai` cannot approve through them.
 

@@ -126,6 +126,19 @@ function PrismaticAI::CloseLine(slot, line) {
 	line.closed = true;
 	AILog.Info("PrismaticAI: rail line " + slot + " closed: " + line.label + ", " + n + " tiles cleared");
 	AILog.Info(PrismaticAI.LineRecord(slot, line));
+	/* An own line that closed gives its own_lines slot back, the way a line that was never built
+	 * does (main.nut, PR #234): own_lines bounds the own lines that run, and a closed one runs
+	 * nothing and holds no train. Kept, it held the slot for the rest of the game: in the owner's
+	 * game 21647 line 7 (OIL Runnley Oil Wells) closed on 1957-08-25 and was never replaced. Its pair
+	 * stays in freight_tried, so the next own line is another pair. Never raised here: a line
+	 * adopted from the map (AdoptTrainlessLines) is not in own_built until a load counts it. */
+	if ("from" in line) {
+		local open = PrismaticAI.OwnLinesOpen();
+		if (open < this.own_built) {
+			AILog.Info("PrismaticAI: own lines " + this.own_built + " -> " + open + ": closed line " + slot + " gives its slot back");
+			this.own_built = open;
+		}
+	}
 	return true;
 }
 

@@ -8,7 +8,8 @@
 # rhai_helpers_stop finds every helper even after its supervisor was killed. Found 2026-11-23:
 # helpers ran 6.5 h under pid 1 after their stack had stopped.
 #
-# Needs: RHAI (the mcp-rhai binary), RHAI_PIDDIR (a directory the stack owns).
+# Needs: RHAI (the mcp-rhai binary), RHAI_PIDDIR (a directory the stack owns); RHAI_TOKEN_FILE, when
+# set, is the stack's run token file (mcp-rhai --panel-token-file).
 
 # rhai_helper NAME LOG PANEL_PID URL SCRIPT [VAR=value ...]: start one supervised helper in the
 # background; its supervisor's pid is in $! as after any `&`.
@@ -16,8 +17,8 @@ rhai_helper() {
   local name="$1" log="$2" panel="$3" url="$4" script="$5" owner="$$"
   shift 5
   ( while kill -0 "$panel" 2>/dev/null && kill -0 "$owner" 2>/dev/null; do
-      env "$@" "$RHAI" --panel "$url" --exit-with-parent --give-up "${RHAI_GIVE_UP:-20}" \
-        --pidfile "$RHAI_PIDDIR/$name.pid" "$script" >> "$log" 2>&1
+      env "$@" "$RHAI" --panel "$url" ${RHAI_TOKEN_FILE:+--panel-token-file "$RHAI_TOKEN_FILE"} \
+        --exit-with-parent --give-up "${RHAI_GIVE_UP:-20}" --pidfile "$RHAI_PIDDIR/$name.pid" "$script" >> "$log" 2>&1
       [[ $? -eq 5 ]] && break   # another copy holds the pidfile: never two of one helper
       sleep 3
     done ) &
