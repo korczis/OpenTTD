@@ -445,6 +445,47 @@ class GrowthFunnel(unittest.TestCase):
         self.assertEqual(m["funnel"], {"A": [{"year": 1960, "mode": "rail", "tried": 3, "stations": 1}]})
 
 
+    def test_a_healthy_prismatic_that_stops_expanding_fails_with_a_named_regime(self):
+        """research/failure-regimes.md: PrismaticAI keeps 10 vehicles for three years while both
+        rivals grow and pull away; the check names the regime, prints it, and fails."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            repo = tmp / "repo"
+            (repo / "build").mkdir(parents=True)
+            (repo / "ai" / "PrismaticAI").mkdir(parents=True)
+            (repo / "referee" / "BattleReferee").mkdir(parents=True)
+            lines = []
+            for q in range(13):
+                y, mo = 1960 + q // 4, 3 * (q % 4) + 1
+                lines += [ref(y, mo, 0, 1000 + q, veh=10), ref(y, mo, 1, 2000 * (q + 1), veh=5 + 2 * q),
+                          ref(y, mo, 2, 1500 + 100 * q, veh=5 + q)]
+            fake = repo / "build" / "openttd"
+            fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\n")
+            fake.chmod(0o755)
+            arena = tmp / "cache" / "arena"
+            (arena / "baseset").mkdir(parents=True)
+            (arena / "ai" / "library").mkdir(parents=True)
+            (arena / "ai" / "AAAHogEx.tar").write_bytes(b"")
+            cfg = {"cache": tmp / "cache", "prismatic": {"path": "ai/PrismaticAI"},
+                   "referee": {"path": "referee/BattleReferee"},
+                   "match": {"years": 3, "start_year": 1960, "landscape": "temperate", "map_x": 8, "map_y": 8},
+                   "fitness": {"years": 3, "seed": 1, "rules": {}, "must_be_healthy": ["PrismaticAI"],
+                               "lineups": [[{"ai": "PrismaticAI"}, {"ai": "AAAHogEx"}, {"ai": "AdmiralAI"}]]}}
+            old = battle.REPO
+            battle.REPO = repo
+            out, err = io.StringIO(), io.StringIO()
+            try:
+                with redirect_stdout(out), redirect_stderr(err):
+                    code = battle.cmd_fitness(cfg)
+            finally:
+                battle.REPO = old
+        self.assertEqual(code, 10, out.getvalue() + err.getvalue())
+        self.assertIn(f"fitness[0]: {'PrismaticAI':26} regime no_expansion: 1960-01..1963-01 "
+                      "(known 1962-01): fleet 10->10", out.getvalue())
+        self.assertIn("FAIL [0] PrismaticAI: regime:no_expansion: 1960-01..1963-01", err.getvalue())
+        self.assertNotIn("AAAHogEx: regime", err.getvalue())
+
+
 class MatchContract(unittest.TestCase):
     def test_done_needs_exit_zero_and_final_year(self):
         m = match("m-0001", "h", 1, [3, 2, 1])
