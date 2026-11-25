@@ -86,9 +86,10 @@ newest first. "Links to" and "Linked from" are read from the documents' own link
 
 | Date | Document | Kind | Seeds | Links to | Linked from |
 |---|---|---|---|---|---|
-| 2026-11-23 | [Finished rail lines without a train, and nothing that saw them](../incident-2026-11-23-trainless-lines.md) | Root-cause analysis | [15805](#evaluations-against-the-field) | [incident-2026-11-23-live-game-15805](../incident-2026-11-23-live-game-15805.md) | - |
-| 2026-11-23 | [PrismaticAI ran one train for eight years in the owner's live game](../incident-2026-11-23-live-game-15805.md) | Post-mortem | [15805](#evaluations-against-the-field) | - | [incident-2026-11-23-trainless-lines](../incident-2026-11-23-trainless-lines.md) |
-| 2026-11-22 | [Four PrismaticAI companies of one map built on the same mines](../incident-2026-11-22-sibling-industries.md) | Post-mortem | [2927](#evaluations-against-the-field) | - | - |
+| 2026-11-23 | [Finished rail lines without a train, and nothing that saw them](../incident-2026-11-23-trainless-lines.md) | Root-cause analysis | [15805](#evaluations-against-the-field) | [analysis-2026-11-23-why-prismatic-loses](../analysis-2026-11-23-why-prismatic-loses.md), [incident-2026-11-23-live-game-15805](../incident-2026-11-23-live-game-15805.md) | [analysis-2026-11-23-why-prismatic-loses](../analysis-2026-11-23-why-prismatic-loses.md) |
+| 2026-11-23 | [PrismaticAI ran one train for eight years in the owner's live game](../incident-2026-11-23-live-game-15805.md) | Post-mortem | [15805](#evaluations-against-the-field) | - | [analysis-2026-11-23-why-prismatic-loses](../analysis-2026-11-23-why-prismatic-loses.md), [incident-2026-11-23-trainless-lines](../incident-2026-11-23-trainless-lines.md) |
+| 2026-11-23 | [Analysis 2026-11-23: why PrismaticAI loses to AAAHogEx, and why nothing reacted](../analysis-2026-11-23-why-prismatic-loses.md) | Post-mortem | [2927](#evaluations-against-the-field) | [incident-2026-11-22-sibling-industries](../incident-2026-11-22-sibling-industries.md), [incident-2026-11-23-live-game-15805](../incident-2026-11-23-live-game-15805.md), [incident-2026-11-23-trainless-lines](../incident-2026-11-23-trainless-lines.md) | [incident-2026-11-23-trainless-lines](../incident-2026-11-23-trainless-lines.md) |
+| 2026-11-22 | [Four PrismaticAI companies of one map built on the same mines](../incident-2026-11-22-sibling-industries.md) | Post-mortem | [2927](#evaluations-against-the-field) | - | [analysis-2026-11-23-why-prismatic-loses](../analysis-2026-11-23-why-prismatic-loses.md) |
 | 2026-11-19 | [An unowned AI battle held three machines, and master's CI broke twice](../incident-2026-11-19-ai-battle-overload.md) | Post-mortem | - | - | - |
 
 <!-- strategy-incidents:end -->
