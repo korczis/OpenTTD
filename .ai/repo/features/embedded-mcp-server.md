@@ -39,8 +39,12 @@ derived from the catalogue (I0067). MCP reads leave the game deterministic: in t
 
 It exists only in a research build. CMake compiles none of it unless `OPTION_PRISMATIC_MCP_SERVER`
 and `OPTION_RESEARCH_INSTRUMENTATION` are both ON, and a default build is checked to be free of it
-(`tools/gate.sh research-free`). It listens on loopback only. The approver is whoever types in the
-game console. No authenticated principal is named (I0182, milestone
+(`tools/gate.sh research-free`). It listens on loopback only. An approval is given in the game
+console. Otherwise, when its deadline expires, the standing verdict decides it. An approve verdict
+applies only to a company that a registered approver plays, both when the approval was asked and
+at the deadline. Registered approvers are known by their client key's fingerprint
+(`openttd://approvals`, ed33855b1f). Naming an authenticated principal for every approval on every
+surface is still open (I0182, milestone
 `governed-access-is-authenticated-and-every-capability-reaches-every-surface`). How much of the
 tool catalogue a live run actually exercises is counted by arrival, not by validated outcome
 (I0183).
