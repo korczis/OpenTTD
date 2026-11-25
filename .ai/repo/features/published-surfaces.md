@@ -10,7 +10,7 @@ status: stable
 weight: 60
 areas: [validation]
 audiences: [research-owner]
-docs: [tools/surfaces/README.md, README.md]
+docs: [README.md]
 adrs: [adr-0012]
 related: [supervised-ai-layer]
 tags: [site, wiki, pages, documentation, derivation]
@@ -41,3 +41,18 @@ tags: [site, wiki, pages, documentation, derivation]
 It publishes nothing a person writes for the site alone, and it does not edit upstream's
 documents: those are exempted from the link check by path in `surfaces.toml`. The wiki is
 overwritten on every sync, so an edit made there is lost.
+
+## Maturity
+
+`stable`, graded 2026-11-25 against [the levels](README.md#maturity-levels).
+
+- **shipped**: `tools/surfaces/surfaces.py:2373:run_check` and the rest of `tools/surfaces/`.
+- **tested**: the scratch-repository tests of `tools/surfaces/`, among them
+  `tools/surfaces/test_facts_site_only.py:48:test_a_site_only_fact_is_not_written_into_the_region`
+  and `tools/surfaces/test_maturity.py`.
+- **gated**: the pre-commit hook (`.ai/repo/policy.yaml:206:surfaces`), `tools/gate.sh change`
+  (`tools/gate.sh:634:check`) and CI, which runs both the check and the tests
+  (`.github/workflows/surfaces.yml:64:check`, `.github/workflows/surfaces.yml:67:unittest`).
+- **documented**: `README.md` and `tools/surfaces/README.md`. The second is not in `docs:`: no
+  source class of `.ai/repo/knowledge/sources.yaml` indexes a README under `tools/`, so
+  `majordomus product validate` refused the reference.

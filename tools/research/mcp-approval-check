@@ -84,6 +84,7 @@ try {
     console.log('NOT RUN the web channel\'s Approve: no owner secret (--owner or PANEL_OWNER_SECRET)');
   } else {
     await page.goto(`${base}/?owner=${encodeURIComponent(secret)}`, { waitUntil: 'load' });
+    check('opening /?owner= redirects to the page without the secret in the address', !page.url().includes('owner='), page.url());
     const cookie = (await context.cookies(base)).some((c) => c.name === `mcp_owner_${port}`);
     check(`opening /?owner= gives the page the owner cookie (mcp_owner_${port})`, cookie);
     await page.goto(base + '/', { waitUntil: 'load' });

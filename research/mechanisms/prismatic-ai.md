@@ -72,7 +72,16 @@ flowchart TB
   The settings `line<N>_trains` and `line<N>_wagons` are targets; the bot clones, resizes, sells, or
   closes a line to match, removing only what the line owns: its track (a level crossing keeps its
   road), its own platforms (`AIRail.RemoveRailStationTileRectangle`, never a whole joined station)
-  and its throats and depot. The bot never decides there; it reconciles.
+  and its throats and depot. The bot never decides there; it reconciles. A closed own line gives
+  its `own_lines` slot back, as a line that was never built does, so the bot can plan another pair
+  (`CloseLine`; the closed pair stays tried). Before, a closed line held its slot for the rest of
+  the game: with `own_lines=1` on seed 930967890 (headless, 2026-11-25) the bot closed its line
+  and built none in the 20 months after it.
+- **Restart without amnesia** (`restore.nut`). A save holds the bot's state, including when the
+  planner's passenger pair became due and for which pair (`PairDue`), so a load keeps the pair's
+  two-year wait; a save from before starts it again. A bot restored from the map marks the pair
+  done only when a passenger line between its two towns stands, never because some other rail
+  line does.
 - **Ships, off by default** (`ships.nut`, setting `ships_max`). The planner has no water mode, so
   the bot plans its ship routes itself, the way it plans its own freight lines: oil rigs (which
   hand their oil only to their own station and have no land for rail) and coastal producers to an
