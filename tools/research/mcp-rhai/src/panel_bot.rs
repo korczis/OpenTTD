@@ -7,7 +7,6 @@ use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -389,14 +388,13 @@ pub fn start_bot(g: &Arc<Game>, ai: &str, settings: Value) -> Result<Value, Stri
         flat.push(format!("{k}={}", py_int(v)?));
     }
     let flat = flat.join(",");
-    if g.tool_names().contains("openttd.ai.start") {
-        return g.tool("openttd.ai.start", json!({"name": ai, "settings": settings}));
+    // A new company goes through the game's approval (openttd.ai.start), never past it: a binary
+    // without that tool starts no bot from here (the console line would found one unapproved).
+    if !g.tool_names().contains("openttd.ai.start") {
+        return Err(format!("this game binary has no openttd.ai.start, so no bot starts here without the owner's approval \
+                            (start_ai {ai} {flat} at the game's own console)").replace("  ", " "));
     }
-    let cmd = format!("start_ai {ai} {flat}").trim().to_string();
-    g.console(&cmd)?;
-    g.ai_started.store(true, Ordering::SeqCst);
-    g.event("ai", &format!("bot started: start_ai {ai} {flat}"));
-    Ok(json!({"status": "started", "via": "console", "command": cmd}))
+    g.tool("openttd.ai.start", json!({"name": ai, "settings": settings}))
 }
 
 pub fn set_bot_setting(g: &Arc<Game>, company: &Value, name: &str, value: &Value) -> Result<Value, String> {

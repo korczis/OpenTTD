@@ -44,6 +44,7 @@ from markdown_it import MarkdownIt
 sys.dont_write_bytecode = True  # no __pycache__ beside the sources, which the next sync would read
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import findings  # noqa: E402 - the open-findings region's generator, a module of its own
+import maturity  # noqa: E402 - the feature records' maturity levels, a module of its own
 
 EXIT_OK, EXIT_USAGE, EXIT_FINDINGS, EXIT_DRIFT = 0, 2, 10, 11
 HERE = Path(__file__).resolve().parent
@@ -62,6 +63,7 @@ DEFAULTS = {
     "generators": {"items": []},
     "pages": {"items": []},
     "findings": dict(findings.DEFAULTS),
+    "features": dict(maturity.DEFAULTS),
 }
 # Set while a declared generator runs, so a generator that calls surfaces again does not recurse.
 NESTED_ENV = "SURFACES_GENERATING"
@@ -2377,6 +2379,9 @@ def run_check(repo: Repo, cfg: dict, docs: dict[str, Doc], layer: Layer) -> list
             findings.append(Finding("front", path, 1, f"front matter does not parse, so the page shows it as text: {why}"))
     findings += check_libraries(repo, cfg)
     findings += check_pages(repo, cfg)
+    findings += [Finding("feature", p.path, p.line, p.message) for p in maturity.check(
+        repo.root, layer.features, repo.tracked, repo.dirs,
+        {str(i.get("id")) for i in layer.issues}, cfg["features"])]
     tools = load_tools(repo, cfg)
     findings += check_tool_headers(tools)
     for path, doc in docs.items():
