@@ -638,6 +638,10 @@ function PrismaticAI::Start() {
 		 * names a company after its first station's town, so this waits for that name. */
 		if (!disclosed && AIController.GetSetting("disclose_name") == 1) disclosed = PrismaticAI.DiscloseName();
 		this.steward_on = b.self_steward == 1;
+		/* The rounds inside this heartbeat's rail searches buy with these settings (capital.nut
+		 * AllocateCapitalInside). Set only by AllocateCapital at the heartbeat's end, it was null
+		 * through the first heartbeat after a start or a load, so no round bought anything there. */
+		CAPITAL.b = b;
 		local afloat = PrismaticAI.QuarterRunningCost();
 		if (PrismaticAI.StayAfloat(afloat)) this.rescued_at = AIDate.GetCurrentDate();
 		local frozen = this.BuildFrozen(afloat);
