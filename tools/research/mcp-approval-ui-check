@@ -633,7 +633,9 @@ async function bulkPhase(page, secret, earlier) {
   const mine = [...earlier, ...runs].filter((e) => e.url.endsWith('/static/approvals.js'));
   const lines = changedLines('tools/research/mcp-panel/static/approvals.js');
   const missed = lines.filter((n) => !mine.some((e) => lineRan(e, n)));
-  check(`every changed line of static/approvals.js ran in Chrome (${lines.length} line(s))`, mine.length > 0 && lines.length > 0 && missed.length === 0,
+  // Like app.js and shell.js above: a change that leaves approvals.js alone has no line to run, and
+  // passes once the page loaded it (mine); requiring a changed line failed every such change.
+  check(`every changed line of static/approvals.js ran in Chrome (${lines.length} line(s))`, mine.length > 0 && missed.length === 0,
     missed.map((n) => `approvals.js:${n}`).join(', '));
 }
 
