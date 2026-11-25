@@ -1689,7 +1689,7 @@ TEST_CASE("A standing rule decides every waiting approval it matches when it is 
 	 * approved and goes to the one execution path, recorded with the rule. */
 	R::Spec everything;
 	everything.via = "panel";
-	everything.match = {{"pause", "*"}};
+	everything.match = {{"pause", false}}; // {"pause": "*"} over every tool would be broad: refused without --force
 	auto allow = AsNetworkClient([&] { return PrismaticMCP::AddApprovalRule(R::Effect::Allow, everything); });
 	REQUIRE(allow.ok);
 	CHECK(allow.refused == 1); // posted as a client would be: refused before the command, see AsNetworkClient
@@ -2176,7 +2176,7 @@ TEST_CASE("A broad allow is refused whatever matcher spells any arguments, and {
 	CHECK(R::IsBroadMatcher({{"$", "*"}}));
 	CHECK(R::IsBroadMatcher({{"$ne", nullptr}}));
 	CHECK_FALSE(R::IsBroadMatcher({{"company", 1}}));
-	CHECK_FALSE(R::IsBroadMatcher({{"company", 0}}));  // a company named, not none: {} has no company
+	CHECK_FALSE(R::IsBroadMatcher({{"company", 0}}));  // a literal narrows
 	CHECK_FALSE(R::IsBroadMatcher({{"name", "max_*"}}));
 	for (const char *m : {"{}", "{'$': '*'}", "{'$ne': null}"}) {
 		INFO(m);
@@ -2262,6 +2262,57 @@ TEST_CASE("Without a hub address the hub's pages lead to the panel, and an allow
 	spec.tool = "ai.set_setting";
 	CHECK(P::Selected(s, spec) == std::vector<uint64_t>{1, 2});
 	CHECK(P::Selected(s, spec, true) == std::vector<uint64_t>{2});
+}
+
+TEST_CASE("An allow matcher is broad when it constrains no value, whatever keys or paths it names", "[prismatic_mcp]")
+{
+	namespace R = PrismaticMCP::Rules;
+	/* Broad: every entry is a non-empty run of stars, a lone $ne, or an object that is itself broad. */
+	for (const json &m : {json::parse(R"({"company":"*"})"), json::parse(R"({"$.*":"*"})"), json::parse(R"({"$..name":"**"})"),
+			json::parse(R"({"a":{"b":"*"}})"), json::parse(R"({"x":{"$ne":null}})"), json::parse(R"({"$":"*"})"), json::object(),
+			json::parse(R"({"$ne":3})"), json::parse(R"({"$.l[*]":"*","$['a b']":"***"})")}) {
+		INFO(m.dump());
+		CHECK(R::IsBroadMatcher(m));
+		R::Spec spec;
+		spec.tool = "openttd.*";
+		spec.match = m;
+		spec.via = "window";
+		CHECK(R::BroadAllowRefusal(R::Effect::Allow, spec).has_value());
+		spec.via = "panel";
+		CHECK(R::BroadAllowRefusal(R::Effect::Allow, spec).has_value());
+		spec.via = "console";
+		CHECK(R::BroadAllowRefusal(R::Effect::Allow, spec).has_value());
+		spec.force = true; // the console alone, with --force
+		CHECK_FALSE(R::BroadAllowRefusal(R::Effect::Allow, spec).has_value());
+		spec.force = false;
+		spec.tool = "openttd.ai.set_setting"; // one tool, any arguments: "Always allow X"
+		CHECK_FALSE(R::BroadAllowRefusal(R::Effect::Allow, spec).has_value());
+	}
+	/* Narrowing: a literal, a glob with any other character or a '?', the empty string, $in, bounds, an array. */
+	for (const json &m : {json::parse(R"({"company":0})"), json::parse(R"({"name":"a*"})"), json::parse(R"({"n":{"$lt":5}})"),
+			json::parse(R"({"c":{"$in":[1]}})"), json::parse(R"({"name":""})"), json::parse(R"({"name":"?"})"),
+			json::parse(R"({"n":{"$gte":1}})"), json::parse(R"({"l":["*"]})"), json::parse(R"({"a":{"b":"x"}})"),
+			json::parse(R"({"x":{"$ne":null,"$lt":3}})"), json::parse(R"({"company":"*","name":"max_*"})")}) {
+		INFO(m.dump());
+		CHECK_FALSE(R::IsBroadMatcher(m));
+		R::Spec spec;
+		spec.tool = "openttd.*";
+		spec.match = m;
+		spec.via = "panel";
+		CHECK_FALSE(R::BroadAllowRefusal(R::Effect::Allow, spec).has_value());
+	}
+	CHECK_FALSE(R::IsBroadMatcher(json::array()));
+	CHECK_FALSE(R::IsBroadMatcher("*"));
+	CHECK_FALSE(R::IsBroadValue(5));
+	/* The console refuses the bypass the probes let through. */
+	ClearRulesAndQueue();
+	IConsoleStdLibRegister();
+	IConsoleCmdExec("prismatic_mcp rule allow openttd.* {'company': '*'}");
+	IConsoleCmdExec("prismatic_mcp rule allow openttd.* {'$.*': '*'} --via panel");
+	CHECK(PrismaticMCP::ApprovalRules().empty());
+	IConsoleCmdExec("prismatic_mcp rule allow openttd.* {'company': '*'} --force");
+	CHECK(PrismaticMCP::ApprovalRules().size() == 1);
+	ClearRulesAndQueue();
 }
 
 #endif /* OTTD_PRISMATIC_MCP_SERVER */

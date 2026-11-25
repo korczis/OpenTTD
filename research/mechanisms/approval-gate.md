@@ -118,9 +118,12 @@ permission rules do.
   and printed when the MCP server starts, only if it is the user's and nobody else may read it.
   A loaded rule is `created_via file` and never decides an owner-only tool.
 - **Guards:**
-  - An allow rule over several tools (`*`, `openttd.cmd.*`) whose matcher matches any arguments
-    (none, `{}`, `{"$": "*"}`, `{"$ne": null}`: one that matches both `{}` and
-    `{"company": 0, "x": 1}`) needs `--force`, and only the console takes it.
+  - An allow rule over several tools (`*`, `openttd.cmd.*`) whose matcher constrains no value
+    needs `--force`, and only the console takes it (`Rules::IsBroadMatcher`, the same definition
+    as the panel's `broad_matcher`). A matcher constrains no value when it is none or `{}`, or
+    every entry, under any key or path, is a non-empty run of `*`, a lone `$ne`, or an object of
+    the same kind: `{"company": "*"}`, `{"$.*": "*"}`, `{"x": {"$ne": null}}`. A literal, the
+    empty string, any other glob, `$in`, a bound or an array narrows.
   - Removing a deny rule is refused to armed or injected input, like an allow rule.
   - Rules decide a request before the queue's cap.
 - **For programs:** `--via panel|auto|window` names the channel. With `--nonce <n>` the console

@@ -70,9 +70,12 @@ like a single approval, and every one of them is recorded.
      (`created_via panel`), the panel's auto-approve loop (`auto`) or loaded from the rules file
      (`file`) never decides an owner-only tool (`ai.set_settings`, a Battlebrain plan); one made at
      the game's console or by the owner's own click in the window does.
-   - An allow rule over a glob of several tools (`*`, `openttd.cmd.*`) whose matcher matches any
-     arguments (none, `{}`, or one that matches both `{}` and `{"company": 0, "x": 1}`, as
-     `{"$": "*"}` does) is refused, except at the console with `--force`.
+   - An allow rule over a glob of several tools (`*`, `openttd.cmd.*`) whose matcher constrains no
+     value is refused, except at the console with `--force`. A matcher constrains no value when
+     it is none or `{}`, or every entry, under any key or path, is a non-empty run of `*`, a lone
+     `$ne`, or an object of the same kind (`{"company": "*"}`, `{"$.*": "*"}`); a literal, the
+     empty string, any other glob, `$in`, a bound or an array narrows. The panel's
+     `broad_matcher` is the same definition, and the window refuses with the same words.
    - Removing a deny rule is guarded like an allow rule, since an allow rule may then decide what
      it held back.
    - Rules apply to every approval as it is created, and to every approval already waiting when a

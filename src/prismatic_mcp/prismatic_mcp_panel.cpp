@@ -715,6 +715,14 @@ struct ControlWindow : Window {
 			IConsolePrint(CC_ERROR, "Prismatic control: {}", *refused);
 			return;
 		}
+		/* The core refuses a broad allow from the window (Rules::BroadAllowRefusal, IsBroadMatcher):
+		 * say so here, with the same words, before asking the owner to confirm it. */
+		Rules::Spec from_window = spec;
+		from_window.via = "window";
+		if (auto broad = Rules::BroadAllowRefusal(effect, from_window); broad.has_value()) {
+			IConsolePrint(CC_ERROR, "Prismatic control: {}", *broad);
+			return;
+		}
 		if (effect == Rules::Effect::Allow && !confirmed) {
 			const size_t now = Selected(Snapshot(), spec, true).size(); // an allow rule never approves an expired one
 			this->pending_rule = std::make_pair(effect, spec);

@@ -628,18 +628,42 @@ inline Spec ParseSpec(std::span<const std::string_view> tokens)
 }
 
 /**
- * Whether a matcher matches about anything: none at all, or one that matches both empty arguments
- * and arguments that name nothing in particular (a company 0 and a stray key), as {"$": "*"} or
- * {"$ne": null} do.
+ * Whether one matcher value constrains nothing: a non-empty string of stars only, an operator
+ * object whose only operator is $ne (with any operand), or an object whose every entry, under a
+ * plain key or a path, is itself one that constrains nothing ({} included). Everything else
+ * narrows: a literal, the empty string, a glob with any other character or a question mark, $in,
+ * $lt, $lte, $gt, $gte, and an array. That a key is present never counts as narrowing. The
+ * panel's broad_matcher is the same definition.
+ * @param value The matcher value.
+ * @return True when it constrains nothing.
+ */
+inline bool IsBroadValue(const nlohmann::json &value)
+{
+	if (value.is_string()) {
+		const std::string &s = value.get_ref<const std::string &>();
+		return !s.empty() && s.find_first_not_of('*') == std::string::npos;
+	}
+	if (!value.is_object()) return false;
+	for (auto it = value.begin(); it != value.end(); ++it) {
+		if (IsOperator(it.key())) {
+			if (it.key() != "$ne") return false;
+		} else if (!IsBroadValue(it.value())) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Whether a matcher constrains no value (IsBroadValue): none at all, {}, {"company": "*"},
+ * {"$.*": "*"}, {"x": {"$ne": null}}. Such a matcher matches every call that has any arguments,
+ * so with a tool glob it approves whatever those tools ask.
  * @param match The matcher; null for any arguments.
  * @return True when it does not narrow the arguments.
  */
 inline bool IsBroadMatcher(const nlohmann::json &match)
 {
-	if (match.is_null()) return true;
-	static const nlohmann::json probes[] = {nlohmann::json::object(), nlohmann::json{{"company", 0}, {"x", 1}}};
-	for (const auto &probe : probes) if (!Match(match, probe)) return false;
-	return true;
+	return match.is_null() || (match.is_object() && IsBroadValue(match));
 }
 
 /**
