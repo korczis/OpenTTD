@@ -750,7 +750,11 @@ on its own is auto-approve, and that is the owner's call (knowledge
   command in `list_cmds` (`con_companies()`, `con_newgame("42")`; `list_cmds` counts them), and one per operation
   of the panel's OpenAPI document (`api_<operationId>`: `api_bots()`, `api_botStart(#{...})`,
   `api_tool_openttd_game_set_pause(#{pause: true})`). A tool, console command or panel route added
-  to the game is a Rhai function the next time a script starts.
+  to the game is a Rhai function the next time a script starts. While the panel's game runs
+  (`/api/status` `server_running`) but does not list its tools or commands yet, as for a service
+  started right after the panel came up, the derivation asks again every 2 s for up to
+  `$PRISMATIC_RHAI_DERIVE_WAIT_S` (default 60) and says on stderr when the script starts without
+  them; with no game it does not wait.
 - `ttd::owner_company()` is the owner's company every service asks (watchdog, build audit,
   narrator): `$OWNER_COMPANY`, else where a registered approver plays, else the panel's AI.
 - `import "ttd" as ttd;` loads `tools/research/mcp-panel/rhai/ttd.rhai` (`MCP_RHAI_PATH` overrides),
