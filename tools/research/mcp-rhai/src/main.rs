@@ -108,15 +108,26 @@ fn set_http_timeout(seconds: i64) -> i64 {
     HTTP_TIMEOUT.with(|t| t.replace(seconds.clamp(1, 3600) as u64)) as i64
 }
 
+/// The header a panel's own script sends its run token in (panel.rs RUN_TOKEN_HEADER): it names the
+/// caller as the stack's own, and never grants an owner's route.
+pub(crate) const RUN_TOKEN_HEADER: &str = "X-Panel-Token";
+
 #[derive(Clone)]
 struct Panel {
     base: String,
+    /// The panel's run token (`--panel-token-file`, or the panel's own for its in-process scripts).
+    token: Option<String>,
 }
 
 impl Panel {
+    /// A request to the panel, with the run token when the script holds one.
+    fn request(&self, method: &str, path: &str) -> ureq::Request {
+        let r = ureq::request(method, &format!("{}{}", self.base, path)).timeout(http_timeout());
+        match &self.token { Some(t) => r.set(RUN_TOKEN_HEADER, t), None => r }
+    }
+
     fn get(&self, path: &str) -> R<Dynamic> {
-        let v: Value = ureq::get(&format!("{}{}", self.base, path))
-            .timeout(http_timeout())
+        let v: Value = self.request("GET", path)
             .call()
             .map_err(|e| format!("GET {path}: {e}"))?
             .into_json()
@@ -125,9 +136,7 @@ impl Panel {
     }
 
     fn post(&self, path: &str, body: Value) -> R<Dynamic> {
-        let resp = ureq::post(&format!("{}{}", self.base, path))
-            .timeout(http_timeout())
-            .send_json(body);
+        let resp = self.request("POST", path).send_json(body);
         let v: Value = match resp {
             Ok(r) => r.into_json().map_err(|e| format!("POST {path}: {e}"))?,
             Err(ureq::Error::Status(code, r)) => {
@@ -558,7 +567,12 @@ pub(crate) fn rhai_dir() -> std::path::PathBuf {
 /// (and from the hub, when given), and `import` resolved against MCP_RHAI_PATH, else the panel's
 /// rhai/ library. mcp-rhai runs one script in it; mcp-panel runs /api/rhai scripts in it in process.
 pub(crate) fn host(base: &str, hub: Option<&str>) -> Engine {
-    let panel = Panel { base: base.trim_end_matches('/').to_string() };
+    host_as(base, hub, None)
+}
+
+/// [`host`] for a script that holds the panel's run `token` ([`RUN_TOKEN_HEADER`] on every call).
+pub(crate) fn host_as(base: &str, hub: Option<&str>, token: Option<String>) -> Engine {
+    let panel = Panel { base: base.trim_end_matches('/').to_string(), token };
     let mut engine = engine(panel.clone());
     engine.set_module_resolver(rhai::module_resolvers::FileModuleResolver::new_with_path(rhai_dir()));
     let (mut tools, commands) = derive(&mut engine, &panel);
@@ -577,10 +591,38 @@ pub(crate) fn host(base: &str, hub: Option<&str>) -> Engine {
     engine
 }
 
+/// A token or secret kept in a file only its owner reads: the trimmed text of `path`. Err for a file
+/// that cannot be read, is empty, or that its group or others may read (a secret must not be).
+pub(crate) fn read_secret_file(path: &str) -> Result<String, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).map_err(|e| format!("{path}: {e}"))?.permissions().mode();
+    if mode & 0o077 != 0 {
+        return Err(format!("{path} is readable beyond its owner (mode {:o}): chmod 600 {path}", mode & 0o777));
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let token = text.trim();
+    if token.is_empty() { return Err(format!("{path} is empty")); }
+    Ok(token.to_string())
+}
+
+/// `--panel-token-file FILE` taken out of `args`: the run token in FILE (never on the command line
+/// itself, where a process list would show it), None without the flag.
+fn take_token_file(args: &mut Vec<String>) -> Result<Option<String>, String> {
+    let Some(i) = args.iter().position(|a| a == "--panel-token-file") else { return Ok(None) };
+    if i + 1 >= args.len() { return Err("--panel-token-file needs a file".into()); }
+    let file = args.remove(i + 1);
+    args.remove(i);
+    read_secret_file(&file).map(Some)
+}
+
 fn main() {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
+    let token = take_token_file(&mut args).unwrap_or_else(|e| {
+        eprintln!("mcp-rhai: {e}");
+        std::process::exit(2);
+    });
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("usage: mcp-rhai [--panel URL] [--hub URL] (<script.rhai> | -e '<script>')");
+        println!("usage: mcp-rhai [--panel URL] [--panel-token-file FILE] [--hub URL] (<script.rhai> | -e '<script>')");
         return;
     }
     let mut base = "http://127.0.0.1:8800".to_string();
@@ -611,11 +653,11 @@ fn main() {
             }
         },
         _ => {
-            eprintln!("usage: mcp-rhai [--panel URL] [--hub URL] (<script.rhai> | -e '<script>')");
+            eprintln!("usage: mcp-rhai [--panel URL] [--panel-token-file FILE] [--hub URL] (<script.rhai> | -e '<script>')");
             std::process::exit(2);
         }
     };
-    let engine = host(&base, hub.as_deref());
+    let engine = host_as(&base, hub.as_deref(), token);
     match engine.eval::<Dynamic>(&script) {
         Ok(v) if !v.is_unit() => println!("{v}"),
         Ok(_) => {}
@@ -632,10 +674,43 @@ mod capital_watch_tests;
 
 #[cfg(test)]
 mod tests {
+    /// A file holding `text` with `mode`, in a fresh directory of this test.
+    fn token_file(name: &str, text: &str, mode: u32) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mcp-rhai-token-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("token");
+        std::fs::write(&f, text).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(mode)).unwrap();
+        f.display().to_string()
+    }
+
+    #[test]
+    fn the_run_token_comes_from_a_file_only_its_owner_reads() {
+        let ok = token_file("ok", "  t0ken\n", 0o600);
+        assert_eq!(super::read_secret_file(&ok).unwrap(), "t0ken");
+        let wide = token_file("wide", "t0ken", 0o640);
+        assert!(super::read_secret_file(&wide).unwrap_err().contains("chmod 600"));
+        let empty = token_file("empty", " \n", 0o600);
+        assert!(super::read_secret_file(&empty).unwrap_err().contains("is empty"));
+        assert!(super::read_secret_file("/nonexistent/token").is_err());
+        let mut args: Vec<String> = ["--panel", "http://x", "--panel-token-file", ok.as_str(), "s.rhai"].map(String::from).to_vec();
+        assert_eq!(super::take_token_file(&mut args).unwrap().as_deref(), Some("t0ken"));
+        assert_eq!(args, ["--panel", "http://x", "s.rhai"], "the flag and its file are taken out");
+        assert_eq!(super::take_token_file(&mut args).unwrap(), None, "no flag, no token");
+        let mut bare = vec!["--panel-token-file".to_string()];
+        assert!(super::take_token_file(&mut bare).is_err());
+        let p = super::Panel { base: "http://127.0.0.1:9".into(), token: Some("t0ken".into()) };
+        assert_eq!(p.request("GET", "/api/status").header(super::RUN_TOKEN_HEADER), Some("t0ken"));
+        let p = super::Panel { base: "http://127.0.0.1:9".into(), token: None };
+        assert_eq!(p.request("GET", "/api/status").header(super::RUN_TOKEN_HEADER), None);
+    }
+
     #[test]
     fn a_script_cannot_approve_or_switch_auto_approve_on() {
         // Port 9 (discard) answers nothing: a refusal that needed the panel would be a connection error.
-        let e = super::engine(super::Panel { base: "http://127.0.0.1:9".into() });
+        let e = super::engine(super::Panel { base: "http://127.0.0.1:9".into(), token: None });
         for call in ["approve(7)", "auto_approve(true)"] {
             let err = e.eval::<rhai::Dynamic>(call).unwrap_err().to_string();
             assert!(err.contains("approval is the owner's") && err.contains("prismatic_mcp approve"), "{call}: {err}");
@@ -1065,7 +1140,7 @@ mod tests {
         }
         let golden: Value = serde_json::from_str(&std::fs::read_to_string(
             concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-human/golden/human-pointing.v1.json")).unwrap()).unwrap();
-        let e = engine(Panel { base: "http://127.0.0.1:9".into() });
+        let e = engine(Panel { base: "http://127.0.0.1:9".into(), token: None });
         for c in golden["cases"].as_array().unwrap().iter().take(3) {
             let script = format!("kernel(\"human-pointing\", #{{from: {}, to: {}, width: {:.1}, seed: {}, drag: {}}})",
                 c["from"], c["to"], c["width"].as_f64().unwrap(), c["seed"], c["drag"]);
@@ -1079,7 +1154,7 @@ mod tests {
     /// (the refusal names the install), so the test never boots npm.
     #[test]
     fn a_script_runs_a_native_algoglyph_kernel_in_process() {
-        let e = engine(Panel { base: "http://127.0.0.1:9".into() });
+        let e = engine(Panel { base: "http://127.0.0.1:9".into(), token: None });
         let id = algoglyph::native::entries(&serde_json::json!([]))[0]["id"].as_str().unwrap().to_string();
         let got = from_dyn(e.eval::<Dynamic>(&format!("kernel(\"{id}\", #{{keys: [3, 1, 2]}})")).unwrap()).unwrap();
         assert_eq!(got["outcome"], "sorted", "{got}");
