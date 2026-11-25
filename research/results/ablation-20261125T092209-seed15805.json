@@ -1,0 +1,60 @@
+{
+ "schema": "ai-battle-ablation/v1",
+ "id": "ablation-20261125T092209-seed15805",
+ "generated_at": "2026-11-25T09:22:09+00:00",
+ "seed": 15805,
+ "years": 10,
+ "field": [
+  "AAAHogEx",
+  "LuDiAI AfterFix",
+  "CivilAI",
+  "AdmiralAI",
+  "NoCAB",
+  "DictatorAI",
+  "SimpleAI"
+ ],
+ "slot": 0,
+ "match_cfg": {
+  "years": 10,
+  "start_year": 1950,
+  "landscape": "temperate",
+  "map_x": 8,
+  "map_y": 8,
+  "breakdowns": 1,
+  "script_opcodes": 250000
+ },
+ "rev": "eb0d839ce010f86b2c64fdff53f13aa0f22395ba",
+ "tree_dirty": false,
+ "rows": [
+  {
+   "variant": "unplanned",
+   "settings": "aggressiveness=80,air_add_waiting=90,air_full_load=0,air_grow_money=0,air_keep_last=1,air_level_max=20,air_level_once=1,air_level_step=8,air_max_tiles=440,air_planes=5,air_reuse=1,air_routes_max=2,air_towns=35,cash_reserve=5000,catchment_stops=4,intercity=1,invest_air_cap=10,invest_borrow=1,invest_min=50,invest_ppv_div=6,invest_road_cap=12,line_budget=30000,max_routes=30,own_fail_pause=4,own_lines=4,rail_twin_max=10,self_steward=1,statue_money=0",
+   "exit_code": 0,
+   "value": 1695263,
+   "money": 882959,
+   "vehicles": 52,
+   "rail": 10,
+   "road": 28,
+   "air": 14,
+   "errors": 0,
+   "field_best": 18119788,
+   "t": "1960-01",
+   "vs_first": 0.0
+  },
+  {
+   "variant": "planned",
+   "settings": "aggressiveness=80,air_add_waiting=90,air_full_load=0,air_grow_money=0,air_keep_last=1,air_level_max=20,air_level_once=1,air_level_step=8,air_max_tiles=440,air_planes=5,air_reuse=1,air_routes_max=2,air_towns=35,cash_reserve=5000,catchment_stops=4,fr10_cargo=1,fr10_from=37,fr10_to=1,fr2_cargo=1,fr2_from=29,fr2_to=39,fr3_cargo=3,fr3_from=33,fr3_to=26,fr4_cargo=1,fr4_from=36,fr4_to=13,fr5_cargo=8,fr5_from=9,fr5_to=6,fr6_cargo=6,fr6_from=24,fr6_to=5,fr7_cargo=8,fr7_from=15,fr7_to=11,fr8_cargo=8,fr8_from=12,fr8_to=11,fr9_cargo=3,fr9_from=8,fr9_to=16,fr_cargo=1,fr_from=0,fr_to=1,intercity=1,invest_air_cap=10,invest_borrow=1,invest_min=50,invest_ppv_div=6,invest_road_cap=12,line_budget=30000,max_routes=30,own_fail_pause=4,own_lines=4,rail_a=1,rail_after=5,rail_b=3,rail_twin_max=10,self_steward=1,statue_money=0",
+   "exit_code": 0,
+   "value": 1093652,
+   "money": 618179,
+   "vehicles": 23,
+   "rail": 8,
+   "road": 6,
+   "air": 9,
+   "errors": 0,
+   "field_best": 13127277,
+   "t": "1960-01",
+   "vs_first": -0.3549
+  }
+ ]
+}
