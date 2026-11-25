@@ -135,6 +135,9 @@ export PRISMATIC_START_PAUSED="${PRISMATIC_START_PAUSED:-2}"
 # console line would change a measured run's timing. A caller's own value wins.
 export PRISMATIC_STRATEGIST="${PRISMATIC_STRATEGIST:-0}"
 echo "==> duel on :$PANEL, seed $SEED, $MONTHS months, held start $PRISMATIC_START_PAUSED${BOT_SETTINGS:+, bot settings $BOT_SETTINGS}"
+# The stack's run token (mcp-e2e make_run_token): in a 0600 file of this run, so this script's own
+# console lines are the stack's, like its helpers'.
+export MCP_E2E_RUN_TOKEN_FILE="$TMP/run-token"
 "$ROOT_DIR/tools/research/mcp-e2e" --no-gui --no-browser --seed "$SEED" --panel-port "$PANEL" \
   --mcp-port "$(free)" --game-port "$(free)" > "$TMP/stack.log" 2>&1 &
 PID=$!
@@ -152,8 +155,9 @@ fi
 
 # Company B: the opponent AI with its own defaults (start_ai with no settings starts a new AI
 # company). An AI the game does not have is refused here, before any month is played.
-out="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"command\":\"start_ai $OPPONENT\",\"wait\":2.0}" \
-  "http://127.0.0.1:$PANEL/api/console")"
+out="$(printf 'X-Panel-Token: %s\n' "$(tr -d '[:space:]' < "$MCP_E2E_RUN_TOKEN_FILE")" \
+  | curl -s -X POST -H @- -H 'Content-Type: application/json' -d "{\"command\":\"start_ai $OPPONENT\",\"wait\":2.0}" \
+    "http://127.0.0.1:$PANEL/api/console")"
 # The game's own refusal (console_cmds.cpp ConStartAI); the bot's log lines may say "failed" too.
 if grep -q "Failed to load the specified AI" <<<"$out"; then
   echo "mcp-duel: the game has no AI named $OPPONENT: $out" >&2; exit 2
