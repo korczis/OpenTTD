@@ -5,6 +5,14 @@
 # (value, money, loan, vehicles by type), and the run ends after N months with a table and a JSON
 # record under research/results/, so the result is evidence, not an impression.
 #
+# Every observation is of the company the arm's tested agent holds, never of whichever company the
+# dump lists first: `--company N` names it (the console's #N, in both games), else each game says it
+# (the one running company of the panel's AI in GET /api/bots, whose id is #N minus one). Its row is
+# picked by number and founding year, so a rival, a company founded later or a bankrupt slot taken
+# over never stands in for it; a month it is not in the game is recorded as its absence. When the
+# company cannot be told (no AI named, several companies of it running, none founded in 120 s) the
+# run refuses with exit 3 and writes no record.
+#
 # Every record's page carries charts between `<!-- ab-charts:begin -->` and `<!-- ab-charts:end -->`,
 # derived from its JSON alone: company value per game month (A against B), A's lead over B per
 # month, and the fleet per month (A against B) when every month has it; each month's mark opens that
@@ -14,26 +22,31 @@
 # is stale. `tools/surfaces/surfaces sync` runs the first, `surfaces check` the second (surfaces.toml,
 # generator ab-charts), so a change of the charts reaches every page in one commit.
 #
-# Usage: tools/research/mcp-ab [--months 12] [--seed N] [--label text]
+# Usage: tools/research/mcp-ab [--months 12] [--seed N] [--label text] [--company N]
 #        tools/research/mcp-ab --render [--check]
 # Exit: 0 the run completed (whatever its outcome) or the pages are current, 1 a stack did not come
-# up, 2 bad arguments, 11 (--render --check) a page's charts are stale.
+# up, 2 bad arguments, 3 the tested company cannot be told, 11 (--render --check) a page's charts
+# are stale.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MONTHS=12 SEED="$RANDOM" LABEL="" RENDER="" CHECK=""
+MONTHS=12 SEED="$RANDOM" LABEL="" RENDER="" CHECK="" COMPANY=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --months) MONTHS="${2:?}"; shift 2 ;;
     --seed) SEED="${2:?}"; shift 2 ;;
     --label) LABEL="${2:?}"; shift 2 ;;
+    --company) COMPANY="${2:?}"; shift 2 ;;
     --render) RENDER=1; shift ;;
     --check) CHECK=1; shift ;;
     -h|--help) sed -n '2,/^[^#]/s/^# \{0,1\}//p' "$0"; exit 0 ;;
-    *) echo "usage: mcp-ab [--months N] [--seed N] [--label text] | --render [--check]" >&2; exit 2 ;;
+    *) echo "usage: mcp-ab [--months N] [--seed N] [--label text] [--company N] | --render [--check]" >&2; exit 2 ;;
   esac
 done
 if [[ -n "$CHECK" && -z "$RENDER" ]]; then
   echo "mcp-ab: --check goes with --render" >&2; exit 2
+fi
+if [[ -n "$COMPANY" && ! "$COMPANY" =~ ^[1-9][0-9]*$ ]]; then
+  echo "mcp-ab: --company is the console's company number (#N of \`companies\`, from 1), not '$COMPANY'" >&2; exit 2
 fi
 if [[ -n "$RENDER" ]]; then
   # The run's own Python (the heredoc below, as test_mcp_ab.py loads it), run for its pages only:
@@ -82,7 +95,7 @@ for port in "$A_PANEL" "$B_PANEL"; do
 done
 # The run's Python. Everything is a function and the run itself is under __main__, so --render and
 # tools/research/test_mcp_ab.py load the same text without starting anything.
-python3 -I - "$A_PANEL" "$B_PANEL" "$MONTHS" "$SEED" "$LABEL" "$ROOT_DIR" <<'PY'
+python3 -I - "$A_PANEL" "$B_PANEL" "$MONTHS" "$SEED" "$LABEL" "$ROOT_DIR" "$COMPANY" <<'PY'
 import json
 import math
 import os
@@ -90,6 +103,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -110,13 +124,75 @@ def get(port, path):
         return json.loads(r.read())
 
 
-def snapshot(port):
-    out = post(port, "/api/console", {"command": "companies", "wait": 1.0}).get("output", [])
-    text = " ".join(l if isinstance(l, str) else str(l) for l in out)
-    rows = [dict(zip(("id", "name", "founded", "money", "loan", "value", "trains", "road", "planes", "ships"),
+class Unbound(Exception):
+    """The company the tested agent holds cannot be told: the run refuses rather than read another."""
+
+
+def companies(output):
+    """Every company of one `companies` dump (the console's output lines), in its order; `id` is the
+    console's #N."""
+    text = " ".join(l if isinstance(l, str) else str(l) for l in output)
+    return [dict(zip(("id", "name", "founded", "money", "loan", "value", "trains", "road", "planes", "ships"),
                      (int(m[0]), m[1], int(m[2]), int(m[3]), int(m[4]), int(m[5]), int(m[6]), int(m[7]), int(m[8]), int(m[9]))))
             for m in ROW.findall(text)]
-    return rows[0] if rows else None
+
+
+def dump(port):
+    return companies(post(port, "/api/console", {"command": "companies", "wait": 1.0}).get("output", []))
+
+
+def observe(rows, tested):
+    """The tested company's observation in one dump, naming it (`company`: its #N): its row when the
+    dump holds that number with the founding year it was bound with; else its absence, saying why (it
+    left the game, or its number now belongs to a company founded since). Never another company's row."""
+    n, founded = tested["company"], tested.get("founded")
+    for r in rows:
+        if r["id"] != n:
+            continue
+        if founded is not None and r["founded"] != founded:
+            return {"company": n, "present": False,
+                    "note": f"#{n} is now '{r['name']}', founded {r['founded']}: not the tested company (founded {founded})"}
+        return dict(r, company=n, present=True)
+    return {"company": n, "present": False, "note": f"#{n} is not among the game's companies"}
+
+
+def snapshot(port, tested):
+    return observe(dump(port), tested)
+
+
+def bind(port, given="", tries=60, pause=2.0):
+    """The company the arm's tested agent holds, as {company (#N), name, founded, from}: `given`
+    (--company) when set, else the one running company of the panel's AI (GET /api/status `ai`,
+    GET /api/bots `running`, whose id is #N minus one), waited for until the dump holds it. Raises
+    Unbound when it cannot be told: no AI named, several companies of it, no /api/bots, or none in
+    the dump after tries * pause seconds."""
+    why = ""
+    for i in range(tries):
+        if i:
+            time.sleep(pause)
+        if given:
+            n, source = int(given), "--company"
+        else:
+            ai = get(port, "/api/status").get("ai") or ""
+            if not ai:
+                raise Unbound("the panel names no AI it started (GET /api/status `ai`): pass --company N")
+            try:
+                running = get(port, "/api/bots").get("running") or []
+            except (urllib.error.URLError, TimeoutError, ValueError) as e:
+                raise Unbound(f"GET /api/bots did not answer ({e}): pass --company N") from e
+            mine = sorted(r["id"] + 1 for r in running
+                          if r.get("ai") == ai and r.get("running") is not False and isinstance(r.get("id"), int))
+            if len(mine) > 1:
+                raise Unbound(f"{len(mine)} running companies of {ai} ({', '.join(f'#{m}' for m in mine)}): pass --company N")
+            if not mine:
+                why = f"no running company of {ai} in GET /api/bots"
+                continue
+            n, source = mine[0], f"GET /api/bots: the one running company of {ai}"
+        row = next((r for r in dump(port) if r["id"] == n), None)
+        if row:
+            return {"company": n, "name": row["name"], "founded": row["founded"], "from": source}
+        why = f"#{n} is not among the game's companies"
+    raise Unbound(f"{why} after {tries * pause:g} s")
 
 
 def month_count(port):
@@ -267,17 +343,28 @@ def render_pages(root, check=False):
     return 0
 
 
+def tested_line(result):
+    """Which company each arm observed and how it was told (the record's `tested`)."""
+    tested = result.get("tested") or {}
+    if not tested:
+        return "the record does not say which"
+    return "; ".join(f"{k} #{t['company']} '{t['name']}' (founded {t['founded']}, from {t['from']})"
+                     for k, t in sorted(tested.items()))
+
+
 def markdown(result, page=None, root=Path(".")):
     """The record's reading. Its charts are charts(result): what --render rewrites later."""
     seed, months, label, plan, last = result["seed"], result["months"], result["label"], result["plan"], result["final"]
+    who = lambda r: f"#{r['company']} {r.get('name', '(absent)')}" if "company" in r else ""
     table = lambda side: "\n".join(
-        f"| {r['month']} | {r.get('date','')} | {r.get('value','')} | {r.get('money','')} | {r.get('loan','')} | {r.get('road','')} | {r.get('planes','')} |"
+        f"| {r['month']} | {r.get('date','')} | {who(r)} | {r.get('value','')} | {r.get('money','')} | {r.get('loan','')} | {r.get('road','')} | {r.get('planes','')} |"
         for r in result["series"][side])
     return f"""# A/B: the planner's air pair vs no planner (seed {seed}, {months} months)
 
 Generated by `tools/research/mcp-ab`{(' (' + label + ')') if label else ''}. Both games use the same seed and map and start the same
 bot (PrismaticAI). A starts it with the planner's best air pair (`mcp-plan` by_mode.air); B starts it
-without one. Figures come from the console's `companies` command, once per game month.
+without one. Figures come from the console's `companies` command, once per game month, each of the
+company the arm's bot holds: {tested_line(result)}.
 
 {plan.get('note', 'no planner note recorded')}
 
@@ -287,20 +374,29 @@ without one. Figures come from the console's `companies` command, once per game 
 
 ## {A_HEADING}
 
-| Month | Date | Value | Money | Loan | Road vehicles | Aircraft |
-|---|---|---|---|---|---|---|
+| Month | Date | Company | Value | Money | Loan | Road vehicles | Aircraft |
+|---|---|---|---|---|---|---|---|
 {table("A")}
 
 ## {B_HEADING}
 
-| Month | Date | Value | Money | Loan | Road vehicles | Aircraft |
-|---|---|---|---|---|---|---|
+| Month | Date | Company | Value | Money | Loan | Road vehicles | Aircraft |
+|---|---|---|---|---|---|---|---|
 {table("B")}
 """
 
 
 def main(argv):
     a_port, b_port, months, seed, label, root = argv[1], argv[2], int(argv[3]), argv[4], argv[5], argv[6]
+    tested = {}
+    for name, port in (("A", a_port), ("B", b_port)):
+        try:
+            tested[name] = bind(port, argv[7] if len(argv) > 7 else "")
+        except Unbound as e:
+            print(f"mcp-ab: {name}: refused, the tested company cannot be told ({e}); no other company's "
+                  "figures are reported in its place", file=sys.stderr)
+            sys.exit(3)
+        print(f"{name} observes #{tested[name]['company']} '{tested[name]['name']}' ({tested[name]['from']})", flush=True)
     plan = {}
     for e in get(a_port, "/api/status")["events"]:
         if e["kind"] == "ai" and e["text"].startswith("planner:"):
@@ -314,9 +410,9 @@ def main(argv):
             n = month_count(port)
             if n > seen[port]:
                 seen[port] = n
-                snap = snapshot(port)
+                snap = snapshot(port, tested[name])
                 date = get(port, "/api/resources/game/state").get("game_date")
-                series[name].append({"month": n - start[port], "date": date, **(snap or {})})
+                series[name].append({"month": n - start[port], "date": date, **snap})
                 print(f"{name} month {n - start[port]:>2} {date}: {snap}", flush=True)
 
     last = {k: (v[-1] if v else {}) for k, v in series.items()}
@@ -329,7 +425,7 @@ def main(argv):
         except Exception as e:  # noqa: BLE001
             bot_log[name] = [f"not read: {e}"]
     result = {"experiment": "planner air pair (A) vs no planner (B)", "label": label, "seed": int(seed), "months": months,
-              "plan": plan, "final": last, "series": series,
+              "plan": plan, "tested": tested, "final": last, "series": series,
               "value_delta": (last["A"].get("value", 0) - last["B"].get("value", 0)), "bot_log": bot_log}
     stamp = time.strftime("%Y%m%dT%H%M%S")
     outdir = f"{root}/research/results"
