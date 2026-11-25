@@ -533,6 +533,20 @@ export function ecInit(box, echarts) {
 }
 
 /**
+ * The card of one chart: its title, a note, a toolbar (`[data-toolbar]`, where maximizable's button
+ * and a page's controls go) and the chart's box, named for assistive technology (`role="img"`,
+ * `aria-label`). `#<id>-card` carries `data-chart` and `data-maximize`, so a registry row finds it.
+ */
+export function chartCard(id, title, note, label, height = 'h-72 sm:h-80 lg:h-96') {
+  return `<div id="${id}-card" data-maximize="${id}" data-chart="${id}" class="${CLS.card} flex flex-col">
+    <div class="${UI.cardHead} mb-3">
+      <div class="${UI.cardHeadTitle}"><h2 class="${UI.cardTitle}">${esc(title)}</h2><p class="mt-2 ${UI.cardSub}">${esc(note)}</p></div>
+      <div data-toolbar class="flex flex-wrap items-center gap-2"></div>
+    </div>
+    <div id="${id}" role="img" aria-label="${esc(label)}" class="w-full ${height} grow"></div></div>`;
+}
+
+/**
  * A card that maximizes to the viewport and back: the button, Escape and the address (key `max`)
  * all agree, so a maximized view is a link. `onResize` redraws the content to its new box.
  */
