@@ -45,6 +45,8 @@ class PrismaticAI extends AIController {
 	routes = 0;
 	air_done = ""; /* the planner air pair ("a-b") already tried */
 	rail_done = ""; /* the planner rail pair ("a-b") already tried */
+	pair_due_since = -1; /* the date the planner rail pair first was due (PairDue; saved, restore.nut) */
+	pair_due_key = ""; /* the pair ("a-b") pair_due_since is for */
 	freight_tried = null; /* the planner freight lines ("from-to-cargo") already tried, a table */
 	own_built = 0; /* freight lines the bot planned itself and built (own_lines caps them) */
 	own_failed = 0; /* own freight lines in a row that were not built (OWN_FAIL_PAUSE) */
@@ -115,6 +117,7 @@ require("air.nut");
 require("rail.nut");
 require("fleet.nut");
 require("lines.nut");
+require("funnel.nut");
 require("steward.nut");
 require("autopilot.nut");
 require("catchment.nut");
@@ -127,6 +130,7 @@ require("modernize.nut");
 require("restore.nut");
 require("events.nut");
 require("ships.nut");
+require("capital.nut");
 
 /* Cheapest buildable road engine that carries a passenger-class cargo. */
 function PrismaticAI::PickPassengerEngine() {
@@ -185,18 +189,21 @@ function PrismaticAI::BuildStarterRoute(aggressiveness, used_towns) {
 
 /* One attempt at a bus route in `town`. See BuildStarterRoute. */
 function PrismaticAI::BuildRouteInTown(town, aggressiveness) {
+	PrismaticAI.Funnel("road", "tried");
 	local center = AITown.GetLocation(town);
 	local stop_a = PrismaticAI.BuildBusStopNear(center, 15, "A in " + AITown.GetName(town));
-	if (stop_a == null) return false;
+	if (stop_a == null) { PrismaticAI.Funnel("road", "stop_fail"); return false; }
 	AIController.Sleep(PACE);
 	/* Stop B in the same town, at least 8 tiles from A, so the two catchments do not overlap (center + 20 used to land in the next town). */
 	local stop_b = PrismaticAI.BuildBusStopAway(center, 12, "B in " + AITown.GetName(town), stop_a);
 	if (stop_b == null || stop_b == stop_a) {
 		AILog.Warning("PrismaticAI: could not find a distinct site for stop B in " + AITown.GetName(town));
+		PrismaticAI.Funnel("road", "stop_fail");
 		return false;
 	}
 	if (!PrismaticAI.RoadConnected(stop_a, stop_b, 4000)) {
 		AILog.Warning("PrismaticAI: stops at tiles " + stop_a + " and " + stop_b + " are on separate road networks; no buses bought");
+		PrismaticAI.Funnel("road", "network_fail");
 		return false;
 	}
 	AIController.Sleep(PACE);
@@ -205,6 +212,7 @@ function PrismaticAI::BuildRouteInTown(town, aggressiveness) {
 	if (depot == null) depot = PrismaticAI.BuildDepotNear(stop_b, 10);
 	if (depot == null) {
 		AILog.Warning("PrismaticAI: could not build a road depot near either stop");
+		PrismaticAI.Funnel("road", "depot_fail");
 		return false;
 	}
 	AIController.Sleep(PACE);
@@ -212,6 +220,7 @@ function PrismaticAI::BuildRouteInTown(town, aggressiveness) {
 	local engine = PrismaticAI.PickPassengerEngine();
 	if (engine == -1) {
 		AILog.Warning("PrismaticAI: no buildable passenger road vehicle available");
+		PrismaticAI.Funnel("road", "vehicle_fail");
 		return false;
 	}
 
@@ -233,6 +242,7 @@ function PrismaticAI::BuildRouteInTown(town, aggressiveness) {
 
 	AILog.Info("PrismaticAI: built a bus route in " + AITown.GetName(town) +
 		" with " + built + "/" + vehicle_count + " vehicle(s) (aggressiveness=" + aggressiveness + ")");
+	PrismaticAI.Funnel("road", (built > 0) ? "built" : "vehicle_fail");
 	return built > 0;
 }
 
@@ -385,16 +395,20 @@ function PrismaticAI::Behaviour() {
 	 * freight lines, connects towns and keeps a small reserve. autopilot=0 restores the unplanned bot
 	 * that duels used as their rival before 2026-11-19.
 	 *
-	 * With a plan, the planner's lines and its own_lines/max_routes/cash_reserve stand, but the growth
-	 * layer still runs on top (`grows`): the in-bot steward (an external steward's target always
-	 * wins), its own air routes after the planner's pair, and idle money buying vehicles. Without it,
-	 * a planned bot in held-start duels ended with ~20 vehicles and no plane while the unplanned
-	 * autopilot rival ran ~190 with 100 planes and won (openttd-1e, seed 4242, 120 months). */
+	 * With a plan, the planner's lines are added on top of the autopilot, not used instead of it
+	 * (`grows`): the same floors, the in-bot steward (an external steward's target always wins), its
+	 * own air routes after the planner's pair, and idle money buying vehicles. A planner's own_lines
+	 * or max_routes above the floor stand; intercity is on and cash_reserve at most 5000, as without a
+	 * plan (planned_freight_only=1 is how a plan turns the bot's own lines off). Without the growth
+	 * layer a planned bot in held-start duels ended with ~20 vehicles and no plane while the unplanned
+	 * autopilot rival ran ~190 with 100 planes and won (openttd-1e, seed 4242, 120 months). Without
+	 * the floors, the live
+	 * settings' own_lines=4 held a planned bot at four own lines for a year while its bank doubled
+	 * (ablation seed 15805, 2026-11-23: 156k to 303k in 1952 on 3-5 trains). */
 	b.planned <- b.freight.len() > 0 || (b.air_a >= 0 && b.air_b >= 0) || (b.rail_a >= 0 && b.rail_b >= 0);
 	b.autopiloted <- b.autopilot == 1 && !b.planned;
 	b.grows <- b.autopilot == 1;
-	if (b.grows) b.self_steward = 1;
-	if (b.autopiloted) {
+	if (b.grows) {
 		b.self_steward = 1;
 		b.own_lines = max(b.own_lines, AUTOPILOT_OWN_LINES);
 		b.max_routes = max(b.max_routes, AUTOPILOT_MAX_ROUTES);
@@ -409,16 +423,187 @@ function PrismaticAI::Behaviour() {
 	return b;
 }
 
+/* The planner's passenger pair (rail_a, rail_b) is due once its rail_after freight lines were tried
+ * (pending slots count as untried, FreightLines); `pair_due_since` holds the date it first was.
+ * Producers nobody serves are taken by rivals within the first years, and a pair of towns is not.
+ * So the heartbeat gives the pair only a heartbeat in which the bot started no own freight line
+ * (none left, its cap, a failure pause, no budget), or any heartbeat once the pair has waited
+ * PAIR_WAIT_DAYS. Built first, the pair held the first own line back for months of path search:
+ * on ablation seed 15805 (2026-11-23) the first heartbeat ran to 1950-11-15 instead of
+ * 1950-04-13, Plondham - Ponninghall failed after 176 days, and the coal mine the unplanned bot
+ * claimed first was gone. Over four seeds (15805, 2927, 31337, 4242; ablations against the seven
+ * live AIs, 2026-11-24) a planned start cost 21.8% (geometric, planned against unplanned in one
+ * tree) on master, 22.5% with the pair after the first own line only, and 3.5% with this order
+ * (+10.6%, -2.5%, -21.2%, +2.1%; research/results ablation-20261124T1739* to T1820*). On seed
+ * 31337 the pair, tried once its bound ran out (heartbeat 1951-04 to 1952-08), still cost 21%;
+ * without the bound it was never built there, and two of four seeds never built it at all. The
+ * wait is saved (restore.nut): a load keeps it, a restore from the map starts it again. */
+const PAIR_WAIT_DAYS = 730;
+
+function PrismaticAI::PairDue(b) {
+	if (b.rail_a < 0 || b.rail_b < 0 || this.rail_done == b.rail_a + "-" + b.rail_b) return false;
+	local tried = 0;
+	foreach (line in b.freight) if (this.freight_tried.rawin(line.from + "-" + line.to + "-" + line.cargo)) tried++;
+	if (tried < min(b.rail_after, b.freight.len() + FREIGHT_SLOTS_WAITING)) return false;
+	/* A pair the settings changed to waits from when it is due, not from when the last one was. */
+	local key = b.rail_a + "-" + b.rail_b;
+	if (this.pair_due_since < 0 || this.pair_due_key != key) {
+		this.pair_due_since = AIDate.GetCurrentDate();
+		this.pair_due_key = key;
+	}
+	return true;
+}
+
+/* The planner's passenger pair, tried once, on borrowed money, when PairDue said it is due: it waits
+ * like the planner's next freight line for money plus loan headroom to reach line_budget, and reads
+ * the construction freeze again, since the builders before it in the heartbeat can take months.
+ * Returns true when it was tried. */
+function PrismaticAI::TryRailPair(b, afloat) {
+	if (this.BuildFrozen(afloat)) return false;
+	local headroom = AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
+	if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) + headroom < b.line_budget) return false;
+	this.rail_done = b.rail_a + "-" + b.rail_b;
+	/* A line pays back over years: borrow up to the limit to build it, as the planner's budget
+	 * assumes; when nothing gets built, give the money back so it does not sit there at interest. */
+	local loan_before = AICompany.GetLoanAmount();
+	AICompany.SetLoanAmount(AICompany.GetMaxLoanAmount());
+	if (PrismaticAI.BuildRailRoute(b.rail_a, b.rail_b, PrismaticAI.RailShape(b)) > 0) {
+		this.routes++;
+	} else {
+		AICompany.SetLoanAmount(loan_before);
+		AILog.Info("PrismaticAI: no rail route built; loan back to " + AICompany.GetLoanAmount());
+	}
+	return true;
+}
+
+/* Handed slots already reported as incoherent ("fr3_:31-5-6" -> true), so each state is logged once. */
+FREIGHT_SLOT_BAD <- {};
+/* Each handed slot's tuple at the previous read ("fr3_" -> "31-5-6"): a slot counts once two reads in
+ * a row agree. */
+FREIGHT_SLOT_SEEN <- {};
+/* Reads in a row each handed slot was set (a field >= 0) but did not count ("fr3_" -> 2). */
+FREIGHT_SLOT_PENDING <- {};
+/* Slots of the last read that are set, do not count yet, and have not been pending for
+ * SLOT_PENDING_READS reads: the heartbeat treats them as untried lines (handed_done, the pair's
+ * rail_after), so a slot being rewritten does not let the bot's own line or the passenger pair run
+ * ahead of it. A slot pending longer (a planner that left it incoherent) stops holding them back. */
+FREIGHT_SLOTS_WAITING <- 0;
+const SLOT_PENDING_READS = 6;
+
 /* The planner's freight rail lines in its order: fr_* then fr2_* to fr16_* (as info.nut declares
- * them), those set. */
+ * them), those whole and coherent. The panel and the re-planner change a slot one setting at a time,
+ * each approved on its own and in any order, so a heartbeat can read a slot half updated: the
+ * owner's game of 2026-11-23 (:8800) tried "WOOD Grutford Forest - Ganingstone Factory" and then
+ * "GRAI Grutford Forest - Ganingstone Factory", which no industry produces or accepts, and each
+ * landed in freight_tried. A slot counts only when from, to and cargo are all set, both industries
+ * exist, the producer makes the cargo and the acceptor takes it (FreightSlotWhyNot), and the
+ * previous read held the same tuple. A slot that does not is left out of this read: not tried, not in
+ * freight_tried, not counted by pair_due, handed_done or b.planned; an incoherent one is logged once
+ * per state. The two reads catch a mixed tuple that is coherent by chance (an old coal line's
+ * producer with a new coal line's acceptor) only while it lasts less than a heartbeat: a writer that
+ * leaves it longer still gets it built. Behaviour() reads once a heartbeat, and twice at the start. */
 function PrismaticAI::FreightLines() {
+	local out = [];
+	local waiting = 0;
+	foreach (slot in PrismaticAI.FreightSlots()) {
+		/* An unused slot (the usual case: most of the 16 are) costs nothing more than before. */
+		if (slot[1] < 0 && slot[2] < 0 && slot[3] < 0) {
+			if (FREIGHT_SLOT_SEEN.rawin(slot[0])) { delete FREIGHT_SLOT_SEEN[slot[0]]; FREIGHT_SLOT_PENDING[slot[0]] <- 0; }
+			continue;
+		}
+		local line = {from = slot[1], to = slot[2], cargo = slot[3]};
+		local tuple = line.from + "-" + line.to + "-" + line.cargo;
+		local stable = FREIGHT_SLOT_SEEN.rawin(slot[0]) && FREIGHT_SLOT_SEEN[slot[0]] == tuple;
+		FREIGHT_SLOT_SEEN[slot[0]] <- tuple;
+		local counts = false;
+		if (line.from >= 0 && line.to >= 0 && line.cargo >= 0) {
+			local why = PrismaticAI.FreightSlotWhyNot(line);
+			if (why != null && !FREIGHT_SLOT_BAD.rawin(slot[0] + ":" + tuple)) {
+				FREIGHT_SLOT_BAD[slot[0] + ":" + tuple] <- true;
+				AILog.Warning("PrismaticAI: handed freight slot " + slot[0] + " (" + tuple + ") left out: " + why);
+			}
+			counts = why == null && stable;
+		}
+		if (counts) {
+			out.push(line);
+			FREIGHT_SLOT_PENDING[slot[0]] <- 0;
+			continue;
+		}
+		local reads = FREIGHT_SLOT_PENDING.rawin(slot[0]) ? FREIGHT_SLOT_PENDING[slot[0]] : 0;
+		FREIGHT_SLOT_PENDING[slot[0]] <- reads + 1;
+		if (reads < SLOT_PENDING_READS) waiting++;
+	}
+	::FREIGHT_SLOTS_WAITING = waiting;
+	return out;
+}
+
+/* The handed slots as [prefix, from, to, cargo], fr_ then fr2_ to fr16_ (as info.nut declares them),
+ * or the test hook's (TestFreightSlots). */
+function PrismaticAI::FreightSlots() {
+	if (AIController.GetSetting("test_freight_slots") == 1) return PrismaticAI.TestFreightSlots();
 	local out = [];
 	for (local i = 1; i <= 16; i++) {
 		local p = (i == 1) ? "fr_" : ("fr" + i + "_");
-		local line = {from = AIController.GetSetting(p + "from"), to = AIController.GetSetting(p + "to"), cargo = AIController.GetSetting(p + "cargo")};
-		if (line.from >= 0 && line.to >= 0 && line.cargo >= 0) out.push(line);
+		out.push([p, AIController.GetSetting(p + "from"), AIController.GetSetting(p + "to"), AIController.GetSetting(p + "cargo")]);
 	}
 	return out;
+}
+
+/* test_freight_slots (RESEARCH-ONLY): the line the hook hands over and the reads so far, set once. */
+TEST_SLOTS <- null;
+/* Reads per phase of the test hook (TestFreightSlots). */
+const TEST_SLOT_READS = 6;
+
+/* RESEARCH-ONLY test hook (setting test_freight_slots=1): handed slots written the way the panel and
+ * the re-planner write them, one setting at a time, so a headless match shows that FreightLines
+ * neither tries nor marks a slot until it is whole, coherent and stable. (P, Q, c) is the bot's own
+ * best freight candidate when the hook first runs; Q2 is another industry accepting c. Phases of
+ * TEST_SLOT_READS reads each (a read a heartbeat): 1. fr_ half written (P set, to and cargo -1);
+ * 2. fr_ = P to an industry that does not accept c, and fr2_ = P to Q with a cargo P does not
+ * produce; 3. fr_ flips between P - Q and P - Q2 at every read (coherent, never stable); 4. fr_ =
+ * P - Q with c, built once. Run it with planned_freight_only=1, so no own line takes P first. */
+function PrismaticAI::TestFreightSlots() {
+	if (TEST_SLOTS == null) {
+		local own = PrismaticAI.NextOwnFreightLine({});
+		if (own == null) return [];
+		local bad_to = -1, bad_cargo = -1, to2 = own.to;
+		foreach (i, _ in AIIndustryList()) {
+			local accepts = AIIndustry.IsCargoAccepted(i, own.cargo) != AIIndustry.CAS_NOT_ACCEPTED;
+			if (bad_to == -1 && i != own.from && !accepts) bad_to = i;
+			if (to2 == own.to && i != own.to && i != own.from && accepts) to2 = i;
+		}
+		local made = AICargoList_IndustryProducing(own.from);
+		foreach (c, _ in AICargoList()) {
+			if (AICargo.IsFreight(c) && !made.HasItem(c)) { bad_cargo = c; break; }
+		}
+		::TEST_SLOTS = {reads = 0, phase = 0, line = own, bad_to = bad_to, bad_cargo = bad_cargo, to2 = to2};
+		AILog.Info("PrismaticAI: test_freight_slots: hands " + own.from + "-" + own.to + "-" + own.cargo + " (" +
+			AIIndustry.GetName(own.from) + " - " + AIIndustry.GetName(own.to) + "), alternate acceptor " + to2 +
+			", non-acceptor " + bad_to + ", cargo not produced " + bad_cargo);
+	}
+	local t = TEST_SLOTS, l = TEST_SLOTS.line;
+	local phase = min(4, 1 + t.reads / TEST_SLOT_READS);
+	if (phase != t.phase) {
+		t.phase = phase;
+		AILog.Info("PrismaticAI: test_freight_slots: phase " + phase + " at read " + t.reads);
+	}
+	t.reads++;
+	if (phase == 1) return [["fr_", l.from, -1, -1]];
+	if (phase == 2) return [["fr_", l.from, t.bad_to, l.cargo], ["fr2_", l.from, l.to, t.bad_cargo]];
+	if (phase == 3) return [["fr_", l.from, (t.reads % 2 == 0) ? l.to : t.to2, l.cargo]];
+	return [["fr_", l.from, l.to, l.cargo]];
+}
+
+/* Why the handed line {from, to, cargo} cannot run, or null when it can. */
+function PrismaticAI::FreightSlotWhyNot(line) {
+	if (!AICargo.IsValidCargo(line.cargo)) return "no such cargo";
+	if (!AIIndustry.IsValidIndustry(line.from)) return "no industry " + line.from;
+	if (!AIIndustry.IsValidIndustry(line.to)) return "no industry " + line.to;
+	if (line.from == line.to) return "one industry at both ends";
+	local cargo = AICargo.GetCargoLabel(line.cargo);
+	if (!AICargoList_IndustryProducing(line.from).HasItem(line.cargo)) return AIIndustry.GetName(line.from) + " does not produce " + cargo;
+	if (AIIndustry.IsCargoAccepted(line.to, line.cargo) == AIIndustry.CAS_NOT_ACCEPTED) return AIIndustry.GetName(line.to) + " does not accept " + cargo;
+	return null;
 }
 
 function PrismaticAI::Start() {
@@ -443,6 +628,7 @@ function PrismaticAI::Start() {
 	 * (rail.nut KeepTrainlessLine), is taken back as a line; then once a game year (lines.nut). */
 	this.adopt_year = PrismaticAI.AdoptKey();
 	this.AdoptTrainlessLines();
+	this.MaintenanceAttach(b.cash_reserve); /* the steward's rounds inside long path searches (steward.nut) */
 
 	local last = "";
 	local disclosed = false;
@@ -452,6 +638,10 @@ function PrismaticAI::Start() {
 		 * names a company after its first station's town, so this waits for that name. */
 		if (!disclosed && AIController.GetSetting("disclose_name") == 1) disclosed = PrismaticAI.DiscloseName();
 		this.steward_on = b.self_steward == 1;
+		/* The rounds inside this heartbeat's rail searches buy with these settings (capital.nut
+		 * AllocateCapitalInside). Set only by AllocateCapital at the heartbeat's end, it was null
+		 * through the first heartbeat after a start or a load, so no round bought anything there. */
+		CAPITAL.b = b;
 		local afloat = PrismaticAI.QuarterRunningCost();
 		if (PrismaticAI.StayAfloat(afloat)) this.rescued_at = AIDate.GetCurrentDate();
 		local frozen = this.BuildFrozen(afloat);
@@ -522,39 +712,25 @@ function PrismaticAI::Start() {
 			money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 			break;
 		}
-		local rail_key = b.rail_a + "-" + b.rail_b;
-		/* The passenger pair waits for the freight lines that score more (rail_after, from the panel):
-		 * each line is built on borrowed money, so the best first. */
-		local tried = 0;
-		foreach (line in b.freight) if (this.freight_tried.rawin(line.from + "-" + line.to + "-" + line.cargo)) tried++;
-		local pair_due = tried >= min(b.rail_after, b.freight.len());
-		if (!frozen && b.rail_a >= 0 && b.rail_b >= 0 && this.rail_done != rail_key && pair_due) {
-			this.rail_done = rail_key;
-			/* A line pays back over years: borrow up to the limit to build it, as the planner's budget
-			 * assumes; when nothing gets built, give the money back so it does not sit there at interest. */
-			local loan_before = AICompany.GetLoanAmount();
-			AICompany.SetLoanAmount(AICompany.GetMaxLoanAmount());
-			if (PrismaticAI.BuildRailRoute(b.rail_a, b.rail_b, PrismaticAI.RailShape(b)) > 0) {
-				this.routes++;
-			} else {
-				AICompany.SetLoanAmount(loan_before);
-				AILog.Info("PrismaticAI: no rail route built; loan back to " + AICompany.GetLoanAmount());
-			}
-			money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
-		}
 		/* Ships (ships.nut; ships_max, default 0: none): one water route a heartbeat, from an oil rig
 		 * or a coastal producer to an acceptor by the sea, or between two coastal towns, before the
 		 * bot's own rail lines take the money. */
 		this.ship_cap = b.ships_cap;
 		if (!frozen && this.ShipRoutes(b)) money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
-		/* The bot's own plan: once every freight line the planner handed over was tried and its
-		 * passenger pair is done, money no longer waits for a new plan from outside. With the script
-		 * budget it was meant to have, the bot built all fourteen planned lines by month 24 on OpenTTD
-		 * seed 31337 and then held 529983 idle at month 36 (research/results duel-20261117T112500).
+		/* The bot's own plan: once every freight line the planner handed over was tried, money no
+		 * longer waits for a new plan from outside. It does not wait for the planner's passenger pair
+		 * either (TryRailPair): the pair is added on top of the autopilot's growth, not instead of it.
+		 * With the script budget it was meant to have, the bot built all fourteen planned lines by month
+		 * 24 on OpenTTD seed 31337 and then held 529983 idle at month 36 (research/results
+		 * duel-20261117T112500).
 		 * One line per heartbeat, when money plus loan headroom reach line_budget, at most own_lines. */
-		local handed_done = true;
+		/* The planner's passenger pair (TryRailPair) is added on top of the bot's own freight lines: it
+		 * takes a heartbeat in which no own line was started, or any heartbeat once it has waited
+		 * PAIR_WAIT_DAYS since it became due (PairDue). */
+		local pair_due = this.PairDue(b);
+		local own_started = false;
+		local handed_done = FREIGHT_SLOTS_WAITING == 0;
 		foreach (line in b.freight) if (!this.freight_tried.rawin(line.from + "-" + line.to + "-" + line.cargo)) handed_done = false;
-		local pair_open = b.rail_a >= 0 && b.rail_b >= 0 && this.rail_done != rail_key;
 		local headroom_own = AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
 		local own_cap = this.OwnLinesCap(b, money);
 		/* A failed line still costs its stations and part of its track. With own_fail_pause, after that
@@ -564,10 +740,11 @@ function PrismaticAI::Start() {
 		if (year_now != this.own_failed_year) { this.own_failed_year = year_now; this.own_failed = 0; }
 		/* planned_freight_only (RESEARCH-ONLY): one authority outside the bot decides every freight
 		 * line, so the bot plans none of its own; the handed-over lines above still get built. */
-		if (!frozen && b.planned_freight_only == 0 && handed_done && !pair_open && this.own_built < own_cap && this.own_failed < (b.own_fail_pause == 0 ? OWN_FAIL_YEAR_MAX : b.own_fail_pause) &&
+		if (!frozen && b.planned_freight_only == 0 && handed_done && this.own_built < own_cap && this.own_failed < (b.own_fail_pause == 0 ? OWN_FAIL_YEAR_MAX : b.own_fail_pause) &&
 				money + headroom_own >= b.line_budget) {
 			local own = PrismaticAI.NextOwnFreightLine(this.freight_tried, b.rail_feed, b.rich);
 			if (own != null) {
+				own_started = true;
 				this.freight_tried[own.from + "-" + own.to + "-" + own.cargo] <- true;
 				this.own_built++;
 				AILog.Info("PrismaticAI: own plan " + this.own_built + "/" + own_cap + ": " + AICargo.GetCargoLabel(own.cargo) + " " +
@@ -594,6 +771,8 @@ function PrismaticAI::Start() {
 				money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 			}
 		}
+		if (!frozen && pair_due && (!own_started || AIDate.GetCurrentDate() - this.pair_due_since >= PAIR_WAIT_DAYS) &&
+				this.TryRailPair(b, afloat)) money = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 		/* A small fleet with no air or rail route borrows for its next road route: RepaySurplus pays the loan down to twice the
 		 * reserve after every heartbeat, and a bot whose air and rail openers failed then had too
 		 * little in the bank for any route. On OpenTTD seed 988774025 (company 3) it kept 3 buses on
@@ -654,6 +833,8 @@ function PrismaticAI::Start() {
 		/* Every rail line keeps a train: one lost at a level crossing or sold is replaced, and a line
 		 * that never had one (KeepTrainlessLine, AdoptTrainlessLines) gets its first. */
 		PrismaticAI.KeepLinesServed(b.cash_reserve);
+		/* The growth funnel's heartbeat counts and, once a game year, its lines (funnel.nut). */
+		PrismaticAI.FunnelTick(b);
 		/* Each line runs what the steward's targets say (lines.nut), and its record is logged again
 		 * once a game month so a steward started late still finds it. */
 		/* With self_steward, the bot sets its own line targets once a game month (steward.nut). */
@@ -678,8 +859,8 @@ function PrismaticAI::Start() {
 		 * walked again (events.nut). */
 		if (PrismaticAI.MonthKey() != this.month) this.LookAfterVehicles();
 		if (PrismaticAI.MonthKey() != this.month) { this.month = PrismaticAI.MonthKey(); PrismaticAI.LogLines(); }
-		/* Borrowed money that sits idle only costs interest: repay what is above twice the reserve. */
-		PrismaticAI.RepaySurplus(max(2 * b.cash_reserve, afloat));
+		/* Money above the reserve buys the best measured investment, else repays the loan (capital.nut). */
+		this.AllocateCapital(b, afloat);
 		PrismaticAI.StayAfloat(afloat);
 
 		AILog.Info("PrismaticAI heartbeat: date=" + AIDate.GetCurrentDate() +

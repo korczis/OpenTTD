@@ -126,6 +126,19 @@ function PrismaticAI::CloseLine(slot, line) {
 	line.closed = true;
 	AILog.Info("PrismaticAI: rail line " + slot + " closed: " + line.label + ", " + n + " tiles cleared");
 	AILog.Info(PrismaticAI.LineRecord(slot, line));
+	/* An own line that closed gives its own_lines slot back, the way a line that was never built
+	 * does (main.nut, PR #234): own_lines bounds the own lines that run, and a closed one runs
+	 * nothing and holds no train. Kept, it held the slot for the rest of the game: in the owner's
+	 * game 21647 line 7 (OIL Runnley Oil Wells) closed on 1957-08-25 and was never replaced. Its pair
+	 * stays in freight_tried, so the next own line is another pair. Never raised here: a line
+	 * adopted from the map (AdoptTrainlessLines) is not in own_built until a load counts it. */
+	if ("from" in line) {
+		local open = PrismaticAI.OwnLinesOpen();
+		if (open < this.own_built) {
+			AILog.Info("PrismaticAI: own lines " + this.own_built + " -> " + open + ": closed line " + slot + " gives its slot back");
+			this.own_built = open;
+		}
+	}
 	return true;
 }
 
@@ -164,41 +177,64 @@ function PrismaticAI::TrainPrice(train) {
  * RepaySurplus (main.nut) pays the loan down to the reserve after every heartbeat, so the bank alone
  * almost never held a train's price: in the owner's live game (seed 15805, 1958-08) a coal line
  * earning 33.9k a year per train kept its one train of trains_max 2 with 13k in the bank and 250k of
- * the loan unused, while its buses earned about 370 a year each. */
-function PrismaticAI::FundTrain(line, train, reserve) {
+ * the loan unused, while its buses earned about 370 a year each.
+ * `inside`: a round inside a rail path search (steward.nut MaintenanceYield) never borrows. With
+ * test_borrow (RESEARCH-ONLY) the bank counts as holding only the reserve, so every train needs
+ * the loan and this path runs. */
+function PrismaticAI::FundTrain(line, train, reserve, inside = false) {
 	local price = PrismaticAI.TrainPrice(train);
 	local bank = AICompany.GetBankBalance(AICompany.COMPANY_SELF);
 	local loan = AICompany.GetLoanAmount();
+	if (!inside && AIController.GetSetting("test_borrow") == 1) bank = min(bank, reserve);
 	if (bank >= reserve + price) return loan;
-	if (AIController.GetSetting("steward_borrow") != 1 || !PrismaticAI.LineEarns(this.LineStats(line))) return -1;
+	if (inside || AIController.GetSetting("steward_borrow") != 1 || !PrismaticAI.LineEarns(this.LineStats(line))) return -1;
 	local afloat = PrismaticAI.QuarterRunningCost();
 	if (this.BuildFrozen(afloat)) return -1;
 	local max_loan = AICompany.GetMaxLoanAmount();
 	local step = AICompany.GetLoanInterval();
-	local want = min(max_loan, loan + ((reserve + price - bank) / step + 1) * step);
+	/* The shortfall in whole loan steps, rounded up. */
+	local want = min(max_loan, loan + ((reserve + price - bank + step - 1) / step) * step);
 	/* The loan stays at most half its limit, and the headroom after it still holds a line budget and
 	 * two quarters of running costs. Early in a game the loan pays for the lines: in a replay of
 	 * seed 4242 a train borrowed for with 280k of 300k drawn left the bank at the reserve, the next
 	 * quarter's survival borrowing froze construction (BuildFrozen) and the company built four
 	 * freight lines where master built seven. */
 	local line_budget = AIController.GetSetting("line_budget");
-	if (2 * want > max_loan || max_loan - want < line_budget + 2 * afloat) return -1;
+	if (2 * want > max_loan || max_loan - want < line_budget + 2 * afloat) {
+		/* Once per line and reason, so the bound shows in a log without repeating every heartbeat. */
+		local why = 2 * want > max_loan ? "the loan would pass half its limit" : "the headroom left would not hold a line budget and two quarters";
+		if (!("borrow_refused" in line) || line.borrow_refused != why) {
+			line.borrow_refused <- why;
+			AILog.Info("PrismaticAI: no loan for a train of " + line.label + ": " + why + " (loan " + loan + ", wanted " + want +
+				" of " + max_loan + ", line budget " + line_budget + ", a quarter " + afloat + ")");
+		}
+		return -1;
+	}
 	if (!AICompany.SetLoanAmount(want)) return -1;
-	AILog.Info("PrismaticAI: borrowed " + (want - loan) + " for a train of " + line.label + " (price " + price + ", bank was " + bank + ")");
+	if ("borrow_refused" in line) delete line.borrow_refused;
+	AILog.Info("PrismaticAI: borrowed " + (want - loan) + " for a train of " + line.label + " (price " + price + ", bank was " + bank +
+		"; loan now " + want + " of " + max_loan + ", headroom " + (max_loan - want) + " for a line budget of " + line_budget + " and a quarter of " + afloat + ")");
 	return loan;
 }
 
-/* Make every line what its targets say (see the head of this file). */
-function PrismaticAI::ReconcileLines(reserve) {
+/* Make every line what its targets say (see the head of this file). `inside`: a round inside a rail
+ * path search (steward.nut MaintenanceYield), which only adds trains, at most MAINT_YIELD_TRAINS,
+ * and never borrows; closing, resizing and shrinking wait for the heartbeat. */
+function PrismaticAI::ReconcileLines(reserve, inside = false) {
+	if (!inside) MAINT_RESERVE = reserve;
+	local added = 0;
 	foreach (i, line in RAIL_LINES) {
 		if (line.closed) continue;
 		local slot = i + 1;
 		/* The external steward's setting, else the in-bot steward's target (steward.nut). */
 		local want_trains = this.EffectiveTarget(slot, "trains");
 		local want_wagons = this.EffectiveTarget(slot, "wagons");
-		if (want_trains == 0) { this.CloseLine(slot, line); continue; }
+		if (want_trains == 0) {
+			if (!inside) this.CloseLine(slot, line);
+			continue;
+		}
 		local trains = PrismaticAI.TrainsOf(line);
-		if (want_wagons > 0) {
+		if (want_wagons > 0 && !inside) {
 			if (!("wagons_fit" in line)) PrismaticAI.LineRecord(slot, line);
 			want_wagons = min(want_wagons, line.wagons_fit);
 			foreach (t in trains) {
@@ -230,25 +266,33 @@ function PrismaticAI::ReconcileLines(reserve) {
 		}
 		if (want_trains > 0) {
 			want_trains = min(want_trains, line.trains_max);
-			local running = 0;
-			foreach (t in trains) if (!this.selling.rawin(t)) running++;
+			local running = 0, source = -1;
+			foreach (t in trains) {
+				if (this.selling.rawin(t)) continue;
+				running++;
+				/* A clone copies a train that keeps running, never one on its way to be sold. */
+				if (source == -1) source = t;
+			}
 			/* A line whose track cannot be repaired or whose trains get lost gets no new train (events.nut). */
 			if (running < want_trains && running > 0 && !PrismaticAI.LineHalted(line)) {
 				/* Every missing train at once (steward.nut STEWARD_ROUND_NOTE), each paid from the bank
 				 * or, for a line that earns, from the loan (FundTrain). */
-				while (running < want_trains) {
-					local loan_before = this.FundTrain(line, trains[0], reserve);
+				while (running < want_trains && !(inside && added >= MAINT_YIELD_TRAINS)) {
+					local loan_before = this.FundTrain(line, source, reserve, inside);
 					if (loan_before < 0) break;
-					local nv = AIVehicle.CloneVehicle(line.depot, trains[0], true);
-					if (!AIVehicle.IsValidVehicle(nv)) {
+					local nv = AIVehicle.CloneVehicle(line.depot, source, true);
+					if (!AIVehicle.IsValidVehicle(nv) || !AIVehicle.StartStopVehicle(nv)) {
+						/* A clone that will not start is sold again at once, not left in the depot. */
+						if (AIVehicle.IsValidVehicle(nv)) AIVehicle.SellVehicle(nv);
 						if (AICompany.GetLoanAmount() > loan_before) AICompany.SetLoanAmount(loan_before);
 						break;
 					}
-					AIVehicle.StartStopVehicle(nv);
 					running++;
-					AILog.Info("PrismaticAI: rail line " + slot + ": added train " + nv + " (" + running + " of " + want_trains + ")");
+					added++;
+					AILog.Info("PrismaticAI: rail line " + slot + ": added train " + nv + " (" + running + " of " + want_trains + ")" +
+						(inside ? " during a rail path search" : ""));
 				}
-			} else if (running > want_trains) {
+			} else if (running > want_trains && !inside) {
 				local newest = -1;
 				foreach (t in trains) if (!this.selling.rawin(t) && (newest == -1 || AIVehicle.GetAge(t) < AIVehicle.GetAge(newest))) newest = t;
 				if (newest != -1) this.SendToSell(newest, "PrismaticAI: rail line " + slot + ": train " + newest + " to the depot to be sold (" +

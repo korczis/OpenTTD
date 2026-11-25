@@ -344,12 +344,18 @@ inline std::optional<uint64_t> DeadlineTick(uint64_t created, uint64_t ticks)
 	return created + ticks;
 }
 
-/** What the deadline does at tick `now` to an approval created at `created`, pending or not, whose action a chat approver may (`chat_scoped`) or may not decide. */
-inline DeadlineAction DeadlineDue(bool pending, uint64_t created, uint64_t now, const DeadlinePolicy &policy, bool chat_scoped)
+/**
+ * What the deadline does at tick `now` to an approval created at `created`, pending or not, whose
+ * action a chat approver may (`chat_scoped`) or may not decide. `approver_company`: a registered
+ * approver played the company the approval names both when it was asked and now (ApproverSeats).
+ * `approve` stands in only for that approver, so it executes nothing for a company no approver
+ * plays, nor for one that names no company (the owner's decision, 2026-11-23): retired as under keep.
+ */
+inline DeadlineAction DeadlineDue(bool pending, uint64_t created, uint64_t now, const DeadlinePolicy &policy, bool chat_scoped, bool approver_company)
 {
 	auto due = DeadlineTick(created, policy.ticks);
 	if (!pending || !due.has_value() || now < *due) return DeadlineAction::None;
-	return policy.verdict == DeadlineVerdict::Approve && chat_scoped ? DeadlineAction::Execute : DeadlineAction::Retire;
+	return policy.verdict == DeadlineVerdict::Approve && chat_scoped && approver_company ? DeadlineAction::Execute : DeadlineAction::Retire;
 }
 
 /** The verdict's name, as the console, the resource and the log spell it. */
@@ -521,10 +527,11 @@ struct ChatFacts {
 	bool key_registered = false;   ///< the client's key is in the server's approver list (declared)
 	bool key_in_allow_list = false; ///< the client's key is in that company's allow list: told to the asker, never enough to approve
 	bool injecting = false;        ///< the line came from injected UI input, not the person
+	bool key_shared = false;       ///< another connected client presents the same key (ClientsWithKey > 1)
 };
 
 /** The verdict on one chat decision, with the condition that failed. */
-enum class ChatVerdict : uint8_t { Allow, NoSuchApproval, NotPending, Expired, ServerOnly, Spectator, NotYourCompany, NotAnApprover, Injected };
+enum class ChatVerdict : uint8_t { Allow, NoSuchApproval, NotPending, Expired, ServerOnly, Spectator, NotYourCompany, NotAnApprover, Injected, SharedKey };
 
 /**
  * Decide whether a client may approve (or deny) an approval from inside the game. A deny withdraws
@@ -532,6 +539,8 @@ enum class ChatVerdict : uint8_t { Allow, NoSuchApproval, NotPending, Expired, S
  * also needs an approver -- a key the server's operator registered, and only that: a company's allow
  * list admits whoever plays it, an agent's own client included, so it never makes an approver
  * (the owner's decision, 2026-11-22, ADR 0038) -- and the person's own input (never injected input).
+ * A registered key that a second connected client presents at the same time approves from neither:
+ * OpenTTD admits both connections, and a copied key must not make its holder an approver.
  */
 inline ChatVerdict DecideChat(const ChatFacts &f, bool approving)
 {
@@ -544,6 +553,7 @@ inline ChatVerdict DecideChat(const ChatFacts &f, bool approving)
 	if (!approving) return ChatVerdict::Allow;
 	if (f.injecting) return ChatVerdict::Injected;
 	if (!f.key_registered) return ChatVerdict::NotAnApprover;
+	if (f.key_shared) return ChatVerdict::SharedKey;
 	return ChatVerdict::Allow;
 }
 
@@ -560,6 +570,7 @@ inline std::string_view ChatVerdictText(ChatVerdict v)
 		case ChatVerdict::NotYourCompany: return "it is not your company's to decide";
 		case ChatVerdict::NotAnApprover: return "you are not an approver: only a key the server's operator registered approves ('prismatic_mcp approvers add <your client id>'); playing the company, or being in its allow list, is not enough";
 		case ChatVerdict::Injected: return "it came from injected input, not your own keyboard or mouse";
+		case ChatVerdict::SharedKey: return "your approver key is connected twice; an approver key approves only while one client holds it (disconnect the other client)";
 	}
 	return "refused";
 }
@@ -620,6 +631,56 @@ inline bool ChatScoped(std::string_view type, const nlohmann::json &flags, std::
 
 /** An approver's key as the log and the audit trail show it: its first 12 characters. */
 inline std::string KeyFingerprint(std::string_view key) { return std::string(key.substr(0, 12)); }
+
+/** One connected client as the approver seats see it: its id, the company it plays (-1 for a spectator) and its public key. */
+struct ClientSeat {
+	uint32_t client_id = 0;
+	int company = -1;
+	std::string key;
+};
+
+/** A company a registered approver plays now: the company, the approver's client and its key's fingerprint. */
+struct ApproverSeat {
+	int company = -1;
+	uint32_t client_id = 0;
+	std::string key_fp;
+	bool operator==(const ApproverSeat &) const = default;
+};
+
+/** How many connected clients present `key`. OpenTTD admits two connections with one key, so a key is one person only while one client holds it. */
+inline size_t ClientsWithKey(const std::vector<ClientSeat> &clients, std::string_view key)
+{
+	if (key.empty()) return 0;
+	return static_cast<size_t>(std::count_if(clients.begin(), clients.end(), [key](const ClientSeat &c) { return c.key == key; }));
+}
+
+/**
+ * The companies registered approvers play now (openttd://approvals approver_companies): one seat per
+ * registered key that exactly one connected client presents, while that client plays a company. A
+ * key two clients present at once is no approver at all -- a copied key used from a second client
+ * must not approve, and the server cannot tell which of the two is the person -- and a spectator
+ * plays no company. Sorted by company, then client.
+ */
+inline std::vector<ApproverSeat> ApproverSeats(const std::vector<ClientSeat> &clients, const std::vector<std::string> &registered)
+{
+	std::vector<ApproverSeat> seats;
+	for (const auto &key : registered) {
+		if (ClientsWithKey(clients, key) != 1) continue;
+		auto c = std::find_if(clients.begin(), clients.end(), [&key](const ClientSeat &s) { return s.key == key; });
+		if (c->company < 0) continue;
+		seats.push_back({c->company, c->client_id, KeyFingerprint(key)});
+	}
+	std::sort(seats.begin(), seats.end(), [](const ApproverSeat &a, const ApproverSeat &b) {
+		return a.company != b.company ? a.company < b.company : a.client_id < b.client_id;
+	});
+	return seats;
+}
+
+/** Whether a registered approver plays `company` among `seats`; a company of -1 (none named) never is. */
+inline bool ApproverPlays(const std::vector<ApproverSeat> &seats, int company)
+{
+	return company >= 0 && std::any_of(seats.begin(), seats.end(), [company](const ApproverSeat &s) { return s.company == company; });
+}
 
 /**
  * One way the server can change something, as openttd://mcp/status and `prismatic_mcp status` name
@@ -719,8 +780,11 @@ inline std::string CapabilitiesLine(const Capabilities &caps)
 struct ServerApprovalsReader {
 	nlohmann::json rows = nlohmann::json::array(); ///< the approvals of the last whole reply
 	uint64_t count = 0;                            ///< how many the server holds for the company
-	uint64_t replies = 0;                          ///< whole replies read
-	nlohmann::json page = nlohmann::json::array(); ///< the rows of the reply being read
+	uint64_t replies = 0;                          ///< whole replies read (every page of one)
+	uint64_t answers = 0;                          ///< answers read: one per page
+	uint64_t next_page = 0;                        ///< the page to ask for next, while a reply has more; else 0
+	nlohmann::json page = nlohmann::json::array(); ///< the rows of the answer being read
+	nlohmann::json pages = nlohmann::json::array(); ///< the rows of the earlier pages of the reply being read
 
 	/** Read one chat line; true when it is an "[approvals]" line (and then it is consumed here). */
 	bool Feed(std::string_view line)
@@ -734,8 +798,19 @@ struct ServerApprovalsReader {
 			return true;
 		}
 		if (j.contains("count") && j["count"].is_number_unsigned()) {
-			this->rows = std::move(this->page);
+			/* A queue longer than one answer comes a page at a time: the reply is whole at its last page. */
+			const uint64_t at = j.value("page", uint64_t{1}), of = j.value("pages", uint64_t{1});
+			if (at <= 1) this->pages = nlohmann::json::array();
+			for (auto &row : this->page) this->pages.push_back(std::move(row));
 			this->page = nlohmann::json::array();
+			this->answers++;
+			if (at < of) {
+				this->next_page = at + 1;
+				return true;
+			}
+			this->next_page = 0;
+			this->rows = std::move(this->pages);
+			this->pages = nlohmann::json::array();
 			this->count = j["count"].get<uint64_t>();
 			this->replies++;
 			return true;
