@@ -27,18 +27,25 @@ function PrismaticAI::StraightRoadFront(t) {
 	return null;
 }
 
-/* An own bus station within `radius` (DistanceMax) of `origin`, and not sharing catchment with `avoid`
- * (7 tiles, DistanceMax) unless that is null:
- * the nearest one's tile, or null. Reusing it keeps one station per place instead of a cluster. */
+/* An own bus stop within `radius` (DistanceMax) of `origin`, and not sharing catchment with `avoid`
+ * (7 tiles, DistanceMax) unless that is null: the nearest one's tile, or null. Reusing it keeps one
+ * station per place instead of a cluster.
+ *
+ * The tile is a bus stop tile of the station, not AIStation.GetLocation: a station whose bus stops
+ * were joined to an airport or a rail station (catchment.nut) has its location on the airport or
+ * the platform, where no road leads, so RoadConnected from it always failed. In live game 21647
+ * (1995-2000) the same pairs, e.g. tiles 5274 and 6291 (Minfingley Airport), were "on separate
+ * road networks" 55 times. */
 function PrismaticAI::OwnBusStationNear(origin, radius, avoid) {
 	local best = null, best_d = radius + 1;
 	local list = AIStationList(AIStation.STATION_BUS_STOP);
 	for (local st = list.Begin(); !list.IsEnd(); st = list.Next()) {
-		local loc = AIStation.GetLocation(st);
-		local d = AIMap.DistanceMax(loc, origin);
-		if (d >= best_d) continue;
-		if (avoid != null && AIMap.DistanceMax(loc, avoid) < 7) continue;
-		best = loc; best_d = d;
+		foreach (loc, _ in AITileList_StationType(st, AIStation.STATION_BUS_STOP)) {
+			local d = AIMap.DistanceMax(loc, origin);
+			if (d >= best_d) continue;
+			if (avoid != null && AIMap.DistanceMax(loc, avoid) < 7) continue;
+			best = loc; best_d = d;
+		}
 	}
 	return best;
 }
@@ -99,9 +106,15 @@ function PrismaticAI::BuildBusStopNear(origin, radius, label) {
 	return PrismaticAI.BuildBusStopAway(origin, radius, label, null);
 }
 
+/* Why the last BuildBusStopAway returned null: "authority" (the local authority refused a stop)
+ * or "site" (no site connected); null after a stop was found. BuildRouteInTown remembers the town
+ * by it (memory.nut ROAD_TOWN_FAILED). */
+ROAD_STOP_FAIL <- null;
+
 /* The same, keeping at least 8 tiles from `avoid` (catchments of radius 3 must not overlap) (the route's other stop) when it is not null.
  * An own bus station within 8 tiles of `origin` is reused first. */
 function PrismaticAI::BuildBusStopAway(origin, radius, label, avoid) {
+	ROAD_STOP_FAIL = null;
 	local reuse = PrismaticAI.OwnBusStationNear(origin, 6, avoid);
 	if (reuse != null) {
 		AILog.Info("PrismaticAI: reuse stop " + label + " at tile " + reuse + " (" + AIStation.GetName(AIStation.GetStationID(reuse)) + ")");
@@ -127,6 +140,14 @@ function PrismaticAI::BuildBusStopAway(origin, radius, label, avoid) {
 					AILog.Info("PrismaticAI: built stop " + label + " at tile " + t + " (drive-through)");
 					return t;
 				}
+				/* The town will not have us: as in pass 2, no other site in it does better now. Pass 1
+				 * went on through every straight road in the radius, about 30 sites at a game day each,
+				 * before pass 2 met the same refusal (live game 21647). */
+				if (AIError.GetLastError() == AIError.ERR_LOCAL_AUTHORITY_REFUSES) {
+					AILog.Warning("PrismaticAI: stop at tile " + t + " refused: " + AIError.GetLastErrorString());
+					ROAD_STOP_FAIL = "authority";
+					return null;
+				}
 			}
 		}
 	}
@@ -146,14 +167,14 @@ function PrismaticAI::BuildBusStopAway(origin, radius, label, avoid) {
 					if (!AIMap.IsValidTile(t) || AIRoad.IsRoadTile(t) || !AITile.IsBuildable(t)) continue;
 					if (AITile.GetSlope(t) != AITile.SLOPE_FLAT) continue;
 					if (PrismaticAI.OverlapsOwnBusStation(t)) continue;
-					if (++tries > 12) { AILog.Warning("PrismaticAI: no stop " + label + " after 12 tries"); return null; }
+					if (++tries > 12) { AILog.Warning("PrismaticAI: no stop " + label + " after 12 tries"); ROAD_STOP_FAIL = "site"; return null; }
 					AILog.Info("PrismaticAI: survey stop " + label + " at tile " + t + " (bay, facing tile " + front + ")");
 					AIController.Sleep(PACE);
 					if (!AIRoad.BuildRoadStation(t, front, AIRoad.ROADVEHTYPE_BUS, AIStation.STATION_JOIN_ADJACENT)) {
 						local why = AIError.GetLastErrorString();
 						AILog.Warning("PrismaticAI: stop at tile " + t + " refused: " + why);
 						/* The town will not have us: no other site in it will do better now. */
-						if (AIError.GetLastError() == AIError.ERR_LOCAL_AUTHORITY_REFUSES) return null;
+						if (AIError.GetLastError() == AIError.ERR_LOCAL_AUTHORITY_REFUSES) { ROAD_STOP_FAIL = "authority"; return null; }
 						continue;
 					}
 					AIRoad.BuildRoad(front, t);
@@ -168,7 +189,35 @@ function PrismaticAI::BuildBusStopAway(origin, radius, label, avoid) {
 		}
 	}
 	AILog.Warning("PrismaticAI: no connected site for stop " + label);
+	ROAD_STOP_FAIL = "site";
 	return null;
+}
+
+/* After a failed bus route in `town`: remove every bus stop of ours within `radius` of its centre
+ * whose station is bus stops only and that no vehicle has in its orders. An unserved station near
+ * a town costs the company RATING_STATION_DOWN_STEP (-15) of its rating there every month
+ * (UpdateTownRating, src/town_cmd.cpp), against RATING_GROWTH_UP_STEP (+5) of recovery. In live
+ * game 21647 two failed attempts in Carnley Market each left a stop A (tiles 33582 and 39747,
+ * 1995) that nothing served, and from 1995-10 the authority refused every stop there. Stations
+ * joined to an airport or a rail station (catchment.nut) are not touched. The town's road stays
+ * (RemoveRoadStation keeps it). Returns the number of stop tiles removed. */
+function PrismaticAI::RemoveUnservedBusStops(town, radius) {
+	local center = AITown.GetLocation(town), removed = 0;
+	local list = AIStationList(AIStation.STATION_BUS_STOP);
+	for (local st = list.Begin(); !list.IsEnd(); st = list.Next()) {
+		if (AIMap.DistanceMax(AIStation.GetLocation(st), center) > radius) continue;
+		if (AIStation.HasStationType(st, AIStation.STATION_TRAIN) || AIStation.HasStationType(st, AIStation.STATION_TRUCK_STOP) ||
+				AIStation.HasStationType(st, AIStation.STATION_AIRPORT) || AIStation.HasStationType(st, AIStation.STATION_DOCK)) continue;
+		if (AIVehicleList_Station(st).Count() > 0) continue;
+		local name = AIStation.GetName(st);
+		foreach (t, _ in AITileList_StationType(st, AIStation.STATION_BUS_STOP)) {
+			if (AIRoad.RemoveRoadStation(t)) {
+				removed++;
+				AILog.Info("PrismaticAI: removed unserved stop at tile " + t + " (" + name + ") in " + AITown.GetName(town));
+			}
+		}
+	}
+	return removed;
 }
 
 /* Build a road depot near `origin` whose exit leads onto the road network `origin` is on, never

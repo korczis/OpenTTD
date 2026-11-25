@@ -111,6 +111,9 @@ const AUTOPILOT_MAX_ROUTES = 30;
 const AUTOPILOT_CASH_RESERVE = 5000;
 
 /* After the class: intercity.nut adds methods to it. */
+require("town_model.nut");
+require("town.nut");
+require("memory.nut");
 require("roadstop.nut");
 require("intercity.nut");
 require("air.nut");
@@ -174,17 +177,35 @@ function PrismaticAI::BuildStarterRoute(aggressiveness, used_towns) {
 		return -1;
 	}
 	local max_towns = 10;
-	local tried = 0;
-	for (local town = towns.Begin(); !towns.IsEnd() && tried < max_towns; town = towns.Next()) {
+	local tried = 0, failed = 0, skipped = 0;
+	for (local town = towns.Begin(); !towns.IsEnd() && tried < max_towns && failed < ROAD_FAILS_PER_CALL; town = towns.Next()) {
 		if (used_towns.rawin(town)) continue;
+		/* A town remembered as failed (memory.nut ROAD_TOWN_FAILED), or one whose authority surely
+		 * refuses a new station (the rating's band is at most VERY_POOR, whose highest value is
+		 * TOWN_MODEL.new_station_above), is skipped without a survey and not counted as tried. */
+		if (PrismaticAI.RoadTownFailed(town) != null || !PrismaticAI.TownSurelyAllowsStation(town, 0)) { skipped++; continue; }
 		tried++;
 		if (PrismaticAI.BuildRouteInTown(town, aggressiveness)) return town;
+		failed++;
 	}
 	/* Every town already has a route: nothing was tried, so there is nothing to warn about. With
 	 * rich growth lifting max_routes the bot reached this every heartbeat, and the narrator relayed
 	 * "no new route in the 0 largest unused town(s)" into the owner's chat (2026-11-22). */
-	if (tried > 0) AILog.Warning("PrismaticAI: no new route in the " + tried + " largest unused town(s)");
+	if (tried > 0) AILog.Warning("PrismaticAI: no new route in the " + tried + " largest unused town(s) (" + skipped + " skipped as failed or refused)");
 	return -1;
+}
+
+/* At most this many failed town attempts in one BuildStarterRoute call: each can survey dozens of
+ * sites, about a game day each, serially in the main loop, and nothing else of the heartbeat
+ * (fleet, steward, capital) runs meanwhile. */
+ROAD_FAILS_PER_CALL <- 2;
+
+/* A failed attempt in `town`: remembered for `why` (memory.nut), and the stops left unserved
+ * there removed (roadstop.nut RemoveUnservedBusStops). Returns false, BuildRouteInTown's answer. */
+function PrismaticAI::RoadTownFails(town, why, a, b) {
+	PrismaticAI.RememberRoadTown(town, why, a, b);
+	PrismaticAI.RemoveUnservedBusStops(town, 15);
+	return false;
 }
 
 /* One attempt at a bus route in `town`. See BuildStarterRoute. */
@@ -192,19 +213,22 @@ function PrismaticAI::BuildRouteInTown(town, aggressiveness) {
 	PrismaticAI.Funnel("road", "tried");
 	local center = AITown.GetLocation(town);
 	local stop_a = PrismaticAI.BuildBusStopNear(center, 15, "A in " + AITown.GetName(town));
-	if (stop_a == null) { PrismaticAI.Funnel("road", "stop_fail"); return false; }
+	if (stop_a == null) {
+		PrismaticAI.Funnel("road", "stop_fail");
+		return PrismaticAI.RoadTownFails(town, ROAD_STOP_FAIL == "authority" ? "authority" : "site", null, null);
+	}
 	AIController.Sleep(PACE);
 	/* Stop B in the same town, at least 8 tiles from A, so the two catchments do not overlap (center + 20 used to land in the next town). */
 	local stop_b = PrismaticAI.BuildBusStopAway(center, 12, "B in " + AITown.GetName(town), stop_a);
 	if (stop_b == null || stop_b == stop_a) {
 		AILog.Warning("PrismaticAI: could not find a distinct site for stop B in " + AITown.GetName(town));
 		PrismaticAI.Funnel("road", "stop_fail");
-		return false;
+		return PrismaticAI.RoadTownFails(town, (stop_b == null && ROAD_STOP_FAIL == "authority") ? "authority" : "site", null, null);
 	}
 	if (!PrismaticAI.RoadConnected(stop_a, stop_b, 4000)) {
 		AILog.Warning("PrismaticAI: stops at tiles " + stop_a + " and " + stop_b + " are on separate road networks; no buses bought");
 		PrismaticAI.Funnel("road", "network_fail");
-		return false;
+		return PrismaticAI.RoadTownFails(town, "network", stop_a, stop_b);
 	}
 	AIController.Sleep(PACE);
 

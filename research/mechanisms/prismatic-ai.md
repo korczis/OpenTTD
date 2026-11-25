@@ -66,7 +66,18 @@ flowchart TB
   straight road first, and a bay only where no such road is near. A road depot is reused when it
   lies on the road network of the stop it serves. A new depot faces only a road piece reachable
   from that stop (one `RoadReach` walk answers every candidate) and never stands beside another
-  depot (`DepotBeside`), so its exit leads onto the route.
+  depot (`DepotBeside`), so its exit leads onto the route. A reused stop is one of the station's
+  bus stop tiles, never its location, which for a stop joined to an airport is the airport tile.
+- **A failed town is remembered** (`memory.nut`). In live game 21647 (1995-2000) nothing
+  remembered a town whose bus route failed: every heartbeat that tried road surveyed the same three
+  towns about 40 sites each (a game day a site) and was refused by their authorities on the same
+  tiles, and the heartbeats fell from 88 a year to 3 while 34-44M sat idle. Now the town is kept
+  out for a period by reason (authority, site, separate networks), and sooner when the cause can
+  have changed (the rating band rose, the town grew). A town whose rating band surely refuses a
+  station is not surveyed at all, a drive-through refusal ends the survey as a bay refusal did, at
+  most two towns fail in one heartbeat, and the failed town keeps none of our unserved bus-only
+  stops, which cost its rating 15 points a month. The same three functions are meant for every
+  such record (the air memories, the rail termini without a site of PR #291).
 - **Lines as desired state** (`lines.nut`). Each line has a slot and logs a record
   (`PrismaticAI: rail line <slot>: label=...|a=...|...|state=...`) when built and every game month.
   The settings `line<N>_trains` and `line<N>_wagons` are targets; the bot clones, resizes, sells, or
@@ -307,6 +318,7 @@ rich removed that hoard in a replay and cost 4.8% of value, so it is not part of
 | [`PrismaticAI/fleet.nut`](../../tools/research/prismatic-ai/PrismaticAI/fleet.nut) | road, air and ship capacity from waiting cargo and the link graph; the yield gates (`RouteLoad`, `RoadPays`) and the road report |
 | [`PrismaticAI/ships.nut`](../../tools/research/prismatic-ai/PrismaticAI/ships.nut) | ship routes behind `ships_max`: candidates, dock sites, the water path check, docks, depot, ships |
 | [`PrismaticAI/roadstop.nut`](../../tools/research/prismatic-ai/PrismaticAI/roadstop.nut), [`intercity.nut`](../../tools/research/prismatic-ai/PrismaticAI/intercity.nut), [`air.nut`](../../tools/research/prismatic-ai/PrismaticAI/air.nut) | bus stops and depots, intercity roads, airports |
+| [`PrismaticAI/memory.nut`](../../tools/research/prismatic-ai/PrismaticAI/memory.nut) | the failure memory (`MemoRemember`, `MemoHeld`, `MemoSave`) and the road towns it keeps out (`ROAD_TOWN_FAILED`) |
 | [`PrismaticAI/capital.nut`](../../tools/research/prismatic-ai/PrismaticAI/capital.nut) | the capital allocator (`capital_alloc`): measured-payback purchases before repayment, the stay-afloat margin, the quarterly capital report |
 | [`PrismaticAI/funnel.nut`](../../tools/research/prismatic-ai/PrismaticAI/funnel.nut) | the yearly growth funnel, one `FUNNEL` line per mode (RESEARCH-ONLY observability; [growth funnel](../growth-funnel.md)) |
 | [`install`](../../tools/research/prismatic-ai/install) | links the bot into the personal `ai/` folder; `--check` verifies it |

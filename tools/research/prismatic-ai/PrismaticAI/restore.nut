@@ -81,6 +81,8 @@ function PrismaticAI::Save() {
 		air_ports = AIR_PORTS,
 		air_bad_towns = AIR_BAD_TOWNS,
 		failed_pairs = FAILED_PAIRS,
+		/* memory.nut: towns whose bus route failed, while their records hold. */
+		road_failed = PrismaticAI.MemoSave(ROAD_TOWN_FAILED, ROAD_FAIL_SAVE_MAX),
 		modernize_set = MODERNIZE_SET,
 		/* rail.nut ClaimFresh: when each foreign rail station tile near a producer was first seen. */
 		claims_seen = CLAIM_SEEN,
@@ -133,7 +135,8 @@ function PrismaticAI::Restore(b) {
 	AILog.Info("PrismaticAI: restored after a restart: " + RAIL_LINES.len() + " rail lines (" + freight + " freight), " +
 		this.auto_air + " autopilot air routes, " + this.routes + " routes, " + this.freight_tried.len() + " freight lines tried, " +
 		this.own_built + " own, " + this.twins + " twins, " + this.used_towns.len() + " road towns, " + AIR_PORTS.len() +
-		" airports, " + old_claims + " foreign rail station tiles of unknown age taken as old (" + how + ")" + pair);
+		" airports, " + old_claims + " foreign rail station tiles of unknown age taken as old, " + ROAD_TOWN_FAILED.len() +
+		" road towns remembered as failed (" + how + ")" + pair);
 }
 
 /* `date` (AIDate) as YYYY-MM-DD. */
@@ -208,6 +211,8 @@ function PrismaticAI::RestoreFromSave(data) {
 	PrismaticAI.RestoreFill(AIR_PORTS, PrismaticAI.RestoreField(data, "air_ports", {}));
 	PrismaticAI.RestoreFill(AIR_BAD_TOWNS, PrismaticAI.RestoreField(data, "air_bad_towns", {}));
 	PrismaticAI.RestoreFill(FAILED_PAIRS, PrismaticAI.RestoreField(data, "failed_pairs", {}));
+	/* A save from before memory.nut has none: {} (MemoHeld drops a record of another layout). */
+	PrismaticAI.RestoreFill(ROAD_TOWN_FAILED, PrismaticAI.RestoreField(data, "road_failed", {}));
 	PrismaticAI.RestoreFill(MODERNIZE_SET, PrismaticAI.RestoreField(data, "modernize_set", {}));
 	PrismaticAI.RestoreFill(CLAIM_SEEN, PrismaticAI.RestoreField(data, "claims_seen", {}));
 }
