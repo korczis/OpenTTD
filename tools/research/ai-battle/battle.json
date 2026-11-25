@@ -206,6 +206,24 @@
         {
           "ai": "AdmiralAI"
         }
+      ],
+      [
+        {
+          "ai": "PrismaticAI",
+          "label": "PrismaticAI claim race A",
+          "settings": "aggressiveness=100,max_routes=30,intercity=1,own_lines=8,cash_reserve=5000,self_steward=1,test_claim_race=20"
+        },
+        {
+          "ai": "PrismaticAI",
+          "label": "PrismaticAI claim race B",
+          "settings": "aggressiveness=100,max_routes=30,intercity=1,own_lines=8,cash_reserve=5000,self_steward=1"
+        },
+        {
+          "ai": "AAAHogEx"
+        },
+        {
+          "ai": "LuDiAI AfterFix"
+        }
       ]
     ]
   },

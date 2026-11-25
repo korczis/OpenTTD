@@ -212,7 +212,7 @@ class PrismaticAI extends AIInfo {
 		}
 		AddSetting({
 			name = "own_lines",
-			description = "Freight rail lines the bot plans itself once every line the planner handed over was tried and money waits (0: none; the panel sets it for a bot it starts from a plan, so a bot started without one stays unplanned).",
+			description = "Freight rail lines the bot plans itself once every line the planner handed over was tried and money waits. With autopilot=1, planned or not, at least 10 (main.nut Behaviour); 0 means none only with autopilot=0, and planned_freight_only=1 turns them off under any plan.",
 			min_value = 0, max_value = 32,
 			easy_value = 18, medium_value = 18, hard_value = 18, custom_value = 18,
 			flags = CONFIG_INGAME,
@@ -439,7 +439,7 @@ class PrismaticAI extends AIInfo {
 		});
 		AddSetting({
 			name = "autopilot",
-			description = "1 (default): a bot started without a plan from the panel (no planner line, air or rail pair) grows on its own: in-bot steward, own freight lines (at least 8), intercity roads, up to 30 routes and a 5000 reserve. 0: the unplanned bot stays as small as its settings say (the duels' rival before 2026-11-19).",
+			description = "1 (default): the bot grows on its own, with or without a plan from the panel: in-bot steward, own freight lines (at least 10), intercity roads, up to 30 routes and at most a 5000 reserve; a plan's lines are built on top, its passenger pair in a heartbeat that starts no own freight line, or after two years of waiting. 0: the bot stays as small as its settings say (the duels' rival before 2026-11-19).",
 			min_value = 0, max_value = 1,
 			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
 			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
@@ -459,6 +459,13 @@ class PrismaticAI extends AIInfo {
 			min_value = 0, max_value = 100,
 			easy_value = 55, medium_value = 55, hard_value = 55, custom_value = 55, step_size = 5,
 			flags = CONFIG_INGAME,
+		});
+		AddSetting({
+			name = "steward_target",
+			description = "In-bot steward: 1 (default): a freight rail line that earns gets the trains that carry its monthly production (its producer and the ones feeding its source station) over one round trip, in batches (at most doubling a month, up to trains_max), its newest train at least 90 days old (steward.nut LineTrainTarget); 0: only the waiting-cargo and rating rules grow a line, one train at a time.",
+			min_value = 0, max_value = 1,
+			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
+			flags = CONFIG_INGAME | CONFIG_BOOLEAN,
 		});
 		AddSetting({
 			name = "steward_borrow",
@@ -656,12 +663,31 @@ class PrismaticAI extends AIInfo {
 			step_size = 1,
 			flags = CONFIG_NONE,
 		});
+		/* RESEARCH-ONLY test hook (lines.nut FundTrain): the borrowing path for a train runs only when the
+		 * bank is short of a train's price, which RepaySurplus and income rarely leave it. */
+		AddSetting({
+			name = "test_borrow",
+			description = "RESEARCH-ONLY test hook. 1: when the steward adds a train, FundTrain counts the bank as holding only the cash reserve, so every such train is borrowed for, within the bounds of steward_borrow (the loan at most half its limit, a line budget and two quarters of running costs left), and RepaySurplus pays it back. 0 (default): off.",
+			min_value = 0, max_value = 1,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			flags = CONFIG_BOOLEAN,
+		});
 		/* RESEARCH-ONLY test hook (main.nut TestFreightSlots): handed freight slots written one
 		 * setting at a time, as the panel and the re-planner write them. */
 		AddSetting({
 			name = "test_freight_slots",
 			description = "RESEARCH-ONLY test hook. 1: the handed freight slots (fr_*) are not read from the settings but from main.nut TestFreightSlots, which hands the bot's own best freight line half written, then incoherent (an acceptor that does not take the cargo, a cargo the producer does not make), then flipping between two acceptors, then whole; FreightLines must try it once, only when whole. Run it with planned_freight_only=1. 0 (default): off.",
 			min_value = 0, max_value = 1,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
+			step_size = 1,
+			flags = CONFIG_NONE,
+		});
+		/* RESEARCH-ONLY test hook (rail.nut TestClaimRace): the producer-claim race that only the second
+		 * claim check settles, run by the fitness check's claim-race lineup. */
+		AddSetting({
+			name = "test_claim_race",
+			description = "RESEARCH-ONLY test hook. Days the company waits after the claim check before its first source station, once a game, so a sibling that chose the same producer builds and checks its station first and only the second claim check (rail.nut ClaimBlocks) can settle the race. 0 (default): off.",
+			min_value = 0, max_value = 60,
 			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0,
 			step_size = 1,
 			flags = CONFIG_NONE,

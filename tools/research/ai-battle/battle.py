@@ -104,8 +104,9 @@ REF_FIELD = re.compile(r"(\w+)=(-?\d+)")
 MODES = ("rail", "road", "air", "water")
 # An AI's Squirrel error: "dbg: [script:1] [<company>] [S] <text>".
 SQ_ERROR = re.compile(r"\[script:\d\] \[(\d+)\] \[S\] ")
-# The referee's shared producers: an industry whose output rail stations of several companies catch.
-REF_SHARED = re.compile(r"REF S date=(\d+)-(\d+) ind=(\d+) owners=([\d,]+) name=(.*)$")
+# The referee's shared producers: an industry one of whose cargoes rail stations of several companies
+# pick up (`cargo=` since 2026-11-23; a line without it counts for the whole industry).
+REF_SHARED = re.compile(r"REF S date=(\d+)-(\d+) ind=(\d+)(?: cargo=(\d+))? owners=([\d,]+) name=(.*)$")
 REF_TRAINLESS = re.compile(r"REF T date=(\d+)-(\d+) cid=(\d+) rail_stations=(\d+) trainless=(\d+) ids=([\d,]*)")
 # PrismaticAI's yearly growth funnel (RESEARCH-ONLY, PrismaticAI/funnel.nut), one line per mode:
 # "dbg: [script:1] [<company>] [E] FUNNEL year=<y> mode=<mode> <stage>=<n> ...".
@@ -1484,18 +1485,23 @@ def parse_log(text: str) -> tuple[dict, dict]:
 
 
 def parse_shared(text: str) -> dict[int, dict]:
-    """{industry id: {"name", "owners": the company ids, "first": the first quarter seen}} from a
-    match log's REF S lines: every producer whose output rail stations of two or more companies
-    caught in some quarter, the owners of every such quarter together."""
+    """{industry id: {"name", "owners": the company ids, "first": the first quarter seen,
+    "cargoes": {cargo id (None for a line without one): {"owners", "first"}}}} from a match log's
+    REF S lines: every producer one of whose cargoes rail stations of two or more companies picked
+    up in some quarter. `owners` joins every cargo and quarter; a cargo's own owners are the ones
+    that shared that cargo."""
     shared: dict[int, dict] = {}
     for line in text.splitlines():
         m = REF_SHARED.search(line)
         if not m:
             continue
-        y, mo, ind, owners, name = m.groups()
-        e = shared.setdefault(int(ind), {"name": name.strip(), "owners": set(),
-                                         "first": f"{y}-{int(mo):02d}"})
-        e["owners"] |= {int(o) for o in owners.split(",") if o}
+        y, mo, ind, cargo, owners, name = m.groups()
+        quarter = f"{y}-{int(mo):02d}"
+        ids = {int(o) for o in owners.split(",") if o}
+        e = shared.setdefault(int(ind), {"name": name.strip(), "owners": set(), "first": quarter, "cargoes": {}})
+        e["owners"] |= ids
+        c = e["cargoes"].setdefault(int(cargo) if cargo is not None else None, {"owners": set(), "first": quarter})
+        c["owners"] |= ids
     return shared
 
 
@@ -1606,10 +1612,14 @@ def sibling_producers(m: dict) -> list[str]:
     prismatic = {i: c["key"] for i, c in enumerate(m["lineup"]) if c["ai"].startswith("PrismaticAI")}
     fails = []
     for ind, e in sorted(m.get("shared", {}).items()):
-        ours = sorted(prismatic[o] for o in e["owners"] if o in prismatic)
-        if len(ours) >= 2:
-            fails.append(f"shared_producer:{e['name']} (industry {ind}, from {e['first']}): "
-                         + " + ".join(ours))
+        # Per cargo: two companies taking different cargoes of one farm split nothing.
+        groups = e.get("cargoes") or {None: {"owners": e["owners"], "first": e["first"]}}
+        for cargo, g in sorted(groups.items(), key=lambda kv: (kv[0] is not None, kv[0] or 0)):
+            ours = sorted(prismatic[o] for o in g["owners"] if o in prismatic)
+            if len(ours) >= 2:
+                what = "" if cargo is None else f", cargo {cargo}"
+                fails.append(f"shared_producer:{e['name']} (industry {ind}{what}, from {g['first']}): "
+                             + " + ".join(ours))
     return fails
 
 
