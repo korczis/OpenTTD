@@ -683,7 +683,8 @@ function PrismaticAI::BuildRailStationAt(origin, other, len, cargo, site, label,
  * other sites. Saved (restore.nut). */
 NO_RAIL_SITE <- {};
 /* How long a site search that found no land is believed: towns grow and land changes. Each
- * record is {until = date, join = whether a station to join stood there}. */
+ * record is {until = date, join = whether a station to join stood there, any = its
+ * NO_RAIL_SITE_ANY key}. */
 NO_RAIL_SITE_DAYS <- 730;
 /* ... and one that passed over a levellable site only for money, which comes in faster. */
 NO_RAIL_SITE_MONEY_DAYS <- 30;
@@ -693,7 +694,39 @@ function PrismaticAI::NoRailSiteKey(origin, site, cargo, len, platforms, hand) {
 }
 
 function PrismaticAI::RememberNoRailSite(origin, site, cargo, len, platforms, hand, days, joined) {
-	NO_RAIL_SITE[PrismaticAI.NoRailSiteKey(origin, site, cargo, len, platforms, hand)] <- {until = AIDate.GetCurrentDate() + days, join = joined};
+	local until = AIDate.GetCurrentDate() + days, any = origin + "-" + site + "-" + cargo;
+	NO_RAIL_SITE[PrismaticAI.NoRailSiteKey(origin, site, cargo, len, platforms, hand)] <- {until = until, join = joined, any = any};
+	PrismaticAI.NoRailSiteIndexAdd(any, until);
+}
+
+/* NO_RAIL_SITE by origin tile, site and cargo alone ("<tile>-<site>-<cargo>" -> the latest date a
+ * record of it holds until), for the own-line search, which does not know a line's platform length
+ * yet (BuildFreightRailRoute plans it). Rebuilt after a load (NoRailSiteReindex). */
+NO_RAIL_SITE_ANY <- {};
+
+function PrismaticAI::NoRailSiteIndexAdd(key, until) {
+	if (!NO_RAIL_SITE_ANY.rawin(key) || NO_RAIL_SITE_ANY[key] < until) NO_RAIL_SITE_ANY[key] <- until;
+}
+
+function PrismaticAI::NoRailSiteReindex() {
+	NO_RAIL_SITE_ANY.clear();
+	foreach (k, rec in NO_RAIL_SITE) {
+		if (typeof rec == "table" && ("until" in rec) && ("any" in rec)) PrismaticAI.NoRailSiteIndexAdd(rec.any, rec.until);
+	}
+}
+
+/* Whether a terminus of any shape at `origin` for `cargo` as `site` is remembered without a site:
+ * the own-line search (NextOwnFreightLine) then passes the industry over, so a failed try does not
+ * use up own_fail_pause and the next best pair is chosen. In the owner's live game of seed 21647
+ * (1992) the own plan picked five factories in a row with no buildable catching site at all
+ * (0/0/0 in every orientation), each after building and removing the farm's station. Coarser than
+ * NoRailSiteKnown (any platform length), and it expires the same way. */
+function PrismaticAI::NoRailSiteFor(origin, site, cargo) {
+	local key = origin + "-" + site + "-" + cargo;
+	if (!NO_RAIL_SITE_ANY.rawin(key)) return false;
+	if (NO_RAIL_SITE_ANY[key] > AIDate.GetCurrentDate()) return true;
+	delete NO_RAIL_SITE_ANY[key];
+	return false;
 }
 
 /* Whether the terminus asked for is remembered without a site (NO_RAIL_SITE); says so when it is.
@@ -772,11 +805,13 @@ function PrismaticAI::StationOrientation(along_x, forward, len, platforms, hand)
  * lowest span first (LevelRailStationSite). */
 function PrismaticAI::StationSurvey(origin, o, cargo, site, slopes, box) {
 	local tiles = AITileList();
-	/* A site's corner is its north tile: a site north or west of the industry starts its own length
-	 * further out than one south or east of it, so the search reaches o.w and o.h further that way.
-	 * Within 10 tiles only, a terminus 8 tiles long could not lie on the industry's north-west side
-	 * at all (an industry's tiles lie south-east of its location tile). */
-	tiles.AddRectangle(AIMap.GetTileIndex(max(2, AIMap.GetTileX(origin) - 10 - o.w), max(2, AIMap.GetTileY(origin) - 10 - o.h)),
+	/* A site's corner is its north tile, and an industry's tiles lie south-east of its location
+	 * tile: a site north or west of it catches it (catchment radius 4) with a corner up to
+	 * 3 + o.w (3 + o.h) tiles out, which 10 did not reach for a terminus with a 4-tile throat on
+	 * that side (corner 11 out). Only that far, not further: every tile more is valuated in every
+	 * orientation, and the script's time is the game's. */
+	local nw_x = max(10, 3 + o.w), nw_y = max(10, 3 + o.h);
+	tiles.AddRectangle(AIMap.GetTileIndex(max(2, AIMap.GetTileX(origin) - nw_x), max(2, AIMap.GetTileY(origin) - nw_y)),
 		AIMap.GetTileIndex(min(AIMap.GetMapSizeX() - 3 - o.w, AIMap.GetTileX(origin) + 10), min(AIMap.GetMapSizeY() - 3 - o.h, AIMap.GetTileY(origin) + 10)));
 	tiles.Valuate(AITile.IsBuildableRectangle, o.w, o.h);
 	tiles.KeepValue(1);
@@ -2111,7 +2146,7 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 	local near = rich ? RICH_MIN_TILES : 100, far = rich ? RICH_MAX_TILES : 260;
 	/* Why nothing was found, said once a game year (NO_OWN_LINE_YEAR): without it a bot that found
 	 * no candidate went silent, as company 0 of the owner's live game (seed 15805) did for years. */
-	local why = {producers = 0, ours = 0, claimed = 0, released = 0, small = 0, served = 0, no_acceptor = 0, tried = 0};
+	local why = {producers = 0, ours = 0, claimed = 0, released = 0, small = 0, served = 0, no_acceptor = 0, tried = 0, no_site = 0};
 	PrismaticAI.ForgetGoneClaims();
 	foreach (p, _ in AIIndustryList()) {
 		if (AIIndustry.IsBuiltOnWater(p)) continue;
@@ -2125,6 +2160,7 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 			if (!AICargo.IsFreight(c)) continue;
 			local prod = AIIndustry.GetLastMonthProduction(p, c);
 			if (prod < 40) { why.small++; continue; }
+			if (PrismaticAI.NoRailSiteFor(AIIndustry.GetLocation(p), "produce", c)) { why.no_site++; continue; }
 			if (AIIndustry.GetLastMonthTransported(p, c) > 0) {
 				if (!rich) { why.served++; continue; }
 				local served = AIIndustry.GetLastMonthTransportedPercentage(p, c);
@@ -2138,6 +2174,7 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 			if (accs.IsEmpty()) why.no_acceptor++;
 			foreach (q, dist in accs) {
 				if (tried.rawin(p + "-" + q + "-" + c)) { why.tried++; continue; }
+				if (PrismaticAI.NoRailSiteFor(AIIndustry.GetLocation(q), "accept", c)) { why.no_site++; continue; }
 				local days = (dist / tiles_a_day).tointeger() + 1;
 				local income = AICargo.GetCargoIncome(c, dist, days);
 				/* Multi-source (rail_feed): the unserved producers of the same cargo a station at p
@@ -2159,7 +2196,8 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 			" ours, " + why.claimed + " claimed by another company's rail station, " + why.released +
 			" with only another company's rail station that no longer claims it, cargoes: " + why.small +
 			" under 40 a month, " + why.served + " transported by others" + (rich ? " (rich: past RICH_SERVED_BELOW)" : "") +
-			", " + why.no_acceptor + " with no acceptor " + near + "-" + far + " tiles away, " + why.tried + " pairs tried");
+			", " + why.no_acceptor + " with no acceptor " + near + "-" + far + " tiles away, " + why.tried + " pairs tried, " +
+			why.no_site + " passed over for an end remembered without a station site");
 	}
 	return best;
 }

@@ -210,6 +210,7 @@ function PrismaticAI::RestoreFromSave(data) {
 	PrismaticAI.RestoreFill(AIR_BAD_TOWNS, PrismaticAI.RestoreField(data, "air_bad_towns", {}));
 	PrismaticAI.RestoreFill(FAILED_PAIRS, PrismaticAI.RestoreField(data, "failed_pairs", {}));
 	PrismaticAI.RestoreFill(NO_RAIL_SITE, PrismaticAI.RestoreField(data, "no_rail_site", {}));
+	PrismaticAI.NoRailSiteReindex();
 	PrismaticAI.RestoreFill(MODERNIZE_SET, PrismaticAI.RestoreField(data, "modernize_set", {}));
 	PrismaticAI.RestoreFill(CLAIM_SEEN, PrismaticAI.RestoreField(data, "claims_seen", {}));
 }

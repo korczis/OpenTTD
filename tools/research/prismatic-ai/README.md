@@ -77,11 +77,13 @@ Full rationale: [`research/rail-steward.md`](../../../research/rail-steward.md),
   and airport limit first (`AirportAuthorityAllows`). Rail station levelling keeps a margin
   proportionate to its price (`RailLevelKeep`). With 2M or more to spend it levels sites of up to
   three height steps and up to 400000 (`RailLevelStep`, `RailLevelMax`); the site search reaches
-  a terminus's own length further north and west, where a site starts further from the industry.
+  as far north and west as a terminus there can still catch the industry (its corner up to 3 tiles
+  plus its own length out).
 - **A terminus with no site is remembered** (`NO_RAIL_SITE`, saved): the next line to or from the
   same place with the same platforms does not survey it again for two game years (30 days when
-  a levellable site was passed over for money), and an acceptor remembered so fails before the
-  source station is built.
+  a levellable site was passed over for money), an acceptor remembered so fails before the
+  source station is built, and the own-line search passes over a producer or acceptor remembered
+  so (`NoRailSiteFor`) instead of spending a try on it.
 - **The laid line is walked** (`VerifyRailLine`) before any train is bought. A missing piece is
   laid again, and a line that stays broken gets no train.
 - **Every wagon is checked.** A wagon the game will not refit or couple (a NewGRF rule) is sold
