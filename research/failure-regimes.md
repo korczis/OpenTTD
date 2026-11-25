@@ -24,7 +24,7 @@ reads it with `shared_get("regime.rules").rules`.
 | Regime | Fires when | Gates fitness |
 |---|---|---|
 | `no_expansion` | for at least 24 game months our fleet stays within 10% of its count at the start of the run (`hoard_fleet_slack`), the median of the rivals' own fleet growth over the same run is above 10%, and our value over the strongest rival's ends the run lower than it began. The record says whether net money (money less loan) rose over the run (`capital: idle`) or not (`starved`) | yes |
-| `widening_gap` | over at least 24 months the Theil-Sen slope of ln(our value / the strongest rival's) is negative and below the median of the other rivals' slopes of ln(their value / the strongest rival's) by ln 2 over the span: we fall behind the leader materially faster than the field | yes |
+| `widening_gap` | over at least 24 months the Theil-Sen slope of ln(our value / the strongest rival's) is negative and below the median of the other rivals' slopes of ln(their value / the strongest rival's) by ln 2 over the span: we fall behind the leader materially faster than the field | no: master's bot shows it (below) |
 | `mode_never_pays` | two year ends in a row at which our vehicles of a mode, counted as those that ran the whole year, made a loss on average | no (finding below) |
 | `mode_underperforms` | two year ends in a row at which our profit a vehicle of a mode is below every rival running it and below half their median | no: AAAHogEx shows it for its road vehicles in 5 of the 6 fitness matches |
 | `unapplied_plan` | live only: at least 3 rounds of the planner (`replan.<company>`) adopt a plan the bot does not run (`proposed` not empty, no other planner holds the company); a round that holds neither ends nor counts | live only |
@@ -85,6 +85,11 @@ Measured 2026-11-23 on master `eb0d839ce0`, binary `20261122-master-gfdc13851cf`
   only, there AdmiralAI); `widening_gap` for LuDiAI in five lineups and AdmiralAI in one, never for
   AAAHogEx; `mode_never_pays` for AAAHogEx's road vehicles in lineup 5. Lineup 0 on the rival
   seeds 31337 and 1383023900: no gated regime.
+- **Headless, master at 42cae0fc33** (2026-11-25, lundra, binary 20261122-master-g2a6a616221,
+  seven lineups, two runs): `widening_gap` for `PrismaticAI planned` in both runs (ln(value /
+  AAAHogEx) -0.06 a year against the other rivals' median +0.10) and for `PrismaticAI` in one.
+  Gated, it would fail every later change, so `regimes.json` gates only `no_expansion` until the
+  bot closes that gap; `widening_gap` is still printed and posted live.
 
 ## Finding: PrismaticAI's aircraft lose money
 
