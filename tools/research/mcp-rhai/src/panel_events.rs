@@ -91,6 +91,8 @@ pub const KINDS: &[Kind] = &[
     k("panel.operator", By::Panel, "panel.rs:Game::event", "`{text}`", "the operator approves, switches auto-approve, downloads content, is refused a console line"),
     k("panel.console", By::Panel, "panel.rs:Game::event", "`{text}`", "a console line sent through `POST /api/console`"),
     k("panel.rhai", By::Panel, "panel.rs:Game::event", "`{text}`", "a Rhai script ran"),
+    // Who may decide what, and who changed it (the digest's "Who changed governance").
+    k("governance.changed", By::Panel, "panel.rs:Game::governance", "`{setting: auto_approve|owner_session|approvers|approval_deadline, from, to, via, credential: owner-cookie|token|none, origin, user_agent, peer, game_date, game_tick}`, never the secret", "auto-approve was switched (`POST /api/auto-approve`, `--auto-approve` at start), the owner signed in or out, an approver was added or removed (`POST /api/approvers`), the approval deadline set through `POST /api/console`, or the deadline came from the environment at start"),
     // The panel's supervisor of its Rhai services (panel_scripts.rs supervise): process liveness only.
     k("service.supervised", By::Panel, "panel_scripts.rs:watch", "`{service, state: ended|restarted|restart_failed|stalled|gave_up, exit, restarts, quick_exits, quiet_s, stall_s, retry_in_s}`", "the supervisor gave a service that ended with an error a restart time, started it again, could not, stopped a stalled one or gave one up"),
     k("panel.view", By::Panel, "panel.rs:Game::event", "`{text}`", "a GUI client attached"),
