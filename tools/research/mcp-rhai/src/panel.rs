@@ -5783,9 +5783,15 @@ mod tests {
         };
         let failing = script("failing-planner", "echo 'mcp-plan: towns: connection refused' >&2; exit 3");
         let air = json!({"portfolio": {"solver": "fixed", "chosen": [{"kind": "passengers", "mode": "air", "score": 3,
-            "a": {"id": 1, "name": "A"}, "b": {"id": 2, "name": "B"}, "options": [{"mode": "air"}]}]}, "reads": []});
+            "a": {"id": 1, "name": "A"}, "b": {"id": 2, "name": "B"}, "options": [{"mode": "air"}]}]}, "reads": [],
+            "outcome": {"0": {"verdict": "mismatch", "why": "air pays, the plan spends on road"}}});
         let fixed = script("fixed-planner", &format!("cat <<'JSON'\n{air}\nJSON"));
-        let (g, p) = bare_panel("2");
+        // Under --no-plan-bot: the flag turns off only the bot start's plan, never this route's.
+        let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", "2", "--no-plan-bot"].map(String::from)).unwrap();
+        assert!(!args.plan_bot);
+        let g = Game::new(args);
+        g.mcp_up.store(true, Ordering::SeqCst);
+        let p = Panel { game: g.clone(), routes: routes() };
         // PRISMATIC_PLANNER is read by this test only; both cases run here, one after the other.
         std::env::set_var("PRISMATIC_PLANNER", &failing);
         let since = g.bus.seq();
@@ -5807,6 +5813,11 @@ mod tests {
         assert_eq!(out["settings"], "air_a=1,air_b=2,air_planes=2");
         assert!(out["bot_settings"].get("unplanned").is_none());
         assert_eq!(out["started"], Value::Null, "planned, not started");
+        // The planner's outcome assessment is published as outcome.<company>, --no-plan-bot or not.
+        let shared = g.bus.since(since, &kinds_of("rhai.shared"), 50);
+        let outcome = shared.iter().find(|e| e["data"]["key"] == "outcome.0").unwrap_or_else(|| panic!("{shared:?}"));
+        assert_eq!(outcome["data"]["value"]["verdict"], "mismatch");
+        assert_eq!(outcome["data"]["writer"], crate::panel_bot::PLANNED_WRITER);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

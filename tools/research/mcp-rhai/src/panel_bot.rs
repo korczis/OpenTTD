@@ -1045,7 +1045,10 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
         argv.extend(["--track".to_string(), track.to_string()]);
     }
     argv.extend(["--for".to_string(), plan_for]);
-    let request = json!({"budget": budget, "params": params, "limit": 40, "track": track, "for": targets});
+    // Each company's plan against what the game pays (src/outcome.rs): blackboard outcome.<company>
+    // below (a rhai.shared event on the bus and in the store), never applied.
+    argv.push("--outcome".to_string());
+    let request = json!({"budget": budget, "params": params, "limit": 40, "track": track, "for": targets, "outcome": true});
     let mut planner = json!({"exe": "mcp-plan", "args": argv[2..].to_vec(), "budget_from": "console: setting difficulty.max_loan",
                              "algoglyph": algoglyph});
     let out = match run(Command::new(&exe).args(&argv), None, Duration::from_secs(600), None) {
@@ -1089,6 +1092,13 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
     let mut p = settings_for(&out, None, &assigned, &mut |text| g.event("ai", &text));
     planner["kernel_runner"] = kernel_runner(&out, algoglyph);
     let seq = g.plan("plan.portfolio", portfolio_event(&out, &p, request, planner, &cal));
+    let state = g.resource("openttd://game/state").unwrap_or(Value::Null);
+    let game = json!({"seed": g.args.seed, "date": state.get("game_date"), "tick": state.get("game_tick")});
+    for (company, record) in outcome_records(&out, seq, &game) {
+        g.event("ai", &format!("planner: company {} against its outcomes: {} ({})", company + 1,
+                               py_str(record.get("verdict")), py_str(record.get("why"))));
+        publish_shared(g, &format!("{OUTCOME_KEY}.{company}"), record);
+    }
     // own_lines and rail_after from the stored duel outcomes (I0087), when the run turns the switch on;
     // otherwise, and when the stores give no pair, the constants above, with the reason in the event.
     let handed = p.bot_settings["freight"].as_array().map_or(0, Vec::len);
@@ -1117,6 +1127,36 @@ pub fn planned(g: &Arc<Game>, track: usize) -> Option<Planned> {
     p.bot_settings = data["choice"].clone();
     g.plan("plan.bot_settings", data);
     Some(p)
+}
+
+/// The blackboard prefix of the planner's outcome assessment: `outcome.<company>` (src/outcome.rs),
+/// read by a gap watcher and the strategy review. Written by PLANNED_WRITER; a proposal only.
+pub const OUTCOME_KEY: &str = "outcome";
+
+/// The planner's outcome assessments (mcp-plan --outcome, `out.outcome.<company>`), each as
+/// `(company, blackboard record)`: the assessment stamped with the game it was read from (seed,
+/// date, tick) and the plan.portfolio it belongs to, so a reader can tell a stale one. The write is
+/// published as rhai.shared, so it reaches the bus and the store as well. None when the planner
+/// answered no assessment (a company not started yet, an older planner).
+pub fn outcome_records(out: &Value, portfolio_seq: Option<u64>, game: &Value) -> Vec<(i64, Value)> {
+    out["outcome"].as_object().into_iter().flatten().filter_map(|(c, a)| {
+        let company = c.parse::<i64>().ok()?;
+        a.get("verdict")?;
+        let mut record = a.clone();
+        record["game"] = game.clone();
+        record["portfolio_seq"] = json!(portfolio_seq);
+        record["producer"] = json!("mcp-plan --outcome (src/outcome.rs), via panel_bot.rs:planned");
+        Some((company, record))
+    }).collect()
+}
+
+/// Write `key` on the panel's shared blackboard as PLANNED_WRITER and publish the write as
+/// rhai.shared, as POST /api/rhai/shared does; a refused write is said in the AI log.
+fn publish_shared(g: &Arc<Game>, key: &str, value: Value) {
+    match crate::rhai_shared::shared().set(key, value.clone(), PLANNED_WRITER, None) {
+        Ok(rev) => { g.bus.publish("rhai.shared", json!({"op": "set", "key": key, "rev": rev, "writer": PLANNED_WRITER, "value": value})); }
+        Err(e) => g.event("ai", &format!("planner: blackboard {key} not written: {e:?}")),
+    }
 }
 
 /// The planned-settings path's name for the planner key `planner.<company>` (src/fr_author.rs).
@@ -1187,6 +1227,27 @@ pub fn extra_settings(text: &str) -> Result<Vec<(String, i64)>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The planner's outcome assessment per company becomes a blackboard record stamped with its
+    /// game and portfolio; a company without a verdict (an answer naming why none was assessed)
+    /// gives none.
+    #[test]
+    fn an_outcome_assessment_becomes_a_stamped_blackboard_record() {
+        let out = json!({"outcome": {"0": {"verdict": "mismatch", "why": "w", "rule": "r", "rule_params": {"k": 1}, "proposal": {"applied": false}},
+                                     "x": {"verdict": "watch"}, "3": {"why": "no verdict"}}});
+        let game = json!({"seed": 12609, "date": "1953-12-19", "tick": 1});
+        let r = outcome_records(&out, Some(7), &game);
+        assert_eq!(r.len(), 1, "a non-numeric company and an answer without a verdict are skipped");
+        let (company, record) = &r[0];
+        assert_eq!(*company, 0);
+        assert_eq!(record["game"], game);
+        assert_eq!(record["portfolio_seq"], 7);
+        assert_eq!(record["verdict"], "mismatch");
+        assert_eq!(record["proposal"]["applied"], false);
+        assert!(crate::rhai_shared::valid_key(&format!("{OUTCOME_KEY}.{company}")));
+        assert!(outcome_records(&json!({"outcome": {"why": "no company"}}), None, &game).is_empty());
+        assert!(outcome_records(&json!({}), None, &game).is_empty());
+    }
 
     /// An unplanned bot starts with the run's settings, a later name winning, and a malformed list
     /// is refused whole and said.

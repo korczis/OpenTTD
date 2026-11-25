@@ -7,6 +7,10 @@
 //!        mcp-plan --track N [--yards N] ...   (price the N best rail lines of each list on the real map,
 //!                                               src/linecost.rs; --yards prices the N best freight yards)
 //!        mcp-plan --calibrate ...  (real against predicted profit per line; the panel stores the reading)
+//!        mcp-plan --outcome --for 0 ...  (does the plan match what the game pays, per company of --for:
+//!                                      owner-split calibration, the plan re-chosen with the outcome
+//!                                      prior, the fleet against the best other company; proposes only,
+//!                                      src/outcome.rs)
 //!        mcp-plan --for 0,6 ...   (plan for these companies: a freight line from a producer where any
 //!                                  other company has a rail station is left out, as the bot refuses
 //!                                  it; an empty list plans for a company not started yet; `claims`
@@ -43,6 +47,8 @@ mod yards;
 #[path = "../calibrate.rs"]
 #[allow(dead_code)]
 mod calibrate;
+#[path = "../outcome.rs"]
+mod outcome;
 #[path = "../store_sql.rs"]
 #[allow(dead_code)]
 mod store_sql;
@@ -358,6 +364,7 @@ fn main() {
     let mut track = 0usize;
     let mut yards_n = 0usize;
     let mut calibrate_too = false;
+    let mut outcome_too = false;
     let (mut capture_dir, mut snapshot_dir): (Option<String>, Option<String>) = (None, None);
     let mut catalogue: Option<String> = None;
     let mut plan_for: Option<Vec<i64>> = None;
@@ -373,6 +380,7 @@ fn main() {
             "--track" => track = args.next().and_then(|v| v.parse().ok()).unwrap_or(3),
             "--yards" => yards_n = args.next().and_then(|v| v.parse().ok()).unwrap_or(2),
             "--calibrate" => calibrate_too = true,
+            "--outcome" => outcome_too = true,
             "--for" => match companies(&args.next().unwrap_or_default()) {
                 Ok(c) => plan_for = Some(c),
                 Err(e) => {
@@ -386,7 +394,7 @@ fn main() {
             }
             "--limit" => limit = args.next().and_then(|v| v.parse().ok()).unwrap_or(20),
             "-h" | "--help" => {
-                println!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--for IDS] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
+                println!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--outcome] [--for IDS] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
                 return;
             }
             "--defaults" => {
@@ -401,7 +409,7 @@ fn main() {
                 }
             },
             _ => {
-                eprintln!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--for IDS] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
+                eprintln!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--outcome] [--for IDS] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
                 std::process::exit(2);
             }
         }
@@ -430,7 +438,7 @@ fn main() {
         }
         let read = |name: &str| src.resource(name);
         let opts = plan_pipeline::Options { limit, params: params.clone(), track, yards: yards_n,
-                                            calibrate: calibrate_too, invest: invest_too, invest_inputs, plan_for: plan_for.clone() };
+                                            calibrate: calibrate_too, outcome: outcome_too, invest: invest_too, invest_inputs, plan_for: plan_for.clone() };
         let mut out = plan_pipeline::run(&read, &opts, &kernels)?;
         if invest_inputs { return Ok(out); }
         // Which runner answered the kernel calls, only when the one-serve switch is on (I0086), so
