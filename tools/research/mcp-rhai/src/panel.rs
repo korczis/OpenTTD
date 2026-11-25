@@ -518,7 +518,10 @@ fn console_word(token: &str) -> String {
 /// owner's act, so the panel refuses any line that approves, in any spelling the game accepts
 /// (a token `approve` or `auto_approve` anywhere), and the commands that run lines it cannot read
 /// first: `alias` (an alias composes a command from its arguments), `exec` and `schedule` (they
-/// run a script file). Withdrawing (`prismatic_mcp deny <id>`) stays open.
+/// run a script file). Who may approve in the game (`approvers`), the approval core's standing
+/// rules (`rule`, `rules`), its channel and result markers (`--via`, `--nonce`) and a bulk `deny
+/// all` are the owner's too: the core trusts a stdin line without `--via` as the console's own.
+/// Withdrawing one request (`prismatic_mcp deny <id>`) stays open.
 pub fn console_refusal(cmd: &str) -> Option<String> {
     if cmd.chars().any(char::is_control) {
         return Some("one console line without control characters".into());
@@ -531,6 +534,19 @@ pub fn console_refusal(cmd: &str) -> Option<String> {
     if tokens.iter().any(|t| matches!(console_word(t).as_str(), "approve" | "autoapprove")) {
         return Some("approval is the owner's act: the panel's Approve with the owner secret (POST /api/approve), \
                      or `prismatic_mcp approve <id>` at the game's own console, never a console line sent through the panel".into());
+    }
+    let words: Vec<String> = tokens.iter().map(|t| console_word(t)).collect();
+    if words.iter().any(|w| matches!(w.as_str(), "approver" | "approvers")) {
+        return Some("who may approve is the owner's to say: the panel's POST /api/approvers with the owner secret, \
+                     or `prismatic_mcp approvers ...` at the game's own console, never a console line sent through the panel".into());
+    }
+    if words.iter().any(|w| matches!(w.as_str(), "rule" | "rules" | "via" | "nonce")) {
+        return Some("standing approval rules are the owner's: the panel's owner routes with the owner secret, \
+                     or `prismatic_mcp rule ...` at the game's own console, never a console line sent through the panel".into());
+    }
+    if words.windows(2).any(|w| w[0] == "deny" && w[1] == "all") {
+        return Some("a bulk denial is the owner's: the panel's owner routes with the owner secret, \
+                     or `prismatic_mcp deny all` at the game's own console".into());
     }
     None
 }
@@ -708,7 +724,7 @@ pub fn owner_login(secret: Option<&str>, given: &str, failures: &mut VecDeque<In
 /// /api/auto-approve `{on: true}`; switching it off is open to anyone). They need the owner secret
 /// the panel printed once at start; any other request passes. Err is the refusal to answer.
 pub fn owner_gate(secret: Option<&str>, port: u16, method: &str, path: &str, body: &Value, headers: &[(String, String)]) -> Result<(), (u16, Value)> {
-    let owners = method == "POST" && (path == "/api/approve" || (path == "/api/auto-approve" && truthy(body.get("on"))));
+    let owners = method == "POST" && (matches!(path, "/api/approve" | "/api/approvers") || (path == "/api/auto-approve" && truthy(body.get("on"))));
     if !owners || presents_owner(secret, port, headers) {
         return Ok(());
     }
@@ -2582,6 +2598,43 @@ fn h_deny(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     Ok((approve_status(&out), out))
 }
 
+/// `prismatic_mcp approvers [add <client id> | remove <key prefix>]`: Err for a body that names
+/// neither a client id nor a key prefix of 8 to 128 key characters.
+pub fn approvers_line(body: &Value) -> Result<String, String> {
+    if let Some(add) = body.get("add") {
+        let id = add.as_u64().filter(|id| *id > 0).ok_or("add: a client id (`clients` lists them)")?;
+        return Ok(format!("prismatic_mcp approvers add {id}"));
+    }
+    if let Some(remove) = body.get("remove") {
+        let key = remove.as_str().unwrap_or_default();
+        if !(8..=128).contains(&key.len()) || !key.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '_' | '-')) {
+            return Err("remove: 8 to 128 characters of one approver's key".into());
+        }
+        return Ok(format!("prismatic_mcp approvers remove {key}"));
+    }
+    Ok("prismatic_mcp approvers".into())
+}
+
+/// Who may approve from inside the game (the in-game approvers, ADR 0038): `{add: <client id>}`,
+/// `{remove: <key prefix>}`, or `{}` to list them. The owner's alone; `/api/console` refuses every
+/// `approvers` line. 422 when the game printed a refusal, else 200 with its output.
+fn h_approvers(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
+    let line = match approvers_line(&i.body) {
+        Ok(l) => l,
+        Err(e) => return Ok((400, json!({"error": e}))),
+    };
+    let mark = g.log_seq();
+    g.console(&line)?;
+    g.event("operator", &format!("sent: {line}"));
+    thread::sleep(Duration::from_millis(if cfg!(test) { 0 } else { 600 }));
+    let output = g.log_after(mark);
+    let refused = output.iter().find(|l| ["No connected", "Could not", "No single"].iter().any(|p| l.trim_start().starts_with(p))).cloned();
+    Ok(match refused {
+        Some(why) => (422, json!({"error": why, "sent": line, "output": output})),
+        None => (200, json!({"sent": line, "output": output})),
+    })
+}
+
 fn h_bots(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
     ok(panel_bot::bots(g)?)
 }
@@ -2769,6 +2822,8 @@ pub fn routes() -> Vec<Route> {
           s(json!({"id": {"type": "integer"}, "by": st()}), &["id"]), h_approve),
         r("POST", "/api/deny", "deny", "Deny a pending decision: the game server withdraws it and enacts nothing (ADR 0038), so no owner secret is needed. 200 with the approval now denied, 409 for an approval not pending, 404 for one the server does not hold, 504 when the server did not mark it denied", true,
           s(json!({"id": {"type": "integer"}}), &["id"]), h_deny),
+        r("POST", "/api/approvers", "approvers", "The owner says who may approve from inside the game (ADR 0038): {add: <client id>} registers a connected client's key, {remove: <key prefix>} drops one, {} lists them (`prismatic_mcp approvers ...`); /api/console refuses every approvers line. 422 when the game printed a refusal. Needs the owner secret", true,
+          s(json!({"add": {"type": "integer"}, "remove": st()}), &[]), h_approvers),
         r("POST", "/api/auto-approve", "autoApprove", "The owner's full-auto switch: on needs the owner secret (as /api/approve), off is open to anyone; it never approves an owner-only tool", false,
           s(json!({"on": {"type": "boolean"}}), &["on"]), h_auto),
         r("POST", "/api/owner/login", "ownerLogin", "The owner signs in: the owner secret (from the file mcp-panel named at start, $PRISMATIC_PANEL_OWNER_SECRET_FILE or ~/.config/prismatic/panel-owner-secret) sets this browser's HttpOnly cookie, as ?owner= does, and answers 204; a wrong secret 401 (after a delay), five wrong ones within a minute 429", false,
@@ -3654,7 +3709,8 @@ mod tests {
         // plays (GET /api/battle/contestants; panel_battle.rs).
         // And Deny beside Approve (POST /api/deny; ADR 0038), and the owner's sign-in and sign-out
         // (POST /api/owner/login, /api/owner/logout).
-        assert_eq!(rs.len(), 85);
+        // And the in-game approvers (POST /api/approvers).
+        assert_eq!(rs.len(), 86);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -4307,6 +4363,52 @@ mod tests {
         // An ordinary approval with the secret goes through to the console (closed here).
         pend(43, "openttd.game.set_pause");
         let (code, out) = post_as(&p, "/api/approve", json!({"id": 43}), &owner);
+        assert!(code == 502 && py_str(out.get("error")).contains("console is closed"), "{code} {out}");
+    }
+
+    /// /api/console (and so Rhai's console()) refuses every line that would change who may approve,
+    /// manage the approval core's standing rules, carry its `--via` or `--nonce` marker, or deny in
+    /// bulk, in every spelling the game resolves; one denial stays open.
+    #[test]
+    fn the_console_refuses_approvers_rules_via_nonce_and_bulk_denial_in_every_spelling() {
+        for line in [
+            "prismatic_mcp approvers add 2", "prismatic_mcp APPROVERS", "prismatic_mcp app_rovers remove abcdefgh",
+            "prismatic_mcp \"approver\"s", "/prismatic_mcp approv-ers", "prismatic_mcp approver",
+            "prismatic_mcp rule allow openttd.cmd.*", "prismatic_mcp rule allow * --persist", "prismatic_mcp RULE deny x",
+            "prismatic_mcp ru_le remove 1", "prismatic_mcp \"rules\"", "/prismatic_mcp rules", "prismatic_mcp r-ule allow x",
+            "prismatic_mcp Ru__Les", "prismatic_mcp \"ru\"\"le\" allow *", "prismatic_mcp deny 3 --via panel",
+            "prismatic_mcp deny 3 --VIA panel", "prismatic_mcp deny 3 -_via panel", "prismatic_mcp deny 3 --nonce 1",
+            "prismatic_mcp deny 3 --NON_CE 1", "prismatic_mcp deny all", "prismatic_mcp deny ALL openttd.*",
+            "prismatic_mcp de_ny \"all\"", "prismatic_mcp approve all --via panel",
+        ] {
+            assert!(console_refusal(line).is_some(), "{line}");
+        }
+        for open in ["prismatic_mcp deny 3", "say \"rule the rails\"", "prismatic_mcp status", "echo allowed", "clients"] {
+            assert_eq!(console_refusal(open), None, "{open}");
+        }
+        let (_, p) = bare_panel("19");
+        for line in ["prismatic_mcp rule allow * --persist", "prismatic_mcp approvers add 2"] {
+            let (code, out) = post_to(&p, "/api/console", json!({"command": line}));
+            assert_eq!((code, out["refused"].clone()), (403, json!("console_line")), "{line}");
+        }
+    }
+
+    /// POST /api/approvers replaces the console path for the in-game approvers: the owner's, its
+    /// body checked before any line is sent.
+    #[test]
+    fn the_in_game_approvers_are_the_owners_route() {
+        assert_eq!(approvers_line(&json!({})).unwrap(), "prismatic_mcp approvers");
+        assert_eq!(approvers_line(&json!({"add": 2})).unwrap(), "prismatic_mcp approvers add 2");
+        assert_eq!(approvers_line(&json!({"remove": "AbCd+/=_-123"})).unwrap(), "prismatic_mcp approvers remove AbCd+/=_-123");
+        for bad in [json!({"add": 0}), json!({"add": "2"}), json!({"remove": "short"}), json!({"remove": "abcdefgh ; approve"})] {
+            assert!(approvers_line(&bad).is_err(), "{bad}");
+        }
+        let (g, p) = bare_panel("19");
+        let secret = g.owner_secret.clone().unwrap();
+        let owner = [(OWNER_HEADER, secret.as_str())];
+        assert_eq!(post_to(&p, "/api/approvers", json!({"add": 2})).0, 401, "without the owner secret");
+        assert_eq!(post_as(&p, "/api/approvers", json!({"remove": "short"}), &owner).0, 400);
+        let (code, out) = post_as(&p, "/api/approvers", json!({"add": 2}), &owner);
         assert!(code == 502 && py_str(out.get("error")).contains("console is closed"), "{code} {out}");
     }
 

@@ -90,13 +90,11 @@ mod tests {
 
     #[test]
     fn the_address_is_majordomus_url_when_set() {
-        let _e = ENV.lock().unwrap();
+        let _e = crate::panel_mesh::test_env_lock();
         std::env::set_var("MAJORDOMUS_URL", "http://127.0.0.1:59999/");
         assert_eq!(base_url().unwrap(), "http://127.0.0.1:59999");
         std::env::remove_var("MAJORDOMUS_URL");
     }
-
-    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn assemble_keeps_parts_and_errors_apart() {
