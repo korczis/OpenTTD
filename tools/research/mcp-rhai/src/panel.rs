@@ -563,6 +563,59 @@ pub fn is_approval_line(cmd: &str) -> bool {
     console_refusal(cmd).is_some()
 }
 
+/// Who may send a console line through the panel (the owner's decision of 2026-11-23: an
+/// allowlist). `Read` and `Chat` lines are open to anyone; every other line changes the game and
+/// needs the owner secret or the stack's run token ([`may_change`]). Lines [`console_refusal`]
+/// refuses stay refused whoever sends them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Authority {
+    Read,
+    Chat,
+    Owner,
+}
+
+/// The console commands that only read: they list or show, and change nothing.
+const READ_COMMANDS: &[&str] = &["companies", "clients", "getdate", "help", "info", "listai", "listailibs", "listgame",
+                                 "listgamelibs", "listcmds", "listaliases", "listsettings", "listsaves", "listscenarios",
+                                 "listheightmaps", "listdirs", "listfiles", "pwd", "ls", "dir", "version", "list", "resetengines_check"];
+
+/// The console commands that only talk: chat to the players, or echo to the console.
+const CHAT_COMMANDS: &[&str] = &["say", "sayclient", "saycompany", "echo", "echoc"];
+
+/// How much authority `cmd` needs, in any spelling the game accepts ([`console_word`]): a read
+/// (`companies`, `setting <name>` without a value, `prismatic_mcp status` or `approvals`), a chat
+/// line (`say`, `echo`, withdrawing one request with `prismatic_mcp deny <id>`), or the owner's
+/// authority for everything else.
+pub fn console_authority(cmd: &str) -> Authority {
+    let tokens = console_tokens(cmd);
+    let words: Vec<String> = tokens.iter().map(|t| console_word(t.strip_prefix('/').unwrap_or(t))).collect();
+    let first = words.first().map(String::as_str).unwrap_or("");
+    match first {
+        w if READ_COMMANDS.contains(&w) => Authority::Read,
+        w if CHAT_COMMANDS.contains(&w) => Authority::Chat,
+        "setting" if words.len() <= 2 => Authority::Read,
+        "prismaticmcp" => match words.get(1).map(String::as_str) {
+            Some("status" | "approvals") if words.len() == 2 => Authority::Read,
+            Some("deny") if words.len() == 3 && words[2] != "all" => Authority::Chat,
+            _ => Authority::Owner,
+        },
+        _ => Authority::Owner,
+    }
+}
+
+/// Whether `who` may change the game through the panel: the owner (secret, by cookie or header) or
+/// the stack's own processes (the run token). Anyone else reads and chats only.
+pub fn may_change(who: &Who) -> bool {
+    matches!(who.role, "owner" | "run")
+}
+
+/// The refusal of a change the caller may not make: 401 with where to sign in.
+fn needs_credential(what: &str) -> (u16, Value) {
+    (401, json!({"error": format!("{what} changes the game: it needs the owner secret (sign in on the panel's page, or send {OWNER_HEADER}) \
+                                   or the stack's run token ({RUN_TOKEN_HEADER}); reads and chat lines are open to anyone"),
+                 "refused": "owner_secret", "needs": "owner_or_token", "sign_in": "/api/owner/login"}))
+}
+
 // ---------------------------------------------------------------------- the owner's approval
 
 /// Tools whose approval belongs to the person at the game's console alone: a Battlebrain live
@@ -726,11 +779,15 @@ pub fn owner_login(secret: Option<&str>, given: &str, failures: &mut VecDeque<In
     }
 }
 
-/// The owner's routes: approving (POST /api/approve) and switching auto-approve on (POST
-/// /api/auto-approve `{on: true}`; switching it off is open to anyone). They need the owner secret
-/// the panel printed once at start; any other request passes. Err is the refusal to answer.
+/// The POST routes only the owner secret opens, whoever else asks (the run token included). A route
+/// that decides for the owner is added here, and nowhere else.
+pub const OWNER_ROUTES: &[&str] = &["/api/approve", "/api/approvers"];
+
+/// The owner's routes: [`OWNER_ROUTES`] and switching auto-approve on (POST /api/auto-approve
+/// `{on: true}`; switching it off is open to anyone). They need the owner secret; any other request
+/// passes here (a route that changes the game asks [`may_change`] itself). Err is the refusal to answer.
 pub fn owner_gate(secret: Option<&str>, port: u16, method: &str, path: &str, body: &Value, headers: &[(String, String)]) -> Result<(), (u16, Value)> {
-    let owners = method == "POST" && (matches!(path, "/api/approve" | "/api/approvers") || (path == "/api/auto-approve" && truthy(body.get("on"))));
+    let owners = method == "POST" && (OWNER_ROUTES.contains(&path) || (path == "/api/auto-approve" && truthy(body.get("on"))));
     if !owners || presents_owner(secret, port, headers) {
         return Ok(());
     }
@@ -1644,6 +1701,12 @@ impl Game {
         self.bus.publish(&format!("panel.{kind}"), json!({"text": text}));
     }
 
+    /// The token a script sent by `who` holds: the run token when `who` may change the game, else
+    /// none (its console lines then read and chat only).
+    pub fn script_token(&self, who: &Who) -> Option<String> {
+        may_change(who).then(|| self.run_token.clone().ok()).flatten()
+    }
+
     /// Publish one change of who may decide what (`governance.changed`, read by the digest): the
     /// setting, its old and new value, how it changed, and who changed it ([`Who`]: the credential's
     /// kind, never the credential), at the latest known game clock.
@@ -2255,6 +2318,10 @@ fn h_console(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
         g.event("operator", &format!("refused console line: {cmd}"));
         return Ok((403, json!({"error": why, "refused": "console_line"})));
     }
+    if console_authority(&cmd) == Authority::Owner && !may_change(&i.who) {
+        g.event("operator", &format!("refused console line without a credential: {cmd}"));
+        return Ok(needs_credential(&format!("the console line `{}`", head(&cmd, 60))));
+    }
     let mark = g.log_seq();
     g.console(&cmd)?;
     g.event("console", &cmd);
@@ -2270,7 +2337,7 @@ fn h_rhai(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     let timeout = py_float(i.body.get("timeout"), 120.0)?.max(0.0);
     let (tx, rx) = mpsc::channel();
     let abort = Arc::new(AtomicBool::new(false));
-    let runner = spawn_script(g.panel_url(), script.clone(), abort.clone(), tx);
+    let runner = spawn_script_as(g.panel_url(), g.script_token(&i.who), script.clone(), abort.clone(), tx);
     let deadline = Instant::now() + Duration::from_secs_f64(timeout.min(86_400.0));
     let (mut out, mut err) = (Vec::new(), Vec::new());
     loop {
@@ -2332,9 +2399,34 @@ fn h_owner_logout(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     Ok((204, Value::Null))
 }
 
+/// An AI's settings as `start_ai` takes them (`a=1,b=2`) as the map `openttd.ai.start` takes:
+/// Err for a part that is no `name=integer`.
+pub fn settings_map(text: &str) -> Result<Value, String> {
+    let mut m = serde_json::Map::new();
+    for part in text.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let (k, v) = part.split_once('=').ok_or_else(|| format!("setting `{part}` is not name=value"))?;
+        let n: i64 = v.trim().parse().map_err(|_| format!("setting `{part}`: the value is not an integer"))?;
+        m.insert(k.trim().to_string(), json!(n));
+    }
+    Ok(Value::Object(m))
+}
+
 fn h_start_ai(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     let name = if truthy(i.body.get("ai")) { py_str(i.body.get("ai")) } else { g.args.ai.clone() };
     let settings = py_str(i.body.get("settings").or(Some(&json!("")))).trim().to_string();
+    if format!("{name} {settings}").chars().any(char::is_control) {
+        return Err("refused a start_ai with a control character: one console line, never two".into());
+    }
+    // Without a credential a new company is the owner's to approve (the countdown decides when they
+    // do not): the game's approval-gated openttd.ai.start, never the console.
+    if !may_change(&i.who) {
+        if !g.tool_names().contains("openttd.ai.start") {
+            return Ok(needs_credential("starting an AI"));
+        }
+        let out = g.tool("openttd.ai.start", json!({"name": name, "settings": settings_map(&settings)?}))?;
+        g.event("ai", &format!("start_ai {name} sent for approval (no credential)"));
+        return Ok((rpc_status(&out), out));
+    }
     let cmd = format!("start_ai {name} {settings}").trim().to_string();
     g.console(&cmd)?;
     g.ai_started.store(true, Ordering::SeqCst);
@@ -2343,6 +2435,10 @@ fn h_start_ai(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
 }
 
 fn h_view_attach(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
+    // Which window is the owner's view, and so which client the panel drives: the stack's or the owner's to say.
+    if !may_change(&i.who) {
+        return Ok(needs_credential("attaching a GUI client"));
+    }
     let f = PathBuf::from(py_str(i.body.get("token_file").or(Some(&json!("")))));
     if !f.is_file() {
         return Ok((400, json!({"error": format!("no token file at {}", f.display())})));
@@ -3267,9 +3363,16 @@ pub enum ScriptLine {
 /// last `Out` line, an error as `Err("mcp-rhai: ...")`, then `Exit` with mcp-rhai's exit status.
 /// Setting `abort` stops the script at its next operation.
 pub fn spawn_script(base: String, script: String, abort: Arc<AtomicBool>, tx: mpsc::Sender<ScriptLine>) -> thread::JoinHandle<i32> {
+    let token = run_token_for(&base);
+    spawn_script_as(base, token, script, abort, tx)
+}
+
+/// [`spawn_script`] holding `token`: the run token when the caller may change the game, else none,
+/// so a script sent through `POST /api/rhai` has its caller's authority and no more.
+pub fn spawn_script_as(base: String, token: Option<String>, script: String, abort: Arc<AtomicBool>, tx: mpsc::Sender<ScriptLine>) -> thread::JoinHandle<i32> {
     thread::spawn(move || {
         let hub = std::env::var("MCP_HUB").ok().filter(|h| !h.is_empty());
-        let mut engine = rhai_host::host_as(&base, hub.as_deref(), run_token_for(&base));
+        let mut engine = rhai_host::host_as(&base, hub.as_deref(), token);
         let out = tx.clone();
         engine.on_print(move |s| for l in s.split('\n') { let _ = out.send(ScriptLine::Out(l.to_string())); });
         let out = tx.clone();
@@ -3370,12 +3473,12 @@ fn stream_events(g: &Game, mut stream: TcpStream, q: &Query) {
 
 /// Run a Rhai script and stream every line it prints as it is printed (SSE: event "out", "err", then
 /// "exit" with the status). A closed connection stops the script.
-fn stream_rhai(g: &Game, mut stream: TcpStream, body: &Value) {
+fn stream_rhai(g: &Game, mut stream: TcpStream, body: &Value, who: &Who) {
     let script = py_str(body.get("script").or(Some(&json!(""))));
     if sse_head(&mut stream).is_err() { return; }
     let (tx, rx) = mpsc::channel();
     let abort = Arc::new(AtomicBool::new(false));
-    let runner = spawn_script(g.panel_url(), script.clone(), abort.clone(), tx);
+    let runner = spawn_script_as(g.panel_url(), g.script_token(who), script.clone(), abort.clone(), tx);
     g.event("rhai", &format!("{} (streamed)", head(&script, 80)));
     for line in rx {
         let (kind, data) = match line {
@@ -3501,7 +3604,8 @@ impl Panel {
         let path = req.path.as_str();
         if req.method == "POST" && path == "/api/rhai/stream" {
             if !body.is_object() { return send_json(stream, 400, &json!({"error": "invalid body: the body must be a JSON object"})); }
-            return stream_rhai(g, stream, &body);
+            let who = Who::of_run(g.owner_secret.as_deref(), g.run_token.as_deref().ok(), g.args.panel_port, &req.headers);
+            return stream_rhai(g, stream, &body, &who);
         }
         if req.method == "GET" {
             match path {
@@ -5089,7 +5193,8 @@ mod tests {
         let mut child = Command::new("/bin/cat").stdin(Stdio::piped()).stdout(Stdio::null()).spawn().unwrap();
         g.console_w.lock().unwrap().stdin = child.stdin.take();
         let since = g.bus.seq();
-        let (code, out) = post_as(&p, "/api/console", json!({"command": "prismatic_mcp approval_deadline 7 keep", "wait": 0}), &[("User-Agent", "mcp-e2e")]);
+        let (code, out) = post_as(&p, "/api/console", json!({"command": "prismatic_mcp approval_deadline 7 keep", "wait": 0}),
+                                  &[("User-Agent", "mcp-e2e"), (OWNER_HEADER, &secret)]);
         assert_eq!(code, 200, "{out}");
         let (code, out) = post_as(&p, "/api/approvers", json!({"add": 2}), &[(OWNER_HEADER, &secret)]);
         assert_eq!(code, 200, "{out}");
@@ -5225,5 +5330,119 @@ mod tests {
             let sent = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(RUN_TOKEN_HEADER)).map(|(_, v)| v.clone());
             assert_eq!(sent, g.run_token.clone().ok(), "{path} carries the run token");
         }
+    }
+
+    #[test]
+    fn the_console_reads_and_chats_for_anyone_and_changes_the_game_only_for_the_owner_or_the_stack() {
+        for read in ["companies", "/Clients", "getdate", "list_ai", "setting", "setting max_loan", "prismatic_mcp status", "prismatic_mcp approvals", "help"] {
+            assert_eq!(console_authority(read), Authority::Read, "{read}");
+        }
+        for chat in ["say \"hi\"", "echo x", "sayclient 2 hi", "prismatic_mcp deny 7"] {
+            assert_eq!(console_authority(chat), Authority::Chat, "{chat}");
+        }
+        for owner in ["start_ai PrismaticAI", "/Start-AI x", "setting max_loan 500000", "newgame", "research_coplay allow 1", "prismatic_mcp deny all",
+                      "prismatic_mcp status now", "prismatic_mcp approval_deadline 7 keep", "plan build a line", "fake consume 4", "", "rescan_ai"] {
+            assert_eq!(console_authority(owner), Authority::Owner, "{owner}");
+        }
+        assert!(may_change(&Who { role: "owner", ..Who::none() }) && may_change(&Who { role: "run", ..Who::none() }) && !may_change(&Who::none()));
+        let (g, p) = bare_panel("18831");
+        let secret = g.owner_secret.clone().unwrap();
+        let run = g.run_token.clone().unwrap();
+        let mut child = Command::new("/bin/cat").stdin(Stdio::piped()).stdout(Stdio::null()).spawn().unwrap();
+        g.console_w.lock().unwrap().stdin = child.stdin.take();
+        let line = |cmd: &str, h: &[(&str, &str)]| post_as(&p, "/api/console", json!({"command": cmd, "wait": 0}), h).0;
+        assert_eq!(line("companies", &[]), 200, "a read is open");
+        assert_eq!(line("say \"hello\"", &[]), 200, "a chat line is open");
+        let (code, out) = post_to(&p, "/api/console", json!({"command": "start_ai PrismaticAI", "wait": 0}));
+        assert_eq!((code, out["refused"].clone(), out["needs"].clone(), out["sign_in"].clone()),
+                   (401, json!("owner_secret"), json!("owner_or_token"), json!("/api/owner/login")), "{out}");
+        assert_eq!(line("start_ai PrismaticAI", &[(OWNER_HEADER, &secret)]), 200, "the owner");
+        assert_eq!(line("start_ai PrismaticAI", &[(RUN_TOKEN_HEADER, &run)]), 200, "the stack's own helpers");
+        assert_eq!(line("start_ai PrismaticAI", &[(RUN_TOKEN_HEADER, "wrong")]), 401);
+        assert_eq!(line("prismatic_mcp approvers add 2", &[(OWNER_HEADER, &secret)]), 403, "the approvers stay the owner's route, never a line");
+        assert!(format!("{:?}", g.events.lock().unwrap()).contains("refused console line without a credential: start_ai PrismaticAI"));
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn starting_an_ai_without_a_credential_asks_the_owner_through_the_approval_tool() {
+        assert_eq!(settings_map("a=1, b = -2").unwrap(), json!({"a": 1, "b": -2}));
+        assert_eq!(settings_map("").unwrap(), json!({}));
+        assert!(settings_map("a").unwrap_err().contains("not name=value"));
+        assert!(settings_map("a=x").unwrap_err().contains("not an integer"));
+        // A game without openttd.ai.start (none here: no MCP answers): nothing starts unapproved.
+        let (g, p) = bare_panel("18832");
+        let (code, out) = post_to(&p, "/api/start-ai", json!({"ai": "X", "settings": "a=1"}));
+        assert_eq!((code, out["needs"].clone()), (401, json!("owner_or_token")), "{out}");
+        assert!(!g.ai_started.load(Ordering::SeqCst));
+        assert!(panel_bot::start_bot(&g, "X", json!({"a": 1})).unwrap_err().contains("no openttd.ai.start"), "no console fallback");
+        // With the tool: the request goes to the game's approval; a stand-in MCP holds it pending.
+        let calls = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mcp = l.local_addr().unwrap().port();
+        let seen_by = calls.clone();
+        thread::spawn(move || for mut c in l.incoming().flatten() {
+            let Some(req) = read_request(&mut c) else { continue };
+            let call: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+            let out = if call["method"] == "tools/list" {
+                json!({"jsonrpc": "2.0", "id": 1, "result": {"tools": [{"name": "openttd.ai.start"}]}})
+            } else {
+                seen_by.lock().unwrap().push(call["params"].clone());
+                let answer = json!({"status": "pending_approval", "approval_id": 9, "message": "Approval required in OpenTTD: prismatic_mcp approve 9"});
+                json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": answer.to_string()}]}})
+            };
+            hub::respond(c, 200, "application/json", out.to_string().as_bytes());
+        });
+        let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", "18833", "--mcp-port", &mcp.to_string()].map(String::from)).unwrap();
+        let g = Game::new(args);
+        g.mcp_up.store(true, Ordering::SeqCst);
+        *g.token.lock().unwrap() = Some("t".into());
+        let p = Panel { game: g.clone(), routes: routes() };
+        let (code, out) = post_to(&p, "/api/start-ai", json!({"ai": "X", "settings": "a=1"}));
+        assert_ne!(code, 401, "{out}");
+        assert_eq!(out["approval_id"], json!(9), "{out}");
+        let seen = calls.lock().unwrap().clone();
+        assert!(seen.iter().any(|c| c["name"] == "openttd.ai.start" && c["arguments"] == json!({"name": "X", "settings": {"a": 1}})), "{seen:?}");
+        assert!(format!("{:?}", g.events.lock().unwrap()).contains("sent for approval (no credential)"));
+        assert!(!g.ai_started.load(Ordering::SeqCst), "not started: the owner decides");
+    }
+
+    #[test]
+    fn attaching_a_client_and_a_scripts_authority_follow_the_caller() {
+        let (g, p) = bare_panel("18834");
+        let run = g.run_token.clone().unwrap();
+        let (code, out) = post_to(&p, "/api/view/attach", json!({"token_file": "/nonexistent"}));
+        assert_eq!((code, out["needs"].clone()), (401, json!("owner_or_token")), "{out}");
+        assert_eq!(post_as(&p, "/api/view/attach", json!({"token_file": "/nonexistent"}), &[(RUN_TOKEN_HEADER, &run)]).0, 400, "past the gate");
+        assert_eq!(g.script_token(&Who::none()), None, "a script sent without a credential holds no token");
+        assert_eq!(g.script_token(&Who { role: "owner", ..Who::none() }), Some(run.clone()));
+        assert_eq!(g.script_token(&Who { role: "run", ..Who::none() }), Some(run.clone()));
+        assert_eq!(OWNER_ROUTES, ["/api/approve", "/api/approvers"]);
+        assert_eq!(post_as(&p, "/api/approve", json!({"id": 1}), &[(RUN_TOKEN_HEADER, &run)]).0, 401, "the run token opens no owner route");
+    }
+
+    #[test]
+    fn a_script_sent_without_a_credential_cannot_change_the_game_through_the_console() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", &port.to_string()].map(String::from)).unwrap();
+        let g = Game::new(args);
+        let mut child = Command::new("/bin/cat").stdin(Stdio::piped()).stdout(Stdio::null()).spawn().unwrap();
+        g.console_w.lock().unwrap().stdin = child.stdin.take();
+        let p = Arc::new(Panel { game: g.clone(), routes: routes() });
+        let pp = p.clone();
+        thread::spawn(move || serve(l, pp));
+        let script = r#"let out = console("start_ai PrismaticAI"); print(out); "#;
+        let (code, out) = post_to(&p, "/api/rhai", json!({"script": script, "timeout": 20}));
+        assert_eq!(code, 200, "{out}");
+        assert!(format!("{:?}", g.events.lock().unwrap()).contains("refused console line without a credential"), "{out}");
+        let secret = g.owner_secret.clone().unwrap();
+        let (code, out) = post_as(&p, "/api/rhai", json!({"script": script, "timeout": 20}), &[(OWNER_HEADER, &secret)]);
+        assert_eq!(code, 200, "{out}");
+        assert!(format!("{:?}", g.events.lock().unwrap()).contains("console: start_ai PrismaticAI") || g.bus.since(0, &kinds_of("panel.console"), 100).iter()
+                .any(|e| e["data"]["text"] == json!("start_ai PrismaticAI")), "the owner's script reaches the console");
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }

@@ -59,7 +59,7 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `GET /api/catalogue` | | `initialize`, `resources/list`, `tools/list` |
 | `GET /api/resource?uri=<uri>` | | one resource's payload |
 | `POST /api/rpc` | `{"method", "params"}` | raw MCP JSON-RPC with the panel's token |
-| `POST /api/console` | `{"command"}` | one OpenTTD console line and its output |
+| `POST /api/console` | `{"command"}` | one OpenTTD console line and its output. A line that reads (`companies`, `setting <name>`, `prismatic_mcp status`) or chats (`say`, `echo`, `prismatic_mcp deny <id>`) is open to anyone; every other line changes the game and needs the owner secret or the stack's run token, else 401 `needs: owner_or_token` (`console_authority`) |
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
 | `POST /api/approve` | `{"id"}` | the owner's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it, 504 when no decision came |
 | `POST /api/deny` | `{"id"}` | withdraw a pending decision through the same core (`prismatic_mcp deny <id>`): it enacts nothing, so no owner secret is needed. 200 with the approval now `denied`, 404 for one the server does not hold, 409 for one not pending, 504 when the server did not mark it denied. The home page's Deny button calls it |
@@ -67,7 +67,7 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/auto-approve` | `{"on": bool}` | `on: true` needs the owner secret (401 without it); `on: false` is open to anyone |
 | `POST /api/owner/login` | `{"secret"}` | the owner signs this browser in: the secret (from its file, see [the owner secret](#approval-is-bound-to-the-owner)) sets the HttpOnly cookie `mcp_owner_<port>` and answers 204; a wrong one 401 after a delay, five within a minute 429 |
 | `POST /api/owner/logout` | | clears that cookie; 204 |
-| `POST /api/rhai` | `{"script"}` | a Rhai script's output |
+| `POST /api/rhai` | `{"script"}` | a Rhai script's output; the script has its caller's authority and no more: the stack's run token for the owner or the stack, none otherwise (its console lines then read and chat only) |
 | `POST /api/rhai/stream` | `{"script"}` | the same, streamed line by line (SSE `out`, `err`, `exit`) |
 | `GET /api/scripts`, `GET /api/script?name=` | | the library ($MCP_RHAI_PATH, else `tools/research/mcp-panel/rhai`), one script with its parse verdict |
 | `POST /api/script/check`, `POST /api/script/save` | `{"text"}`, `{"name", "text"}` | the parser's error with line and column; save only what parses (422 otherwise) |
@@ -1699,6 +1699,15 @@ pending request (red-team residual risk 3). Approval is now bound to the owner i
   it too. The run token names a caller as the stack's own (`credential: token`, `role: run`) and
   opens no owner's route: approving, auto-approve on and the approvers stay the owner secret's.
   `mcp-duel` holds the token of the stack it drives through `$MCP_E2E_RUN_TOKEN_FILE`.
+- **Changing the game needs a credential** (the owner's decision of 2026-11-23: an allowlist).
+  `POST /api/console` sends a line that reads or chats for anyone, and any other line only for the
+  owner (secret) or the stack (run token); a script sent through `POST /api/rhai` or
+  `/api/rhai/stream` holds the run token only when its caller may change the game. `POST
+  /api/start-ai` without a credential asks the owner: it goes to the game's approval-gated
+  `openttd.ai.start`, whose countdown and default verdict then decide, and a game without that tool
+  starts nothing. `start_bot` has no console fallback any more. `POST /api/view/attach` (which
+  window is the owner's view) needs the owner or the stack. `OWNER_ROUTES` names the routes only the
+  owner secret opens, the run token included.
 - **The owner client's key is the owner's alone.** A client's personal directory
   (`$TMP/client-home`) holds its `secrets.cfg`, the key that makes the owner's client an approver:
   mcp-e2e starts every client under `umask 077`, closes the directory to 0700 and the file to 0600

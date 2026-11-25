@@ -120,9 +120,12 @@ try {
   });
   await page.reload({ waitUntil: 'load' });
   await page.locator('#pending [data-deny="7"]').waitFor({ timeout: 15000 });
-  await post('/api/console', { command: 'fake consume 4' });
-  await post('/api/console', { command: 'fake drop 5' });
-  await post('/api/console', { command: 'fake ignore 7' });
+  // The stand-in's console lines change its queue, so they need the owner's authority (the console's allowlist).
+  const owned = (p, body) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, 'X-Panel-Owner': secret }, body: JSON.stringify(body) });
+  check('a console line that changes the game is refused without a credential', (await post('/api/console', { command: 'fake consume 4' })).status === 401);
+  await owned('/api/console', { command: 'fake consume 4' });
+  await owned('/api/console', { command: 'fake drop 5' });
+  await owned('/api/console', { command: 'fake ignore 7' });
   check('the stand-in changed its queue under the page', await until(async () => {
     const q = await queue();
     return q.some((a) => a.id === 4 && a.state === 'consumed') && !q.some((a) => a.id === 5);
