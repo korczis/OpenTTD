@@ -1,7 +1,7 @@
 {
  "schema": "ai-live-outcome/v1",
  "id": "live-15805-1795381184362",
- "generated_at": "2026-11-23T03:26:12+00:00",
+ "generated_at": "2026-11-23T04:04:47+00:00",
  "source": "panel:http://127.0.0.1:8800",
  "instance": "panel-8800",
  "seed": 15805,
@@ -20,7 +20,7 @@
   }
  ],
  "revision": "6d1eda39e1",
- "inputs_sha256": "928754528930a5f973da59d61cdb3386d1e9c4eaefe8c8a60acb3c8a6f2e9186",
+ "inputs_sha256": "ab7933e1743e86c080455b819f473b75070d8880d3a8e105a7c99f88375073c1",
  "first_month": "1950-02",
  "final_month": "1964-11",
  "companies": [
@@ -33,22 +33,146 @@
     {
      "date": "1952-05-08",
      "name": "rail_after",
-     "value": 7
+     "value": 7,
+     "applied": null
     },
     {
      "date": "1962-01-26",
      "name": "own_lines",
-     "value": 8
+     "value": 8,
+     "applied": null
     },
     {
      "date": "1962-01-26",
      "name": "rail_after",
-     "value": 3
+     "value": 3,
+     "applied": null
+    },
+    {
+     "date": "1962-03-16",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
     },
     {
      "date": "1962-03-16",
      "name": "rail_after",
-     "value": 2
+     "value": 2,
+     "applied": null
+    },
+    {
+     "date": "1962-05-19",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1962-05-19",
+     "name": "rail_after",
+     "value": 2,
+     "applied": null
+    },
+    {
+     "date": "1962-07-05",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1962-07-05",
+     "name": "rail_after",
+     "value": 2,
+     "applied": null
+    },
+    {
+     "date": "1962-08-15",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1962-08-15",
+     "name": "rail_after",
+     "value": 2,
+     "applied": null
+    },
+    {
+     "date": "1962-10-14",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1962-10-14",
+     "name": "rail_after",
+     "value": 2,
+     "applied": null
+    },
+    {
+     "date": "1962-12-04",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1963-02-17",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1963-04-15",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1963-06-23",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1963-09-05",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1963-12-03",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1964-01-28",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1964-05-09",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1964-07-02",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1964-08-20",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
+    },
+    {
+     "date": "1964-10-13",
+     "name": "own_lines",
+     "value": 8,
+     "applied": null
     }
    ]
   },
@@ -968,27 +1092,6 @@
    "aircraft": 7,
    "stations": 92
   },
-  "2": {
-   "train": 3,
-   "road": 147,
-   "ship": 0,
-   "aircraft": 0,
-   "stations": 27
-  },
-  "5": {
-   "train": 0,
-   "road": 114,
-   "ship": 0,
-   "aircraft": 7,
-   "stations": 24
-  },
-  "1": {
-   "train": 133,
-   "road": 442,
-   "ship": 1,
-   "aircraft": 39,
-   "stations": 162
-  },
   "0": {
    "train": 1,
    "road": 15,
@@ -1003,12 +1106,12 @@
    "aircraft": 0,
    "stations": 3
   },
-  "7": {
-   "train": 12,
-   "road": 68,
+  "2": {
+   "train": 3,
+   "road": 147,
    "ship": 0,
-   "aircraft": 4,
-   "stations": 49
+   "aircraft": 0,
+   "stations": 27
   },
   "6": {
    "train": 0,
@@ -1016,6 +1119,27 @@
    "ship": 7,
    "aircraft": 5,
    "stations": 39
+  },
+  "1": {
+   "train": 133,
+   "road": 442,
+   "ship": 1,
+   "aircraft": 39,
+   "stations": 162
+  },
+  "5": {
+   "train": 0,
+   "road": 114,
+   "ship": 0,
+   "aircraft": 7,
+   "stations": 24
+  },
+  "7": {
+   "train": 12,
+   "road": 68,
+   "ship": 0,
+   "aircraft": 4,
+   "stations": 49
   }
  },
  "outcome": {

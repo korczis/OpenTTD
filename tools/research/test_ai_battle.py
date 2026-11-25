@@ -15,6 +15,7 @@ records a commit can hold (git index in a hook).
 import importlib.util
 import io
 import json
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -79,9 +80,19 @@ class SharedProducers(unittest.TestCase):
                           "dbg: REF S date=1961-1 ind=x owners= name=broken"])
         got = battle.parse_shared(text)
         self.assertEqual(sorted(got), [7, 9])
-        self.assertEqual(got[7], {"name": "Gundhead Coal Mine", "owners": {0, 1, 2}, "first": "1960-04"})
+        self.assertEqual(got[7], {"name": "Gundhead Coal Mine", "owners": {0, 1, 2}, "first": "1960-04",
+                                  "cargoes": {None: {"owners": {0, 1, 2}, "first": "1960-04"}}})
         self.assertEqual(got[9]["owners"], {1, 3})
         self.assertEqual(battle.parse_shared("no referee here"), {})
+
+    def test_parse_keeps_each_cargo_apart(self):
+        # Since 2026-11-23 the referee names the cargo: one line per producer and cargo.
+        text = "\n".join([shared(1965, 4, 7, "0,2", "Punthill Farm").replace(" owners=", " cargo=6 owners="),
+                          shared(1965, 7, 7, "1,2", "Punthill Farm").replace(" owners=", " cargo=4 owners=")])
+        got = battle.parse_shared(text)[7]
+        self.assertEqual(got["owners"], {0, 1, 2})
+        self.assertEqual(got["cargoes"], {6: {"owners": {0, 2}, "first": "1965-04"},
+                                          4: {"owners": {1, 2}, "first": "1965-07"}})
 
     def lineup(self):
         return [{"ai": "PrismaticAI", "key": "P a"}, {"ai": "PrismaticAI", "key": "P b"},
@@ -97,6 +108,30 @@ class SharedProducers(unittest.TestCase):
         m.update(status="done", errors={}, series={"P a": [], "P b": [], "AAAHogEx": []})
         self.assertIn("shared_producer:Coal Mine (industry 7, from 1960-04): P a + P b",
                       battle.fitness_verdict(m, fit))
+
+    def test_two_prismatic_companies_on_different_cargoes_of_one_farm_do_not_fail(self):
+        # Livestock for one, grain for the other: nothing of the farm's output is split.
+        farm = {"name": "Farm", "owners": {0, 1}, "first": "1965-04",
+                "cargoes": {4: {"owners": {0, 2}, "first": "1965-04"}, 6: {"owners": {1, 2}, "first": "1965-04"}}}
+        self.assertEqual(battle.sibling_producers({"lineup": self.lineup(), "shared": {7: farm}}), [])
+        farm["cargoes"][6]["owners"] = {0, 1}
+        self.assertEqual(battle.sibling_producers({"lineup": self.lineup(), "shared": {7: farm}}),
+                         ["shared_producer:Farm (industry 7, cargo 6, from 1965-04): P a + P b"])
+
+    def test_the_fitness_config_plays_the_claim_race(self):
+        # Two PrismaticAI companies, the lower one held back by test_claim_race, so the higher one
+        # builds and checks its source station first and only the second claim check (rail.nut
+        # ClaimBlocks) settles the race; shared_producer judges it like every lineup.
+        cfg = json.loads((Path(battle.__file__).parent / "battle.json").read_text())
+        race = [lu for lu in cfg["fitness"]["lineups"]
+                if any(c.get("label") == "PrismaticAI claim race A" for c in lu)]
+        self.assertEqual(len(race), 1)
+        ours = [c for c in race[0] if c["ai"] == "PrismaticAI"]
+        self.assertEqual([c["label"] for c in ours], ["PrismaticAI claim race A", "PrismaticAI claim race B"])
+        self.assertIn("test_claim_race=", ours[0]["settings"])
+        self.assertNotIn("test_claim_race=", ours[1]["settings"])
+        # Otherwise the same bot, so both choose the same producer first.
+        self.assertEqual(ours[0]["settings"].replace(",test_claim_race=20", ""), ours[1]["settings"])
 
 
 def trainless(y, mo, cid, rail, ids):
@@ -171,6 +206,66 @@ class TrainlessStations(unittest.TestCase):
         self.assertIn("T: no_trains: no train at the end of the match", battle.fitness_verdict(m, fit))
 
 
+def capital(year, q, cid, frozen, days, **more):
+    """One PrismaticAI capital report line as capital.nut logs it (a warning, script level 3)."""
+    extra = "".join(f" {k}={v}" for k, v in more.items())
+    return (f"dbg: [script:3] [{cid}] [W] PrismaticAI: capital report {year}Q{q}: frozen={frozen} days={days}"
+            f" calls=4 bought=1 spent=30000 holds=0 idle=0 money=12000 loan=0 keep=15000 level=3{extra}")
+
+
+class FrozenConstruction(unittest.TestCase):
+    """capital.nut's quarterly report and the fitness failure of a healthy PrismaticAI company whose
+    construction stood frozen on too many days of its first years (the live game of seed 12609:
+    525 of 1,096 days in 1950-1952)."""
+
+    def test_parse_keeps_report_order_and_fields_per_company(self):
+        text = "\n".join([capital(1960, 1, 0, 10, 91), ref(1960, 4, 0, 1), capital(1960, 1, 2, 0, 50),
+                          capital(1960, 2, 0, 0, 91, extra=5),
+                          "dbg: [script:3] [0] [I] PrismaticAI: capital report 1960Q3: frozen=91 days=91",
+                          "dbg: [script:3] [0] [W] PrismaticAI: capital: no vehicle more on route 1,2,"])
+        got = battle.parse_capital(text)
+        self.assertEqual(sorted(got), [0, 2])
+        self.assertEqual([(r["year"], r["quarter"], r["frozen"], r["days"]) for r in got[0]],
+                         [(1960, 1, 10, 91), (1960, 2, 0, 91)])
+        self.assertEqual((got[0][1]["extra"], got[0][0]["level"], got[0][0]["spent"]), (5, 3, 30000))
+        self.assertEqual(battle.parse_capital("no reports"), {})
+
+    def match(self, reports):
+        return {"lineup": [{"ai": "PrismaticAI", "key": "P"}, {"ai": "AAAHogEx", "key": "AAAHogEx"},
+                           {"ai": "PrismaticAI", "key": "P2"}],
+                "match_cfg": {"start_year": 1950}, "capital": reports}
+
+    def reports(self, frozen):
+        return [{"year": 1950 + i // 4, "quarter": i % 4 + 1, "frozen": f, "days": 91} for i, f in enumerate(frozen)]
+
+    def test_more_than_the_limit_of_the_first_years_frozen_fails(self):
+        fit = {"rules": {}, "must_be_healthy": ["P", "P2"]}
+        # The live game's shape: 163 days in 1950, half of 1951, 170 days in 1952; then nothing.
+        live = self.reports([0, 72, 91, 0, 91, 75, 0, 15, 91, 79, 0, 8] + [91] * 8)
+        got = battle.frozen_construction(self.match({0: live, 2: self.reports([0] * 12)}), fit)
+        self.assertEqual(got, ["P: frozen:522 of 1092 days (47.8%) in 1950-1952 (max 15%)"])
+        # Only the first frozen_years count: the frozen 1953-1954 quarters above did not.
+        late = self.reports([0] * 12 + [91] * 8)
+        self.assertEqual(battle.frozen_construction(self.match({0: late}), fit), [])
+        # At the limit passes; the limit and the window come from the rules.
+        self.assertEqual(battle.frozen_construction(self.match({0: self.reports([0, 0, 0, 54])}), fit), [])
+        self.assertEqual(len(battle.frozen_construction(self.match({0: self.reports([0, 0, 0, 55])}), fit)), 1)
+        loose = {"rules": {"frozen_max": 0.5, "frozen_years": 1}, "must_be_healthy": ["P"]}
+        self.assertEqual(battle.frozen_construction(self.match({0: live}), loose), [])
+        self.assertEqual(battle.frozen_construction(self.match({0: self.reports([91] * 4)}), loose),
+                         ["P: frozen:364 of 364 days (100.0%) in 1950-1950 (max 50%)"])
+
+    def test_only_healthy_contestants_with_reports_are_judged(self):
+        frozen = self.reports([91] * 4)
+        self.assertEqual(battle.frozen_construction(self.match({0: frozen}), {"rules": {}, "must_be_healthy": []}), [])
+        self.assertEqual(battle.frozen_construction(self.match({}), {"rules": {}, "must_be_healthy": ["P"]}), [])
+        self.assertEqual(battle.frozen_construction(self.match({1: frozen}), {"rules": {}, "must_be_healthy": ["AAAHogEx"]}), [])
+        m = self.match({0: frozen})
+        m.update(status="done", errors={}, series={"P": [], "AAAHogEx": [], "P2": []})
+        self.assertIn("P: frozen:364 of 364 days (100.0%) in 1950-1952 (max 15%)",
+                      battle.fitness_verdict(m, {"rules": {}, "must_be_healthy": ["P"]}))
+
+
 class FitnessRun(unittest.TestCase):
     """cmd_fitness end to end against a fake game binary that prints referee lines: the shared
     producer is printed and fails the check."""
@@ -185,7 +280,8 @@ class FitnessRun(unittest.TestCase):
             lines = [ref(1960, 1, c, 10, veh=1) for c in range(3)] + \
                     [ref(1961, 1, c, 20 + c, veh=2) for c in range(3)] + [shared(1960, 4, 7, "0,1")] + \
                     [trainless(1960, 1, 1, 4, [5, 6]), trainless(1960, 4, 1, 4, [5, 6]), trainless(1960, 7, 1, 4, [5, 6]),
-                     trainless(1961, 1, 1, 4, [5, 6, 7]), trainless(1961, 1, 2, 8, [1, 2, 3])]
+                     trainless(1961, 1, 1, 4, [5, 6, 7]), trainless(1961, 1, 2, 8, [1, 2, 3]),
+                     capital(1960, 1, 0, 30, 91), capital(1960, 2, 0, 0, 91)]
             fake = repo / "build" / "openttd"
             fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\n")
             fake.chmod(0o755)
@@ -214,6 +310,139 @@ class FitnessRun(unittest.TestCase):
         self.assertIn("P b: trainless_stations:2 rail station(s) without a train from 1960-01 to 1961-01 "
                       "(stations 5, 6; max 0)", err.getvalue())
         self.assertNotIn("AAAHogEx: trainless", err.getvalue())
+        self.assertIn("P a                        construction frozen 30 of 182 days in its first 3 years", out.getvalue())
+
+
+def funnel(year, cid, mode, fields, level="E"):
+    return f"[2026-11-24 10:00:00] dbg: [script:1] [{cid}] [{level}] FUNNEL year={year} mode={mode} {fields}"
+
+
+RAIL_ROW = ("hb=40 short_hb=3 idle_hb=0 searches=12 found=2 producers=40 ours=3 claimed=20 small=6 "
+            "served=5 no_acceptor=8 pairs_tried=4 tried=4 stations=2 path_fail=1 laid=1 built=1 "
+            "single_track=1 trainless=0 loco_refused_cash=0 trained=1 lines=3 paying=2 trains=5 trains_added=2")
+
+
+class GrowthFunnel(unittest.TestCase):
+    """PrismaticAI's yearly FUNNEL lines (PrismaticAI/funnel.nut): parsed per company, the stage that
+    lost most, the fitness failure of a missing year, the post-mortem, the fitness print and the
+    orchestrator's poll (research/growth-funnel.md)."""
+
+    def test_parse_keeps_the_last_line_of_a_year_and_mode_and_only_error_level(self):
+        text = "\n".join([funnel(1951, 0, "rail", "tried=1"), funnel(1951, 0, "rail", RAIL_ROW),
+                          funnel(1951, 0, "road", "tried=3 stop_fail=2 built=1 vehicles=2 paying=1"),
+                          funnel(1950, 2, "air", "short=4 tried=1 built=1"),
+                          funnel(1952, 0, "rail", "tried=9", level="I"),
+                          "dbg: [script:1] [0] [E] FUNNEL year=x mode=rail tried=1"])
+        got = battle.parse_funnel(text)
+        self.assertEqual(sorted(got), [0, 2])
+        self.assertEqual([(r["year"], r["mode"]) for r in got[0]], [(1951, "rail"), (1951, "road")])
+        self.assertEqual((got[0][0]["claimed"], got[0][0]["trains_added"]), (20, 2))
+        self.assertEqual(got[2], [{"year": 1950, "mode": "air", "short": 4, "tried": 1, "built": 1}])
+
+    def test_most_lost_is_the_largest_share_and_none_without_a_loss(self):
+        row = {"year": 1951, "mode": "rail"}
+        row.update({k: int(v) for k, v in battle.REF_FIELD.findall(RAIL_ROW)})
+        # Per population: producers, tries, lines. Stations lost 2 of 4 tries ties path 1 of 2
+        # stations at a half; the tie goes to the larger loss.
+        self.assertEqual(battle.funnel_most_lost(row), [("discovery", "claimed", 20, 40),
+                                                        ("build", "stations", 2, 4), ("run", "paying", 1, 3)])
+        row.update(claimed=0, ours=0, served=0, no_acceptor=0, lines=0, paying=0)
+        self.assertEqual(battle.funnel_most_lost(row), [("build", "stations", 2, 4)])
+        self.assertEqual(battle.funnel_most_lost({"year": 1951, "mode": "air", "tried": 0}), [])
+        self.assertEqual(battle.funnel_most_lost({"year": 1951, "mode": "unknown", "tried": 5}), [])
+        text = battle.funnel_text({"year": 1951, "mode": "road", "tried": 4, "stop_fail": 3})
+        self.assertEqual(text, "road 1951: tried=4 stop_fail=3; most lost: build stop 3/4")
+        self.assertEqual(battle.funnel_text({"year": 1951, "mode": "ship", "vehicles": 0}),
+                         "ship 1951: vehicles=0; most lost: none")
+
+    def test_a_held_contestant_owes_a_rail_line_for_every_whole_year(self):
+        m = {"lineup": [{"key": "P", "ai": "PrismaticAI"}, {"key": "Q", "ai": "PrismaticAI"}],
+             "years": 3, "match_cfg": {"start_year": 1950}, "status": "done", "errors": {},
+             "series": {"P": [], "Q": []},
+             "funnel": {"P": [{"year": 1950, "mode": "rail"}, {"year": 1951, "mode": "road"}]}}
+        self.assertEqual(battle.funnel_gaps(m, ["P"]), ["P: no_funnel: no FUNNEL rail line for 1951"])
+        self.assertEqual(battle.funnel_gaps(m, []), [])
+        fit = {"rules": {}, "must_be_healthy": [], "must_funnel": ["P", "Q"]}
+        fails = battle.fitness_verdict(m, fit)
+        self.assertIn("P: no_funnel: no FUNNEL rail line for 1951", fails)
+        self.assertIn("Q: no_funnel: no FUNNEL rail line for 1950, 1951", fails)
+
+    def test_postmortem_carries_the_last_funnel_year_of_each_mode(self):
+        lineup = [{"key": "W", "ai": "W"}, {"key": "P", "ai": "PrismaticAI"}]
+        m = {"lineup": lineup, "errors": {}, "series": {
+            "W": [{"t": "1952-01", "value": 1000, "vehicles": 10, "income": 10}],
+            "P": [{"t": "1952-01", "value": 100, "vehicles": 10, "income": 10}]},
+            "funnel": {"P": [{"year": 1950, "mode": "rail", "tried": 9, "stations": 0},
+                             {"year": 1951, "mode": "rail", "tried": 2, "stations": 1, "laid": 1, "built": 1}]}}
+        m["standings"] = battle.standings_of(m)
+        pm = battle.postmortem(m)
+        self.assertIn("funnel rail 1951: tried=2 stations=1 laid=1 built=1; most lost: build stations 1/2", pm[0]["findings"])
+        self.assertFalse(any("1950" in f for f in pm[0]["findings"]))
+
+    def test_fitness_prints_each_funnel_line_and_fails_a_missing_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            repo = tmp / "repo"
+            (repo / "build").mkdir(parents=True)
+            (repo / "ai" / "PrismaticAI").mkdir(parents=True)
+            (repo / "referee" / "BattleReferee").mkdir(parents=True)
+            lines = [ref(1960, 1, c, 10, veh=1) for c in range(3)] + \
+                    [ref(1962, 1, c, 20 + c, veh=2) for c in range(3)] + \
+                    [funnel(1960, 0, "rail", "tried=2 stations=1 laid=1 built=1"), funnel(1960, 0, "road", "tried=1 built=1"),
+                     funnel(1961, 0, "rail", "tried=0"), funnel(1960, 1, "rail", "tried=1"),
+                     funnel(1960, 9, "rail", "tried=1")]
+            fake = repo / "build" / "openttd"
+            fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\n")
+            fake.chmod(0o755)
+            arena = tmp / "cache" / "arena"
+            (arena / "baseset").mkdir(parents=True)
+            (arena / "ai" / "library").mkdir(parents=True)
+            (arena / "ai" / "AAAHogEx.tar").write_bytes(b"")
+            cfg = {"cache": tmp / "cache", "prismatic": {"path": "ai/PrismaticAI"},
+                   "referee": {"path": "referee/BattleReferee"},
+                   "match": {"years": 2, "start_year": 1960, "landscape": "temperate", "map_x": 8, "map_y": 8},
+                   "fitness": {"years": 2, "seed": 1, "rules": {}, "must_be_healthy": [],
+                               "must_funnel": ["P a", "P b"],
+                               "lineups": [[{"ai": "PrismaticAI", "label": "P a"},
+                                            {"ai": "PrismaticAI", "label": "P b"}, {"ai": "AAAHogEx"}]]}}
+            old = battle.REPO
+            battle.REPO = repo
+            out, err = io.StringIO(), io.StringIO()
+            try:
+                with redirect_stdout(out), redirect_stderr(err):
+                    code = battle.cmd_fitness(cfg)
+            finally:
+                battle.REPO = old
+        self.assertEqual(code, 0, out.getvalue() + err.getvalue())
+        self.assertIn("P a                        funnel rail 1960: tried=2 stations=1 laid=1 built=1; most lost: build stations 1/2",
+                      out.getvalue())
+        self.assertIn("P a                        funnel road 1960: tried=1 built=1; most lost: none", out.getvalue())
+        self.assertIn("P b                        funnel rail 1960: tried=1; most lost: build stations 1/1", out.getvalue())
+        # Company 9 is not in the lineup; 1961, the last year, is not owed by a match of two years.
+        self.assertNotIn("tried=1; most lost: build stations 1/1\nfitness[0]: P b", out.getvalue())
+        self.assertIn("fitness: PASS", out.getvalue())
+
+    def test_the_orchestrator_poll_reads_funnel_lines_into_the_match(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            orch, host = Guards.orchestrator(tmp)
+            host.state = "online"
+            m = {"id": "m-0001", "host": "h", "edition": "e1", "status": "running", "started_at": 0.0, "seed": 1,
+                 "ticks": 1,
+                 "lineup": [{"key": "A", "ai": "PrismaticAI"}, {"key": "B", "ai": "B"}], "years": 2,
+                 "match_cfg": MC, "series": {}, "errors": {}}
+            orch.matches = {"m-0001": m}
+            body = "\n".join([ref(1960, 1, 0, 5), ref(1960, 1, 1, 6), funnel(1960, 0, "rail", "tried=3 stations=1")])
+            seen = []
+
+            def sh(script, timeout=60):
+                seen.append(script)
+                return subprocess.CompletedProcess(script, 0, f"@@@ m-0001\nRUNNING\n{body}\n", "")
+            host.sh = sh
+            with mock.patch.object(battle, "log"):
+                orch.poll_host(host)
+        self.assertIn("\\] \\[E\\] FUNNEL ", seen[0])
+        self.assertEqual(m["funnel"], {"A": [{"year": 1960, "mode": "rail", "tried": 3, "stations": 1}]})
 
 
 class MatchContract(unittest.TestCase):
@@ -811,6 +1040,32 @@ class Telemetry(unittest.TestCase):
             lineup = json.loads(st.query("SELECT lineup FROM matches")["rows"][0][0])
             self.assertEqual(lineup[0], {"key": "A", "ai": "A", "settings": ""})
 
+    def test_store_keeps_each_samples_loan_in_a_new_and_in_an_old_store(self):
+        # The hoard rules judge money net of the loan; a stored sample must keep the loan for any
+        # analysis that judges it later (research/design-net-investment-hoard-rule.md).
+        with tempfile.TemporaryDirectory() as tmp:
+            old = Path(tmp) / "old.sqlite"
+            db = sqlite3.connect(old)  # a store from before the loan column
+            db.executescript(battle.SCHEMA.replace(" loan INTEGER,", ""))
+            db.execute("INSERT INTO samples (edition, match_id, contestant, t, money) "
+                       "VALUES ('e0', 'm-0000', 'A', '1960-01', 7)")
+            db.commit()
+            db.close()
+            for path in (Path(tmp) / "new.sqlite", old):
+                st = battle.Store(path)
+                m = match("m-0001", "h1", 1, [3, 2, 1])
+                m.update(edition="e1", started_at=0.0, ticks=1,
+                         lineup=[{"key": k, "ai": k} for k in KEYS])
+                for series in m["series"].values():
+                    for s in series:
+                        s.update(money=900_000, loan=300_000)
+                st.match(m)
+                rows = st.query("SELECT money, loan FROM samples WHERE edition = 'e1'")["rows"]
+                self.assertTrue(rows, path.name)
+                self.assertEqual({tuple(r) for r in rows}, {(900_000, 300_000)}, path.name)
+            older = battle.Store(old).query("SELECT loan FROM samples WHERE edition = 'e0'")["rows"]
+            self.assertEqual(older, [(None,)], "a sample from before the column reads unrecorded")
+
     def test_fitness_fails_when_a_never_last_bot_is_last(self):
         lineup = [{"ai": "PrismaticAI", "key": "PrismaticAI"}, {"ai": "X", "key": "X"}]
         fl = Health.fleet
@@ -1238,19 +1493,28 @@ def live_store():
                   {"run_ms": 300, "month": "1953-07", "name": "Someone else"}],
         "series": series,
         "events": [ev(100, 1, "company.founded", "1950-06-01", data={"id": 0}),
-                   ev(100, 2, "panel.ai", "1950-06-01", "start_ai PrismaticAI a=40,fr_from=3,b=x sent: the company"),
+                   ev(100, 2, "panel.ai", "1950-06-01", "start_ai PrismaticAI a=40,aggressiveness=40,fr_from=3,b=x sent: the company"),
                    ev(100, 3, "company.founded", "1950-06-02", data={"id": 1}),
                    ev(100, 4, "panel.console", "1950-06-02", 'start_ai "AAAHogEx"'),
                    ev(100, 5, "company.founded", "1950-06-03", data={"id": 2}),
-                   ev(100, 6, "panel.console", "1950-06-03", 'start_ai "PrismaticAI" a=70,b=8'),
+                   ev(100, 6, "panel.console", "1950-06-03", 'start_ai "PrismaticAI" a=70,b=8,aggressiveness=70'),
                    ev(100, 7, "company.founded", "1950-06-04", data={"id": 2}),
                    ev(100, 8, "company.founded", "1950-06-05", data={"id": 3}),
                    ev(100, 9, "panel.mcp", "1951-02-01",
                       'openttd.ai.set_setting({"company": 0, "name": "a", "value": 40}) -> pending approval #1'),
-                   ev(200, 10, "panel.mcp", "1953-02-01",
-                      'openttd.ai.set_setting({"company": 2, "name": "b", "value": 10}) -> pending approval #2'),
+                   # Never enacted (no decision): it changes nothing and does not end company 0's window.
+                   ev(100, 10, "panel.mcp", "1951-03-01",
+                      'openttd.ai.set_setting({"company": 0, "name": "a", "value": 90}) -> pending approval #4'),
                    ev(200, 11, "panel.mcp", "1953-02-01",
-                      'openttd.ai.set_setting({"company": 2, "name": "fr_to", "value": 3}) -> pending approval #3')],
+                      'openttd.ai.set_setting({"company": 2, "name": "b", "value": 10}) -> pending approval #2'),
+                   ev(200, 12, "panel.mcp", "1953-02-01",
+                      'openttd.ai.set_setting({"company": 2, "name": "fr_to", "value": 3}) -> pending approval #3'),
+                   ev(200, 13, "decision.recorded", "1953-02-02",
+                      data={"action_type": "ai.set_setting", "approval_id": 2, "command_result": "succeeded"}),
+                   ev(200, 14, "decision.recorded", "1953-02-03",
+                      data={"action_type": "ai.start", "approval_id": 3, "command_result": "succeeded"}),
+                   ev(100, 15, "panel.mcp", "1951-04-01",
+                      'openttd.ai.set_setting({"company": 0, "name": "b", "value": 6})')],
         "watchdog": [{"key": "watchdog.0", "value": json.dumps({"signature": "train 2 road 3 ship 0 aircraft 1 stations 4"})},
                      {"key": "watchdog.tuning", "value": "7"}],
         "revision": [{"version": json.dumps({"revision": "abc123"})}],
@@ -1275,9 +1539,13 @@ class Live(unittest.TestCase):
         self.assertEqual((rec["first_month"], rec["final_month"], rec["revision"]), ("1950-06", "1953-06", "abc123"))
         comp = {c["company"]: c for c in rec["companies"]}
         self.assertEqual([comp[c]["ai"] for c in range(4)], ["PrismaticAI", "AAAHogEx", "PrismaticAI", None])
-        self.assertEqual(comp[0]["settings_start"], "a=40")            # fr_from and a non-number left out
-        self.assertEqual(comp[0]["settings_requested"], [])            # a=40 again is no change
-        self.assertEqual(comp[2]["settings_requested"], [{"date": "1953-02-01", "name": "b", "value": 10}])
+        self.assertEqual(comp[0]["settings_start"], "a=40,aggressiveness=40")   # no fr_from, no non-number
+        # a=40 again is no change; a=90 and b=6 were requested and never enacted.
+        self.assertEqual(comp[0]["settings_requested"], [
+            {"date": "1951-03-01", "name": "a", "value": 90, "applied": None},
+            {"date": "1951-04-01", "name": "b", "value": 6, "applied": None}])
+        self.assertEqual(comp[2]["settings_requested"],
+                         [{"date": "1953-02-01", "name": "b", "value": 10, "applied": "1953-02-02"}])
         self.assertEqual([p["month"] for p in rec["series"]["0"]], ["1950-12", "1951-12", "1952-12", "1953-06"])
         self.assertEqual(rec["series"]["0"][2]["value"], 110)          # the loaded run's month replaces it
         self.assertEqual(rec["mode_mix"], {"0": {"train": 2, "road": 3, "ship": 0, "aircraft": 1, "stations": 4}})
@@ -1324,16 +1592,18 @@ class Live(unittest.TestCase):
         # Alone and short: no evidence; alone and long enough: judged against loss_ratio.
         rec = live_rec()
         rec["companies"][2]["ai"] = "Other"
-        rec["companies"][0]["settings_requested"] = [{"date": "1951-03-01", "name": "a", "value": 90}]
+        rec["companies"][0]["settings_requested"] = [{"date": "1951-03-01", "name": "a", "value": 90,
+                                                      "applied": "1951-03-05"}]
         (e,) = battle.live_entries([rec], LIVE_T)
         self.assertFalse(e["evidence"])
         self.assertIn("first setting change 1951", e["why"])
-        rec["companies"][0]["settings_requested"] = []
+        rec["companies"][0]["settings_requested"][0]["applied"] = None   # requested, never enacted
         (e,) = battle.live_entries([rec], LIVE_T)
         self.assertEqual((e["ratio"], e["lost"], e["paired"]), (0.5238, False, False))
         self.assertIn("a loss is under 0.5", e["why"])
         (e,) = battle.live_entries([rec], dict(LIVE_T, live={"loss_ratio": 0.6}))
-        self.assertTrue(e["lost"])
+        self.assertEqual((e["lost"], e["radius"]), (True, 3))          # lost to the rival: a wider veto
+        self.assertEqual(battle.live_veto(LIVE_T, {"a": 100, "b": 10}, [e])["company"], 0)
         (e,) = battle.live_entries([rec], dict(LIVE_T, live={"min_years": 5}))
         self.assertIn("first setting change none", e["why"])
 
@@ -1341,7 +1611,8 @@ class Live(unittest.TestCase):
         live = battle.live_entries([live_rec()], LIVE_T)       # lost: a=40,b=4; won: a=70,b=8
         self.assertEqual(battle.live_veto(LIVE_T, {"a": 40, "b": 4}, live)["company"], 0)
         self.assertIsNone(battle.live_veto(LIVE_T, {"a": 40, "b": 6}, live))
-        self.assertIsNotNone(battle.live_veto(dict(LIVE_T, live={"veto_genes": 1}), {"a": 40, "b": 6}, live))
+        wide = battle.live_entries([live_rec()], dict(LIVE_T, live={"veto_genes": 1}))
+        self.assertIsNotNone(battle.live_veto(LIVE_T, {"a": 40, "b": 6}, wide))
         g0 = [battle.variant(LIVE_T, 0, i, g, []) for i, g in enumerate(
             [{"a": 10, "b": 2}, {"a": 20, "b": 2}, {"a": 30, "b": 2}, {"a": 40, "b": 4}])]
         scored = [(v, {"score": i}) for i, v in enumerate(g0)]   # the lost configuration scores best
@@ -1360,24 +1631,34 @@ class Live(unittest.TestCase):
         pop1 = dict(LIVE_T, population=1)
         self.assertEqual(len(battle.next_generation(pop1, {"generation": 0}, scored, live)), 1)
 
-    def test_live_settings_take_the_best_arena_configuration_that_did_not_lose_live(self):
-        live_t = dict(LIVE_T)
+    def test_live_settings_take_only_a_configuration_with_live_evidence(self):
         brec = {"id": "battle-x", "contestants": [
             {"key": "P lost", "ai": "PrismaticAI", "settings": "a=40,b=4"},
-            {"key": "P ok", "ai": "PrismaticAI", "settings": "a=60,b=4,rail_a=2"},
+            {"key": "P won", "ai": "PrismaticAI", "settings": "a=70,b=8,rail_a=2"},
+            {"key": "P arena", "ai": "PrismaticAI", "settings": "a=60,b=4"},
             {"key": "P unplayed", "ai": "PrismaticAI", "settings": "a=90"},
             {"key": "AAAHogEx", "ai": "AAAHogEx", "settings": ""}],
             "leaderboard": [{"key": "AAAHogEx", "played": 4, "avg_value": 1000},
                             {"key": "P lost", "played": 4, "avg_value": 300},
-                            {"key": "P ok", "played": 4, "avg_value": 200},
+                            {"key": "P arena", "played": 4, "avg_value": 250},
+                            {"key": "P won", "played": 4, "avg_value": 200},
                             {"key": "P unplayed", "played": 0, "avg_value": 0}]}
-        d = battle.derive_live_settings(live_t, brec, [live_rec()])
-        self.assertEqual((d["chosen"], d["settings"]), ("P ok", "a=60,b=4"))
-        self.assertEqual([c["vetoed_by"] for c in d["candidates"]], ["live-7-100:0", None])
-        self.assertEqual(d["seeds"], ["live-7-100:2"])
-        self.assertEqual(d["live_records"], ["live-7-100"])
-        none = battle.derive_live_settings(live_t, None, [live_rec()])
-        self.assertEqual((none["chosen"], none["settings"], none["candidates"]), (None, None, []))
+        d = battle.derive_live_settings(LIVE_T, brec, [live_rec()])
+        # The arena's best did not lose live but has no live evidence either: not chosen.
+        self.assertEqual((d["chosen"], d["settings"]), ("live-7-100:2", "a=70,aggressiveness=70,b=8"))
+        self.assertEqual(d["candidates"][0]["arena"], "P won")
+        self.assertIn("found not lost", d["reason"])
+        self.assertEqual([(a["candidate"], a["vetoed_by"]) for a in d["arena"]],
+                         [("P lost", "live-7-100:0"), ("P arena", None), ("P won", None)])
+        self.assertEqual(d["seeds"], [])                                  # the arena has played it
+        # Its only winner lost elsewhere (a loss to the rival, within 3 genes): nothing is derived.
+        loser = live_rec()
+        loser["id"], loser["companies"][2]["ai"] = "live-8-1", "Other"
+        loser["companies"][0]["settings_start"] = "a=70,b=8"
+        none = battle.derive_live_settings(dict(LIVE_T, live={"loss_ratio": 0.6}), None, [live_rec(), loser])
+        self.assertEqual((none["chosen"], none["settings"], none["arena"]), (None, None, []))
+        self.assertEqual(none["candidates"][0]["vetoed_by"], "live-8-1:0")
+        self.assertIn("no configuration has live evidence", none["reason"])
 
     def test_runners_read_the_panel_and_a_store_copy(self):
         import http.server
@@ -1449,19 +1730,11 @@ class Live(unittest.TestCase):
                 self.assertEqual(battle.cmd_render(), 0)
                 self.assertEqual(battle.cmd_check(), 0)
                 self.assertEqual(battle.cmd_render(), 0)                 # current: nothing rewritten
-                # No battle record: nothing to choose.
-                self.assertEqual(battle.main(["live-settings"]), 10)
-                brec = record()
-                # The live record's settings name no gene of the real space, so its loser is the defaults.
-                brec["contestants"].append({"key": "PrismaticAI", "ai": "PrismaticAI",
-                                            "settings": "aggressiveness=100"})
-                brec["leaderboard"] = [{"key": "AAAHogEx", "played": 1, "avg_value": 10},
-                                       {"key": "PrismaticAI", "played": 1, "avg_value": 5}]
-                brec["contestants"].append({"key": "AAAHogEx", "ai": "AAAHogEx", "settings": ""})
-                (d / f"{brec['id']}.json").write_text(json.dumps(brec))
                 self.assertEqual(battle.main(["live-settings", "--write"]), 0)
-                self.assertEqual(json.loads((d / "live-start.json").read_text())["chosen"], "PrismaticAI")
-                (d / f"{brec['id']}.json").unlink()                       # a partial board, not a record
+                self.assertEqual(json.loads((d / "live-start.json").read_text())["chosen"], "live-7-100:2")
+                with mock.patch.object(battle, "derive_live_settings", lambda *a: {"chosen": None, "settings": None,
+                                                                                   "reason": "none"}):
+                    self.assertEqual(battle.main(["live-settings"]), 10)   # nothing evidenced: no start
                 rec["outcome"]["leader_value"] = 1                        # a forged record
                 (d / "live-7-100.json").write_text(json.dumps(rec))
                 self.assertEqual(battle.cmd_check(), 10)
@@ -1486,11 +1759,332 @@ class Live(unittest.TestCase):
             state = json.loads(path.read_text())
             self.assertEqual(state["variants"][0]["genes"], {"a": 20, "b": 2})
 
+    def test_game_15805_is_a_loss_and_vetoes_the_ga_pick_it_ran(self):
+        """The committed record of live game 15805 (PrismaticAI 1 train, 36x behind AAAHogEx by 1964):
+        replan's request of rail_after=7 (1952-05-08) was never enacted, so it does not end the window;
+        judged at 1953-12 the company lost to AAAHogEx, and GA g347.3 (which it ran, with three owner
+        overrides) is vetoed."""
+        results = HERE.parents[1] / "research" / "results"
+        t = battle.live_tuning(json.loads(BATTLE_JSON.read_text()))
+        rec = json.loads(next(results.glob("live-15805-*.json")).read_text())
+        self.assertTrue(any(r["name"] == "rail_after" and not r["applied"]
+                            for r in rec["companies"][0]["settings_requested"]))
+        (e,) = [x for x in battle.live_entries([rec], t) if x["company"] == 0]
+        self.assertEqual((e["at"], e["lost"]), ("1953-12", True))
+        self.assertLess(e["ratio"], 0.5)
+        board = json.loads((results / "battle-20261122T045411-a80cc94a.json").read_text())
+        g347 = next(c for c in board["contestants"] if c["key"] == "PrismaticAI GA g347.3")
+        self.assertIs(battle.live_veto(t, battle.live_genes(t, battle.settings_dict(g347["settings"])), [e]), e)
+
     def test_battle_json_declares_the_live_rule_and_it_resolves(self):
         cfg_raw = json.loads(BATTLE_JSON.read_text())
         t = battle.live_tuning(cfg_raw)
         self.assertEqual(set(battle.live_cfg(t)), set(battle.LIVE_DEFAULTS))
         self.assertTrue(set(t["defaults"]) <= set(t["space"]))
+
+
+# ------------------------------------------------------------------ live-like arena and replay
+
+LIVE = {"seed": 15805, "slot": 0,
+        "match": {"start_year": 1950, "map_x": 8, "map_y": 8, "script_opcodes": 250000},
+        "rivals": [{"ai": "AAAHogEx", "version": "115"}, {"ai": "NoCAB", "version": "2.1.4"},
+                   {"ai": "SimpleAI"}],
+        "arms": {"unplanned": "own_lines=4", "planned": "own_lines=4,fr_from=0,fr_to=1,fr_cargo=1"}}
+
+
+def company(n, name, money, loan, value, t, r=0, p=0, s=0, ai=True):
+    return (f"[2026-11-24 17:00:00] #:{n}(Red) Company Name: '{name}'  Year Founded: 1950  Money: {money}  "
+            f"Loan: {loan}  Value: {value}  (T:{t}, R:{r}, P:{p}, S:{s}) {'AI' if ai else ''}")
+
+
+def console(months, mine_trains, mine_value=100, lead_value=1000, start=(1952, 11)):
+    """A replay console log: `months` monthly reports of company 0 (the bot) and company 1."""
+    lines, (y, m) = ["Console log output started to 'x'."], start
+    for i in range(months):
+        lines += [f"[2026-11-24 17:00:00] Date: {y:04d}-{m:02d}-01",
+                  company(1, "Bot Transport", 5, 0, mine_value, mine_trains(i), r=3, p=2),
+                  company(2, "AAAHogEx", 9, 300000, lead_value, 20),
+                  company(9, "Unnamed", 100000, 100000, 1, 0, ai=False),
+                  "Script file 'scripts/monthly.scr' scheduled to execute at the start of next calendar month."]
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return "\n".join(lines) + "\n"
+
+
+class LiveLike(unittest.TestCase):
+    def test_fetch_wanted_adds_the_live_rivals_once(self):
+        cfg = {"contestants": [{"ai": "PrismaticAI", "source": "repository"},
+                               {"ai": "AAAHogEx", "source": "bananas"}], "live_like": LIVE}
+        self.assertEqual(battle.fetch_wanted(cfg), ["AAAHogEx", "NoCAB", "SimpleAI"])
+        self.assertEqual(battle.fetch_wanted({"contestants": []}), [])
+        self.assertEqual(battle.live_like({"live_like": None}), {})
+
+    def test_rival_versions_names_a_missing_tar_and_another_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            for name in ("484f4745-AAAHogEx-115.tar", "4e434142-NoCAB-2.0.tar", "534d504c-SimpleAI-14.tar",
+                         "4c444146-LuDiAI_AfterFix-v27.tar", "PrismaticAI.tar"):
+                (d / name).write_bytes(b"")
+            self.assertEqual(battle.tar_versions(d, "LuDiAI AfterFix"), ["v27"])
+            self.assertEqual(battle.tar_versions(d / "missing", "NoCAB"), [])
+            got = battle.rival_versions(d, LIVE["rivals"] + [{"ai": "DictatorAI", "version": "183"}])
+            self.assertEqual(len(got), 2, got)
+            self.assertIn("NoCAB: version 2.0 in", got[0])
+            self.assertIn("the live game ran 2.1.4", got[0])
+            self.assertIn("DictatorAI: no tar in", got[1])
+
+    def test_battle_cfg_sets_the_script_budget_only_when_given(self):
+        mc = dict(MC, breakdowns=1)
+        self.assertNotIn("[script]", battle.battle_cfg_text(mc))
+        text = battle.battle_cfg_text(dict(mc, script_opcodes=250000))
+        self.assertTrue(text.endswith("[script]\nscript_max_opcode_till_suspend = 250000\n"), text)
+
+    def test_live_like_ablate_takes_the_live_world_and_arms(self):
+        cfg = {"match": dict(MC), "live_like": LIVE}
+        out, seed, field, slot, variants = battle.live_like_ablate(cfg, None, [])
+        self.assertEqual((seed, field, slot), (15805, ["AAAHogEx", "NoCAB", "SimpleAI"], 0))
+        self.assertEqual(out["match"]["start_year"], 1950)
+        self.assertEqual(out["match"]["landscape"], "temperate")   # kept from the arena's match
+        self.assertEqual(cfg["match"]["start_year"], 1960)         # the caller's config is untouched
+        self.assertEqual(variants, ["unplanned=own_lines=4", "planned=own_lines=4,fr_from=0,fr_to=1,fr_cargo=1"])
+        self.assertEqual(battle.live_like_ablate(cfg, 7, ["a=x=1"])[1:5:3], (7, ["a=x=1"]))
+        with self.assertRaises(SystemExit):
+            battle.live_like_ablate({"match": MC}, None, [])
+
+    def test_ablate_live_like_runs_the_live_field_from_the_command_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            repo = tmp / "repo"
+            (repo / "build").mkdir(parents=True)
+            (repo / "ai" / "PrismaticAI").mkdir(parents=True)
+            fake = repo / "build" / "openttd"
+            # Every company of the lineup reports once; the script proves the live cfg reached it.
+            fake.write_text("#!/bin/sh\ngrep -q 'script_max_opcode_till_suspend = 250000' battle.cfg || exit 3\n"
+                            "grep -c start_ai \"$HOME/Documents/OpenTTD/scripts/game_start.scr\" >&2\ncat <<'EOF'\n"
+                            + "\n".join(ref(1956, 1, c, 10 + c) for c in range(4)) + "\nEOF\n")
+            fake.chmod(0o755)
+            arena = tmp / "cache" / "arena"
+            for sub in ("baseset", "ai/library", "game"):
+                (arena / sub).mkdir(parents=True)
+            (arena / "ai" / "484f4745-AAAHogEx-115.tar").write_bytes(b"")
+            conf = tmp / "battle.json"
+            conf.write_text(json.dumps({
+                "cache": str(tmp / "cache"), "results": str(tmp / "results"), "hosts_file": str(tmp / "h.json"),
+                "baseset": str(tmp / "b.tar"), "prismatic": {"path": "ai/PrismaticAI"},
+                "match": dict(MC, breakdowns=1), "live_like": LIVE}))
+            old = battle.REPO
+            battle.REPO = repo
+            out = io.StringIO()
+            try:
+                with redirect_stdout(out):
+                    code = battle.main(["ablate", "--live-like", "--config", str(conf)])
+            finally:
+                battle.REPO = old
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn("ablate: warning: NoCAB: no tar in", out.getvalue())
+        self.assertIn("ablate: unplanned", out.getvalue())
+        self.assertIn("ablate: planned", out.getvalue())
+        self.assertIn("value           10", out.getvalue())   # PrismaticAI is company 0, the live slot
+
+    def test_plain_ablate_keeps_its_old_defaults(self):
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, redirect_stdout(out):
+            conf = Replay._conf(Path(tmp))
+            old = battle.REPO
+            battle.REPO = Path(tmp)
+            try:
+                code = battle.main(["ablate", "--config", conf])
+            finally:
+                battle.REPO = old
+        self.assertEqual(code, 12)   # no build: not run, after the --live-like / --match / --lineup choice
+        self.assertIn("ablate: NOT RUN", out.getvalue())
+
+    def test_fetch_downloads_the_live_rivals_and_reports_their_versions(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            fake = tmp / "openttd"
+            # A stand-in content client: answers `content state` and writes the downloaded tars.
+            fake.write_text("#!/bin/sh\nwhile read -r line; do case \"$line\" in\n"
+                            "  'content state '*) echo \"7, AI, Selected, ${line#content state }, 1\";;\n"
+                            "  'content download') mkdir -p content_download/ai\n"
+                            "    : > content_download/ai/484f4745-AAAHogEx-115.tar\n"
+                            "    : > content_download/ai/4e434142-NoCAB-2.0.tar\n"
+                            "    echo 'Completed download of NoCAB';;\n"
+                            "  quit) exit 0;;\nesac; done\n")
+            fake.chmod(0o755)
+            (tmp / "b.tar").write_bytes(b"")
+            (tmp / "hosts.json").write_text(json.dumps({"hosts": [{"name": "local", "binary": str(fake)}]}))
+            cfg = {"cache": tmp / "cache", "baseset": tmp / "b.tar", "hosts_file": tmp / "hosts.json",
+                   "contestants": [{"ai": "AAAHogEx", "source": "bananas"}],
+                   "live_like": {"rivals": [{"ai": "NoCAB", "version": "2.1.4"}]}}
+            real_sleep = battle.time.sleep
+            out = io.StringIO()
+            with mock.patch.object(battle.time, "sleep", lambda s: real_sleep(min(s, 0.3))), redirect_stdout(out):
+                battle.cmd_fetch(cfg)
+        self.assertIn("fetched 1 package(s) for ['AAAHogEx', 'NoCAB']; missing: none", out.getvalue())
+        self.assertIn("live-like: NoCAB: version 2.0 in", out.getvalue())
+
+
+class Replay(unittest.TestCase):
+    RULES = {"min_trains": 2, "one_train_years": 3, "min_leader_ratio": 0.05}
+
+    def test_parse_console_reads_monthly_companies_and_skips_the_player(self):
+        series = battle.parse_console(console(2, lambda i: 1 + i) + "Date: garbage\n#:3 not a company\n")
+        self.assertEqual(sorted(series), [0, 1])        # the local player's company 9 is not an AI
+        self.assertEqual([s["t"] for s in series[0]], ["1952-11-01", "1952-12-01"])
+        self.assertEqual(series[0][1], {"t": "1952-12-01", "name": "Bot Transport", "money": 5, "loan": 0,
+                                        "value": 100, "rail": 2, "road": 3, "air": 2, "water": 0,
+                                        "vehicles": 7})
+        self.assertEqual(series[1][0]["loan"], 300000)
+
+    def test_scripts_log_the_console_and_reschedule_themselves(self):
+        start, monthly = battle.replay_scripts(Path("/tmp/x/console.log"))
+        self.assertTrue(start.startswith('script "/tmp/x/console.log"\n'))
+        self.assertEqual(start.splitlines()[1:], monthly.splitlines())
+        self.assertIn("schedule on-next-calendar-month scripts/monthly.scr", monthly)
+
+    def test_substituted_ai_invalidates_the_replay(self):
+        text = ("dbg: [script:0] The savegame has an AI by the name 'NoCAB', version 3 which is no longer "
+                "available.\ndbg: [script:0] A random other AI will be loaded in its place.\n")
+        self.assertEqual(battle.replay_substitutions(text),
+                         ["invalid replay: the save's AI NoCAB version 3 is not available"])
+        self.assertEqual(battle.replay_substitutions("all fine"), [])
+
+    def test_an_lzma_save_is_unpacked_and_others_copied(self):
+        import lzma
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "x.sav").write_bytes(b"OTTX\x01\x70\x00\x00" + lzma.compress(b"CHUNKS", format=lzma.FORMAT_XZ))
+            self.assertTrue(battle.replay_copy(d / "x.sav", d / "y.sav"))
+            self.assertEqual((d / "y.sav").read_bytes(), b"OTTN\x01\x70\x00\x00CHUNKS")
+            self.assertFalse(battle.replay_copy(d / "y.sav", d / "z.sav"))
+            self.assertEqual((d / "z.sav").read_bytes(), (d / "y.sav").read_bytes())
+
+    def test_verdict_clauses(self):
+        one = battle.parse_console(console(48, lambda i: 1, mine_value=40))
+        fails = battle.replay_verdict(one, 0, 4, self.RULES)
+        self.assertEqual(len(fails), 3, fails)
+        self.assertIn("1 train(s) at 1956-10-01, at least 2 wanted", fails[0])
+        self.assertIn("at most one train from 1953-11-01 to 1956-10-01", fails[1])
+        self.assertIn("value 40 is 0.040 of the leader AAAHogEx (1,000), at least 0.05 wanted", fails[2])
+        # A second line late in the replay: the end count passes, the window does not fail.
+        late = battle.parse_console(console(48, lambda i: 2 if i >= 40 else 1))
+        self.assertEqual(battle.replay_verdict(late, 0, 4, self.RULES), [])
+        short = battle.replay_verdict(one, 0, 5, self.RULES)
+        self.assertEqual(short, ["company 0: 48 monthly report(s), 60 needed: the replay did not run its years"])
+        self.assertEqual(battle.replay_verdict(one, 0, 4, {}), [   # defaults: 2 trains, 3 years, no ratio
+            fails[0].replace("at least 2", "at least 2"), fails[1]])
+        zero = battle.parse_console(console(12, lambda i: 3, lead_value=0))
+        self.assertEqual(battle.replay_verdict(zero, 0, 1, self.RULES), [])
+
+    def test_table_has_a_line_per_year(self):
+        series = battle.parse_console(console(15, lambda i: i))
+        lines = battle.replay_table(series, 0)
+        self.assertEqual(len(lines), 3)
+        self.assertIn("replay: 1952-12-01  trains   1 road   3 air   2  value         100  leader AAAHogEx "
+                      "1,000 (20 trains)  ratio 0.100", lines[0])
+        self.assertIn("leader - 0 (0 trains)  ratio 0.000", battle.replay_table({0: series[0]}, 0)[0])
+        self.assertEqual(battle.replay_table({}, 0), [])
+
+    def _run(self, tmp, months, extra="", exit_code=0, rev=None, years=4, log_dir=None):
+        """cmd_replay against a fake game: it writes `months` reports to the console log the start
+        script names, lists the AI directory on stdout and exits with `exit_code`."""
+        from unittest import mock
+        import os
+        repo = tmp / "repo"
+        (repo / "ai" / "PrismaticAI").mkdir(parents=True, exist_ok=True)
+        (repo / "ai" / "PrismaticAI" / "main.nut").write_text("class P {}\n")
+        init_repo(repo)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        with mock.patch.dict(os.environ, env, clear=True):
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "ai"], check=True)
+        (tmp / "console.txt").write_text(console(months, lambda i: 1 if i < 30 else 3))
+        fake = tmp / "openttd"
+        fake.write_text("#!/bin/sh\nlog=$(sed -n 's/^script \"\\(.*\\)\"$/\\1/p' "
+                        "\"$HOME/Documents/OpenTTD/scripts/game_start.scr\")\n"
+                        f"cp {tmp / 'console.txt'} \"$log\"\nls \"$HOME/Documents/OpenTTD/ai\"\n"
+                        "for a in \"$@\"; do case \"$a\" in *.sav) test -f \"$a\" || exit 4;; esac; done\n"
+                        f"echo \"{extra}\"\nexit {exit_code}\n")
+        fake.chmod(0o755)
+        arena = tmp / "cache" / "arena"
+        for sub in ("baseset", "ai/library"):
+            (arena / sub).mkdir(parents=True, exist_ok=True)
+        (arena / "ai" / "484f4745-AAAHogEx-115.tar").write_bytes(b"")
+        import lzma
+        (tmp / "live.sav").write_bytes(b"OTTX\x01\x70\x00\x00" + lzma.compress(b"save"))
+        cfg = {"cache": tmp / "cache", "prismatic": {"path": "ai/PrismaticAI"},
+               "live_like": {"rivals": [{"ai": "AAAHogEx", "version": "114"}]},
+               "replay": {"save": str(tmp / "live.sav"), "company": 0, "years": years, "rules": self.RULES}}
+        old = battle.REPO
+        battle.REPO = repo
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with mock.patch.dict(os.environ, env, clear=True), redirect_stdout(out), redirect_stderr(err):
+                code = battle.cmd_replay(cfg, None, None, rev, str(fake), log_dir)
+        finally:
+            battle.REPO = old
+        return code, out.getvalue(), err.getvalue()
+
+    def test_replay_passes_when_the_bot_equips_more_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            code, out, err = self._run(tmp, 48, log_dir=str(tmp / "logs"))
+            game_log = (tmp / "logs" / "game.log").read_text()
+            self.assertIn("Date: 1956-10-01", (tmp / "logs" / "console.log").read_text())
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("replay: warning: AAAHogEx: version 115 in", out)
+        self.assertIn("PrismaticAI of the working tree, company 0, 4 year(s), exit 0", out)
+        self.assertIn("replay: PASS", out)
+        self.assertIn("live.sav: lzma save unpacked", out)
+        self.assertIn("PrismaticAI\n", game_log)    # the working tree's bot was copied in
+
+    def test_replay_of_an_old_rev_that_fails_and_a_broken_game(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            code, out, err = self._run(
+                tmp, 40, rev="HEAD", exit_code=1,
+                extra="The savegame has an AI by the name 'NoCAB', version 3 which is no longer available.")
+        self.assertEqual(code, 10, out + err)
+        self.assertIn("PrismaticAI at HEAD", out)
+        self.assertIn("replay: FAIL the game exited with 1", err)
+        self.assertIn("replay: FAIL invalid replay: the save's AI NoCAB version 3 is not available", err)
+        self.assertIn("40 monthly report(s), 48 needed", err)
+
+    def test_replay_without_its_inputs_is_not_run(self):
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, redirect_stdout(out):
+            code = battle.main(["replay", "--config", self._conf(Path(tmp)), "--save", "/nonexistent.sav"])
+        self.assertEqual(code, 12)
+        self.assertIn("replay: NOT RUN: needs the save /nonexistent.sav", out.getvalue())
+
+    @staticmethod
+    def _conf(tmp):
+        conf = tmp / "battle.json"
+        conf.write_text(json.dumps({"cache": str(tmp), "results": str(tmp), "hosts_file": str(tmp / "h"),
+                                    "baseset": str(tmp / "b"), "prismatic": {"path": "x"}, "match": MC}))
+        return str(conf)
+
+
+class SiblingMark(unittest.TestCase):
+    """rail.nut IsSibling knows a sibling PrismaticAI company by the auto-renew settings main.nut sets
+    at every start; when one side changes and the other does not, siblings stop recognising each
+    other and build second lines beside each other's (research/incident-2026-11-22-sibling-industries.md)."""
+
+    def test_the_mark_rail_nut_reads_is_the_one_main_nut_sets(self):
+        import re
+        src = Path(battle.__file__).parent.parent / "prismatic-ai" / "PrismaticAI"
+        main = (src / "main.nut").read_text()
+        rail = (src / "rail.nut").read_text()
+        self.assertIn("AICompany.SetAutoRenewStatus(true);", main)
+        months = re.search(r"AICompany\.SetAutoRenewMonths\((-?\d+)\);", main)
+        money = re.search(r"AICompany\.SetAutoRenewMoney\((\d+)\);", main)
+        self.assertIsNotNone(months)
+        self.assertIsNotNone(money)
+        self.assertIn(f"const SIBLING_RENEW_MONTHS = {months.group(1)};", rail)
+        self.assertIn(f"const SIBLING_RENEW_MONEY = {money.group(1)};", rail)
+        # Not the game's defaults (company_settings.ini: 6 months, 100000), or every company would match.
+        self.assertNotEqual((int(months.group(1)), int(money.group(1))), (6, 100000))
 
 
 if __name__ == "__main__":

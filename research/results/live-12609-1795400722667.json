@@ -1,7 +1,7 @@
 {
  "schema": "ai-live-outcome/v1",
  "id": "live-12609-1795400722667",
- "generated_at": "2026-11-23T03:26:13+00:00",
+ "generated_at": "2026-11-23T04:04:48+00:00",
  "source": "panel:http://127.0.0.1:8800",
  "instance": "panel-8800",
  "seed": 12609,
@@ -10,13 +10,13 @@
    "run_ms": 1795400722667,
    "seed": 12609,
    "first_month": "1950-01",
-   "last_month": "1954-12"
+   "last_month": "1955-03"
   }
  ],
  "revision": "9f87f24fb4",
- "inputs_sha256": "661bfe834021f51345c8a2fbc2e84dbc6a9b754e4b4d43f4c3cc129530eab88e",
+ "inputs_sha256": "0aa991afed7a24e12c7aa944b63544341a822d39a0d5725b75d8263ffb3e33f2",
  "first_month": "1950-01",
- "final_month": "1954-12",
+ "final_month": "1955-03",
  "companies": [
   {
    "company": 0,
@@ -27,162 +27,1286 @@
     {
      "date": "1951-05-15",
      "name": "aggressiveness",
-     "value": 80
+     "value": 80,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "air_add_waiting",
-     "value": 90
+     "value": 90,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "air_grow_money",
-     "value": 0
+     "value": 0,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "air_level_max",
-     "value": 20
+     "value": 20,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "air_level_once",
-     "value": 1
+     "value": 1,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "air_max_tiles",
-     "value": 440
+     "value": 440,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "air_planes",
-     "value": 5
+     "value": 5,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "air_reuse",
-     "value": 1
+     "value": 1,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "air_routes_max",
-     "value": 2
+     "value": 2,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "air_towns",
-     "value": 35
+     "value": 35,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "cash_reserve",
-     "value": 5000
+     "value": 5000,
+     "applied": null
     },
     {
      "date": "1951-05-15",
      "name": "catchment_stops",
-     "value": 4
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1951-05-16",
      "name": "invest_air_cap",
-     "value": 10
+     "value": 10,
+     "applied": null
     },
     {
      "date": "1951-05-16",
      "name": "invest_borrow",
-     "value": 1
+     "value": 1,
+     "applied": null
     },
     {
      "date": "1951-05-16",
      "name": "invest_ppv_div",
-     "value": 6
+     "value": 6,
+     "applied": null
     },
     {
      "date": "1951-05-16",
      "name": "invest_road_cap",
-     "value": 12
+     "value": 12,
+     "applied": null
     },
     {
      "date": "1951-05-16",
      "name": "line_budget",
-     "value": 30000
+     "value": 30000,
+     "applied": null
     },
     {
      "date": "1951-05-16",
      "name": "max_routes",
-     "value": 30
+     "value": 30,
+     "applied": null
     },
     {
      "date": "1951-05-16",
      "name": "own_fail_pause",
-     "value": 4
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1951-05-16",
      "name": "own_lines",
-     "value": 4
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1951-05-16",
      "name": "rail_after",
-     "value": 11
+     "value": 11,
+     "applied": null
     },
     {
      "date": "1951-05-16",
      "name": "rail_twin_max",
-     "value": 10
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-07-03",
+     "name": "aggressiveness",
+     "value": 80,
+     "applied": "1951-07-29"
+    },
+    {
+     "date": "1951-07-03",
+     "name": "air_add_waiting",
+     "value": 90,
+     "applied": "1951-07-30"
+    },
+    {
+     "date": "1951-07-03",
+     "name": "air_grow_money",
+     "value": 0,
+     "applied": "1951-08-02"
+    },
+    {
+     "date": "1951-07-03",
+     "name": "air_level_max",
+     "value": 20,
+     "applied": null
+    },
+    {
+     "date": "1951-07-03",
+     "name": "air_level_once",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-07-04",
+     "name": "air_max_tiles",
+     "value": 440,
+     "applied": null
+    },
+    {
+     "date": "1951-07-04",
+     "name": "air_planes",
+     "value": 5,
+     "applied": null
+    },
+    {
+     "date": "1951-07-04",
+     "name": "air_reuse",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-07-04",
+     "name": "air_routes_max",
+     "value": 2,
+     "applied": null
+    },
+    {
+     "date": "1951-07-04",
+     "name": "air_towns",
+     "value": 35,
+     "applied": null
+    },
+    {
+     "date": "1951-07-04",
+     "name": "cash_reserve",
+     "value": 5000,
+     "applied": null
+    },
+    {
+     "date": "1951-07-04",
+     "name": "catchment_stops",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-07-05",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-07-05",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-07-05",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1951-07-05",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1951-07-05",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1951-07-05",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1951-07-05",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-07-05",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-07-05",
+     "name": "rail_after",
+     "value": 11,
+     "applied": null
+    },
+    {
+     "date": "1951-07-05",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-08-12",
+     "name": "air_level_max",
+     "value": 20,
+     "applied": null
+    },
+    {
+     "date": "1951-08-12",
+     "name": "air_level_once",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-08-12",
+     "name": "air_max_tiles",
+     "value": 440,
+     "applied": "1951-08-23"
+    },
+    {
+     "date": "1951-08-12",
+     "name": "air_planes",
+     "value": 5,
+     "applied": null
+    },
+    {
+     "date": "1951-08-12",
+     "name": "air_reuse",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-08-12",
+     "name": "air_routes_max",
+     "value": 2,
+     "applied": null
+    },
+    {
+     "date": "1951-08-12",
+     "name": "air_towns",
+     "value": 35,
+     "applied": null
+    },
+    {
+     "date": "1951-08-12",
+     "name": "cash_reserve",
+     "value": 5000,
+     "applied": "1951-08-21"
+    },
+    {
+     "date": "1951-08-12",
+     "name": "catchment_stops",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-08-13",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-08-13",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-08-13",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1951-08-13",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1951-08-13",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1951-08-13",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1951-08-13",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-08-13",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1951-08-14",
      "name": "rail_after",
-     "value": 6
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1951-08-14",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-09-21",
+     "name": "air_level_max",
+     "value": 20,
+     "applied": null
+    },
+    {
+     "date": "1951-09-21",
+     "name": "air_level_once",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-09-21",
+     "name": "air_planes",
+     "value": 5,
+     "applied": null
+    },
+    {
+     "date": "1951-09-21",
+     "name": "air_reuse",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-09-21",
+     "name": "air_routes_max",
+     "value": 2,
+     "applied": null
+    },
+    {
+     "date": "1951-09-21",
+     "name": "air_towns",
+     "value": 35,
+     "applied": null
+    },
+    {
+     "date": "1951-09-21",
+     "name": "catchment_stops",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-09-22",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-09-22",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-09-22",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1951-09-22",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1951-09-22",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1951-09-22",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1951-09-22",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-09-22",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-09-22",
+     "name": "rail_after",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1951-09-22",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-10-29",
+     "name": "air_level_max",
+     "value": 20,
+     "applied": "1951-11-03"
+    },
+    {
+     "date": "1951-10-29",
+     "name": "air_level_once",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-10-29",
+     "name": "air_planes",
+     "value": 5,
+     "applied": "1951-11-26"
+    },
+    {
+     "date": "1951-10-29",
+     "name": "air_reuse",
+     "value": 1,
+     "applied": "1951-11-25"
+    },
+    {
+     "date": "1951-10-29",
+     "name": "air_routes_max",
+     "value": 2,
+     "applied": "1951-11-23"
+    },
+    {
+     "date": "1951-10-29",
+     "name": "air_towns",
+     "value": 35,
+     "applied": "1951-11-27"
+    },
+    {
+     "date": "1951-10-29",
+     "name": "catchment_stops",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-10-30",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-10-30",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-10-30",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1951-10-30",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1951-10-30",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1951-10-30",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1951-10-30",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-10-30",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1951-10-30",
      "name": "rail_after",
-     "value": 10
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-10-30",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-12-10",
+     "name": "air_level_once",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-12-10",
+     "name": "catchment_stops",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-12-12",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1951-12-12",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1951-12-12",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1951-12-12",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1951-12-12",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1951-12-12",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1951-12-12",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1951-12-12",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1951-12-12",
      "name": "rail_after",
-     "value": 5
+     "value": 5,
+     "applied": null
+    },
+    {
+     "date": "1951-12-12",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-01-23",
+     "name": "air_level_once",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1952-01-23",
+     "name": "catchment_stops",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-01-24",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-01-24",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1952-01-24",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1952-01-24",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1952-01-24",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1952-01-24",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1952-01-24",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-01-24",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1952-01-24",
      "name": "rail_after",
-     "value": 4
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-01-24",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-03-14",
+     "name": "air_level_once",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1952-03-14",
+     "name": "catchment_stops",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-03-15",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-03-15",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1952-03-15",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1952-03-16",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1952-03-16",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1952-03-16",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1952-03-16",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-03-16",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1952-03-16",
      "name": "rail_after",
-     "value": 6
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1952-03-16",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-04-29",
+     "name": "air_level_once",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1952-04-29",
+     "name": "catchment_stops",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-04-30",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-04-30",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1952-04-30",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1952-04-30",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1952-04-30",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1952-05-01",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1952-05-01",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-05-01",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-05-01",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-06-17",
+     "name": "air_level_once",
+     "value": 1,
+     "applied": "1952-07-07"
+    },
+    {
+     "date": "1952-06-17",
+     "name": "catchment_stops",
+     "value": 4,
+     "applied": "1952-07-10"
+    },
+    {
+     "date": "1952-06-19",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-06-19",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1952-06-19",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1952-06-19",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1952-06-19",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1952-06-19",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1952-06-19",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-06-19",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1952-06-19",
      "name": "rail_after",
-     "value": 4
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-06-19",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-08-07",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-08-07",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1952-08-07",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1952-08-07",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1952-08-07",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1952-08-07",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1952-08-07",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-08-07",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1952-08-07",
      "name": "rail_after",
-     "value": 10
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-08-07",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-10-27",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1952-10-27",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1952-10-27",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1952-10-28",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1952-10-28",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1952-10-28",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1952-10-28",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1952-10-28",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1952-10-28",
      "name": "rail_after",
-     "value": 2
+     "value": 2,
+     "applied": null
+    },
+    {
+     "date": "1952-10-28",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1953-03-07",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1953-03-07",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1953-03-07",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1953-03-07",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1953-03-07",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1953-03-07",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1953-03-07",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1953-03-07",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
     },
     {
      "date": "1953-03-07",
      "name": "rail_after",
-     "value": 4
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1953-03-07",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1953-05-31",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1953-05-31",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1953-05-31",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1953-05-31",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1953-05-31",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1953-06-01",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1953-06-01",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1953-06-01",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1953-06-01",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1953-10-16",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1953-10-16",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1953-10-16",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1953-10-16",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1953-10-16",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1953-10-16",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1953-10-16",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1953-10-16",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1953-10-17",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
     },
     {
      "date": "1953-11-09",
      "name": "max_routes",
-     "value": 6
+     "value": 6,
+     "applied": "1953-11-19"
+    },
+    {
+     "date": "1955-03-23",
+     "name": "invest_air_cap",
+     "value": 10,
+     "applied": null
+    },
+    {
+     "date": "1955-03-23",
+     "name": "invest_borrow",
+     "value": 1,
+     "applied": null
+    },
+    {
+     "date": "1955-03-23",
+     "name": "invest_ppv_div",
+     "value": 6,
+     "applied": null
+    },
+    {
+     "date": "1955-03-24",
+     "name": "invest_road_cap",
+     "value": 12,
+     "applied": null
+    },
+    {
+     "date": "1955-03-24",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": null
+    },
+    {
+     "date": "1955-03-24",
+     "name": "max_routes",
+     "value": 30,
+     "applied": null
+    },
+    {
+     "date": "1955-03-24",
+     "name": "own_fail_pause",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1955-03-24",
+     "name": "own_lines",
+     "value": 4,
+     "applied": null
+    },
+    {
+     "date": "1955-03-24",
+     "name": "rail_twin_max",
+     "value": 10,
+     "applied": null
     }
    ]
   },
@@ -282,10 +1406,17 @@
    },
    {
     "month": "1954-12",
-    "value": 1539693,
-    "money": 646368,
+    "value": 1536517,
+    "money": 645427,
     "loan": 0,
     "vehicles": 34
+   },
+   {
+    "month": "1955-03",
+    "value": 1631379,
+    "money": 721075,
+    "loan": 0,
+    "vehicles": 33
    }
   ],
   "1": [
@@ -319,10 +1450,17 @@
    },
    {
     "month": "1954-12",
-    "value": 2621541,
-    "money": 38376,
-    "loan": 250000,
+    "value": 2622764,
+    "money": 50467,
+    "loan": 260000,
     "vehicles": 106
+   },
+   {
+    "month": "1955-03",
+    "value": 2828178,
+    "money": 47311,
+    "loan": 300000,
+    "vehicles": 121
    }
   ],
   "2": [
@@ -356,10 +1494,17 @@
    },
    {
     "month": "1954-12",
-    "value": 157433,
-    "money": 6470,
+    "value": 156739,
+    "money": 6715,
     "loan": 230000,
     "vehicles": 57
+   },
+   {
+    "month": "1955-03",
+    "value": 135911,
+    "money": 9687,
+    "loan": 260000,
+    "vehicles": 59
    }
   ],
   "3": [
@@ -394,7 +1539,14 @@
    {
     "month": "1954-12",
     "value": 1,
-    "money": 135549,
+    "money": 135342,
+    "loan": 300000,
+    "vehicles": 6
+   },
+   {
+    "month": "1955-03",
+    "value": 1,
+    "money": 137523,
     "loan": 300000,
     "vehicles": 6
    }
@@ -430,8 +1582,15 @@
    },
    {
     "month": "1954-12",
-    "value": 89231,
-    "money": 120955,
+    "value": 88300,
+    "money": 120648,
+    "loan": 300000,
+    "vehicles": 35
+   },
+   {
+    "month": "1955-03",
+    "value": 85266,
+    "money": 114781,
     "loan": 300000,
     "vehicles": 35
    }
@@ -468,8 +1627,15 @@
    {
     "month": "1954-12",
     "value": 1,
-    "money": 23456,
+    "money": 23315,
     "loan": 260000,
+    "vehicles": 10
+   },
+   {
+    "month": "1955-03",
+    "value": 1,
+    "money": 59473,
+    "loan": 300000,
     "vehicles": 10
    }
   ],
@@ -504,10 +1670,17 @@
    },
    {
     "month": "1954-12",
-    "value": 282763,
-    "money": 17280,
-    "loan": 280000,
+    "value": 284673,
+    "money": 10422,
+    "loan": 270000,
     "vehicles": 67
+   },
+   {
+    "month": "1955-03",
+    "value": 282505,
+    "money": 20309,
+    "loan": 290000,
+    "vehicles": 70
    }
   ],
   "7": [
@@ -541,17 +1714,31 @@
    },
    {
     "month": "1954-12",
-    "value": 244201,
-    "money": 17999,
+    "value": 242464,
+    "money": 17549,
     "loan": 250000,
     "vehicles": 25
+   },
+   {
+    "month": "1955-03",
+    "value": 242017,
+    "money": 19666,
+    "loan": 250000,
+    "vehicles": 28
    }
   ],
   "8": [
    {
     "month": "1954-12",
-    "value": 10190,
-    "money": 19498,
+    "value": 10151,
+    "money": 19484,
+    "loan": 30000,
+    "vehicles": 2
+   },
+   {
+    "month": "1955-03",
+    "value": 9820,
+    "money": 19690,
     "loan": 30000,
     "vehicles": 2
    }
@@ -559,28 +1746,21 @@
   "9": [
    {
     "month": "1954-12",
-    "value": 10596,
-    "money": 19700,
+    "value": 10558,
+    "money": 19687,
+    "loan": 30000,
+    "vehicles": 2
+   },
+   {
+    "month": "1955-03",
+    "value": 10354,
+    "money": 20056,
     "loan": 30000,
     "vehicles": 2
    }
   ]
  },
  "mode_mix": {
-  "2": {
-   "train": 0,
-   "road": 52,
-   "ship": 5,
-   "aircraft": 0,
-   "stations": 13
-  },
-  "4": {
-   "train": 1,
-   "road": 32,
-   "ship": 0,
-   "aircraft": 2,
-   "stations": 10
-  },
   "8": {
    "train": 0,
    "road": 2,
@@ -588,12 +1768,47 @@
    "aircraft": 0,
    "stations": 3
   },
-  "1": {
-   "train": 65,
-   "road": 18,
+  "7": {
+   "train": 14,
+   "road": 14,
    "ship": 0,
-   "aircraft": 23,
-   "stations": 87
+   "aircraft": 0,
+   "stations": 26
+  },
+  "2": {
+   "train": 0,
+   "road": 56,
+   "ship": 4,
+   "aircraft": 0,
+   "stations": 12
+  },
+  "6": {
+   "train": 0,
+   "road": 61,
+   "ship": 3,
+   "aircraft": 6,
+   "stations": 30
+  },
+  "9": {
+   "train": 0,
+   "road": 2,
+   "ship": 0,
+   "aircraft": 0,
+   "stations": 3
+  },
+  "1": {
+   "train": 72,
+   "road": 25,
+   "ship": 0,
+   "aircraft": 24,
+   "stations": 93
+  },
+  "4": {
+   "train": 1,
+   "road": 32,
+   "ship": 0,
+   "aircraft": 2,
+   "stations": 10
   },
   "5": {
    "train": 3,
@@ -604,7 +1819,7 @@
   },
   "0": {
    "train": 16,
-   "road": 10,
+   "road": 9,
    "ship": 0,
    "aircraft": 8,
    "stations": 34
@@ -615,46 +1830,25 @@
    "ship": 0,
    "aircraft": 0,
    "stations": 6
-  },
-  "7": {
-   "train": 15,
-   "road": 10,
-   "ship": 0,
-   "aircraft": 0,
-   "stations": 24
-  },
-  "6": {
-   "train": 0,
-   "road": 58,
-   "ship": 3,
-   "aircraft": 6,
-   "stations": 25
-  },
-  "9": {
-   "train": 0,
-   "road": 2,
-   "ship": 0,
-   "aircraft": 0,
-   "stations": 3
   }
  },
  "outcome": {
   "leader": 1,
-  "leader_value": 2621541,
+  "leader_value": 2828178,
   "reference": "AAAHogEx",
   "reference_company": 1,
   "prismatic": {
    "0": {
-    "value": 1539693,
+    "value": 1631379,
     "rank": 2,
-    "share_of_leader": 0.5873,
-    "ratio_to_reference": 0.5873
+    "share_of_leader": 0.5768,
+    "ratio_to_reference": 0.5768
    },
    "8": {
-    "value": 10190,
+    "value": 9820,
     "rank": 8,
-    "share_of_leader": 0.0039,
-    "ratio_to_reference": 0.0039
+    "share_of_leader": 0.0035,
+    "ratio_to_reference": 0.0035
    }
   }
  }

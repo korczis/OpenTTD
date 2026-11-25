@@ -14,7 +14,8 @@ research/ai-battle/README.md.
 
 Commands:
   discover   find the SSH-reachable machines on the local /24 and write the local hosts file
-  fetch      download the BaNaNaS contestants into the cache (throwaway loopback -D server)
+  fetch      download the BaNaNaS contestants and the live-like rivals into the cache (throwaway
+             loopback -D server); says which live rival's version the download lacks
   prepare    assemble the arena bundle: base set, AIs, PrismaticAI and referee at a clean commit
   probe      show which hosts are usable now (state, build, load, disk; paused and busy hosts)
   run        schedule matches forever and serve the dashboard (SIGTERM / Ctrl-C stops; STOP holds it)
@@ -27,6 +28,12 @@ Commands:
              leaderboard is derived (the gate)
   fitness    one short local match of the working tree's PrismaticAI against a reference AI; fails
              on a Squirrel error, an unfinished match or a collapsing fleet (the gate, on change)
+  ablate     one local match per PrismaticAI settings variant on one seed and field; --live-like
+             plays the owner's live world instead (battle.json live_like: 1950, the seven live
+             rivals, the live script budget, seed 15805, the unplanned and the planned arm)
+  replay     load a live game's save headless (battle.json replay: 15805's earliest save) with the
+             working tree's PrismaticAI (or --rev's) for N game years and fail when the bot repeats
+             the live one-train failure (trains, months with at most one train, value vs leader)
   power      the recorded battle's noise (split-half Kendall tau of the GA score, the paired
              deviation across seeds) and the held-start pairs a strategy comparison needs for a
              margin (--margin 1.10); reads research/results only, starts nothing
@@ -110,9 +117,42 @@ REF_FIELD = re.compile(r"(\w+)=(-?\d+)")
 MODES = ("rail", "road", "air", "water")
 # An AI's Squirrel error: "dbg: [script:1] [<company>] [S] <text>".
 SQ_ERROR = re.compile(r"\[script:\d\] \[(\d+)\] \[S\] ")
-# The referee's shared producers: an industry whose output rail stations of several companies catch.
-REF_SHARED = re.compile(r"REF S date=(\d+)-(\d+) ind=(\d+) owners=([\d,]+) name=(.*)$")
+# PrismaticAI's quarterly capital report (capital.nut, a warning, so it shows at `-d script=3`):
+# "dbg: [script:3] [<company>] [W] PrismaticAI: capital report <year>Q<n>: frozen=<d> days=<d> ...".
+CAP_LINE = re.compile(r"\[script:\d\] \[(\d+)\] \[W\] PrismaticAI: capital report (\d+)Q(\d): (.*)$")
+# The referee's shared producers: an industry one of whose cargoes rail stations of several companies
+# pick up (`cargo=` since 2026-11-23; a line without it counts for the whole industry).
+REF_SHARED = re.compile(r"REF S date=(\d+)-(\d+) ind=(\d+)(?: cargo=(\d+))? owners=([\d,]+) name=(.*)$")
 REF_TRAINLESS = re.compile(r"REF T date=(\d+)-(\d+) cid=(\d+) rail_stations=(\d+) trainless=(\d+) ids=([\d,]*)")
+# PrismaticAI's yearly growth funnel (RESEARCH-ONLY, PrismaticAI/funnel.nut), one line per mode:
+# "dbg: [script:1] [<company>] [E] FUNNEL year=<y> mode=<mode> <stage>=<n> ...".
+AI_FUNNEL = re.compile(r"\[script:\d\] \[(\d+)\] \[E\] FUNNEL year=(\d+) mode=(\w+) (.*)$")
+# Where each mode's funnel loses, by population, so no loss is compared with one counted in other
+# units: {mode: [(group, stage, the counts lost, the counts it was lost of), ...]}, each count a sum
+# of signed stage counts. Rail discovery is in producers of the last search's census (`served`
+# counts cargoes), building in tries, running in lines; road in tries and vehicles; air in
+# autopilot calls past its caps (each ends short, with no pair, or tried), tries and vehicles.
+FUNNEL_DROPS = {
+    "rail": [("discovery", "ours", [("ours", 1)], [("producers", 1)]),
+             ("discovery", "claimed", [("claimed", 1)], [("producers", 1)]),
+             ("discovery", "served", [("served", 1)], [("producers", 1)]),
+             ("discovery", "no_acceptor", [("no_acceptor", 1)], [("producers", 1)]),
+             ("build", "stations", [("tried", 1), ("stations", -1)], [("tried", 1)]),
+             ("build", "path", [("path_fail", 1)], [("stations", 1)]),
+             ("build", "lay", [("stations", 1), ("path_fail", -1), ("laid", -1)], [("stations", 1)]),
+             ("build", "given_up", [("laid", 1), ("built", -1)], [("laid", 1)]),
+             ("run", "paying", [("lines", 1), ("paying", -1)], [("lines", 1)])],
+    "road": [("build", "stop", [("stop_fail", 1)], [("tried", 1)]),
+             ("build", "network", [("network_fail", 1)], [("tried", 1)]),
+             ("build", "depot", [("depot_fail", 1)], [("tried", 1)]),
+             ("build", "vehicle", [("vehicle_fail", 1)], [("tried", 1)]),
+             ("run", "paying", [("vehicles", 1), ("paying", -1)], [("vehicles", 1)])],
+    "air": [("discovery", "budget", [("short", 1)], [("short", 1), ("no_pair", 1), ("tried", 1)]),
+            ("discovery", "pair", [("no_pair", 1)], [("short", 1), ("no_pair", 1), ("tried", 1)]),
+            ("build", "build", [("tried", 1), ("built", -1)], [("tried", 1)]),
+            ("run", "paying", [("vehicles", 1), ("paying", -1)], [("vehicles", 1)])],
+    "ship": [("run", "paying", [("vehicles", 1), ("paying", -1)], [("vehicles", 1)])],
+}
 
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
             "-o", "ControlMaster=auto", "-o", "ControlPersist=120",
@@ -633,9 +673,9 @@ LIVE_SETTINGS_SCHEMA = "ai-live-settings/v1"
 # town and airport pairs) are instance data, not strategy: dropped from every live configuration.
 MAP_SETTING = re.compile(r"^(fr\d*_(from|to|cargo)|line\d+_(trains|wagons)|rail_[ab]|air_[ab])$")
 LIVE_DEFAULTS = {"reference": "AAAHogEx", "horizon_years": 4, "min_years": 2, "loss_ratio": 0.5,
-                 "paired_margin": 0.8, "veto_genes": 0, "seed_offspring": 1}
+                 "paired_margin": 0.8, "veto_genes": 0, "loss_veto_genes": 3, "seed_offspring": 1}
 START_AI = re.compile(r'^start_ai\s+(?:"([^"]+)"|(\S+))(?:\s+(\S*=\S*))?')
-SET_SETTING = re.compile(r"^openttd\.ai\.set_setting\((\{.*?\})\)")
+SET_SETTING = re.compile(r"^openttd\.ai\.set_setting\((\{.*?\})\)(?:.*?approval #(\d+))?")
 WATCHDOG = re.compile(r"(train|road|ship|aircraft|stations) (\d+)")
 LIVE_SQL = {
     "runs": "SELECT m.instance, m.seed, m.run_ms, min(m.month) AS first_month, max(m.month) AS last_month "
@@ -645,7 +685,7 @@ LIVE_SQL = {
     "series": "SELECT run_ms, company, name, month, value, money, loan, vehicles FROM company_month "
               "WHERE run_ms IN ({runs}) ORDER BY run_ms, company, month",
     "events": "SELECT run_ms, seq, game_date, kind, data->>'text' AS text, CAST(data AS VARCHAR) AS data "
-              "FROM run_events WHERE run_ms IN ({runs}) AND (kind = 'company.founded' OR (kind IN "
+              "FROM run_events WHERE run_ms IN ({runs}) AND (kind IN ('company.founded', 'decision.recorded') OR (kind IN "
               "('panel.ai', 'panel.console') AND (data->>'text') LIKE 'start_ai%') OR (kind = 'panel.mcp' "
               "AND (data->>'text') LIKE 'openttd.ai.set_setting(%')) ORDER BY run_ms, seq",
     "watchdog": "SELECT data->>'key' AS key, CAST(data->'value' AS VARCHAR) AS value FROM run_events "
@@ -735,16 +775,23 @@ def live_record(query, seed: int, source: str) -> dict:
         for m in sorted(months):
             last_of_year[m[:4]] = m
         yearly[c] = [dict(month=m, **months[m]) for m in sorted(last_of_year.values())]
-    founded, starts, requests = [], [], {}
+    founded, starts, requests, enacted = [], [], {}, {}
     for ev in fetched["events"]:
         if ev["kind"] == "company.founded":
             cid = json.loads(ev["data"])["id"]
             if cid not in founded:
                 founded.append(cid)
+        elif ev["kind"] == "decision.recorded":
+            # The approval server's verdict on an approval of this run: what it enacted, and when.
+            d = json.loads(ev["data"])
+            if d.get("action_type") == "ai.set_setting" and d.get("command_result") == "succeeded":
+                enacted[(ev["run_ms"], int(d["approval_id"]))] = ev["game_date"]
         elif ev["kind"] == "panel.mcp":
-            args = json.loads(SET_SETTING.match(ev["text"]).group(1))
+            m = SET_SETTING.match(ev["text"])
+            args = json.loads(m.group(1))
             requests.setdefault(int(args["company"]), []).append(
-                {"date": ev["game_date"], "name": args["name"], "value": int(args["value"])})
+                {"date": ev["game_date"], "name": args["name"], "value": int(args["value"]),
+                 "key": (ev["run_ms"], int(m.group(2))) if m.group(2) else None})
         else:
             m = START_AI.match(ev["text"])
             starts.append((m.group(1) or m.group(2), m.group(3) or ""))
@@ -756,8 +803,11 @@ def live_record(query, seed: int, source: str) -> dict:
         current, changes = dict(start), []
         for r in requests.get(cid, []):    # only a request that would change a setting counts
             if not MAP_SETTING.match(r["name"]) and current.get(r["name"]) != r["value"]:
-                current[r["name"]] = r["value"]
-                changes.append(r)
+                # Applied: the approval it waited for was enacted (decision.recorded, succeeded).
+                applied = enacted.get(r.pop("key"))
+                if applied:
+                    current[r["name"]] = r["value"]
+                changes.append(dict(r, applied=applied))
         companies.append({"company": cid, "name": names[cid], "ai": ai,
                           "settings_start": settings_str(start), "settings_requested": changes})
     mode_mix = {}
@@ -829,11 +879,12 @@ def live_genes(t: dict, settings: dict) -> dict:
 def live_entries(records: list[dict], t: dict) -> list[dict]:
     """Every PrismaticAI company of every live record, judged at a year end against the reference
     AI. A company is judged on one configuration only: its end is the last year end before its first
-    requested setting change (a request is not a confirmation, and a game that mixed configurations
-    proves none of them), at most `horizon_years` game years in and at least `min_years`. The
-    companies of one game share the earliest of their ends, so they are compared at the same date.
-    Lost: in a game with several judged PrismaticAI configurations, worth less than paired_margin x
-    the best of them; alone, worth less than loss_ratio x the reference AI."""
+    applied setting change (a request the approval server enacted; one never enacted changed
+    nothing), at most `horizon_years` game years in and at least `min_years`. The companies of one
+    game share the earliest of their ends, so they are compared at the same date. Lost: in a game
+    with several judged PrismaticAI configurations, worth less than paired_margin x the best of them
+    (vetoes genes within `veto_genes`); alone, worth less than loss_ratio x the reference AI (a loss
+    to the rival itself, which vetoes genes within `loss_veto_genes`)."""
     lc = live_cfg(t)
     out = []
     for rec in records:
@@ -844,7 +895,8 @@ def live_entries(records: list[dict], t: dict) -> list[dict]:
         for c in rec["companies"]:
             if c["ai"] != "PrismaticAI":
                 continue
-            changed = min((r["date"] or "9999")[:4] for r in c["settings_requested"]) if c["settings_requested"] else "9999"
+            # A request that was never enacted (unanswered, expired, denied) changed nothing.
+            changed = min((r["applied"][:4] for r in c["settings_requested"] if r.get("applied")), default="9999")
             end = min(y0 + lc["horizon_years"] - 1, int(changed) - 1)
             vals = {p["month"]: p["value"] for p in rec["series"][str(c["company"])]}
             reached = [y for y in range(y0, end + 1) if f"{y}-12" in vals and f"{y}-12" in ref_v]
@@ -865,10 +917,10 @@ def live_entries(records: list[dict], t: dict) -> list[dict]:
         for e in judged:
             e["paired"] = len(judged) > 1
             if e["paired"]:
-                e["lost"] = e["ratio"] < lc["paired_margin"] * best
+                e["lost"], e["radius"] = e["ratio"] < lc["paired_margin"] * best, lc["veto_genes"]
                 e["why"] = f"{e['ratio']:.3f} of {lc['reference']} at {at}, the game's best {best:.3f}"
             else:
-                e["lost"] = e["ratio"] < lc["loss_ratio"]
+                e["lost"], e["radius"] = e["ratio"] < lc["loss_ratio"], lc["loss_veto_genes"]
                 e["why"] = f"{e['ratio']:.3f} of {lc['reference']} at {at} (a loss is under {lc['loss_ratio']})"
         for e in game:
             del e["vals"]
@@ -878,9 +930,10 @@ def live_entries(records: list[dict], t: dict) -> list[dict]:
 
 def live_veto(t: dict, genes: dict, live: list[dict]) -> dict | None:
     """The live entry that lost with this configuration: genes equal to its genes except in at most
-    `veto_genes` genes (default 0: the exact configuration). None when no lost entry matches."""
-    n = live_cfg(t)["veto_genes"]
+    the entry's radius (live_entries: `veto_genes` for a paired loss, `loss_veto_genes` for a loss to
+    the reference AI). None when no lost entry matches."""
     for e in live:
+        n = e.get("radius", live_cfg(t)["veto_genes"])
         if e.get("lost") and sum(genes.get(g) != e["genes"][g] for g in e["genes"]) <= n:
             return e
     return None
@@ -902,37 +955,50 @@ def live_records(results: Path | None = None) -> list[dict]:
 
 
 def derive_live_settings(t: dict, battle_rec: dict | None, records: list[dict]) -> dict:
-    """The next live start's settings, derived from the records alone. Candidates are the PrismaticAI
-    configurations of the newest battle record, ranked by arena value relative to the reference AI;
-    a candidate that lost a live game is out (live_veto). Live-only configurations have no arena
-    evidence and are listed as seeds, not chosen."""
+    """The next live start's settings, derived from the records alone. Only a configuration with
+    live evidence is chosen: one that a live game judged and found not lost (live_entries), best
+    ratio to the reference first, unless another game's loss vetoes it (live_veto). The arena's
+    PrismaticAI configurations of the newest battle record are listed with their arena ratio and
+    their veto, as context; none is chosen on arena evidence alone. Nothing judged and not lost:
+    no settings (`chosen` null), so a start never falls back to info.nut's defaults unseen."""
     live = live_entries(records, t)
-    cands = []
+    ref_key = live_cfg(t)["reference"]
+    arena = []
     if battle_rec:
         board = {r["key"]: r for r in battle_rec["leaderboard"]}
-        ref = board.get(live_cfg(t)["reference"], {}).get("avg_value", 0)
+        ref = board.get(ref_key, {}).get("avg_value", 0)
         for c in battle_rec["contestants"]:
             row = board.get(c["key"], {})
             if c["ai"] != "PrismaticAI" or not row.get("played") or not ref:
                 continue
-            genes = live_genes(t, settings_dict(c.get("settings", "")))
-            veto = live_veto(t, genes, live)
-            cands.append({"candidate": c["key"], "settings": c.get("settings", ""),
+            veto = live_veto(t, live_genes(t, settings_dict(c.get("settings", ""))), live)
+            arena.append({"candidate": c["key"], "settings": c.get("settings", ""),
                           "arena_ratio": round(row["avg_value"] / ref, 4), "played": row["played"],
                           "vetoed_by": f"{veto['record']}:{veto['company']}" if veto else None})
-    cands.sort(key=lambda c: (-c["arena_ratio"], c["candidate"]))
+    arena.sort(key=lambda c: (-c["arena_ratio"], c["candidate"]))
+    cands = []
+    for e in sorted((e for e in live if e["evidence"] and not e["lost"]),
+                    key=lambda e: (-e["ratio"], e["record"], e["company"])):
+        veto = live_veto(t, e["genes"], live)
+        same = next((a for a in arena if live_genes(t, settings_dict(a["settings"])) == e["genes"]), None)
+        cands.append({"candidate": f"{e['record']}:{e['company']}", "settings": settings_str(settings_dict(e["settings"])),
+                      "live_ratio": e["ratio"], "at": e["at"], "why": e["why"],
+                      "arena": same["candidate"] if same else None,
+                      "vetoed_by": f"{veto['record']}:{veto['company']}" if veto else None})
     chosen = next((c for c in cands if not c["vetoed_by"]), None)
     return {"schema": LIVE_SETTINGS_SCHEMA,
             "derived_by": "tools/research/ai-battle/battle.py live-settings (battle.json tuning.live)",
             "rule": live_cfg(t), "battle_record": battle_rec["id"] if battle_rec else None,
             "live_records": [r["id"] for r in records],
             "chosen": chosen["candidate"] if chosen else None,
-            "settings": settings_str(settings_dict(chosen["settings"])) if chosen else None,
-            "candidates": cands,
-            "live": [{k: e.get(k) for k in ("record", "company", "at", "ratio", "evidence", "paired", "lost", "why",
-                                            "settings")} for e in live],
+            "settings": chosen["settings"] if chosen else None,
+            "reason": (f"the best configuration a live game judged and found not lost ({chosen['why']})"
+                       if chosen else "no configuration has live evidence of not losing: no live start is derived"),
+            "candidates": cands, "arena": arena,
+            "live": [{k: e.get(k) for k in ("record", "company", "at", "ratio", "evidence", "paired", "lost", "radius",
+                                            "why", "settings")} for e in live],
             "seeds": [s for _, s in live_seeds(t, live, [live_genes(t, settings_dict(c["settings"]))
-                                                         for c in cands])]}
+                                                         for c in arena])]}
 
 
 def live_settings_text(t: dict, results: Path | None = None) -> str:
@@ -967,7 +1033,7 @@ def cmd_live_settings(write: bool) -> int:
     if write:
         (RESULTS_DIR / LIVE_SETTINGS).write_text(text)
     d = json.loads(text)
-    print(f"PRISMATIC_BOT_SETTINGS={d['settings'] or ''}  # {d['chosen']} of {d['battle_record']}")
+    print(f"PRISMATIC_BOT_SETTINGS={d['settings'] or ''}  # {d['chosen']}: {d['reason']}")
     return 0 if d["chosen"] else 10
 
 
@@ -1433,7 +1499,7 @@ def cmd_fetch(cfg: dict) -> None:
 
     time.sleep(5)
     send("content update", 10)
-    wanted = [c["ai"] for c in cfg["contestants"] if c.get("source") == "bananas"]
+    wanted = fetch_wanted(cfg)
     ids = {}
     for name in dict.fromkeys(wanted):
         mark = len(lines)
@@ -1454,9 +1520,236 @@ def cmd_fetch(cfg: dict) -> None:
     missing = sorted(set(wanted) - set(ids))
     done = sum(1 for line in lines if line.startswith("Completed download"))
     log(f"fetched {done} package(s) for {sorted(ids)}; missing: {missing or 'none'}")
+    for problem in rival_versions(home / "content_download" / "ai", live_like(cfg).get("rivals", [])):
+        log(f"live-like: {problem}")
     if missing:
         sys.exit(12)
 
+
+# ------------------------------------------------------------------------ live-like arena, replay
+#
+# The arena's own world (1960, four rivals, the bot unplanned) is not the owner's live game (1950,
+# seven BaNaNaS rivals, the bot sometimes planned): in live game 15805 PrismaticAI ran one train
+# for eight years, and the arena produced a one-train PrismaticAI in 0.2% of its matches
+# (research/incident-2026-11-23-live-game-15805.md). battle.json `live_like` declares the live
+# world once; `ablate --live-like` plays it, and `replay` loads a live game's own save headless.
+
+def live_like(cfg: dict) -> dict:
+    """battle.json `live_like` (empty when the configuration has none)."""
+    return cfg.get("live_like") or {}
+
+
+def fetch_wanted(cfg: dict) -> list[str]:
+    """The BaNaNaS AIs `fetch` downloads: the arena's contestants and the live-like rivals."""
+    return list(dict.fromkeys([c["ai"] for c in cfg["contestants"] if c.get("source") == "bananas"]
+                              + [r["ai"] for r in live_like(cfg).get("rivals", [])]))
+
+
+def tar_versions(ai_dir: Path, ai: str) -> list[str]:
+    """The versions of `ai` among the content tars of a directory, which the content client names
+    <8 hex digits>-<name with _ for spaces>-<version>.tar (484f4745-AAAHogEx-115.tar)."""
+    pat = re.compile(rf"[0-9a-fA-F]{{8}}-{re.escape(ai.replace(' ', '_'))}-(.+)\.tar")
+    found = (pat.fullmatch(t.name) for t in ai_dir.rglob("*.tar")) if ai_dir.is_dir() else ()
+    return sorted(m.group(1) for m in found if m)
+
+
+def rival_versions(ai_dir: Path, rivals: list[dict]) -> list[str]:
+    """What the AI tars of `ai_dir` lack against the live rivals: an AI with no tar, or none of the
+    version the live game ran. A replayed save asks for the AI it saved; a missing one is replaced
+    by a random AI or left empty, and another version plays another game."""
+    out = []
+    for r in rivals:
+        have = tar_versions(ai_dir, r["ai"])
+        if not have:
+            out.append(f"{r['ai']}: no tar in {ai_dir} (battle.py fetch && battle.py prepare)")
+        elif r.get("version") and r["version"] not in have:
+            out.append(f"{r['ai']}: version {', '.join(have)} in {ai_dir}, the live game ran "
+                       f"{r['version']}")
+    return out
+
+
+def live_like_ablate(cfg: dict, seed: int | None, variants: list[str]) -> tuple[dict, int, list[str], int, list[str]]:
+    """`ablate --live-like`: (config with the live match settings, seed, field, PrismaticAI's slot,
+    variants). The seed defaults to the live game's, the variants to the configured arms; a
+    planned arm names towns and industries by id, so it holds only on the seed it was planned on."""
+    live = live_like(cfg)
+    if not live:
+        raise SystemExit("ablate --live-like: battle.json has no live_like block")
+    out = dict(cfg, match=dict(cfg["match"], **live["match"]))
+    arms = [f"{name}={settings}" for name, settings in live.get("arms", {}).items()]
+    return (out, live["seed"] if seed is None else seed, [r["ai"] for r in live["rivals"]],
+            live.get("slot", 0), variants or arms)
+
+
+CONSOLE_DATE = re.compile(r"Date: (\d{4})-(\d{2})-(\d{2})")
+CONSOLE_COMPANY = re.compile(r"#:(\d+)\([^)]*\) Company Name: '(.*)'  Year Founded: -?\d+  "
+                             r"Money: (-?\d+)  Loan: (-?\d+)  Value: (-?\d+)  "
+                             r"\(T:(\d+), R:(\d+), P:(\d+), S:(\d+)\)\s*(AI)?\s*$")
+
+
+def replay_scripts(console_log: Path) -> tuple[str, str]:
+    """(game_start.scr, monthly.scr) of a replay. A loaded save keeps its own Game Script (the live
+    game runs none), so the referee cannot report: the console does. game_start.scr opens a
+    console log (`script`, written without a GUI too), prints the date and `companies`, and
+    schedules monthly.scr, which prints them again and schedules itself for the next month."""
+    report = "getdate\ncompanies\nschedule on-next-calendar-month scripts/monthly.scr\n"
+    return f'script "{console_log}"\n' + report, report
+
+
+def parse_console(text: str) -> dict[int, list[dict]]:
+    """{company id: [one sample per `companies` report]} from a replay's console log. `companies`
+    numbers companies from 1; the id here is the game's (from 0). Only AI companies count: a save
+    loaded without a network game adds a company for the local player."""
+    series: dict[int, list[dict]] = {}
+    t = ""
+    for line in text.splitlines():
+        d = CONSOLE_DATE.search(line)
+        if d:
+            t = f"{d.group(1)}-{d.group(2)}-{d.group(3)}"
+            continue
+        m = CONSOLE_COMPANY.search(line)
+        if not m or not m.group(10):
+            continue
+        rail, road, air, water = (int(m.group(i)) for i in (6, 7, 8, 9))
+        series.setdefault(int(m.group(1)) - 1, []).append({
+            "t": t, "name": m.group(2), "money": int(m.group(3)), "loan": int(m.group(4)),
+            "value": int(m.group(5)), "rail": rail, "road": road, "air": air, "water": water,
+            "vehicles": rail + road + air + water})
+    return series
+
+
+AI_GONE = re.compile(r"The savegame has an AI by the name '(.*)', version (\d+) which is no longer available")
+
+
+def replay_substitutions(text: str) -> list[str]:
+    """Every AI the save names that the replay could not load (the game then starts a random AI in
+    its place or none): such a replay plays another game, so each one fails it."""
+    return [f"invalid replay: the save's AI {m.group(1)} version {m.group(2)} is not available"
+            for m in AI_GONE.finditer(text)]
+
+
+def replay_copy(src: Path, dst: Path) -> bool:
+    """Copy a save for a replay, an lzma one (tag OTTX, OpenTTD's default) unpacked to an
+    uncompressed one (tag OTTN, the same 4-byte savegame version, then the chunks): a binary built
+    without liblzma (lundra's) loads only that, and the chunks are byte for byte the same. True
+    when it unpacked."""
+    data = src.read_bytes()
+    if data[:4] != b"OTTX":
+        dst.write_bytes(data)
+        return False
+    import lzma
+    dst.write_bytes(b"OTTN" + data[4:8] + lzma.decompress(data[8:]))
+    return True
+
+
+def replay_verdict(series: dict[int, list[dict]], company: int, years: int, rules: dict) -> list[str]:
+    """The replay's failures for the bot's company (empty: PASS). `min_trains`: trains at the end;
+    `one_train_years`: fails when it ran at most one train in every monthly report of the last N
+    years; `min_leader_ratio`: its value over the best other company's at the end. A replay that
+    did not reach `years` of monthly reports fails too: it says nothing about those years."""
+    mine = series.get(company, [])
+    if len(mine) < 12 * years:
+        return [f"company {company}: {len(mine)} monthly report(s), {12 * years} needed: the replay "
+                "did not run its years"]
+    fails, end = [], mine[-1]
+    if end["rail"] < rules.get("min_trains", 2):
+        fails.append(f"company {company}: {end['rail']} train(s) at {end['t']}, at least "
+                     f"{rules.get('min_trains', 2)} wanted")
+    window = mine[-12 * rules.get("one_train_years", 3):]
+    if max(s["rail"] for s in window) <= 1:
+        fails.append(f"company {company}: at most one train from {window[0]['t']} to {end['t']}")
+    rivals = [s[-1] for c, s in series.items() if c != company and s and s[-1]["t"] == end["t"]]
+    leader = max(rivals, key=lambda s: s["value"], default=None)
+    if leader and leader["value"] > 0:
+        ratio = end["value"] / leader["value"]
+        if ratio < rules.get("min_leader_ratio", 0.0):
+            fails.append(f"company {company}: value {end['value']:,} is {ratio:.3f} of the leader "
+                         f"{leader['name']} ({leader['value']:,}), at least "
+                         f"{rules['min_leader_ratio']} wanted")
+    return fails
+
+
+def replay_table(series: dict[int, list[dict]], company: int) -> list[str]:
+    """One line per game year of the replay (its last report): the bot's trains, road vehicles,
+    aircraft and value against the leader's."""
+    out = []
+    mine = series.get(company, [])
+    last = {s["t"][:4]: i for i, s in enumerate(mine)}
+    for year, i in last.items():
+        s = mine[i]
+        others = [o[i] for c, o in series.items() if c != company and len(o) > i]
+        lead = max(others, key=lambda o: o["value"], default={"value": 0, "name": "-", "rail": 0})
+        ratio = s["value"] / lead["value"] if lead["value"] > 0 else 0.0
+        out.append(f"replay: {s['t']}  trains {s['rail']:>3} road {s['road']:>3} air {s['air']:>3}  "
+                   f"value {s['value']:>11,}  leader {lead['name']} {lead['value']:,} "
+                   f"({lead['rail']} trains)  ratio {ratio:.3f}")
+    return out
+
+
+def cmd_replay(cfg: dict, save: str | None, years: int | None, rev: str | None,
+               binary: str | None, log_dir: str | None) -> int:
+    """Load a copy of a live game's save headless (scratch HOME, null drivers) with this tree's
+    PrismaticAI (or the one at `rev`) and the arena's rival tars, run it `years` game years and
+    judge the bot's company by battle.json `replay` rules. The live save is never written."""
+    rep = cfg.get("replay") or {}
+    save_path = expand(save or rep.get("save", ""))
+    years = years or rep.get("years", 4)
+    exe = Path(binary) if binary else REPO / "build" / "openttd"
+    arena = cfg["cache"] / "arena"
+    if not save_path.is_file() or not exe.is_file() or not (arena / "baseset").is_dir():
+        print(f"replay: NOT RUN: needs the save {save_path}, the binary {exe} and an arena cache "
+              f"with a base set at {arena} (battle.py fetch && battle.py prepare)")
+        return 12
+    for problem in rival_versions(arena / "ai", live_like(cfg).get("rivals", [])):
+        print(f"replay: warning: {problem}")
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="battle-replay-") as tmp:
+        home = Path(tmp) / "home"
+        personal = home / "Documents" / "OpenTTD"
+        for sub in ("scripts", "ai", "game"):
+            (personal / sub).mkdir(parents=True)
+        os.symlink(arena / "baseset", personal / "baseset")
+        (home / ".local" / "share").mkdir(parents=True)
+        os.symlink(personal, home / ".local" / "share" / "openttd")   # Linux (XDG)
+        ref_tars = [str(t) for t in (arena / "ai").glob("*.tar") if t.name != "PrismaticAI.tar"]
+        subprocess.run(["cp", "-R", str(arena / "ai" / "library"), *ref_tars, str(personal / "ai")],
+                       check=True)
+        if rev:
+            export_tree(cfg["prismatic"]["path"], rev, personal / "ai" / "PrismaticAI.tar")
+        else:
+            subprocess.run(["cp", "-R", str(REPO / cfg["prismatic"]["path"]), str(personal / "ai")],
+                           check=True)
+        console_log = Path(tmp) / "console.log"
+        start, monthly = replay_scripts(console_log)
+        (personal / "scripts" / "game_start.scr").write_text(start)
+        (personal / "scripts" / "monthly.scr").write_text(monthly)
+        (Path(tmp) / "replay.cfg").write_text("[gui]\nautosave = off\n")
+        copy = Path(tmp) / save_path.name
+        if replay_copy(save_path, copy):
+            print(f"replay: {save_path.name}: lzma save unpacked for a binary built without liblzma")
+        t0 = time.time()
+        proc = subprocess.run(
+            [str(exe), "-c", "replay.cfg", "-x", "-v", f"null:ticks={match_ticks(years)}", "-s", "null",
+             "-m", "null", "-g", str(copy), "-d", "script=1"], cwd=tmp, env=dict(os.environ, HOME=str(home)),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=rep.get("timeout_s", 3600))
+        text = console_log.read_text() if console_log.is_file() else ""
+        if log_dir:
+            Path(log_dir).mkdir(parents=True, exist_ok=True)
+            (Path(log_dir) / "console.log").write_text(text)
+            (Path(log_dir) / "game.log").write_text(proc.stdout)
+    series = parse_console(text)
+    company = rep.get("company", 0)
+    print(f"replay: {save_path.name}, PrismaticAI {'at ' + rev if rev else 'of the working tree'}, "
+          f"company {company}, {years} year(s), exit {proc.returncode}, {time.time() - t0:.0f} s")
+    for line in replay_table(series, company):
+        print(line)
+    fails = replay_substitutions(proc.stdout) + replay_verdict(series, company, years, rep.get("rules", {}))
+    if proc.returncode != 0:
+        fails.insert(0, f"the game exited with {proc.returncode}")
+    for f in fails:
+        print(f"replay: FAIL {f}", file=sys.stderr)
+    print(f"replay: {'FAIL' if fails else 'PASS'}")
+    return 10 if fails else 0
 
 # -------------------------------------------------------------------------------------- matches
 
@@ -1488,7 +1781,11 @@ def battle_cfg_text(mc: dict) -> str:
             f"[game_creation]\nlandscape = {mc['landscape']}\nstarting_year = {mc['start_year']}\n"
             f"map_x = {mc['map_x']}\nmap_y = {mc['map_y']}\n"
             "[gui]\nautosave = off\n[graphicsset]\nname = OpenGFX\n"
-            "[game_scripts]\nBattleReferee =\n")
+            "[game_scripts]\nBattleReferee =\n"
+            # The live stack's script budget (mcp-rhai panel.rs SCRIPT_OPCODES; engine default
+            # 10000): a live-like match gives every AI the opcodes per tick it has live.
+            + (f"[script]\nscript_max_opcode_till_suspend = {mc['script_opcodes']}\n"
+               if mc.get("script_opcodes") else ""))
 
 
 def start_script_text(lineup: list[dict]) -> str:
@@ -1602,18 +1899,23 @@ def parse_log(text: str) -> tuple[dict, dict]:
 
 
 def parse_shared(text: str) -> dict[int, dict]:
-    """{industry id: {"name", "owners": the company ids, "first": the first quarter seen}} from a
-    match log's REF S lines: every producer whose output rail stations of two or more companies
-    caught in some quarter, the owners of every such quarter together."""
+    """{industry id: {"name", "owners": the company ids, "first": the first quarter seen,
+    "cargoes": {cargo id (None for a line without one): {"owners", "first"}}}} from a match log's
+    REF S lines: every producer one of whose cargoes rail stations of two or more companies picked
+    up in some quarter. `owners` joins every cargo and quarter; a cargo's own owners are the ones
+    that shared that cargo."""
     shared: dict[int, dict] = {}
     for line in text.splitlines():
         m = REF_SHARED.search(line)
         if not m:
             continue
-        y, mo, ind, owners, name = m.groups()
-        e = shared.setdefault(int(ind), {"name": name.strip(), "owners": set(),
-                                         "first": f"{y}-{int(mo):02d}"})
-        e["owners"] |= {int(o) for o in owners.split(",") if o}
+        y, mo, ind, cargo, owners, name = m.groups()
+        quarter = f"{y}-{int(mo):02d}"
+        ids = {int(o) for o in owners.split(",") if o}
+        e = shared.setdefault(int(ind), {"name": name.strip(), "owners": set(), "first": quarter, "cargoes": {}})
+        e["owners"] |= ids
+        c = e["cargoes"].setdefault(int(cargo) if cargo is not None else None, {"owners": set(), "first": quarter})
+        c["owners"] |= ids
     return shared
 
 
@@ -1630,6 +1932,105 @@ def parse_trainless(text: str) -> dict[int, list[dict]]:
         ids = {int(i) for i in m.group(6).split(",") if i}
         out.setdefault(cid, []).append({"date": f"{y}-{mo:02d}", "rail": rail, "trainless": bare, "ids": ids})
     return out
+
+
+def parse_funnel(text: str) -> dict[int, list[dict]]:
+    """{company id: [{"year", "mode", <stage>: count, ...}, ...] by year, then mode} from a match
+    log's FUNNEL lines (PrismaticAI/funnel.nut). A repeated year and mode keeps the last line."""
+    by_key: dict[tuple, dict] = {}
+    for line in text.splitlines():
+        m = AI_FUNNEL.search(line)
+        if not m:
+            continue
+        cid, year, mode, fields = m.groups()
+        row = {"year": int(year), "mode": mode}
+        row.update({k: int(v) for k, v in REF_FIELD.findall(fields)})
+        by_key[(int(cid), int(year), mode)] = row
+    out: dict[int, list[dict]] = {}
+    for (cid, _y, _mode), row in sorted(by_key.items()):
+        out.setdefault(cid, []).append(row)
+    return out
+
+
+def funnel_most_lost(row: dict) -> list[tuple[str, str, int, int]]:
+    """Per population of one FUNNEL row (FUNNEL_DROPS, in its order), the stage that lost the largest
+    share of what reached it: [(group, stage, lost, of), ...], ties to the larger loss; a group
+    whose stages lost nothing is left out."""
+    best: dict[str, tuple[str, str, int, int]] = {}
+    for group, stage, lost_terms, of_terms in FUNNEL_DROPS.get(row["mode"], []):
+        lost = sum(sign * row.get(k, 0) for k, sign in lost_terms)
+        of = sum(sign * row.get(k, 0) for k, sign in of_terms)
+        if lost <= 0 or of <= 0:
+            continue
+        b = best.get(group)
+        if b is None or (lost / of, lost) > (b[2] / b[3], b[2]):
+            best[group] = (group, stage, lost, of)
+    return list(best.values())
+
+
+def funnel_text(row: dict) -> str:
+    """One FUNNEL row as the fitness check and the post-mortem print it."""
+    counts = " ".join(f"{k}={v}" for k, v in row.items() if k not in ("year", "mode"))
+    lost = ", ".join(f"{g} {st} {n}/{of}" for g, st, n, of in funnel_most_lost(row))
+    return f"{row['mode']} {row['year']}: {counts}; most lost: {lost or 'none'}"
+
+
+def funnel_gaps(m: dict, keys: list[str]) -> list[str]:
+    """The fitness failures of contestants in `keys` (fitness.must_funnel) whose rail funnel misses a
+    game year the match played whole: the line for year Y comes at the first heartbeat of Y+1, so a
+    match of N years from start_year owes start_year .. start_year+N-2 (`m["funnel"]` by key)."""
+    fails = []
+    for c in m["lineup"]:
+        if c["key"] not in keys:
+            continue
+        start, years = m["match_cfg"]["start_year"], m["years"]
+        seen = {r["year"] for r in m.get("funnel", {}).get(c["key"], []) if r["mode"] == "rail"}
+        missing = [y for y in range(start, start + years - 1) if y not in seen]
+        if missing:
+            fails.append(f"{c['key']}: no_funnel: no FUNNEL rail line for {', '.join(map(str, missing))}")
+    return fails
+
+
+def parse_capital(text: str) -> dict[int, list[dict]]:
+    """{company id: [{"year", "quarter", "frozen", "days", ...}, ...] in report order} from a match
+    log's PrismaticAI capital reports (CAP_LINE): per game quarter, the days its construction stood
+    frozen (main.nut BuildFrozen, counted by capital.nut from heartbeat to heartbeat) out of the days
+    counted, and the allocator's other counters."""
+    out: dict[int, list[dict]] = {}
+    for line in text.splitlines():
+        m = CAP_LINE.search(line)
+        if not m:
+            continue
+        rep = {"year": int(m.group(2)), "quarter": int(m.group(3))}
+        rep.update({k: int(v) for k, v in REF_FIELD.findall(m.group(4))})
+        out.setdefault(int(m.group(1)), []).append(rep)
+    return out
+
+
+def frozen_construction(m: dict, fit: dict) -> list[str]:
+    """The fitness failures of healthy PrismaticAI contestants (`must_be_healthy`) whose construction
+    stood frozen on more than `frozen_max` (default 0.15) of the days of their first `frozen_years`
+    (default 3) game years, from `m["capital"]` (parse_capital, keyed by company id in start order).
+    In the owner's live game of seed 12609 company 0 was frozen on 525 of the 1,096 days of 1950-1952
+    (47.9%): RepaySurplus left the balance just above StayAfloat's floor, a few days of costs later
+    the company "borrowed to stay afloat", and BuildFrozen stopped every build for 90 days while the
+    loan was above half its limit. A contestant whose log has no capital report there (a bot without
+    capital.nut) is not judged; one that reports fewer days than the window holds is judged on the
+    days it reported."""
+    rules = fit["rules"]
+    limit, years = rules.get("frozen_max", 0.15), rules.get("frozen_years", 3)
+    start = m.get("match_cfg", {}).get("start_year", 1950)
+    fails = []
+    for i, c in enumerate(m["lineup"]):
+        if not c["ai"].startswith("PrismaticAI") or c["key"] not in fit.get("must_be_healthy", []):
+            continue
+        reps = [r for r in m.get("capital", {}).get(i, []) if r["year"] < start + years]
+        days = sum(r.get("days", 0) for r in reps)
+        frozen = sum(r.get("frozen", 0) for r in reps)
+        if days > 0 and frozen > limit * days:
+            fails.append(f"{c['key']}: frozen:{frozen} of {days} days ({frozen / days:.1%}) in {start}-{start + years - 1} "
+                         f"(max {limit:.0%})")
+    return fails
 
 
 def trainless_stations(m: dict, rules: dict) -> list[str]:
@@ -1667,10 +2068,14 @@ def sibling_producers(m: dict) -> list[str]:
     prismatic = {i: c["key"] for i, c in enumerate(m["lineup"]) if c["ai"].startswith("PrismaticAI")}
     fails = []
     for ind, e in sorted(m.get("shared", {}).items()):
-        ours = sorted(prismatic[o] for o in e["owners"] if o in prismatic)
-        if len(ours) >= 2:
-            fails.append(f"shared_producer:{e['name']} (industry {ind}, from {e['first']}): "
-                         + " + ".join(ours))
+        # Per cargo: two companies taking different cargoes of one farm split nothing.
+        groups = e.get("cargoes") or {None: {"owners": e["owners"], "first": e["first"]}}
+        for cargo, g in sorted(groups.items(), key=lambda kv: (kv[0] is not None, kv[0] or 0)):
+            ours = sorted(prismatic[o] for o in g["owners"] if o in prismatic)
+            if len(ours) >= 2:
+                what = "" if cargo is None else f", cargo {cargo}"
+                fails.append(f"shared_producer:{e['name']} (industry {ind}{what}, from {g['first']}): "
+                             + " + ".join(ours))
     return fails
 
 
@@ -1785,6 +2190,11 @@ def postmortem(m: dict) -> list[dict]:
                 findings.append(f"{mode} profit/yr {mine:,} vs {theirs:,} "
                                 f"({last.get(mode, 0)} vs {wlast.get(mode, 0)} vehicles)")
         findings += [f"anomaly {a}" for a in f.get("anomalies", [])]
+        # The growth funnel's last year per mode, where the contestant logs one (funnel.nut).
+        last_rows: dict[str, dict] = {}
+        for r in m.get("funnel", {}).get(f["key"], []):
+            last_rows[r["mode"]] = r
+        findings += [f"funnel {funnel_text(r)}" for r in last_rows.values()]
         out.append({"contestant": f["key"], "winner": win,
                     "gap": round(wlast.get("value", 0) / max(1, last.get("value", 1)), 2),
                     "behind_since": behind,
@@ -1801,7 +2211,7 @@ CREATE TABLE IF NOT EXISTS matches (id TEXT, edition TEXT, host TEXT, host_versi
 CREATE TABLE IF NOT EXISTS samples (edition TEXT, match_id TEXT, contestant TEXT, t TEXT,
   value INTEGER, money INTEGER, income INTEGER, perf INTEGER, vehicles INTEGER, stations INTEGER,
   rail INTEGER, road INTEGER, air INTEGER, water INTEGER, prail INTEGER, proad INTEGER,
-  pair INTEGER, pwater INTEGER, cargo INTEGER, expenses INTEGER,
+  pair INTEGER, pwater INTEGER, cargo INTEGER, expenses INTEGER, loan INTEGER,
   PRIMARY KEY (edition, match_id, contestant, t));
 CREATE TABLE IF NOT EXISTS standings (edition TEXT, match_id TEXT, rank INTEGER, contestant TEXT,
   value INTEGER, vehicles INTEGER, stations INTEGER, errors INTEGER, anomalies TEXT,
@@ -1813,8 +2223,10 @@ CREATE TABLE IF NOT EXISTS host_perf (edition TEXT, match_id TEXT, host TEXT, ho
   game_years REAL, wall_s REAL, years_per_min REAL, PRIMARY KEY (edition, match_id));
 CREATE TABLE IF NOT EXISTS events (at REAL, edition TEXT, msg TEXT);
 """
+# loan: since the referee logs it (2026-11-23). Without it a stored `money` (the bank balance, the
+# loan included) cannot be judged net of the loan, as the hoard rules judge the live series.
 SAMPLE_COLS = ("value", "money", "income", "perf", "vehicles", "stations", "rail", "road", "air",
-               "water", "prail", "proad", "pair", "pwater", "cargo", "expenses")
+               "water", "prail", "proad", "pair", "pwater", "cargo", "expenses", "loan")
 
 
 class Store:
@@ -1829,6 +2241,13 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=30000")
         self.db.executescript(SCHEMA)
+        # A store made before a sample column existed gets it added (columns are only ever added,
+        # never renamed); its older rows read NULL there, which says "not recorded", not 0.
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(samples)")}
+        for col in SAMPLE_COLS:
+            if col not in have:
+                self.db.execute(f"ALTER TABLE samples ADD COLUMN {col} INTEGER")
+        self.db.commit()
         self.lock = threading.Lock()
 
     def match(self, m: dict) -> None:
@@ -1841,8 +2260,10 @@ class Store:
                                                  for c in m["lineup"]])))
             rows = [(m["edition"], m["id"], key, s["t"], *[s.get(c) for c in SAMPLE_COLS])
                     for key, series in m["series"].items() for s in series]
-            self.db.executemany("INSERT OR REPLACE INTO samples VALUES (" + ",".join("?" * 20) + ")",
-                                rows)
+            # By name: an added column sits last in an old store and in its place in a new one.
+            cols = ("edition", "match_id", "contestant", "t", *SAMPLE_COLS)
+            self.db.executemany(f"INSERT OR REPLACE INTO samples ({','.join(cols)}) VALUES "
+                                f"({','.join('?' * len(cols))})", rows)
             for rank, f in enumerate(m.get("standings") or [], 1):
                 self.db.execute("INSERT OR REPLACE INTO standings VALUES (?,?,?,?,?,?,?,?,?)", (
                     m["edition"], m["id"], rank, f["key"], f["value"], f["vehicles"],
@@ -2175,7 +2596,7 @@ class Orchestrator:
         for m in running:
             d = match_dir(host.root, m)
             parts.append(f"echo '@@@ {m['id']}'; cat {d}/exit_code 2>/dev/null || echo RUNNING; "
-                         f"grep -a -E 'REF Q|\\] \\[S\\] ' {d}/match.log 2>/dev/null | tail -n 4000")
+                         f"grep -a -E 'REF Q|\\] \\[S\\] |\\] \\[E\\] FUNNEL ' {d}/match.log 2>/dev/null | tail -n 4000")
         try:
             r = host.sh("; ".join(parts), timeout=30)
         except subprocess.TimeoutExpired:
@@ -2196,6 +2617,7 @@ class Orchestrator:
             # Company ids follow the start order: a `-g` null-driver game has no human company.
             m["series"] = {lineup[c]["key"]: s for c, s in series.items() if c < len(lineup)}
             m["errors"] = {lineup[c]["key"]: n for c, n in errors.items() if c < len(lineup)}
+            m["funnel"] = {lineup[c]["key"]: r for c, r in parse_funnel(body).items() if c < len(lineup)}
             self.watch(m)
             if status_line.strip() != "RUNNING":
                 self.finish(m, int(status_line.strip() or -1))
@@ -3039,6 +3461,8 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
         fails += [f"{c['key']}: {b}" for b in bad]
     fails += sibling_producers(m)
     fails += trainless_stations(m, fit["rules"])
+    fails += funnel_gaps(m, fit.get("must_funnel", []))
+    fails += frozen_construction(m, fit)
     # A contestant held to run trains ends with at least one: the test_trainless lineup refuses every
     # new line's first train, so a train at the end proves KeepTrainlessLine, the adoption and
     # KeepLinesServed's first train (research/incident-2026-11-23-trainless-lines.md).
@@ -3101,7 +3525,7 @@ def cmd_fitness(cfg: dict) -> int:
             (mper / "scripts" / "game_start.scr").write_text(start_script_text(lineup))
             procs.append(subprocess.Popen(
                 [str(binary), "-c", "battle.cfg", "-x", "-v", f"null:ticks={match_ticks(fit['years'])}",
-                 "-s", "null", "-m", "null", "-g", "-G", str(fit["seed"]), "-d", "script=1"],
+                 "-s", "null", "-m", "null", "-g", "-G", str(fit["seed"]), "-d", "script=3"],
                 cwd=tmp, env=dict(os.environ, HOME=str(mhome)), stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True))
         for i, (lineup, proc) in enumerate(zip(lineups, procs)):
@@ -3114,12 +3538,20 @@ def cmd_fitness(cfg: dict) -> int:
             m["status"] = match_status(m, proc.returncode)
             m["shared"] = parse_shared(out)
             m["trainless"] = parse_trainless(out)
+            m["funnel"] = {lineup[c]["key"]: r for c, r in parse_funnel(out).items() if c < len(lineup)}
+            m["capital"] = parse_capital(out)
             for c in lineup:
                 s = m["series"].get(c["key"], [])
                 peak, final = fleet_peak_final(s)
                 print(f"fitness[{i}]: {c['key']:26} value {s[-1]['value'] if s else 0:>12,}  vehicles "
                       f"peak {peak:>4} final {final:>4}  "
                       f"{' '.join(anomalies(s, m['errors'].get(c['key'], 0), fit['rules'])) or 'ok'}")
+            for cid, reps in sorted(m["capital"].items()):
+                if cid < len(lineup):
+                    early = [r for r in reps if r["year"] < mc["start_year"] + fit["rules"].get("frozen_years", 3)]
+                    print(f"fitness[{i}]: {lineup[cid]['key']:26} construction frozen "
+                          f"{sum(r.get('frozen', 0) for r in early)} of {sum(r.get('days', 0) for r in early)} days "
+                          f"in its first {fit['rules'].get('frozen_years', 3)} years")
             for ind, e in sorted(m["shared"].items()):
                 owners = ", ".join(lineup[o]["key"] if o < len(lineup) else f"company {o}"
                                    for o in sorted(e["owners"]))
@@ -3128,6 +3560,9 @@ def cmd_fitness(cfg: dict) -> int:
                 if cid < len(lineup) and reps and lineup[cid]["ai"].startswith("PrismaticAI"):
                     print(f"fitness[{i}]: {lineup[cid]['key']:26} rail stations {reps[-1]['rail']:>3}, "
                           f"without a train {reps[-1]['trainless']:>3} ({reps[-1]['date']})")
+            for key, rows in m["funnel"].items():
+                for r in rows:
+                    print(f"fitness[{i}]: {key:26} funnel {funnel_text(r)}")
             fails += [f"[{i}] {f}" for f in fitness_verdict(m, fit)]
     for f in fails:
         print(f"fitness: FAIL {f}", file=sys.stderr)
@@ -3937,14 +4372,16 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("command", choices=["discover", "fetch", "prepare", "probe", "run", "status",
                                         "report", "render", "check", "fitness", "ablate", "reap", "power",
-                                        "live-export", "live-settings", "evolve"])
+                                        "live-export", "live-settings", "replay", "evolve"])
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--allow-dirty", action="store_true",
                     help="prepare: export uncommitted PrismaticAI/referee (records are refused)")
     ap.add_argument("--check", action="store_true", help="report: only check, write nothing")
-    ap.add_argument("--seed", type=int, default=930967890, help="ablate: the map seed")
-    ap.add_argument("--years", type=int, default=6, help="ablate: game years")
+    ap.add_argument("--seed", type=int, help="ablate: the map seed (default 930967890; with "
+                                                   "--live-like the live game's, battle.json live_like.seed)")
+    ap.add_argument("--years", type=int, help="ablate: game years (default 6); replay: game years "
+                                               "after the load (default battle.json replay.years)")
     ap.add_argument("--variant", action="append", default=[],
                     help='ablate: "name=setting=v,setting=v" (the first is the baseline), repeatable')
     ap.add_argument("--field", default="AAAHogEx,AdmiralAI", help="ablate: comma-separated opponents")
@@ -3957,7 +4394,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--match", help="ablate: an arena match as <edition prefix>/<m-NNNN>; takes "
                                     "seed, years, field, slot and settings (variant 'arena') from "
                                     "its record")
-    ap.add_argument("--log-dir", help="ablate: keep each variant's full log (script debug level 4) here")
+    ap.add_argument("--log-dir", help="ablate: keep each variant's full log (script debug level 4) "
+                                      "here; replay: keep its console and game log here")
+    ap.add_argument("--live-like", action="store_true",
+                    help="ablate: the live game's world (battle.json live_like): its match settings, "
+                         "rivals, PrismaticAI's slot, seed and arms (unless --variant names others)")
+    ap.add_argument("--save", help="replay: the live save to load (default battle.json replay.save)")
+    ap.add_argument("--rev", help="replay: PrismaticAI at this commit instead of the working tree")
+    ap.add_argument("--binary", help="replay, evolve: the OpenTTD binary (default build/openttd)")
     ap.add_argument("--edition", help="report: a past edition (its arena bundle must still be the "
                                       "prepared one, for its provenance)")
     ap.add_argument("--margin", type=float, default=1.10, help="power: the non-inferiority margin, a value ratio")
@@ -3972,7 +4416,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--force", action="store_true", help="evolve: run without a fired trigger and past the cooldown")
     ap.add_argument("--budget", type=int, help="evolve: at most this many matches (battle.json evolve.budget)")
     ap.add_argument("--max-minutes", type=float, help="evolve: wall-clock cap (battle.json evolve.max_minutes)")
-    ap.add_argument("--binary", help="evolve: the OpenTTD binary (default build/openttd)")
     ap.add_argument("--propose", help="evolve: a panel to write the proposal to as a blackboard key")
     a = ap.parse_args(argv)
     if a.command == "live-export":
@@ -4008,14 +4451,20 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_report(cfg, a.check, a.edition)
     elif a.command == "fitness":
         return cmd_fitness(cfg)
+    elif a.command == "replay":
+        return cmd_replay(cfg, a.save, a.years, a.rev, a.binary, a.log_dir)
     elif a.command == "reap":
         Orchestrator(cfg).reap()
     elif a.command == "evolve":
         return cmd_evolve(cfg, a)
     elif a.command == "ablate":
         field, slot, variants = a.field.split(","), a.slot, list(a.variant)
-        seed, years = a.seed, a.years
-        if a.match:
+        seed, years = (930967890 if a.seed is None else a.seed), (6 if a.years is None else a.years)
+        if a.live_like:
+            cfg, seed, field, slot, variants = live_like_ablate(cfg, a.seed, variants)
+            for problem in rival_versions(cfg["cache"] / "arena" / "ai", live_like(cfg)["rivals"]):
+                print(f"ablate: warning: {problem}")
+        elif a.match:
             r = match_replay_inputs(cfg["results"], a.match)
             seed, years, field, slot = r["seed"], r["years"], r["field"], r["slot"]
             if not any(v.partition("=")[0] == "arena" for v in variants):
