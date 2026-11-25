@@ -1800,7 +1800,7 @@ CREATE TABLE IF NOT EXISTS matches (id TEXT, edition TEXT, host TEXT, host_versi
 CREATE TABLE IF NOT EXISTS samples (edition TEXT, match_id TEXT, contestant TEXT, t TEXT,
   value INTEGER, money INTEGER, income INTEGER, perf INTEGER, vehicles INTEGER, stations INTEGER,
   rail INTEGER, road INTEGER, air INTEGER, water INTEGER, prail INTEGER, proad INTEGER,
-  pair INTEGER, pwater INTEGER, cargo INTEGER, expenses INTEGER,
+  pair INTEGER, pwater INTEGER, cargo INTEGER, expenses INTEGER, loan INTEGER,
   PRIMARY KEY (edition, match_id, contestant, t));
 CREATE TABLE IF NOT EXISTS standings (edition TEXT, match_id TEXT, rank INTEGER, contestant TEXT,
   value INTEGER, vehicles INTEGER, stations INTEGER, errors INTEGER, anomalies TEXT,
@@ -1812,8 +1812,10 @@ CREATE TABLE IF NOT EXISTS host_perf (edition TEXT, match_id TEXT, host TEXT, ho
   game_years REAL, wall_s REAL, years_per_min REAL, PRIMARY KEY (edition, match_id));
 CREATE TABLE IF NOT EXISTS events (at REAL, edition TEXT, msg TEXT);
 """
+# loan: since the referee logs it (2026-11-23). Without it a stored `money` (the bank balance, the
+# loan included) cannot be judged net of the loan, as the hoard rules judge the live series.
 SAMPLE_COLS = ("value", "money", "income", "perf", "vehicles", "stations", "rail", "road", "air",
-               "water", "prail", "proad", "pair", "pwater", "cargo", "expenses")
+               "water", "prail", "proad", "pair", "pwater", "cargo", "expenses", "loan")
 
 
 class Store:
@@ -1828,6 +1830,13 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=30000")
         self.db.executescript(SCHEMA)
+        # A store made before a sample column existed gets it added (columns are only ever added,
+        # never renamed); its older rows read NULL there, which says "not recorded", not 0.
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(samples)")}
+        for col in SAMPLE_COLS:
+            if col not in have:
+                self.db.execute(f"ALTER TABLE samples ADD COLUMN {col} INTEGER")
+        self.db.commit()
         self.lock = threading.Lock()
 
     def match(self, m: dict) -> None:
@@ -1840,8 +1849,10 @@ class Store:
                                                  for c in m["lineup"]])))
             rows = [(m["edition"], m["id"], key, s["t"], *[s.get(c) for c in SAMPLE_COLS])
                     for key, series in m["series"].items() for s in series]
-            self.db.executemany("INSERT OR REPLACE INTO samples VALUES (" + ",".join("?" * 20) + ")",
-                                rows)
+            # By name: an added column sits last in an old store and in its place in a new one.
+            cols = ("edition", "match_id", "contestant", "t", *SAMPLE_COLS)
+            self.db.executemany(f"INSERT OR REPLACE INTO samples ({','.join(cols)}) VALUES "
+                                f"({','.join('?' * len(cols))})", rows)
             for rank, f in enumerate(m.get("standings") or [], 1):
                 self.db.execute("INSERT OR REPLACE INTO standings VALUES (?,?,?,?,?,?,?,?,?)", (
                     m["edition"], m["id"], rank, f["key"], f["value"], f["vehicles"],

@@ -737,7 +737,10 @@ do not yet mean more value on this map.
 - **Store.** Everything is written to `~/ttd-battle/results/battle.sqlite`:
   - tables `matches` (with the lineup as `{key, ai, settings}`), `samples`, `standings`,
     `postmortems`, `host_perf` and `events`,
-  - column names are only ever added, never renamed,
+  - column names are only ever added, never renamed, and a store made before a column existed gets
+    it added when it opens; its older rows read NULL there ("not recorded"). The sample's `loan`
+    was added on 2026-11-25: before that the store dropped it, so stored `money` from earlier
+    matches cannot be judged net of the loan,
   - DuckDB reads it with `ATTACH '<file>' (TYPE sqlite)`,
   - `GET /api/query?sql=` runs one read-only `SELECT`/`WITH` on it.
 - **Throughput.** `host_perf` and `/api/perf` give game years per wall-clock minute per arena.
