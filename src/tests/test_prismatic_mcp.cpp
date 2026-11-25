@@ -1340,6 +1340,16 @@ TEST_CASE("The deadline policy is parsed from the console's game days and verdic
 	CHECK_FALSE(ParseDeadlinePolicy("7d", "").has_value());
 	CHECK_FALSE(ParseDeadlinePolicy("99999", "").has_value());
 	CHECK_FALSE(ParseDeadlinePolicy("7", "yes").has_value());
+
+	/* The start-up form, PRISMATIC_MCP_APPROVAL_DEADLINE="<days>[:verdict]". */
+	CHECK(ParseDeadlinePolicyText("30:approve")->verdict == DeadlineVerdict::Approve);
+	CHECK(ParseDeadlinePolicyText("30:approve")->ticks == 30 * DEADLINE_DAY_TICKS);
+	CHECK(ParseDeadlinePolicyText("14")->verdict == DeadlineVerdict::Keep);
+	CHECK(ParseDeadlinePolicyText("0:keep")->ticks == 0);
+	CHECK_FALSE(ParseDeadlinePolicyText("approve").has_value());
+	CHECK(ParseDeadlinePolicyText("30:")->verdict == DeadlineVerdict::Keep); // an empty verdict is keep
+	CHECK_FALSE(ParseDeadlinePolicyText("30:yes").has_value());
+	CHECK_FALSE(ParseDeadlinePolicyText(":approve").has_value());
 }
 
 TEST_CASE("Only an action on one company is decided in the game's chat, classified by the command's own flags and category", "[prismatic_mcp]")

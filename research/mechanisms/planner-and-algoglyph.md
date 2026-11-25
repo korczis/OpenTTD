@@ -62,6 +62,22 @@ flowchart TB
   planner's `calibration` is applied to every route it returns: monthly profit scaled by the
   mode's ratio, the lowest one for a route of several legs, then the kernel's own score and ROI
   recomputed (`invest.rs calibrated`).
+- **Producers another company holds, and one plan per company** (`cargo.rs` `rail_claims`,
+  `panel_bot.rs` `assign_producers`). The planner applies the bot's own rule (`rail.nut`
+  `ForeignRailStationAt`): a raw producer where a company has a rail station tile within 4 tiles
+  of one of the producer's tiles belongs to that company. It reads this from `openttd://map` (the
+  `S` tiles and their owners, the `I` tiles) and `openttd://map/ways` (a station tile with track).
+  `mcp-plan --for <ids>` leaves out every freight candidate whose producer a company outside
+  `<ids>` holds, before the list is cut and the best lines are priced. The plan's `claims` names
+  those producers. The panel plans every running company of its AI from one answer. Each producer
+  goes to one company only: the best producer to the lower id, the next best to the other
+  company, and so on. A producer a company holds goes to that company. The top-level settings are
+  for a company not started yet, and `bot_settings.companies` holds one plan per company.
+  Two things are inferred, not read. The game serves no industry id per tile, so an industry
+  tile counts for the industry whose location tile lies nearest north of it. It also serves no
+  raw flag, so "raw" means "produces cargo, accepts none". The sub-tropical lumber mill, a
+  processing industry that accepts nothing, therefore counts as raw. A rail waypoint counts as a
+  station. Both of these errors leave a producer out, so they make the planner more careful, not less.
 - **Action plan.** `POST /api/actionplan` turns a set of actions with dependencies into a
   validated DAG and executable steps through `action-plan`, refused if it would overdraw.
 - **Calibration** (`calibrate.rs`). Running lines with a whole year of profit are matched to the
@@ -103,8 +119,10 @@ the AlgoGlyph hub methods in [`../mcp-hub.md`](../mcp-hub.md) ("AlgoGlyph: the p
 
 The planner runs when the bot starts, and once a game month after that. The monthly run is the
 panel service [`replan.rhai`](../../tools/research/mcp-panel/rhai/replan.rhai) (Scripts page, or
-`POST /api/services/start {"name":"replan"}`). It composes what exists and decides nothing of
-its own:
+`POST /api/services/start {"name":"replan"}`). Each round makes one plan and then goes through
+every running company of its AI (`AI`). Each company gets the steps below with its own entry of
+`bot_settings.companies`. A company the plan has no entry for is skipped with a line that says so.
+The script composes what exists and decides nothing of its own:
 
 | Step | Source |
 |---|---|
@@ -112,11 +130,11 @@ its own:
 | Its rank by value and its value change over the last six months | the store's views `company_latest` and `company_month` |
 | The competition: each company's last quarter, and per transport type the profit per vehicle a year old, with the leader and this company's gap to it | the same calls, `openttd://vehicles` |
 | A fresh portfolio on today's map and money | `POST /api/bots/planned` (mcp-plan, AlgoGlyph track-planning and knapsack-dp), published as `plan.portfolio` and `plan.bot_settings` |
-| The chance that a new line pays | AlgoGlyph `bayes-update` on this company's own lines a year old: earned or lost |
+| The chance that a new line pays | AlgoGlyph `bayes-update` on this company's own lines a year old, earned or lost, kept per mode (rail, road, air, water, by vehicle type). A plan is judged by the modes of the lines it adds: a freight slot or the rail pair is rail, the air pair is air. Where it adds two modes, the weaker lower bound decides. A plan that adds no line is judged on the whole record |
 | The months to pay back the portfolio's investment | AlgoGlyph `pert-monte-carlo`, optimistic, likely and pessimistic at the posterior's upper end, mean and lower end |
 | The verdict | a switch only when the lower end is at least `MIN_PAYS` (0.5) and 80 % of the draws pay back within `HORIZON_MONTHS` (24) |
-| The changes | `build_plan::apply`: only settings that differ from the bot's live ones, each approval-gated. Nothing new is proposed while an earlier change for the company still waits for the owner, or while another planner holds the company: the shared key `planner.<company>` names it (unset or `replan`: this service) |
-| The record | the shared blackboard `replan.<company>` (a `rhai.shared` event, so on the bus and in the store), and a `plan` record on the Majordomus mesh when the panel has a mesh session |
+| The changes | `build_plan::apply_to` that company, in one call: only settings that differ from the bot's live ones, each approval-gated, after [`bot_floors.rhai`](../../tools/research/mcp-panel/rhai/bot_floors.rhai) `guard` (below). Nothing new is proposed while an earlier change for the company still waits for the owner, or while another planner holds the company: the shared key `planner.<company>` names it (unset or `replan`: this service) |
+| The record | the shared blackboard `replan.<company>` (a `rhai.shared` event, so on the bus and in the store), and a `plan` record on the Majordomus mesh when the panel has a mesh session. `held` is why the round held, as text: another planner, approvals still waiting, or the model's reason. It is null when the round proposed or had nothing to change. `held_by` is the planner refusal, `record.by_mode` and `model.by_mode`/`judged_by` the per-mode record, `floors` what the guard did, and `sent` the settings filed |
 
 The planner's call prices up to 16 rail lines with AlgoGlyph and took 3 min 10 s at load 50, so the
 script raises its own HTTP timeout for that call only (`http_timeout(seconds)`, per script thread).
@@ -150,6 +168,42 @@ On 2026-11-22 the first version proposed again every round. The plan's `fr*` slo
 from round to round, so the proposals did not collapse onto earlier ones, and about 130 waited unanswered.
 That is why a round now holds while anything waits.
 
+### The plan keeps the bot's autopilot floors
+
+PrismaticAI raises `own_lines` to 10 and `max_routes` to 30, caps `cash_reserve` at 5000, and sets
+`intercity` and `self_steward` only while it has no plan (`main.nut`, `if (b.autopiloted)`). A plan
+is one complete freight slot, the rail pair or the air pair. Once a re-plan gives it one, the bot
+runs on its live values. In game 10487 (2026-11-23) replan filed 36 `ai.set_setting` rows on
+1952-04-05 to 1952-04-07. The owner's chat approved the first. The approval deadline's standing
+verdict `approve` executed the other 35 on 1952-04-12, with nobody answering. On 1952-04-15 the
+heartbeat changed from `own_cap=10 ... autopilot=engaged` to `own_cap=4 ... own_lines=4
+autopilot=growth-on-plan`. The 4 was the run's start string, inert while the floor applied. The
+bot stayed there until the game ended in 2114, with 42 vehicles. Run 12609 did the same through
+three chat approvals (#227, #460, #461) that completed slot `fr10` over nine months. No other path
+handed the bot its slots. The bot started with every slot unset, and the live values of
+`fr_` and `fr2_` are those of approved rows (#31 to #33, #129 to #131).
+
+`bot_floors.rhai` is the panel's one copy of those floors. The test
+`the_floors_are_main_nuts_autopilot_block` (`src/rhai_shared.rs`) reads `main.nut` and fails when
+the two drift. Its `guard(live, diff)` takes the bot's line groups from the names the bot declares
+(`x_from`/`x_to`/`x_cargo`, `x_a`/`x_b`), so it names no slot (rule
+`project.decision-authority-boundaries` B2). It changes a plan's difference in four ways:
+
+1. A plan never turns the autopilot off, because with it off there are no floors.
+2. A line the plan touches is filed whole, so its members go through the same plan.
+3. With the autopilot on, a floor key that the plan proposes is held to its floor.
+4. When the bot would be planned afterwards, each declared floor key whose live value would drop
+   the floor is filed at its floor in the same call. The 1952-04 plan of 10487 would have carried
+   `own_lines=10`.
+
+A bot that is already planned and has lost a floor is offered it back alone while the model holds
+its new plan. An approval of the whole plan at once is the plan batch of `fix/approval-plan-batch`
+(one plan id over every row of one `apply_to`). Until that lands, an approver can still pick single
+rows of a plan by hand, but the deadline's `approve` executes all of them. A mode with no line a
+year old starts at the prior alone, whose lower bound is below `MIN_PAYS`. So replan never proposes the
+first line of a mode. The bot's autopilot builds that first line itself, as it built the trains of
+10487 (a design review by codex, 2026-11-24, named this cold start).
+
 The payback is only as good as the planner's monthly profit, and the planner over-predicts
 ([`the-planner-overpredicts-what-a-line-earns`](../../.ai/repo/knowledge/curated/the-planner-overpredicts-what-a-line-earns.md)).
 The record-based lower bound is what discounts it.
@@ -168,7 +222,7 @@ The record-based lower bound is what discounts it.
 | [`tools/research/mcp-rhai/src/intent.rs`](../../tools/research/mcp-rhai/src/intent.rs) | sentences to queries |
 | [`tools/research/mcp-rhai/src/graph.rs`](../../tools/research/mcp-rhai/src/graph.rs) | the road network as a graph |
 | [`tools/research/mcp-rhai/src/hub_algoglyph.rs`](../../tools/research/mcp-rhai/src/hub_algoglyph.rs), [`flow_serve.rs`](../../tools/research/mcp-rhai/src/flow_serve.rs), [`kernel_feed.rs`](../../tools/research/mcp-rhai/src/kernel_feed.rs) | how kernels are called and fed |
-| [`tools/research/mcp-rhai/src/panel_bot.rs`](../../tools/research/mcp-rhai/src/panel_bot.rs) | the planned bot start: portfolio to settings |
+| [`tools/research/mcp-rhai/src/panel_bot.rs`](../../tools/research/mcp-rhai/src/panel_bot.rs) | the planned bot start: portfolio to settings, one plan per company of the AI |
 | [`tools/research/mcp-rhai/src/plan_pipeline.rs`](../../tools/research/mcp-rhai/src/plan_pipeline.rs) | one planner run, shared by `mcp-plan` and the panel's strategist |
 | [`tools/research/mcp-rhai/src/bin/mcp-plan.rs`](../../tools/research/mcp-rhai/src/bin/mcp-plan.rs), [`mcp-intent.rs`](../../tools/research/mcp-rhai/src/bin/mcp-intent.rs), [`mcp-kernel-feed.rs`](../../tools/research/mcp-rhai/src/bin/mcp-kernel-feed.rs) | the command-line front ends |
 
@@ -176,7 +230,12 @@ The record-based lower bound is what discounts it.
 
 - `cargo test` in `tools/research/mcp-rhai`: tests in `plan.rs`, `cargo.rs`, `linecost.rs`,
   `yards.rs`, `sites.rs`, `invest.rs`, `calibrate.rs`, `intent.rs`, `hub_algoglyph.rs`,
-  `flow_serve.rs`, `kernel_feed.rs` and `panel_bot.rs`.
+  `flow_serve.rs`, `kernel_feed.rs`, `panel_bot.rs` and `plan_pipeline.rs`. The rival and sibling
+  claims are covered by `rail_stations_near_a_raw_producer_hold_it_for_their_company`,
+  `a_plan_for_a_company_leaves_out_the_producers_another_company_holds`,
+  `two_companies_of_one_ai_are_handed_different_producers_best_first` and
+  `every_running_company_gets_a_plan_of_its_own`. A whole `replan.rhai` round over stubbed reads
+  is covered by `replan_proposes_each_company_of_its_ai_its_own_plan` (`rhai_shared.rs`).
 - `tools/research/mcp-intent-check`: the owner's plan sentences typed into the game's console and
   answered end to end. `tools/research/mcp-carryout-check`: an answered sentence's settings reach
   the bot, through the approval gate.

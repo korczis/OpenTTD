@@ -129,6 +129,263 @@ The bot builds and the steward decides. The bot then reconciles the line to the 
 `STEWARD_DRY=1` decides and prints without handing anything over. `STEWARD_EVERY_S` sets the
 round (default 120 s). A round's decisions are posted to the board as `openttd:<instance>:steward`.
 
+## The in-bot steward's capital
+
+With `self_steward=1` the bot applies the policy above itself (`steward.nut` `SelfSteward`). In
+six-year headless matches with the live game's settings, PrismaticAI's profit per train was close
+to AAAHogEx's, but it ran 3-9 times fewer trains. Its lines stayed at one or two trains.
+
+**What stopped growth** (master f4c02d0aac, `battle.py ablate`, start 1950, field AAAHogEx,
+LuDiAI AfterFix, CivilAI, AdmiralAI, seeds 15805, 2927, 31337 and 4242, `script=4` logs):
+
+- **The signal.** Every line runs full-load orders. A train at the source takes the cargo as it
+  arrives, so a trainload waits only when the trains cannot carry it at all. The steward decided
+  one to four trains per match, all by the double-track rule (half a trainload waiting). The
+  single-track `add_train` rule (a whole trainload waiting) never fired. The 27 lines peaked at one
+  to three trains: the double-track ones of 15-37 allowed, the single-track ones mostly at one of
+  two.
+- **What a shortage looks like instead.** The source station's rating falls with the days since
+  the last pickup (`station_cmd.cpp` `UpdateStationRating`), and the industry moves only the
+  rating's share of its output to the station. In the branch's yearly state lines, lines with one
+  train sat at 27-48%. Lines with a train at the platform most of the time sat at 64-80%.
+- **Money, where the loan was drawn.** `RepaySurplus` (main.nut) pays the loan down to the reserve
+  after every heartbeat, so the bank seldom held a train's price. In the owner's live game (seed
+  15805, 1958-08) a coal line earning 33.9k a year per train kept one train of two. The bank held
+  13k, and 250k of the loan was unused.
+- **Rare rounds.** The steward runs at most once a game month, on a heartbeat. A heartbeat waits
+  for the bot's rail path searches (90-178 game days each) and airport surveys. On the fitness
+  seed the monthly line records appeared about once a game year from 1963 on.
+- **Single track is a ceiling.** One track carries one train at a time, so a single-track line
+  moves about one trainload per two trips whatever it runs. Re-laying the second track of such a
+  line later on the junction geometry it was built with failed in all 8 tries in these matches:
+  the tiles beyond `B2` were taken by the line's own track A, by roads or by other rail. That code
+  was not kept.
+
+**The change** (`steward.nut`, `lines.nut`, `info.nut`):
+
+- **`steward_rating`** (default 55). An earning line (`LineEarns`) gets more trains while its
+  source rates the cargo below this percent, a source platform is free and its newest train is
+  `STEWARD_SETTLE_DAYS` (90) old. It gets one train, plus one for every 15 points the rating is
+  lower, up to `trains_max`.
+- **Several trains per round.** The double-track rule adds one train for every full trainload
+  waiting (at least one). `ReconcileLines` buys every missing train of a target in the same
+  heartbeat, not one per heartbeat.
+- **`steward_borrow`** (default 1). An earning line may borrow for its next train (`FundTrain`).
+  The company must not be frozen, the loan must stay at most half its limit, and the headroom left
+  must still hold a line budget and two quarters of running costs. Early in a game the loan pays
+  for new lines. Without these limits, in a replay of seed 4242, a train borrowed with 280k of
+  300k drawn froze construction, and the company built four freight lines where master built
+  seven.
+- **A state line per line**, on the first round of each game year: `steward state line <slot>`,
+  with its trains, waiting cargo, source rating, free source platforms and profit.
+
+**Measured** (single matches with the live game's settings, not held-start pairs, rule
+`a-tuning-claim-needs-held-start-pairs`; `battle.py ablate`, start 1950, six years; master and
+branch on one binary per round):
+
+| seed | arm | rail trains | company value | rail profit last year (`prail`) | AAAHogEx trains |
+|---|---|---|---|---|---|
+| 15805 | master 3ed759fd1e | 6 | 746,829 | 126,467 | 47 |
+| 15805 | branch | 7 | 754,212 | 113,637 | 46 |
+| 2927 | master 3ed759fd1e | 9 | 2,486,144 | 300,766 | 46 |
+| 2927 | branch | 12 | 3,106,114 | 445,637 | 45 |
+| 31337 | master 3ed759fd1e | 12 | 2,290,859 | 394,295 | 66 |
+| 31337 | branch | 14 | 2,044,513 | 261,169 | 49 |
+| 4242 | master 3ed759fd1e | 7 | 1,716,762 | 264,104 | 28 |
+| 4242 | branch | 17 | 2,609,134 | 501,960 | 43 |
+
+On master 3ed759fd1e (binary `94f7ee692f`) the branch ran 50 rail trains against 34. Its rail
+profit was 1.32M against 1.09M, and its value was 14.4% higher as a geometric mean, ahead on three
+seeds of four. In an earlier round on master f4c02d0aac (binary `94de29ae5b`) it ran 52 trains
+against 39, with rail profit 1.76M against 1.55M and value 7.2% higher, also ahead on three seeds
+of four.
+
+The games diverge within the first years, so each row is one sample of a chaotic process. On
+31337 the branch built fewer freight lines because its path searches failed differently, and
+AAAHogEx's own count moved by up to 17 trains between the arms. The borrowing path (`FundTrain`
+from the loan) did not fire in any of these matches: in them the bank held the price whenever the
+steward wanted a train. It is the owner's live-game case above and has not been run end to end.
+
+**Tried and not kept.** Two attempts did not work:
+
+- An idle-money rule: more trains while last year's profit per train paid a train back within
+  two years. It reached 66 trains, but value fell on all four seeds against the branch above,
+  because trains that only share a saturated line's cargo dilute it.
+- `rail_feed=3` and `rail_grow_max=7` as variants on top of the change: -44% to +25% by seed, so
+  no conclusion.
+
+**Open.** The single-track lines need a second-track design that reserves its corridor when the
+line is built. Most of the remaining gap is supply: a line saturates at about one producer's
+output. The steward's wait on the heartbeat is the next section.
+
+## The steward between heartbeats
+
+**The problem.** The steward ran once a game month at most, on a heartbeat, and a heartbeat waits
+for everything the bot builds in it. A rail path search takes 28-160 game days (seed 2927), a
+double-track line runs two, and a heartbeat with a line, an airport and a few bus routes takes
+most of a year. In ten-year matches of master 11411cdc4d (live settings, `battle.py ablate`,
+start 1950, field AAAHogEx, LuDiAI AfterFix, CivilAI, AdmiralAI, NoCAB, DictatorAI, SimpleAI) the
+steward's rounds came 1-3 times in most game years, up to 548 days apart. A line whose source
+rating fell waited that long for its next train.
+
+**The change** (`steward.nut` `MaintenanceYield`, `MaintenanceRound`; `rail.nut` `FindRailPath`,
+`BuildRailAlong`; `lines.nut` `ReconcileLines`, `FundTrain`). The search loop of `FindRailPath`
+checks every 512 nodes whether a game month has begun since the last round. The check is one API
+call and a comparison. When one has, a maintenance round runs right there:
+
+- it decides (`SelfSteward`), adds at most four trains to running lines (`ReconcileLines`), and
+  buys a first or replacement train or a pending depot (`KeepLinesServed`, one per line at most);
+- it pays only from money beyond all of the loan, the cash reserve and one line budget. The
+  builder takes the whole loan before a line and lays it from that money, so a round never spends
+  it. A round never borrows. A company that builds on borrowed money buys nothing in a round and
+  waits for its heartbeat, as before; a company with money of its own buys;
+- it never resizes, shrinks or closes a line, and builds no line. A train sent to be sold would
+  wait in its depot for the heartbeat's `ManageFleet`. `CloseHaltedLines` demolishes a whole line
+  with hundreds of commands and pays for it without a reserve check, so it stays in the heartbeat,
+  like `TwinLines`, `GrowPlatforms` and `FeedStations`;
+- it never runs while track is being laid. `BuildRailAlong` counts its frames in `MAINT_LAYING`,
+  so the search of a re-plan inside a laying yields nothing. A round never runs inside another
+  round either;
+- it keeps the builder's state: its own `AIAccounting` (the double track's cost of track A decides
+  whether track B is affordable; `ScriptAccounting`'s destructor restores the outer count), exec
+  mode, and the current rail type.
+
+The heartbeat's `SelfSteward` skips a month a round already decided, so a line changes at most once
+a game month. Each round logs `steward round <n> on <y-m-d> (survey|heartbeat)`. This is where the
+cadence below is measured from.
+
+**FundTrain.** A train the steward adds is paid from the bank when it holds the reserve plus the
+price. Otherwise, for a line that earns, it is paid from the loan within the bounds of
+`steward_borrow`. The loan is now raised in whole steps rounded up: `/ step + 1` borrowed one step
+too many when the shortfall was a whole number of steps. A borrow logs the loan after it, the
+limit, and the headroom left. A refusal by the bounds is logged once per line and reason. A clone
+that will not start is sold at once, and a clone copies a running train, never one on its way to
+be sold.
+
+**Measured.** Single matches, not held-start pairs (rule `a-tuning-claim-needs-held-start-pairs`):
+`battle.py ablate`, ten years from 1950, the live game's settings, the field above, `-d script=4`.
+Round 1 compares master 11411cdc4d with the maintenance round alone (commit 20d4f97f29), both on
+binary `build/openttd` of 2026-11-23 00:39. Rounds are the `steward round` lines; on master, which
+logs none, they are the first heartbeat of each new game month, where its gate opens.
+
+| seed | arm | rounds a year (1951-59) | longest gap | trains added (inside a search) | rail trains | value | AAAHogEx value |
+|---|---|---|---|---|---|---|---|
+| 15805 | master | 1-12 (median 3) | 386 days | 14 (0) | 19 | 3,194,006 | 17,990,949 |
+| 15805 | round 1 | 5-12 (median 12) | 249 days | 19 (13) | 22 | 2,351,483 | 15,004,380 |
+| 2927 | master | 0-3 (median 1) | 548 days | 12 (0) | 22 | 6,974,317 | 23,296,935 |
+| 2927 | round 1 | 7-12 (median 12) | 193 days | 19 (16) | 29 | 6,687,819 | 18,176,319 |
+| 4242 | master | 1-6 (median 2) | 467 days | 10 (0) | 18 | 5,075,273 | 18,842,390 |
+| 4242 | round 1 | 3-12 (median 11) | 226 days | 13 (5) | 19 | 4,356,218 | 16,667,892 |
+
+The cadence is what the change is for: about a round a game month in place of one to three a
+year. The longest gaps that remain are heartbeats whose time goes to laying track, station and
+airport surveys and road building, where no round runs. The trains followed: 3-7 more rail
+trains on every seed, most of the added ones bought inside a search. Company value fell on all
+three seeds (-26%, -4%, -14%) while AAAHogEx's moved by up to 5.1M between the arms of one seed,
+so these single matches do not measure the value effect. Double-track lines allowed 18-39 trains
+still ran 2-3; the next section asks why.
+
+FundTrain's borrowing path, end to end, on a copy of the owner's live save
+(`final-15805-0106.sav`, 1964-11, null driver, scratch HOME, 45000 ticks) with `test_borrow=1` in a
+scratch copy of the bot. Company 0 held about 736k, so without the hook every train was paid from
+the bank, as in every match before:
+
+```
+self-steward line 3 (IORE Wruntwood Iron Ore Mine - Sunfingburg Steel Mill): add_train (rating): 51% at the source, below 55%, ...; 1 -> 2 of 2
+borrowed 30000 for a train of IORE Wruntwood Iron Ore Mine - Sunfingburg Steel Mill (price 28429, bank was 5000; loan now 30000 of 300000, headroom 270000 for a line budget of 30000 and a quarter of 10487)
+rail line 3: added train 2652 (2 of 2)
+repaid 30000 of the loan (now 0)
+borrowed 30000 for a train of COAL Minnbridge Coal Mine - Dontford Power Station (price 28310, bank was 5000; loan now 30000 of 300000, headroom 270000 for a line budget of 30000 and a quarter of 11281)
+rail line 1: added train 2923 (2 of 2)
+repaid 30000 of the loan (now 0)
+```
+
+The borrow is the shortfall in whole loan steps (28,429 above a bank counted at the 5,000
+reserve: three steps of 10,000), the loan stays at a tenth of its limit, the headroom keeps the
+line budget and two quarters, and `RepaySurplus` repays it at the end of the same heartbeat. The
+bound refusing a borrow, from a two-year match of seed 2927 with `test_borrow=1`:
+
+```
+no loan for a train of COAL Gundhead Coal Mine - Bindingstone Bay Power Station: the loan would pass half its limit (loan 300000, wanted 300000 of 300000, line budget 30000, a quarter 5089)
+```
+
+## Trains from supply
+
+**The problem.** The merged analysis
+([`analysis-2026-11-23-why-prismatic-loses.md`](analysis-2026-11-23-why-prismatic-loses.md))
+found double-track lines allowed 33-39 trains running 2 ("2 of 33", "2 of 39", 1955-01-02).
+PrismaticAI ran 1.54 trains a line at 1960-01 and AAAHogEx 3.24. The steward's only growth rules
+were waiting cargo, which full-load orders hide, and the source rating. AAAHogEx sizes a line's
+trains from its production.
+
+**The change** (`steward.nut` `LineSupply`, `LineTrainTarget`; setting `steward_target`, default 1).
+A freight line's target is the trains that carry its monthly production over one round trip:
+production × round-trip days / (30 × a trainload), rounded up, at most `trains_max`. The
+production is the line's producer's plus that of every producer feeding its source station
+whose cargo someone carries. The round trip is the line's tiles both ways at the locomotive's top
+speed plus a week at the stations, the estimate `PlatformPlan` sizes platforms with. A line below
+its target that earns, and whose newest train has run 90 days, gets a batch up to the target, at
+most doubling. `ReconcileLines` buys a batch whole in a heartbeat, or four at a time in a round
+inside a search. The yearly state line logs the supply, the round trip and the target. Reviewed by
+Codex before it ran; two of its findings were adopted: settle on the newest train, so batches do
+not follow each other, and count only fed producers whose cargo is carried.
+
+**Measured** (single matches, as above; master e95a0e37aa against the branch with both changes,
+same binary, ten years):
+
+| seed | arm | rounds a year (1951-59) | longest gap | lines open | rail trains | trains a line | trains added (supply rule) | shrinks | value | AAAHogEx value |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 15805 | master | 1-12 (median 3) | 386 days | 10 | 19 | 1.9 | 13 (0) | 3 | 3,201,751 | 18,338,114 |
+| 15805 | branch | 11-12 | 83 days | 12 | 24 | 2.0 | 18 (15) | 6 | 3,168,025 | 20,754,068 |
+| 2927 | master | 1-4 (median 2) | 369 days | 14 | 29 | 2.1 | 15 (0) | 2 | 7,955,336 | 14,654,054 |
+| 2927 | branch | 3-12 (median 12) | 341 days | 12 | 26 | 2.2 | 17 (14) | 3 | 5,793,107 | 20,523,497 |
+| 4242 | master | 0-9 (median 2) | 609 days | 9 | 15 | 1.7 | 10 (0) | 4 | 3,552,135 | 20,515,903 |
+| 4242 | branch | 8-12 (median 12) | 165 days | 11 | 24 | 2.2 | 17 (11) | 5 | 3,691,446 | 18,716,831 |
+
+What it shows:
+
+- **The cadence holds:** about a round a month on all three seeds, the longest gap 83-341 days
+  against 369-609.
+- **More trains, a little deeper lines:** rail trains 19 → 24, 29 → 26 and 15 → 24 on lines that
+  also differ in number; trains a line 1.7-2.1 → 2.0-2.2. The supply rule made most of the adds.
+- **The ceiling is the producer, not the rule.** The targets it computed were small: a forest or
+  mine of 80-190 a month over a 59-121-day round trip in trainloads of 210 needs one or two trains
+  ("80 a month over a 101-day round trip in trainloads of 210 needs 2 of 2"; a double-track line
+  "supply 120 a month, round trip 76 days, target 2 trains" of 29 allowed). The double-track lines
+  stayed at 2-3 trains because their producers fill no more, so the waiting-cargo rule was not what
+  held them there.
+- **The line being built kept its money.** No match of either arm logged `still short of money`,
+  and `no second track` (track B refused as unaffordable or unfound) came 8, 11 and 8 times on
+  master and 11, 7 and 8 on the branch: a round inside track B's search did not starve it.
+- **The second train churned, and the shrink judged it too early.** The shrinks rose from 2-4 to
+  3-6 a match; line 6 of seed 15805 (WOOD, 80 a month) went 1 → 2 → 1 → 2. Of the branch's 13
+  shrinks, 10 sold a train bought during the year before, judged on its profit "last year", which
+  covered only the months it ran. The owner's game 21647 showed the same on 1955-09-01: lines 7 and
+  10 each sold the second train they had just got, both for "lost -1017". The rule waited
+  `STEWARD_JUDGE_AFTER_DAYS` (400) days, which does not cover a calendar year: a train bought in
+  July is 400 days old in August of the next year. Now a train's profit last year judges it only
+  once it ran all of last year (`JudgeAge`: at least the days since 1 January of last year), for
+  the shrink, the close and `LineEarns` alike. Rerun with that fix on seeds 15805 and 4242
+  (same settings and binary): one shrink a match, each of a train that ran all of the year before
+  it was judged on; rail trains 22 and 22, value 2,990,237 and 4,067,890 (master 3,201,751 and
+  3,552,135), longest gap between rounds 66 and 112 days.
+- **A close was decided on days of a year, too.** The close rule asked for a loss last year and
+  this year. In January "this year" is a few days of running costs before the first delivery: of
+  the 10 closes in the matches above (both arms), 4 came on day 1-12 of a year ("lost -2296 last
+  year and -13 this year", 1958-01-02, seed 2927). Now a line closes only when the trains that ran
+  all of last year lost money in it and the line still loses money after the first 90 days of this
+  year. The owner's game 21647 closed line 7 (OIL Runnley Oil Wells) on 1957-08-25, after its
+  second train had been sold on a partial year in 1955; whether its oil wells were declining the
+  Script API cannot tell from one month's production, so the rule reads the trains' money only.
+- **Value: no conclusion.** -1.1%, -27.2% and +3.9%, while AAAHogEx's own value moved by up to
+  5.9M between the arms of one seed. Single chaotic matches do not measure it, and no default here
+  changes on the strength of these numbers alone (rule `a-tuning-claim-needs-held-start-pairs`).
+
+**Open.** Trains a line is bounded by supply: deeper lines need more producers per station (the
+feeders of `growth.nut`) or shorter, more frequent trains, which keep the station rating up, as
+AAAHogEx's estimator sizes them. Whether the target should round to the nearest train, so a
+line that needs 1.3 trainloads a trip keeps one, has not been measured.
+
 ## The monitor: what is wrong, on the board
 
 `rail_monitor.rhai` runs a round every `MONITOR_EVERY_S` (default 60 s) and reports, worst first:

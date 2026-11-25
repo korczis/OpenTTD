@@ -624,6 +624,10 @@ fn main() {
     }
 }
 
+// The capital watch's tests (mcp-panel/rhai/capital_watch.rhai), a file of their own.
+#[cfg(test)]
+mod capital_watch_tests;
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -911,6 +915,42 @@ mod tests {
         "#);
         assert_eq!(v, vec![r#"["crashed", "lost", "unserved", "warning", "broken_down"]"#, "true", "true",
                            "OpenTTD panel-1 d rail: no problems"]);
+    }
+
+    /// A rail station of the company that no train of it calls at is reported, whatever the line
+    /// records say (a line that failed before its train logged none); a station a train calls at,
+    /// a road stop, another company's station and another company's train are not counted. The
+    /// report ranks it right after a line without a train, and the bot's own words for a train it
+    /// did not buy or a line it gave up are rail warnings (research/incident-2026-11-23-trainless-lines.md).
+    #[test]
+    fn rail_monitor_reports_rail_stations_no_train_calls_at() {
+        let v = rail(r#"
+            let st = [ #{ id: 1, owner: 0, name: "Mine", facilities: ["train"] },
+                       #{ id: 2, owner: 0, name: "Mill", facilities: ["train", "truck"] },
+                       #{ id: 8, owner: 0, name: "Woods", facilities: ["train"] },
+                       #{ id: 9, owner: 0, name: "Bus", facilities: ["bus"] },
+                       #{ id: 10, owner: 1, name: "Theirs", facilities: ["train"] },
+                       #{ id: 11, owner: 0, name: "Old", facilities: () } ];
+            let ours = train(5, 10, 0, 0, 4, 90, 0);
+            let theirs = train(6, 10, 0, 0, 4, 90, 0); theirs.owner = 1;
+            theirs.orders = [#{ type: "goto_station", destination: 8 }];
+            let t = rl::trainless_stations(0, st, [ours, theirs]);
+            let ids = []; for x in t { ids.push(x.id); }
+            let recs = rl::records_from_events(ev);
+            let lines = rl::lines_of(0, recs, [], stations, 64);
+            let warn = rl::rail_warnings([
+                #{ data: #{ text: "PrismaticAI: locomotive not bought: ERR_NOT_ENOUGH_CASH" } },
+                #{ data: #{ text: "PrismaticAI: rail line X is built but its first train was not bought (cash); it waits for one" } },
+                #{ data: #{ text: "PrismaticAI: rail line Y given up (no depot); its two stations are removed" } },
+                #{ data: #{ text: "PrismaticAI heartbeat: date=1" } } ]);
+            let r = rl::report(0, lines, [ours, theirs], warn, st);
+            let kinds = []; for x in r { kinds.push(x.kind); }
+            let none = rl::trainless_stations(0, [st[0], st[1]], [ours]);
+            [`${ids}`, t[0].text, warn.len(), `${kinds}`, none.len(), rl::problem_rank("nope"),
+             rl::digest("p", "d", r, 1).contains("1 trainless_station")]
+        "#);
+        assert_eq!(v, vec!["[8]", "rail station 8 Woods has no train calling", "3",
+                           r#"["unserved", "trainless_station", "warning", "warning", "warning"]"#, "0", "8", "true"]);
     }
 
     /// The advice the monitor reacts to (advice_lib.rhai), on the rail fixture: news.shown events

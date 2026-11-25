@@ -98,11 +98,56 @@
     const rest = withoutKey(el.dataset.failure, key);
     if (rest.length) el.dataset.failure = rest.join('\n'); else delete el.dataset.failure;
   }
+  /** The owner's sign-in, a Flowbite modal: what an owner's route (Approve, auto-approve on) asks for
+   *  instead of a raw 401. `file` is where mcp-panel keeps the secret (it names it when it starts). */
+  function signInHtml(file) {
+    return `<div id="owner-signin" role="dialog" aria-modal="true" aria-labelledby="owner-signin-title" tabindex="-1" class="fixed inset-0 z-50 flex items-center justify-center w-full h-full p-4 bg-gray-900/50 dark:bg-gray-900/80">
+  <div class="relative w-full max-w-md bg-white rounded-lg shadow-sm dark:bg-gray-700">
+    <div class="flex items-center justify-between p-4 border-b border-gray-200 rounded-t dark:border-gray-600">
+      <h3 id="owner-signin-title" class="text-lg font-semibold text-gray-900 dark:text-white">Owner sign-in</h3>
+      <button type="button" data-signin-cancel aria-label="Close" class="inline-flex items-center justify-center w-8 h-8 text-sm text-gray-400 bg-transparent rounded-lg hover:bg-gray-200 hover:text-gray-900 dark:hover:bg-gray-600 dark:hover:text-white">&times;</button>
+    </div>
+    <form id="owner-signin-form" class="p-4 space-y-4">
+      <p class="text-sm text-gray-500 dark:text-gray-400">Approving and auto-approve are the owner's. Paste the owner secret from <code class="font-mono text-gray-900 break-all dark:text-white">${esc(file || '~/.config/prismatic/panel-owner-secret')}</code>; this browser then stays signed in, across panel restarts too.</p>
+      <div><label for="owner-secret" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Owner secret</label>
+        <input type="password" id="owner-secret" name="secret" autocomplete="current-password" required class="block w-full ${UI.input}"></div>
+      <p id="owner-signin-error" role="alert" class="hidden text-sm font-medium text-red-600 dark:text-red-500"></p>
+      <div class="flex justify-end gap-2"><button type="button" data-signin-cancel class="${UI.secondary}">Cancel</button><button type="submit" class="${UI.primary}">Sign in</button></div>
+    </form>
+  </div>
+</div>`;
+  }
+  let signing = null;
+  /** Ask the owner to sign in: true once POST /api/owner/login took the secret (the panel then keeps
+   *  this browser's HttpOnly cookie), false when the owner closed the box. One box at a time. */
+  function signIn(file) {
+    if (signing) return signing;
+    signing = new Promise((resolve) => {
+      document.body.insertAdjacentHTML('beforeend', signInHtml(file));
+      const box = document.getElementById('owner-signin');
+      const input = document.getElementById('owner-secret');
+      const error = document.getElementById('owner-signin-error');
+      const done = (ok) => { box.remove(); signing = null; resolve(ok); };
+      box.querySelectorAll('[data-signin-cancel]').forEach((b) => { b.onclick = () => done(false); });
+      box.onkeydown = (e) => { if (e.key === 'Escape') done(false); };
+      document.getElementById('owner-signin-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const r = await fetch('/api/owner/login', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret: input.value }) }).catch(() => null);
+        if (r && r.ok) return done(true);
+        error.textContent = r ? ((await r.json().catch(() => ({}))).error || `${r.status} ${r.statusText}`) : 'the panel is unreachable';
+        error.classList.remove('hidden');
+        input.select();
+      };
+      input.focus();
+    });
+    return signing;
+  }
   /** The one API client: GET without a body, POST JSON with one. Answers the parsed body (or {status,
    *  text} for a non-JSON one) with `ok`; a non-2xx answer or a network failure is shown to the person
    *  (a toast, or the element named by `shownIn`, see failed()), so no control fails silently: a 403
-   *  only the console saw is how every button of a page opened as localhost went dead (2026-11-22). */
-  async function api(path, body, { shownIn } = {}) {
+   *  only the console saw is how every button of a page opened as localhost went dead (2026-11-22).
+   *  An owner's route refused for want of the owner secret asks the owner to sign in, then is sent once more. */
+  async function api(path, body, { shownIn, retried } = {}) {
     const opts = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
     const where = `${opts.method || 'GET'} ${path.split('?')[0]}`;
     let r;
@@ -113,6 +158,9 @@
     const text = await r.text();
     let out;
     try { out = JSON.parse(text); } catch { out = { status: r.status, text }; }
+    if (r.status === 401 && out && out.refused === 'owner_secret' && !retried && typeof document !== 'undefined' && await signIn(out.secret_file)) {
+      return api(path, body, { shownIn, retried: true });
+    }
     if (!r.ok) failed(shownIn, `${where}: ${r.status} ${(out && (out.error || out.text)) || r.statusText}`);
     else succeeded(shownIn, where);
     // `ok` and the HTTP `status` ride along unlisted (a body's own `status`, a debug session's, wins).

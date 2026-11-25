@@ -65,7 +65,10 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
 | `POST /api/approve` | `{"id"}` | the owner's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it, 504 when no decision came |
 | `POST /api/deny` | `{"id"}` | withdraw a pending decision through the same core (`prismatic_mcp deny <id>`): it enacts nothing, so no owner secret is needed. 200 with the approval now `denied`, 404 for one the server does not hold, 409 for one not pending, 504 when the server did not mark it denied. The home page's Deny button calls it |
+| `POST /api/approvers` | `{"add": <client id>}`, `{"remove": "<key prefix>"}` or `{}` | the owner says who may approve from inside the game (`prismatic_mcp approvers add\|remove`, or the list); owner secret, else 401; 422 when the game printed a refusal. `/api/console` refuses every `approvers` line |
 | `POST /api/auto-approve` | `{"on": bool}` | `on: true` needs the owner secret (401 without it); `on: false` is open to anyone |
+| `POST /api/owner/login` | `{"secret"}` | the owner signs this browser in: the secret (from its file, see [the owner secret](#approval-is-bound-to-the-owner)) sets the HttpOnly cookie `mcp_owner_<port>` and answers 204; a wrong one 401 after a delay, five within a minute 429 |
+| `POST /api/owner/logout` | | clears that cookie; 204 |
 | `POST /api/rhai` | `{"script"}` | a Rhai script's output |
 | `POST /api/rhai/stream` | `{"script"}` | the same, streamed line by line (SSE `out`, `err`, `exit`) |
 | `GET /api/scripts`, `GET /api/script?name=` | | the library ($MCP_RHAI_PATH, else `tools/research/mcp-panel/rhai`), one script with its parse verdict |
@@ -1649,6 +1652,11 @@ because each of them runs lines the panel cannot read first. The panel splits a 
 character, so a newline inside a value (an AI's settings, a content query) cannot add a second
 command. Approvals go through `POST /api/approve` with the owner secret, or through the game's own
 console. Withdrawing your own request (`deny`) is still allowed. `mcp-panel-check` tests both cases.
+The same refusal covers who may approve in the game (`approvers`, now `POST /api/approvers` with the
+owner secret), the approval core's standing rules (`rule`, `rules`), its channel and result markers
+(`--via`, `--nonce`: the core trusts a stdin line without `--via` as the console's own) and `deny
+all`, in every spelling `console_word` accepts; Rhai's `console()` goes through `/api/console`, so
+it is refused the same.
 
 ### The panel's Approve and Deny, in Chrome
 
@@ -1677,29 +1685,46 @@ pending request (red-team residual risk 3). Approval is now bound to the owner i
   - Auto-approve passes them over (`auto_approve_once`), `--auto-approve` included.
   - The request stays pending for the console.
   - The C++ console path is unchanged.
-- **The owner secret.** `mcp-panel` makes a fresh secret at start from 32 bytes of `/dev/urandom`.
-  It prints the secret once, on its own stdout: `mcp-panel: owner secret <hex>`.
+- **The owner secret.** It lives in one file: `--owner-secret-file FILE`, else
+  `$PRISMATIC_PANEL_OWNER_SECRET_FILE`, else `~/.config/prismatic/panel-owner-secret`
+  (`owner_secret_path`). The first start makes it from 32 bytes of `/dev/urandom`, mode 0600 in a
+  0700 directory; every later start reads the same secret, so a signed-in browser stays signed in
+  across restarts and redeploys (`load_owner_secret`).
+  - A file others may read (any group or other permission bit), or one that holds no secret, stops
+    the panel at start with the `chmod 600` to type; it never serves a weak or shared secret.
+  - The panel prints where the secret lives and the page's address, never the secret:
+    `mcp-panel: owner secret in <file> (sign in once at http://127.0.0.1:<port>/ ...)`. Its stdout
+    ends up in logs (`~/Documents/OpenTTD/coplay-stack.log`) that the secret must not reach.
+  - `--ephemeral-owner-secret` makes a one-shot secret kept nowhere: nobody signs in over HTTP, and
+    the owner approves at the game's console (a battle run, a disposable test).
   - The secret never goes to the bus, the store, the event feed or any answer. Comparisons run in
     constant time (`web_access::same`).
   - `POST /api/approve`, and `POST /api/auto-approve` with `on: true`, need it, else 401. Switching
     off stays open.
   - A client that is not the page sends it as `X-Panel-Owner: <secret>`.
-  - The page needs no change: open it once as `http://127.0.0.1:<port>/?owner=<secret>`. The
-    answer sets the HttpOnly, `SameSite=Strict` cookie `mcp_owner_<port>`, which the one API
-    client sends with every same-origin request. Its Approve button and auto-approve toggle then
-    work as before.
-  - Opened without the secret, those two controls answer 401, and the page shows the reason. When
-    `/dev/urandom` cannot be read the panel has no secret, and approval happens only at the
+  - **The page signs the owner in.** An owner's route answering 401 `refused: "owner_secret"`
+    makes the shell's one API client (`static/shell.js` `api`) open the "Owner sign-in" box instead
+    of a raw error. It names the secret's file (the answer's `secret_file`) and asks for the secret
+    in a password field. `POST /api/owner/login {secret}` sets the HttpOnly, `SameSite=Strict`
+    cookie `mcp_owner_<port>`, kept a year, and answers 204; the refused request is then sent once
+    more. A wrong secret answers 401 after a second's delay and says nothing of its length or
+    prefix; five wrong ones within a minute answer 429 for the rest of it (`owner_login`).
+    `POST /api/owner/logout` clears the cookie. Cancel (or Escape) leaves the refusal shown.
+  - A launcher may still open the page once as `http://127.0.0.1:<port>/?owner=<secret>` (mcp-e2e
+    reads the secret from its file and does): the answer sets the same cookie.
+  - When `/dev/urandom` cannot be read the panel has no secret, and approval happens only at the
     console (fails closed).
 - **Scripts never approve.** The Rhai `approve(id)` and `auto_approve(true)` raise an error that
   names the console command. They hold no secret, so `POST /api/rhai` cannot approve through them.
 
 What this does not stop, measured honestly:
 
-- **A same-user process can still act as the owner.** Whoever reads the panel's stdout holds the
-  secret: a launcher that captures it, as `mcp-decision-check` does for its own disposable stack,
-  or a process that reads a captured log or the browser's cookie store. The secret raises the bar
-  from "any loopback request" to "a secret only the panel's launcher saw". It is not a sandbox
+- **A same-user process can still act as the owner.** Whoever reads the secret's file holds the
+  secret: a launcher that reads it, as `mcp-decision-check` does for its own disposable stack (a
+  file of that run, through `$PRISMATIC_PANEL_OWNER_SECRET_FILE`), or a process that reads the
+  browser's cookie store. Agents are not given it: it is in no log, on no stdout, in no answer, and
+  the file is 0600. The secret raises the bar from "any loopback request" to "a secret only the
+  owner's account reads". It is not a sandbox
   between processes of one user. The guarantee is the owner-only set, which no HTTP caller can
   approve.
 - **Armed UI input approves nothing** (ADR 0038). A process armed with `mcp-e2e --arm-input` can
@@ -1712,7 +1737,7 @@ What this does not stop, measured honestly:
   game's console runs then, with no caller resubmitting it.
 
 `cargo test --release --offline --bin mcp-panel` covers every refusal (`owner_only_approvals_are_refused_by_every_panel_channel`,
-`approving_and_auto_approve_on_need_the_owner_secret`, `console_lines_are_read_as_the_game_reads_them_and_no_spelling_approves`,
+`approving_and_auto_approve_on_need_the_owner_secret`, `the_owner_secret_lives_in_one_0600_file_and_survives_a_restart`, `the_owner_signs_in_with_the_secret_and_guessing_is_refused_then_slowed`, `the_sign_in_routes_set_and_clear_the_owner_cookie`, `console_lines_are_read_as_the_game_reads_them_and_no_spelling_approves`,
 `the_console_writer_sends_one_line_only`). `--bin mcp-rhai` covers the script refusal
 (`a_script_cannot_approve_or_switch_auto_approve_on`).
 

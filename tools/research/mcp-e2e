@@ -37,6 +37,13 @@
 #                                bot instead of watching: the server opens it with `research_coplay
 #                                allow`, the client joins it, and the co-play services start:
 #                                $MCP_SERVICES, default "arena replan watchdog"; research/coplay.md)]
+#                               [--approval-deadline DAYS[:keep|approve] (the operator's standing verdict for an approval
+#                                nobody answers within DAYS game days, read by the server at start as
+#                                PRISMATIC_MCP_APPROVAL_DEADLINE; default 30:keep; research/mechanisms/approval-gate.md)]
+#                               [--lineup "AI,AI,..." (the other companies of a new world, each started with
+#                                the server's `start_ai` once the bot's company exists; a name is an AI's
+#                                own name as `list_ai` shows it; with --lineup the arena is not among the
+#                                default co-play services, since the lineup is given; research/coplay.md)]
 #                               [--load FILE (start from a savegame instead of a new world: its AI
 #                                companies play on and no new bot is started; with --coplay the
 #                                client joins the bot company the game reports; research/coplay.md)]
@@ -51,7 +58,7 @@ BIN="$ROOT_DIR/build-gate-research/openttd"
 PANEL_PORT=8800 MCP_PORT=8731 GAME_PORT=3979 SEED="$RANDOM"
 GUI=1 BROWSER=1 AUTO=() WINDOW="" DIRECTOR=1 VIEW_PORT="" INSTANCES=1 EXTRA_PIDS=() ARM_INPUT=0 PLAN=() NULL_CLIENT=0
 PANEL_IMPL="${MCP_PANEL:-rust}"
-ASK_COUNTDOWN=10 GFX=OpenGFX COPLAY=0 LOAD=() ENV_ONLY=0
+ASK_COUNTDOWN=10 GFX=OpenGFX COPLAY=0 LOAD=() ENV_ONLY=0 LINEUP=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -74,6 +81,9 @@ while [[ $# -gt 0 ]]; do
     --ask-countdown) ASK_COUNTDOWN="${2:?--ask-countdown needs seconds (0 = off)}"; shift 2 ;;
     --gfx) GFX="${2:?--gfx needs a base graphics set name}"; shift 2 ;;
     --coplay) COPLAY=1; shift ;;
+    --lineup) LINEUP="${2:?--lineup needs a comma-separated list of AI names}"; shift 2 ;;
+    --approval-deadline) [[ "${2:-}" =~ ^[0-9]{1,4}(:(keep|approve))?$ ]] || { echo "mcp-e2e: --approval-deadline takes <game days>[:keep|approve]" >&2; exit 2; }
+                         export PRISMATIC_MCP_APPROVAL_DEADLINE="$2"; shift 2 ;;
     --load) [[ -f "${2:?--load needs a savegame file}" ]] || { echo "mcp-e2e: no savegame at $2" >&2; exit 2; }
             LOAD=(--load "$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"); shift 2 ;;
     --env) ENV_ONLY=1; shift ;;
@@ -243,7 +253,35 @@ for ((n = 2; n <= INSTANCES; n++)); do
   EXTRA_PIDS+=($!)
   echo "==> instance $n of $INSTANCES starting (log $TMP/instance-$n.log)"
 done
-[[ "$BROWSER" == 1 ]] && open "$URL"
+# register_owner_approver URL CLIENT_ID SECRET_FILE: makes the owner's client an in-game approver
+# through the panel's owner route POST /api/approvers (/api/console refuses every approvers line,
+# #258). The secret comes from the owner's own 0600 file; curl reads the header from stdin, so the
+# secret is never in a command line, a process list or this script's output.
+# Tested by tools/research/test_mcp_e2e_approver.py, which runs this function as written here.
+register_owner_approver() {
+  local url="$1" id="$2" file="$3" reg
+  if [[ -r "$file" && -s "$file" ]]; then
+    reg="$(printf 'X-Panel-Owner: %s\n' "$(tr -d '[:space:]' < "$file")" \
+      | curl -s -X POST -H @- -H 'Content-Type: application/json' -d "{\"add\":$id}" "$url/api/approvers" \
+      | jq -r '.error // ([.output[]? | select(test("approver"))] | last) // empty' 2>/dev/null || true)"
+    echo "==> approver: the owner's client #$id (${reg:-no answer})"
+  else
+    echo "mcp-e2e: --coplay: no owner secret file ($file), so the owner's client is no approver; approve in the panel" >&2
+  fi
+}
+
+# The owner's browser signs in by opening the panel with the owner secret once (the cookie it sets
+# is what Approve and auto-approve check). The secret is read from the owner's own 0600 file, which
+# mcp-panel keeps stable across restarts, and never printed; without the file the plain URL opens.
+OWNER_SECRET_FILE="${PRISMATIC_PANEL_OWNER_SECRET_FILE:-$HOME/.config/prismatic/panel-owner-secret}"
+if [[ "$BROWSER" == 1 ]]; then
+  if [[ -r "$OWNER_SECRET_FILE" && -s "$OWNER_SECRET_FILE" ]]; then
+    open "$URL/?owner=$(tr -d '[:space:]' < "$OWNER_SECRET_FILE")"
+    echo "==> the panel opened in your browser, signed in as the owner (secret from $OWNER_SECRET_FILE)"
+  else
+    open "$URL"
+  fi
+fi
 
 if [[ "$GUI" == 1 ]]; then
   # Full screen at the display's size unless --window WxH asks for a window.
@@ -330,9 +368,8 @@ if [[ "$GUI" == 1 ]]; then
       sleep 1
     done
     if [[ -n "$OWNER_ID" ]]; then
-      REG="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"command\":\"prismatic_mcp approvers add $OWNER_ID\"}" "$URL/api/console" \
-        | jq -r '[.output[]? | select(test("approver"))] | last // empty' 2>/dev/null || true)"
-      echo "==> approver: the owner's client #$OWNER_ID (${REG:-no answer})"
+      # /api/console refuses every approvers line (#258): the owner's route registers it.
+      register_owner_approver "$URL" "$OWNER_ID" "$OWNER_SECRET_FILE"
     else
       echo "mcp-e2e: --coplay: the owner's client did not join within 60 s; no approver registered (approve in the panel)" >&2
     fi
@@ -399,11 +436,34 @@ if [[ "$GUI" == 0 && "$NULL_CLIENT" == 1 ]]; then
   GUI_PID=$!
 fi
 
+# The lineup of a new world (--lineup): every other company's AI, started after the bot's own
+# company exists, so the bot keeps the first company. A loaded game keeps the AIs it saved.
+if [[ -n "$LINEUP" && ${#LOAD[@]} -eq 0 ]]; then
+  for ((i = 0; i < 300; i++)); do curl -s "$URL/api/bots" | jq -e '.running | length >= 1' >/dev/null 2>&1 && break; sleep 1; done
+  IFS=',' read -r -a LINEUP_AIS <<<"$LINEUP"
+  for ai in "${LINEUP_AIS[@]}"; do
+    ai="$(sed -E 's/^ +| +$//g' <<<"$ai")"
+    [[ -n "$ai" ]] || continue
+    before="$(curl -s "$URL/api/bots" | jq '.running | length' 2>/dev/null || echo 0)"
+    curl -s -X POST -H 'Content-Type: application/json' -d "$(jq -nc --arg c "start_ai \"$ai\"" '{command:$c}')" "$URL/api/console" >/dev/null || true
+    started=0
+    for ((j = 0; j < 30; j++)); do
+      now="$(curl -s "$URL/api/bots" | jq '.running | length' 2>/dev/null || echo 0)"
+      if [[ "$now" -gt "$before" ]]; then started=1; break; fi
+      sleep 1
+    done
+    if [[ "$started" == 1 ]]; then echo "==> lineup: $ai started"; else echo "mcp-e2e: lineup: $ai did not start (not installed? list_ai)" >&2; fi
+  done
+fi
+
 # The services a co-play game runs (research/coplay.md "Services"): the arena fills the other
-# companies, replan re-plans the bot every game month, the watchdog says when a company stalls and
-# why. Started here, never by hand; MCP_SERVICES names another list (empty: none).
+# companies (unless --lineup names them), replan re-plans the bot every game month, the watchdog
+# says when a company stalls and why. Started here, never by hand; MCP_SERVICES names another list
+# (empty: none).
+DEFAULT_SERVICES="arena replan watchdog"
+[[ -n "$LINEUP" || ${#LOAD[@]} -gt 0 ]] && DEFAULT_SERVICES="replan watchdog build_audit rail_monitor"
 if [[ "$COPLAY" == 1 ]]; then
-  for svc in ${MCP_SERVICES-arena replan watchdog}; do
+  for svc in ${MCP_SERVICES-$DEFAULT_SERVICES}; do
     out="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"name\":\"$svc\"}" "$URL/api/services/start" || true)"
     if grep -q '"running": true' <<<"$out"; then echo "==> service $svc started"; else echo "mcp-e2e: service $svc did not start: ${out:-no answer}" >&2; fi
   done

@@ -7,6 +7,10 @@
 //!        mcp-plan --track N [--yards N] ...   (price the N best rail lines of each list on the real map,
 //!                                               src/linecost.rs; --yards prices the N best freight yards)
 //!        mcp-plan --calibrate ...  (real against predicted profit per line; the panel stores the reading)
+//!        mcp-plan --for 0,6 ...   (plan for these companies: a freight line from a producer where any
+//!                                  other company has a rail station is left out, as the bot refuses
+//!                                  it; an empty list plans for a company not started yet; `claims`
+//!                                  says which producers and why, src/cargo.rs `rail_claims`)
 //!        mcp-plan --defaults   (print the default parameters)
 //!        mcp-plan --capture DIR ...   (also write every openttd:// read, envelope and all, with its sha256,
 //!                                      game tick and date, to DIR/capture.json; I0096) -- all at one
@@ -338,6 +342,12 @@ fn mcp_rpc(endpoint: &str, token: &str, method: &str, params: serde_json::Value)
         .into_json().map_err(|e| e.to_string())
 }
 
+/// `--for`'s company ids: whole numbers separated by commas, none for a company not started yet.
+fn companies(text: &str) -> Result<Vec<i64>, String> {
+    text.split(',').map(str::trim).filter(|p| !p.is_empty())
+        .map(|p| p.parse::<i64>().map_err(|_| format!("{p} is no company id (ids separated by commas)"))).collect()
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let (mut panel, mut limit) = ("http://127.0.0.1:8800".to_string(), 20usize);
@@ -350,6 +360,7 @@ fn main() {
     let mut calibrate_too = false;
     let (mut capture_dir, mut snapshot_dir): (Option<String>, Option<String>) = (None, None);
     let mut catalogue: Option<String> = None;
+    let mut plan_for: Option<Vec<i64>> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--capture" => capture_dir = args.next(),
@@ -362,13 +373,20 @@ fn main() {
             "--track" => track = args.next().and_then(|v| v.parse().ok()).unwrap_or(3),
             "--yards" => yards_n = args.next().and_then(|v| v.parse().ok()).unwrap_or(2),
             "--calibrate" => calibrate_too = true,
+            "--for" => match companies(&args.next().unwrap_or_default()) {
+                Ok(c) => plan_for = Some(c),
+                Err(e) => {
+                    eprintln!("mcp-plan: --for: {e}");
+                    std::process::exit(2);
+                }
+            },
             "--record" => {
                 eprintln!("mcp-plan: --record is gone (I0082): POST /api/calibration on a panel stores the reading as plan.calibration");
                 std::process::exit(2);
             }
             "--limit" => limit = args.next().and_then(|v| v.parse().ok()).unwrap_or(20),
             "-h" | "--help" => {
-                println!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
+                println!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--for IDS] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
                 return;
             }
             "--defaults" => {
@@ -383,7 +401,7 @@ fn main() {
                 }
             },
             _ => {
-                eprintln!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
+                eprintln!("usage: mcp-plan [--panel URL | --token FILE] [--limit N] [--params JSON] [--invest | --invest-inputs] [--track N [--yards N]] [--calibrate] [--for IDS] [--capture DIR | --snapshot DIR] [--catalogue FILE] [--defaults]");
                 std::process::exit(2);
             }
         }
@@ -412,7 +430,7 @@ fn main() {
         }
         let read = |name: &str| src.resource(name);
         let opts = plan_pipeline::Options { limit, params: params.clone(), track, yards: yards_n,
-                                            calibrate: calibrate_too, invest: invest_too, invest_inputs };
+                                            calibrate: calibrate_too, invest: invest_too, invest_inputs, plan_for: plan_for.clone() };
         let mut out = plan_pipeline::run(&read, &opts, &kernels)?;
         if invest_inputs { return Ok(out); }
         // Which runner answered the kernel calls, only when the one-serve switch is on (I0086), so
@@ -479,6 +497,14 @@ mod tests {
         assert_eq!(lc["kernel"], serde_json::Value::Null);
         assert_eq!(solver_of(&k, linecost::RAIL_LINE_PRICE), "no kernel (rail-line-price unmatched, see kernels)");
         assert_eq!(k.record()["matches"][0]["refusal"]["code"], "kernel_expired");
+    }
+
+    /// --for: company ids separated by commas; an empty list is a company not started yet.
+    #[test]
+    fn for_names_the_companies_a_plan_is_for() {
+        assert_eq!(companies("0, 6,"), Ok(vec![0, 6]));
+        assert_eq!(companies(""), Ok(vec![]));
+        assert!(companies("0,x").unwrap_err().contains("x is no company id"));
     }
 
     fn temp(tag: &str) -> std::path::PathBuf {

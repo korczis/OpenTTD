@@ -18,6 +18,12 @@
 // change adds runs in the page (Chrome's own JS coverage), and the list redrawn from the server
 // holds only #7.
 //
+// Then the owner's sign-in, in a browser that holds no cookie: the secret is in its 0600 file and
+// never on the panel's stdout; switching auto-approve on opens the "Owner sign-in" box, Escape
+// closes it and the switch stays off, a wrong secret is refused in the box, the right one signs in
+// and the switch goes on. A reload keeps the sign-in, and so does a restart of the panel on the same
+// secret file; signing out asks again. Every changed line of static/shell.js runs in these pages.
+//
 // e2e-covers: panel /
 //
 // Usage: tools/research/mcp-approval-ui-check [--panel-bin <mcp-panel>] [--base <git ref>]
@@ -52,11 +58,18 @@ const until = async (pred, ms = 20000) => { for (let t = 0; t < ms; t += 200) { 
 const [panelPort, mcpPort, gamePort] = [await freePort(), await freePort(), await freePort()];
 const base = `http://127.0.0.1:${panelPort}`;
 const store = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || '/tmp'), 'mcp-approval-ui-'));
-const panel = spawn(bin, ['--bin', path.join(here, 'mcp-fake-game'), '--panel-port', String(panelPort), '--mcp-port', String(mcpPort),
-  '--game-port', String(gamePort), '--no-plan-bot'], { env: { ...process.env, PRISMATIC_STORE_DIR: store }, stdio: ['ignore', 'pipe', 'pipe'] });
+// The owner secret lives in a file of this run, never in the person's own ~/.config.
+const secretFile = path.join(store, 'owner', 'panel-owner-secret');
 let out = '';
-panel.stdout.on('data', (d) => { out += d; });
-panel.stderr.on('data', (d) => { out += d; });
+/** One mcp-panel on this run's ports and secret file (a second call is the restart). */
+const startPanel = () => {
+  const child = spawn(bin, ['--bin', path.join(here, 'mcp-fake-game'), '--panel-port', String(panelPort), '--mcp-port', String(mcpPort),
+    '--game-port', String(gamePort), '--no-plan-bot'], { env: { ...process.env, PRISMATIC_STORE_DIR: store, PRISMATIC_PANEL_OWNER_SECRET_FILE: secretFile }, stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { out += d; });
+  return child;
+};
+let panel = startPanel();
 const stop = () => { if (panel.exitCode === null && panel.signalCode === null) panel.kill('SIGTERM'); };
 /** Stop the panel and wait until it is gone (it stops its game first); SIGKILL after 10 s. */
 const stopAndWait = async () => {
@@ -79,8 +92,11 @@ const queue = async () => ((await get('/api/resources/approvals')).data || {}).a
 
 let browser;
 try {
-  const secret = await until(async () => /owner secret (\S+)/.test(out)) && out.match(/owner secret (\S+)/)[1];
-  check('mcp-panel starts the stand-in game and prints its owner secret', !!secret);
+  const named = await until(async () => out.includes(`owner secret in ${secretFile}`));
+  const secret = fs.existsSync(secretFile) ? fs.readFileSync(secretFile, 'utf8').trim() : '';
+  check('mcp-panel keeps its owner secret in its 0600 file and names the file', named && secret.length === 64
+    && (fs.statSync(secretFile).mode & 0o777) === 0o600, secretFile);
+  check('the owner secret is not on the panel\'s stdout', !!secret && !out.includes(secret));
   check('its MCP comes up with the seeded queue of 7', await until(async () => (await get('/api/status')).pending.length === 7));
 
   browser = await chromium.launch({ executablePath: CHROME, headless: true });
@@ -148,11 +164,78 @@ try {
   check('the page threw no error', errors.length === 0, errors.join('; '));
 
   // Every line this change adds to static/app.js ran in the page (V8 block coverage, by byte).
-  const entry = (await page.coverage.stopJSCoverage()).find((e) => e.url.endsWith('/static/app.js'));
+  const covered = await page.coverage.stopJSCoverage();
+  const entry = covered.find((e) => e.url.endsWith('/static/app.js'));
   const changed = changedLines('tools/research/mcp-panel/static/app.js');
   const missed = entry ? changed.filter((n) => !lineRan(entry, n)) : changed;
   check(`every changed line of static/app.js ran in Chrome (${changed.length} line(s))`, !!entry && missed.length === 0,
     missed.map((n) => `app.js:${n}`).join(', '));
+
+  // The owner's sign-in, in a browser that holds no cookie.
+  const fresh = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const owner = await fresh.newPage();
+  owner.on('pageerror', (e) => errors.push(e.message));
+  await owner.coverage.startJSCoverage({ resetOnNavigation: false });
+  // V8 drops a page's coverage when it navigates away, so it is taken before every reload.
+  const signed = [];
+  const snapshot = async () => { signed.push(...await owner.coverage.stopJSCoverage()); await owner.coverage.startJSCoverage({ resetOnNavigation: false }); };
+  const box = owner.locator('#owner-signin');
+  const autoOn = async () => (await get('/api/status')).auto_approve === true;
+  await owner.goto(base + '/', { waitUntil: 'load' });
+  await owner.locator('#auto').waitFor({ state: 'attached', timeout: 15000 });
+  await owner.locator('label:has(#auto)').click();
+  check('switching auto-approve on without the secret opens the Owner sign-in box', await box.waitFor({ timeout: 10000 }).then(() => true).catch(() => false));
+  check('the box names the secret\'s file', (await box.locator('code').textContent()) === secretFile);
+  await owner.keyboard.press('Escape');
+  check('Escape closes the box and auto-approve stays off', await until(async () => (await box.count()) === 0) && !(await autoOn()));
+  check('the refusal is shown once the box is closed', await owner.locator('[data-toast="red"]').filter({ hasText: '/api/auto-approve: 401' }).first()
+    .waitFor({ timeout: 10000 }).then(() => true).catch(() => false));
+  await owner.locator('label:has(#auto)').click();
+  await box.waitFor({ timeout: 10000 });
+  await owner.locator('#owner-secret').fill('not-the-secret');
+  await owner.locator('#owner-signin-form button[type="submit"]').click();
+  check('a wrong secret is refused in the box', await owner.locator('#owner-signin-error').filter({ hasText: 'that is not the owner secret' })
+    .waitFor({ timeout: 10000 }).then(() => true).catch(() => false) && !(await autoOn()));
+  await owner.locator('#owner-secret').fill(secret);
+  await owner.locator('#owner-signin-form button[type="submit"]').click();
+  check('the right secret signs in and the switch goes on', await until(async () => (await box.count()) === 0 && autoOn()));
+  const cookie = (await fresh.cookies(base)).find((c) => c.name === `mcp_owner_${panelPort}`);
+  check('the sign-in cookie is HttpOnly, SameSite=Strict and outlives the browser session', !!cookie && cookie.httpOnly && cookie.sameSite === 'Strict' && cookie.expires > Date.now() / 1000 + 300 * 86400);
+  const toggleWithoutBox = async (want) => {
+    await owner.locator('label:has(#auto)').click();
+    const asked = await box.waitFor({ timeout: 2000 }).then(() => true).catch(() => false);
+    if (asked) return false;
+    return until(async () => (await autoOn()) === want);
+  };
+  check('switching off is open', await toggleWithoutBox(false));
+  await snapshot();
+  await owner.reload({ waitUntil: 'load' });
+  await owner.locator('#auto').waitFor({ state: 'attached', timeout: 15000 });
+  check('after a reload the owner is still signed in', await toggleWithoutBox(true));
+  // The panel restarts on the same secret file: the browser's cookie still holds.
+  await stopAndWait();
+  panel = startPanel();
+  check('the panel comes back after its restart', await until(async () => (await get('/api/status')).mcp_up === true, 30000));
+  await snapshot();
+  await owner.reload({ waitUntil: 'load' });
+  await owner.locator('#auto').waitFor({ state: 'attached', timeout: 15000 });
+  check('after the panel\'s restart the owner is still signed in', await toggleWithoutBox(true));
+  check('the restart kept the same secret in the same file', fs.readFileSync(secretFile, 'utf8').trim() === secret && !out.includes(secret));
+  check('switching off again needs no secret', await toggleWithoutBox(false));
+  // raw fetch past the kit is the test's own sign-out, as a person's other tab would send it
+  const logout = await owner.evaluate(async () => (await fetch('/api/owner/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status);
+  await owner.locator('label:has(#auto)').click();
+  check('after signing out the box asks again', logout === 204 && await box.waitFor({ timeout: 10000 }).then(() => true).catch(() => false));
+  await owner.locator('[data-signin-cancel]').first().click();
+  check('the close button closes it too', await until(async () => (await box.count()) === 0));
+  signed.push(...await owner.coverage.stopJSCoverage());
+  check('the sign-in pages threw no error', errors.length === 0, errors.join('; '));
+  // Every line this change adds to static/shell.js ran in one of the pages.
+  const shells = [...covered, ...signed].filter((e) => e.url.endsWith('/static/shell.js'));
+  const changedShell = changedLines('tools/research/mcp-panel/static/shell.js');
+  const missedShell = changedShell.filter((n) => !shells.some((e) => lineRan(e, n)));
+  check(`every changed line of static/shell.js ran in Chrome (${changedShell.length} line(s))`, shells.length > 0 && missedShell.length === 0,
+    missedShell.map((n) => `shell.js:${n}`).join(', '));
 } catch (e) {
   check('the check ran to its end', false, e.stack || String(e));
 } finally {
