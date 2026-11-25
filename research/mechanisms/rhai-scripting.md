@@ -70,6 +70,7 @@ The scripts in the library today:
 | [`build_audit.rhai`](../../tools/research/mcp-panel/rhai/build_audit.rhai) | once a game month judges every company's construction (depots without an exit, duplicate depots and stations, drive-through against bay stops) and keeps it in the shared key `audit.<company>` and the store's view `build_audit`; one chat line for a new defect of the owner's company ([Hub](../mcp-hub.md#no-duplicate-buildings)) |
 | [`replan.rhai`](../../tools/research/mcp-panel/rhai/replan.rhai) | re-plans the running bot every game month: trend, competition, the planner's portfolio, a modelled switch, approval-gated changes ([Planner and AlgoGlyph](planner-and-algoglyph.md#replanning-while-the-game-runs)) |
 | [`watchdog.rhai`](../../tools/research/mcp-panel/rhai/watchdog.rhai) | finds a company that has built or bought nothing for longer than a threshold tuned from the game's own data, and says what holds it ([The progress watchdog](#the-progress-watchdog)) |
+| [`capital_watch.rhai`](../../tools/research/mcp-panel/rhai/capital_watch.rhai) | once a game month measures every company's reinvestment, idle capital and fleet growth against its leader, and keeps it in the shared key `capital.<company>`; read-only ([The capital watch](#the-capital-watch)) |
 
 Usage and the built-in list in full: [`../mcp-control.md`](../mcp-control.md) ("Rhai"), and the
 Scripts page in [`../rail-steward.md`](../rail-steward.md) ("The Scripts page").
@@ -103,6 +104,63 @@ waited. [`watchdog.rhai`](../../tools/research/mcp-panel/rhai/watchdog.rhai) run
   ([Approval gate](approval-gate.md)), never here. The file's first line, `// stall: 180`, tells the
   panel's supervisor how long the service may stay quiet before it is restarted.
 
+### The capital watch
+
+The post-mortem of [why PrismaticAI loses](../analysis-2026-11-23-why-prismatic-loses.md) found
+that the decisive live signal was capital not put to work. In game 12609 PrismaticAI reinvested
+62 %, 44 % and then 12 % of what it earned, while AAAHogEx reinvested 98-100 %. In game 10487
+company 1 sat on 165M+ with 42 vehicles for 160 game years. The watchdog sees inactivity only, and
+nothing measured reinvestment.
+[`capital_watch.rhai`](../../tools/research/mcp-panel/rhai/capital_watch.rhai) runs as a panel
+service (`POST /api/services/start {"name":"capital_watch"}`). It looks every 20 s and judges once
+a game month, from the engine's game date. It judges **every** company, so each one is compared
+with its leader on the same terms.
+
+- **Operating cash flow** of each of the last 4 finished quarters is income plus expenses, read
+  from the engine (`ScriptCompany` `GetQuarterlyIncome` and `GetQuarterlyExpenses`). In the engine
+  (`src/company_cmd.cpp` `SubtractMoneyFromCompany`), income is what vehicles earn. Expenses are
+  running costs, property maintenance and loan interest. Construction and new vehicles are in
+  neither.
+- **Implied capex** is the operating cash flow minus the net kept: net (money minus loan) at the
+  end of the quarter's last month, minus net at the end of the quarter before. The net comes from
+  the store's `company_month` view through the named query
+  [`capital_months`](../../tools/research/mcp-rhai/sql/queries/capital_months.sql). A loan taken
+  or repaid moves money and loan alike, so it is not spending. This is the method of the
+  post-mortem. It is a residual, not a booked figure: vehicle sales make it negative, and it is
+  kept as it is.
+- **Reinvestment** is implied capex divided by operating cash flow, per quarter and over the
+  trailing year. A quarter whose cash flow is under `MIN_OCF` (10,000) is `unknown`, because a
+  smaller one makes the ratio noise.
+- **Idle-capital ratio** is (money − loan) divided by trailing-year income: how many years of
+  income sit in the bank. It is `unknown` while that income is under `MIN_INCOME` (40,000).
+- **Fleet growth** is vehicles now minus 12 months ago, ours against the leader's. The leader is
+  the most valuable *other* company.
+- **Flags** are diagnostic; they say what the numbers are, not why:
+  - `under_reinvesting`: the newest 2 finished quarters each reinvested less than the floor. An
+    unknown quarter ends the streak and never counts toward it.
+  - `hoarding`: the idle-capital ratio is at least the idle threshold, and the fleet grew less
+    than the leader's, or not at all.
+- **The thresholds are policy** (ADR 0042, section 3). The floor is
+  `derived.capital_watch.reinvestment_floor` when it holds a value in 0..1.5, and the idle
+  threshold is `derived.capital_watch.idle_years` when it holds one in 0.25..50. Both are the
+  self-evaluation service's `derived.*` contract
+  (the service self-evaluation of pull request #263, not merged yet). Otherwise the declared
+  cold starts apply: `REINVEST_FLOOR` 0.5 and `IDLE_YEARS` 1.0. Each threshold in
+  `capital.<company>.thresholds` names its `source`, whether it is a `bootstrap`, and why.
+- **Where it goes:** one key per company, `capital.<company>`, with one writer, `capital_watch`.
+  The key carries ADR 0042's envelope: `company`, `period`, `game_date`, `writer`, `version`,
+  `reads` (each input with its row count) and `unknown`. A missing input is listed in `unknown`,
+  never zero. The rest of the key holds `quarters`, `trailing`, `idle_ratio`, `vehicles_growth`,
+  `streak`, `leader`, `flags`, `thresholds` and `said_quarter`. One line goes to the service's
+  log when a flag holds, at most once per newly finished quarter, and not again after a restart.
+- **It changes nothing in the game.** It calls no tool, changes no setting, files no proposal,
+  chats nothing and approves nothing (boundary B3 of
+  [`project.decision-authority-boundaries`](../../.ai/repo/rules/project/decision-authority-boundaries.v1.md)).
+- **Approximations.** The month's last sample is taken a few days before the quarter rolls over,
+  and the monthly property maintenance of the quarter's first day is booked to the quarter that
+  ends. A few days of cash flow therefore fall in the neighbouring quarter. The engine keeps no
+  monthly economy, so the rolling window is the last finished quarter, re-read every month.
+
 ## Where it lives
 
 | File | What it holds |
@@ -119,8 +177,12 @@ waited. [`watchdog.rhai`](../../tools/research/mcp-panel/rhai/watchdog.rhai) run
   `advice_lib.rhai` and `director_lib.rhai` on fixtures (`rail_*`, `advice_*`, the director), run
   `build_audit.rhai` against fakes of the panel's reads, shared memory and chat (`build_audit_*`),
   run `watchdog.rhai` against a scripted panel (a stall found, said once with its reasons, the
-  threshold tuned) and its pure functions (`watchdog_*`), check that every hub method but streams
-  is a Rhai function, and that a kernel refusal is an error; `panel_scripts.rs` tests cover names,
+  threshold tuned) and its pure functions (`watchdog_*`); `capital_watch_tests.rs` runs
+  `capital_watch.rhai` against a scripted panel with no tool, setting or chat function: game
+  12609's reinvestment collapse, flagged from its second quarter under the floor and said once a
+  quarter; game 10487's hoard; derived and out-of-range thresholds; a restart; the store off; and
+  early, small and negative quarters (`capital_watch_*`). Other tests check that every hub
+  method but streams is a Rhai function, and that a kernel refusal is an error; `panel_scripts.rs` tests cover names,
   docs, imports, the parse check, and a service that hot-reloads on a library edit.
 - `node --test tools/research/mcp-panel/test/scripts.test.mjs`: tokens, the outline, stream frames.
 - `tools/research/mcp-scripts-check <panel-url>` drives the Scripts page in a real Chrome.
