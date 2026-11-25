@@ -131,7 +131,7 @@ The script composes what exists and decides nothing of its own:
 | The competition: each company's last quarter, and per transport type the profit per vehicle a year old, with the leader and this company's gap to it | the same calls, `openttd://vehicles` |
 | A fresh portfolio on today's map and money | `POST /api/bots/planned` (mcp-plan, AlgoGlyph track-planning and knapsack-dp), published as `plan.portfolio` and `plan.bot_settings` |
 | The chance that a new line pays | AlgoGlyph `bayes-update` on this company's own lines a year old, earned or lost, kept per mode (rail, road, air, water, by vehicle type). A plan is judged by the modes of the lines it adds: a freight slot or the rail pair is rail, the air pair is air. Where it adds two modes, the weaker lower bound decides. A plan that adds no line is judged on the whole record |
-| The months to pay back the portfolio's investment | AlgoGlyph `pert-monte-carlo`, optimistic, likely and pessimistic at the posterior's upper end, mean and lower end |
+| The months to pay back the portfolio's investment | AlgoGlyph `pert-monte-carlo`, optimistic, likely and pessimistic at the posterior's upper end, mean and lower end, over the monthly profit of the chosen lines (`predicted_monthly`): the plan's freight price of a line, else the planner's own monthly profit of the option it chose (the portfolio's `monthly_profit`), else this company's realised profit per earning line of that mode (last year's profit of its earning lines a year old, over their number and 12: the profit of a line that pays, since `bayes-update` weighs the chance that it does), else 0. The record's `monthly_from` counts the lines priced each way |
 | The verdict | a switch only when the lower end is at least `MIN_PAYS` (0.5) and 80 % of the draws pay back within `HORIZON_MONTHS` (24) |
 | The changes | `build_plan::apply_to` that company, in one call: only settings that differ from the bot's live ones, each approval-gated, after [`bot_floors.rhai`](../../tools/research/mcp-panel/rhai/bot_floors.rhai) `guard` (below). Nothing new is proposed while an earlier change for the company still waits for the owner, or while another planner holds the company: the shared key `planner.<company>` names it (unset or `replan`: this service) |
 | The record | the shared blackboard `replan.<company>` (a `rhai.shared` event, so on the bus and in the store), and a `plan` record on the Majordomus mesh when the panel has a mesh session. `held` is why the round held, as text: another planner, approvals still waiting, or the model's reason. It is null when the round proposed or had nothing to change. `held_by` is the planner refusal, `record.by_mode` and `model.by_mode`/`judged_by` the per-mode record, `floors` what the guard did, and `sent` the settings filed |
@@ -207,6 +207,15 @@ first line of a mode. The bot's autopilot builds that first line itself, as it b
 The payback is only as good as the planner's monthly profit, and the planner over-predicts
 ([`the-planner-overpredicts-what-a-line-earns`](../../.ai/repo/knowledge/curated/the-planner-overpredicts-what-a-line-earns.md)).
 The record-based lower bound is what discounts it.
+
+Before 2026-11-25 the portfolio dropped the price of a chosen passenger pair, so such a line
+counted 0 a month. In the owner's game 21647 (store of the :8800 panel) 2475 of 2832 replan rounds
+predicted 0, so the model never ran ("no payback to model") while 11 of 12 lines a year old earned
+at a company value of 44.9M (2000-09). The portfolio now keeps the planner's monthly profit of each chosen option. A line still without
+one counts at the realised profit per earning line of its mode. That figure comes from lines a
+year old or more, which may earn more than a new one; the record's lower bound still discounts
+it (a review by codex, 2026-11-25, named the double count of a mean that includes the losing
+lines, and the dropped planner price).
 
 ## Where it lives
 

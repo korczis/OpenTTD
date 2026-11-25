@@ -523,9 +523,16 @@ fn end(v: &Value) -> Value {
 /// A planner candidate as the events carry it.
 fn line_of(c: &Value) -> Value {
     let empty = json!({});
-    json!({"kind": c.get("kind"), "mode": c.get("mode"), "cargo": c.get("cargo"), "cargo_id": c.get("cargo_id"),
+    let mut l = json!({"kind": c.get("kind"), "mode": c.get("mode"), "cargo": c.get("cargo"), "cargo_id": c.get("cargo_id"),
            "from": end(get_or(c, "producer", get_or(c, "a", &empty))), "to": end(get_or(c, "acceptor", get_or(c, "b", &empty))),
-           "distance": c.get("distance"), "score": c.get("score")})
+           "distance": c.get("distance"), "score": c.get("score")});
+    // The planner's monthly profit of the option it chose (its mode's), when it gave one: replan.rhai
+    // pays a passenger pair back from it, as no freight price names that line.
+    let chosen = c["options"].as_array().into_iter().flatten().find(|o| o["mode"] == c["mode"]);
+    if let Some(m) = chosen.and_then(|o| o["monthly_profit"].as_f64()) {
+        l["monthly_profit"] = json!(m);
+    }
+    l
 }
 
 /// Settings as a JSON object and as the `start_ai` argument they make.
@@ -1364,7 +1371,7 @@ mod tests {
                 {"kind": "passengers", "mode": "rail", "cargo": null, "cargo_id": null, "from": {"id": 1, "name": "T1"},
                  "to": {"id": 2, "name": "B"}, "distance": null, "score": 9.0},
                 {"kind": "freight", "mode": "freight_rail", "cargo": "Coal", "cargo_id": 1, "from": {"id": "industry:7", "name": "Mine"},
-                 "to": {"id": "industry:99", "name": "Plant"}, "distance": 40, "score": 8.0}]}));
+                 "to": {"id": "industry:99", "name": "Plant"}, "distance": 40, "score": 8.0, "monthly_profit": 500.0}]}));
         let request = json!({"budget": 300000, "params": {"budget": 300000}, "limit": 40, "track": 16});
         let off = calibration(&Scope::Off, &json!({"seed": 3, "map": null}), |_| panic!("calibration off reads no store"));
         let e = portfolio_event(&out, &p, request.clone(), json!({"exe": "mcp-plan"}), &off);
