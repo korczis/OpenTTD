@@ -82,8 +82,10 @@ hand:
 `--lineup "AAAHogEx,LuDiAI AfterFix,CivilAI,AdmiralAI,NoCAB,DictatorAI,SimpleAI"` names the other
 companies of a new world instead of the arena's lineup. Each is started with the server's `start_ai`
 once the bot's company exists, so the bot keeps company 1. With `--lineup`, and with `--load` (whose AIs
-come from the save), the default services are `replan watchdog build_audit rail_monitor`, without
-the arena. `MCP_SERVICES` names another list, and an empty value starts none. A service that does not start is
+come from the save), the default services are `replan watchdog build_audit rail_monitor
+capital_watch gap_watch`, without the arena; a new world with the arena runs `arena replan watchdog
+build_audit rail_monitor capital_watch` (the monitors change nothing in the game, and the leader-gap
+watch joins it once it tells and proposes only for the owner's company, #319). `MCP_SERVICES` names another list, and an empty value starts none. A service that does not start is
 reported on stderr, and the stack runs on without it.
 
 ## Validation

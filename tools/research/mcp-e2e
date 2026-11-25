@@ -519,11 +519,16 @@ if [[ -n "$LINEUP" && ${#LOAD[@]} -eq 0 ]]; then
 fi
 
 # The services a co-play game runs (research/coplay.md "Services"): the arena fills the other
-# companies (unless --lineup names them), replan re-plans the bot every game month, the watchdog
-# says when a company stalls and why. Started here, never by hand; MCP_SERVICES names another list
-# (empty: none).
-DEFAULT_SERVICES="arena replan watchdog"
-[[ -n "$LINEUP" || ${#LOAD[@]} -gt 0 ]] && DEFAULT_SERVICES="replan watchdog build_audit rail_monitor"
+# companies (unless --lineup names them), replan re-plans the bot every game month, and the
+# monitors watch every company without changing the game: the watchdog (a stall and why), the build
+# audit, the rail monitor (advice from the game's news) and the capital watch (money not put back
+# to work). With --lineup or --load the owner's company is the only PrismaticAI one, so the
+# leader-gap watch runs there too; in an arena the other PrismaticAI companies are rivals', and
+# gap_watch tells and proposes only for the owner's company once #319 is on master. Started here,
+# never by hand; MCP_SERVICES names another list (empty: none).
+MONITORS="watchdog build_audit rail_monitor capital_watch"
+DEFAULT_SERVICES="arena replan $MONITORS"
+[[ -n "$LINEUP" || ${#LOAD[@]} -gt 0 ]] && DEFAULT_SERVICES="replan $MONITORS gap_watch"
 if [[ "$COPLAY" == 1 ]]; then
   for svc in ${MCP_SERVICES-$DEFAULT_SERVICES}; do
     out="$(stack_post "$URL/api/services/start" "{\"name\":\"$svc\"}" || true)"
