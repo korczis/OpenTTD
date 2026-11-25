@@ -38,6 +38,12 @@ Commands:
   power      the recorded battle's noise (split-half Kendall tau of the GA score, the paired
              deviation across seeds) and the held-start pairs a strategy comparison needs for a
              margin (--margin 1.10); reads research/results only, starts nothing
+  live-export    one live game (--game-seed) from a panel's store, read-only (--panel <url> SELECTs
+                 through /api/db/query; --db <copy> reads a copy with the duckdb CLI), as
+                 research/results/live-<seed>-<run_ms>.json
+  live-settings  the next live start's PRISMATIC_BOT_SETTINGS, derived from the newest battle record
+                 and the live records (--write: research/results/live-start.json; `render` keeps
+                 it current and `check` refuses drift)
 
 Guards (after an incident where `run` kept ~32 matches per host going for three days, drove targets
 to load 86 on 18 cores and 35 of 37 GB swap, and nobody on a target could tell whose they were):
@@ -429,6 +435,8 @@ def resolve_genes(cfg: dict) -> None:
     for g in t["space"]:
         if g not in start:
             start[g] = settings[g]["default"]
+    # What a live game's bot ran with for a gene its settings do not name (live_genes).
+    t["defaults"] = {g: settings[g]["default"] for g in t["space"] if g in settings}
 
 def paired_vs(matches: list[dict], base: str) -> list[dict]:
     """Every configuration against `base` on the same seeds (common random numbers): pairs, mean
@@ -595,13 +603,21 @@ def fitness_of(key: str, matches: list[dict], last_penalty: float = 0.0) -> dict
             "score": round(sum(pts) / n + 0.1 * sum(logs) / n - last_penalty * lasts / n, 4) if n else -9.0}
 
 
-def next_generation(t: dict, state: dict, scored: list[tuple[dict, dict]]) -> list[dict]:
+def next_generation(t: dict, state: dict, scored: list[tuple[dict, dict]],
+                    live: list[dict] | None = None) -> list[dict]:
     """Elitism (the best survives unchanged), then children of two tournament-chosen parents by
-    uniform crossover and mutation. Deterministic per generation."""
+    uniform crossover and mutation. Deterministic per generation. With live evidence (`live`, the
+    entries of live_entries): a variant that is a configuration which lost a live game is neither
+    the elite nor a parent (live_veto), and the best paired live configuration not yet tried in the
+    arena joins as a child (live_seeds)."""
     gen = state["generation"] + 1
     rng = random.Random(f"{t['seed']}:{gen}")
     ranked = [v for v, _ in sorted(scored, key=lambda x: -x[1]["score"])]
-    out = [variant(t, gen, 0, dict(ranked[0]["genes"]), [ranked[0]["label"]])]
+    live = live or []
+    allowed = [v for v in ranked if not live_veto(t, v["genes"], live)]
+    # Every variant vetoed: no elite this generation, and the children breed from the whole field.
+    out = [variant(t, gen, 0, dict(allowed[0]["genes"]), [allowed[0]["label"]])] if allowed else []
+    ranked = allowed or ranked
 
     def pick():
         a, b = rng.sample(ranked[:max(2, len(ranked))], 2) if len(ranked) > 1 else (ranked[0], ranked[0])
@@ -619,12 +635,400 @@ def next_generation(t: dict, state: dict, scored: list[tuple[dict, dict]]) -> li
         used.add(tag)
         out.append(variant(t, gen, len(out), genes, [tag]))
         out[-1]["label"] = f"{t['label_prefix']} g{gen}.{tag}"
+    tried = [v["genes"] for h in state.get("history", []) for v in h["variants"]] + [v["genes"] for v in ranked]
+    for k, (genes, source) in enumerate(live_seeds(t, live, tried)):
+        if len(out) >= t["population"]:
+            break
+        out.append(variant(t, gen, len(out), genes, [source]))
+        out[-1]["label"] = f"{t['label_prefix']} g{gen}.live{k or ''}"
     while len(out) < t["population"]:
         p1, p2 = pick(), pick()
         child = {k: (p1["genes"] if rng.random() < 0.5 else p2["genes"]).get(k, t["start"].get(k))
                  for k in t["space"]}
         out.append(variant(t, gen, len(out), mutate(t, child, rng), [p1["label"], p2["label"]]))
     return out
+
+
+# --------------------------------------------------------------------------- live outcome learning
+#
+# The owner's live games are recorded by their panel in a DuckDB store. `live-export` turns one game
+# into research/results/live-<seed>-<run_ms>.json from that store alone (schema ai-live-outcome/v1),
+# and everything below reads only tracked records, so each derived figure is reproducible from the
+# repository (rule project.battle-records-are-reproducible). The evidence enters the GA as a veto
+# and a seed, not as a score term: a configuration that lost a live game is never the elite or a
+# parent again, and the best configuration of a paired live comparison is played in the arena.
+# research/ai-battle/README.md ("Live outcomes") describes the rule and its reasons.
+
+LIVE_SCHEMA = "ai-live-outcome/v1"
+LIVE_GLOB = "live-[0-9]*.json"
+LIVE_SETTINGS = "live-start.json"
+LIVE_SETTINGS_SCHEMA = "ai-live-settings/v1"
+# Settings that name one map's objects (the planner's industry slots, per-line train counts, fixed
+# town and airport pairs) are instance data, not strategy: dropped from every live configuration.
+MAP_SETTING = re.compile(r"^(fr\d*_(from|to|cargo)|line\d+_(trains|wagons)|rail_[ab]|air_[ab])$")
+LIVE_DEFAULTS = {"reference": "AAAHogEx", "horizon_years": 4, "min_years": 2, "loss_ratio": 0.5,
+                 "paired_margin": 0.8, "veto_genes": 0, "loss_veto_genes": 3, "seed_offspring": 1}
+START_AI = re.compile(r'^start_ai\s+(?:"([^"]+)"|(\S+))(?:\s+(\S*=\S*))?')
+SET_SETTING = re.compile(r"^openttd\.ai\.set_setting\((\{.*?\})\)(?:.*?approval #(\d+))?")
+WATCHDOG = re.compile(r"(train|road|ship|aircraft|stations) (\d+)")
+LIVE_SQL = {
+    "runs": "SELECT m.instance, m.seed, m.run_ms, min(m.month) AS first_month, max(m.month) AS last_month "
+            "FROM company_month m GROUP BY ALL ORDER BY m.run_ms",
+    "edges": "SELECT run_ms, month, name FROM company_month WHERE company = 0 QUALIFY "
+             "month = min(month) OVER (PARTITION BY run_ms) OR month = max(month) OVER (PARTITION BY run_ms)",
+    "series": "SELECT run_ms, company, name, month, value, money, loan, vehicles FROM company_month "
+              "WHERE run_ms IN ({runs}) ORDER BY run_ms, company, month",
+    "events": "SELECT run_ms, seq, game_date, kind, data->>'text' AS text, CAST(data AS VARCHAR) AS data "
+              "FROM run_events WHERE run_ms IN ({runs}) AND (kind IN ('company.founded', 'decision.recorded') OR (kind IN "
+              "('panel.ai', 'panel.console') AND (data->>'text') LIKE 'start_ai%') OR (kind = 'panel.mcp' "
+              "AND (data->>'text') LIKE 'openttd.ai.set_setting(%')) ORDER BY run_ms, seq",
+    "watchdog": "SELECT data->>'key' AS key, CAST(data->'value' AS VARCHAR) AS value FROM run_events "
+                "WHERE run_ms IN ({runs}) AND kind = 'rhai.shared' AND (data->>'key') LIKE 'watchdog.%' "
+                "QUALIFY row_number() OVER (PARTITION BY data->>'key' ORDER BY run_ms DESC, seq DESC) = 1",
+    "revision": "SELECT CAST(version AS VARCHAR) AS version FROM plan_decisions WHERE run_ms IN ({runs}) "
+                "ORDER BY run_ms, seq LIMIT 1",
+}
+
+
+def panel_query(url: str):
+    """A query runner over the panel's read-only SQL endpoint (POST /api/db/query, SELECT only)."""
+    import urllib.request
+
+    def run(name: str, sql: str) -> list[dict]:
+        req = urllib.request.Request(url.rstrip("/") + "/api/db/query", data=json.dumps({"sql": sql}).encode(),
+                                     headers={"content-type": "application/json", "origin": url.rstrip("/")})
+        with urllib.request.urlopen(req, timeout=180) as r:
+            d = json.loads(r.read())
+        if d.get("error") or d.get("capped"):
+            raise SystemExit(f"live-export: query {name}: {d.get('error') or 'result capped by the panel'}")
+        return [dict(zip(d["columns"], row)) for row in d["rows"]]
+    return run
+
+
+def duckdb_query(path: Path):
+    """A query runner over a copy of the store through the duckdb CLI, opened read-only."""
+    def run(name: str, sql: str) -> list[dict]:
+        p = subprocess.run(["duckdb", "-readonly", "-json", str(path), "-c", sql],
+                           capture_output=True, text=True)
+        if p.returncode:
+            raise SystemExit(f"live-export: query {name}: {p.stderr.strip()}")
+        return json.loads(p.stdout or "[]")
+    return run
+
+
+def next_month(month: str) -> str:
+    y, m = int(month[:4]), int(month[5:7])
+    return f"{y + m // 12}-{m % 12 + 1:02d}"
+
+
+def settings_dict(text: str) -> dict:
+    """A "k=v,k=v" settings text as {k: int}, without the map's own settings (MAP_SETTING)."""
+    out = {}
+    for kv in (text or "").split(","):
+        k, _, v = kv.partition("=")
+        if k.strip() and not MAP_SETTING.match(k.strip()) and re.fullmatch(r"-?\d+", v.strip()):
+            out[k.strip()] = int(v.strip())
+    return out
+
+
+def game_runs(runs: list[dict], edges: list[dict], seed: int) -> list[dict]:
+    """The runs of one game: the newest run started with `seed` (a fresh start under the same seed
+    replaces the older one), then every later run of the same panel whose first month continues the
+    previous run's last month under the same company 0 name (a `--load` gets a new run seed)."""
+    name = {(e["run_ms"], e["month"]): e["name"] for e in edges}
+    own = [r for r in runs if r["seed"] == seed]
+    if not own:
+        return []
+    chain = [own[-1]]
+    for r in runs:
+        last = chain[-1]
+        if (r["run_ms"] > last["run_ms"] and r["instance"] == last["instance"]
+                and r["first_month"] in (last["last_month"], next_month(last["last_month"]))
+                and name.get((r["run_ms"], r["first_month"])) == name.get((last["run_ms"], last["last_month"]))):
+            chain.append(r)
+    return chain
+
+
+def live_record(query, seed: int, source: str) -> dict:
+    """The live outcome record of the game played with map seed `seed`, from the panel store alone
+    (`query(name, sql)` runs LIVE_SQL[name]). Raises SystemExit when the store has no such game."""
+    chain = game_runs(query("runs", LIVE_SQL["runs"]), query("edges", LIVE_SQL["edges"]), seed)
+    if not chain:
+        raise SystemExit(f"live-export: no run with seed {seed} in the store")
+    ids = ",".join(str(r["run_ms"]) for r in chain)
+    fetched = {k: query(k, LIVE_SQL[k].format(runs=ids)) for k in ("series", "events", "watchdog", "revision")}
+    series: dict[str, dict[str, dict]] = {}
+    names: dict[int, str] = {}
+    for row in fetched["series"]:          # a later run's month replaces an earlier run's
+        series.setdefault(str(row["company"]), {})[row["month"]] = {
+            k: int(row[k]) for k in ("value", "money", "loan", "vehicles")}
+        names[int(row["company"])] = row["name"]
+    yearly = {}
+    for c, months in series.items():
+        last_of_year = {}
+        for m in sorted(months):
+            last_of_year[m[:4]] = m
+        yearly[c] = [dict(month=m, **months[m]) for m in sorted(last_of_year.values())]
+    founded, starts, requests, enacted = [], [], {}, {}
+    for ev in fetched["events"]:
+        if ev["kind"] == "company.founded":
+            cid = json.loads(ev["data"])["id"]
+            if cid not in founded:
+                founded.append(cid)
+        elif ev["kind"] == "decision.recorded":
+            # The approval server's verdict on an approval of this run: what it enacted, and when.
+            d = json.loads(ev["data"])
+            if d.get("action_type") == "ai.set_setting" and d.get("command_result") == "succeeded":
+                enacted[(ev["run_ms"], int(d["approval_id"]))] = ev["game_date"]
+        elif ev["kind"] == "panel.mcp":
+            m = SET_SETTING.match(ev["text"])
+            args = json.loads(m.group(1))
+            requests.setdefault(int(args["company"]), []).append(
+                {"date": ev["game_date"], "name": args["name"], "value": int(args["value"]),
+                 "key": (ev["run_ms"], int(m.group(2))) if m.group(2) else None})
+        else:
+            m = START_AI.match(ev["text"])
+            starts.append((m.group(1) or m.group(2), m.group(3) or ""))
+    ai_of = dict(zip(founded, starts))
+    companies = []
+    for cid in sorted(names):
+        ai, text = ai_of.get(cid, (None, ""))
+        start = settings_dict(text)
+        current, changes = dict(start), []
+        for r in requests.get(cid, []):    # only a request that would change a setting counts
+            if not MAP_SETTING.match(r["name"]) and current.get(r["name"]) != r["value"]:
+                # Applied: the approval it waited for was enacted (decision.recorded, succeeded).
+                applied = enacted.get(r.pop("key"))
+                if applied:
+                    current[r["name"]] = r["value"]
+                changes.append(dict(r, applied=applied))
+        companies.append({"company": cid, "name": names[cid], "ai": ai,
+                          "settings_start": settings_str(start), "settings_requested": changes})
+    mode_mix = {}
+    for w in fetched["watchdog"]:
+        cid = w["key"].split(".", 1)[1]
+        if cid.isdigit():                           # watchdog.<company>; other keys are its own state
+            sig = json.loads(w["value"]).get("signature", "")
+            mode_mix[cid] = {k: int(v) for k, v in WATCHDOG.findall(sig)}
+    rev = fetched["revision"][0]["version"] if fetched["revision"] else None
+    first = min(m for months in series.values() for m in months)
+    final = max(m for months in series.values() for m in months)
+    digest = hashlib.sha256(json.dumps(fetched, sort_keys=True, default=str).encode()).hexdigest()
+    rec = {"schema": LIVE_SCHEMA, "id": f"live-{seed}-{chain[0]['run_ms']}",
+           "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+           "source": source, "instance": chain[0]["instance"], "seed": seed,
+           "runs": [{k: r[k] for k in ("run_ms", "seed", "first_month", "last_month")} for r in chain],
+           "revision": json.loads(rev).get("revision") if rev else None, "inputs_sha256": digest,
+           "first_month": first, "final_month": final, "companies": companies, "series": yearly,
+           "mode_mix": mode_mix or None}
+    rec["outcome"] = live_outcome(rec)
+    return rec
+
+
+def live_outcome(rec: dict, reference: str = LIVE_DEFAULTS["reference"]) -> dict:
+    """Leader, reference and every PrismaticAI company's final standing, from the record's series."""
+    final = {c["company"]: rec["series"][str(c["company"])][-1]["value"] for c in rec["companies"]}
+    leader = max(final, key=lambda c: (final[c], -c))
+    ref = next((c["company"] for c in rec["companies"] if c["ai"] == reference), None)
+    ours = {}
+    for c in rec["companies"]:
+        if c["ai"] == "PrismaticAI":
+            v = final[c["company"]]
+            ours[str(c["company"])] = {
+                "value": v, "rank": 1 + sum(x > v for x in final.values()),
+                "share_of_leader": round(v / max(1, final[leader]), 4),
+                "ratio_to_reference": round(v / max(1, final[ref]), 4) if ref is not None else None}
+    return {"leader": leader, "leader_value": final[leader], "reference": reference,
+            "reference_company": ref, "prismatic": ours}
+
+
+def validate_live(rec: dict, name: str) -> list[str]:
+    errs = [f"{name}: missing {k}" for k in ("schema", "id", "seed", "runs", "companies", "series",
+                                              "first_month", "final_month", "outcome") if k not in rec]
+    if errs:
+        return errs
+    if rec["schema"] != LIVE_SCHEMA:
+        errs.append(f"{name}: schema {rec['schema']} is not {LIVE_SCHEMA}")
+    if name != f"{rec['id']}.json" or not rec["id"].startswith(f"live-{rec['seed']}-"):
+        errs.append(f"{name}: id {rec['id']} does not name the file and the seed")
+    for c in rec["companies"]:
+        if not rec["series"].get(str(c["company"])):
+            errs.append(f"{name}: company {c['company']} has no series")
+    if not errs and live_outcome(rec, rec["outcome"].get("reference", "AAAHogEx")) != rec["outcome"]:
+        errs.append(f"{name}: outcome is not derived from its series")
+    return errs
+
+
+def live_cfg(t: dict) -> dict:
+    return {**LIVE_DEFAULTS, **t.get("live", {})}
+
+
+def live_genes(t: dict, settings: dict) -> dict:
+    """A configuration's genes in the GA's space: a gene the settings do not name is what the bot ran
+    with, info.nut's default (t["defaults"], set by resolve_genes)."""
+    d = t.get("defaults", t["start"])
+    return {g: clamp_gene(t["space"], g, settings.get(g, d.get(g, t["space"][g][0]))) for g in t["space"]}
+
+
+def live_entries(records: list[dict], t: dict) -> list[dict]:
+    """Every PrismaticAI company of every live record, judged at a year end against the reference
+    AI. A company is judged on one configuration only: its end is the last year end before its first
+    applied setting change (a request the approval server enacted; one never enacted changed
+    nothing), at most `horizon_years` game years in and at least `min_years`. The companies of one
+    game share the earliest of their ends, so they are compared at the same date. Lost: in a game
+    with several judged PrismaticAI configurations, worth less than paired_margin x the best of them
+    (vetoes genes within `veto_genes`); alone, worth less than loss_ratio x the reference AI (a loss
+    to the rival itself, which vetoes genes within `loss_veto_genes`)."""
+    lc = live_cfg(t)
+    out = []
+    for rec in records:
+        y0 = int(rec["first_month"][:4])
+        ref = next((c["company"] for c in rec["companies"] if c["ai"] == lc["reference"]), None)
+        ref_v = {p["month"]: p["value"] for p in rec["series"].get(str(ref), [])}
+        game = []
+        for c in rec["companies"]:
+            if c["ai"] != "PrismaticAI":
+                continue
+            # A request that was never enacted (unanswered, expired, denied) changed nothing.
+            changed = min((r["applied"][:4] for r in c["settings_requested"] if r.get("applied")), default="9999")
+            end = min(y0 + lc["horizon_years"] - 1, int(changed) - 1)
+            vals = {p["month"]: p["value"] for p in rec["series"][str(c["company"])]}
+            reached = [y for y in range(y0, end + 1) if f"{y}-12" in vals and f"{y}-12" in ref_v]
+            e = {"record": rec["id"], "seed": rec["seed"], "company": c["company"], "at": None,
+                 "settings": c["settings_start"], "genes": live_genes(t, settings_dict(c["settings_start"])),
+                 "ratio": None, "evidence": False, "why": "", "vals": vals}
+            if not reached or reached[-1] - y0 + 1 < lc["min_years"]:
+                e["why"] = (f"one configuration for under {lc.get('min_years', 2)} game year(s) "
+                            f"(first setting change {changed if changed != '9999' else 'none'})")
+            else:
+                e.update(evidence=True, at=f"{reached[-1]}-12")
+            game.append(e)
+        judged = [e for e in game if e["evidence"]]
+        at = min((e["at"] for e in judged), default=None)
+        for e in judged:
+            e["at"], e["ratio"] = at, round(e["vals"][at] / max(1, ref_v[at]), 4)
+        best = max((e["ratio"] for e in judged), default=0)
+        for e in judged:
+            e["paired"] = len(judged) > 1
+            if e["paired"]:
+                e["lost"], e["radius"] = e["ratio"] < lc["paired_margin"] * best, lc["veto_genes"]
+                e["why"] = f"{e['ratio']:.3f} of {lc['reference']} at {at}, the game's best {best:.3f}"
+            else:
+                e["lost"], e["radius"] = e["ratio"] < lc["loss_ratio"], lc["loss_veto_genes"]
+                e["why"] = f"{e['ratio']:.3f} of {lc['reference']} at {at} (a loss is under {lc['loss_ratio']})"
+        for e in game:
+            del e["vals"]
+        out += game
+    return out
+
+
+def live_veto(t: dict, genes: dict, live: list[dict]) -> dict | None:
+    """The live entry that lost with this configuration: genes equal to its genes except in at most
+    the entry's radius (live_entries: `veto_genes` for a paired loss, `loss_veto_genes` for a loss to
+    the reference AI). None when no lost entry matches."""
+    for e in live:
+        n = e.get("radius", live_cfg(t)["veto_genes"])
+        if e.get("lost") and sum(genes.get(g) != e["genes"][g] for g in e["genes"]) <= n:
+            return e
+    return None
+
+
+def live_seeds(t: dict, live: list[dict], tried: list[dict]) -> list[tuple[dict, str]]:
+    """Up to `seed_offspring` configurations to play in the arena: the winners of paired live
+    comparisons (several PrismaticAI configurations in one game) that did not lose, best first, whose
+    genes no variant has had yet. Live play suggests them; the arena measures them."""
+    out = []
+    for e in sorted((e for e in live if e.get("paired") and not e["lost"]), key=lambda e: -e["ratio"]):
+        if e["genes"] not in tried and len(out) < live_cfg(t).get("seed_offspring", 1):
+            out.append((dict(e["genes"]), f"{e['record']}:{e['company']}"))
+    return out
+
+
+def live_records(results: Path | None = None) -> list[dict]:
+    return [json.loads(f.read_text()) for f in tracked_records(LIVE_GLOB, results)]
+
+
+def derive_live_settings(t: dict, battle_rec: dict | None, records: list[dict]) -> dict:
+    """The next live start's settings, derived from the records alone. Only a configuration with
+    live evidence is chosen: one that a live game judged and found not lost (live_entries), best
+    ratio to the reference first, unless another game's loss vetoes it (live_veto). The arena's
+    PrismaticAI configurations of the newest battle record are listed with their arena ratio and
+    their veto, as context; none is chosen on arena evidence alone. Nothing judged and not lost:
+    no settings (`chosen` null), so a start never falls back to info.nut's defaults unseen."""
+    live = live_entries(records, t)
+    ref_key = live_cfg(t)["reference"]
+    arena = []
+    if battle_rec:
+        board = {r["key"]: r for r in battle_rec["leaderboard"]}
+        ref = board.get(ref_key, {}).get("avg_value", 0)
+        for c in battle_rec["contestants"]:
+            row = board.get(c["key"], {})
+            if c["ai"] != "PrismaticAI" or not row.get("played") or not ref:
+                continue
+            veto = live_veto(t, live_genes(t, settings_dict(c.get("settings", ""))), live)
+            arena.append({"candidate": c["key"], "settings": c.get("settings", ""),
+                          "arena_ratio": round(row["avg_value"] / ref, 4), "played": row["played"],
+                          "vetoed_by": f"{veto['record']}:{veto['company']}" if veto else None})
+    arena.sort(key=lambda c: (-c["arena_ratio"], c["candidate"]))
+    cands = []
+    for e in sorted((e for e in live if e["evidence"] and not e["lost"]),
+                    key=lambda e: (-e["ratio"], e["record"], e["company"])):
+        veto = live_veto(t, e["genes"], live)
+        same = next((a for a in arena if live_genes(t, settings_dict(a["settings"])) == e["genes"]), None)
+        cands.append({"candidate": f"{e['record']}:{e['company']}", "settings": settings_str(settings_dict(e["settings"])),
+                      "live_ratio": e["ratio"], "at": e["at"], "why": e["why"],
+                      "arena": same["candidate"] if same else None,
+                      "vetoed_by": f"{veto['record']}:{veto['company']}" if veto else None})
+    chosen = next((c for c in cands if not c["vetoed_by"]), None)
+    return {"schema": LIVE_SETTINGS_SCHEMA,
+            "derived_by": "tools/research/ai-battle/battle.py live-settings (battle.json tuning.live)",
+            "rule": live_cfg(t), "battle_record": battle_rec["id"] if battle_rec else None,
+            "live_records": [r["id"] for r in records],
+            "chosen": chosen["candidate"] if chosen else None,
+            "settings": chosen["settings"] if chosen else None,
+            "reason": (f"the best configuration a live game judged and found not lost ({chosen['why']})"
+                       if chosen else "no configuration has live evidence of not losing: no live start is derived"),
+            "candidates": cands, "arena": arena,
+            "live": [{k: e.get(k) for k in ("record", "company", "at", "ratio", "evidence", "paired", "lost", "radius",
+                                            "why", "settings")} for e in live],
+            "seeds": [s for _, s in live_seeds(t, live, [live_genes(t, settings_dict(c["settings"]))
+                                                         for c in arena])]}
+
+
+def live_settings_text(t: dict, results: Path | None = None) -> str:
+    rec = latest_record()
+    return json.dumps(derive_live_settings(t, rec, live_records(results)), indent=1) + "\n"
+
+
+def live_tuning(cfg_raw: dict) -> dict:
+    """battle.json's `tuning` with its genes resolved against info.nut, read-only (no state file)."""
+    cfg = {"tuning": json.loads(json.dumps(cfg_raw["tuning"])), "prismatic": cfg_raw.get("prismatic", {})}
+    resolve_genes(cfg)
+    return cfg["tuning"]
+
+
+def cmd_live_export(seed: int, panel: str | None, db: Path | None) -> int:
+    if not (panel or db) or (panel and db):
+        print("live-export: give exactly one of --panel <url> and --db <copy of the store>", file=sys.stderr)
+        return 2
+    query = panel_query(panel) if panel else duckdb_query(db)
+    rec = live_record(query, seed, f"panel:{panel}" if panel else f"duckdb:{db.name}")
+    for e in validate_live(rec, f"{rec['id']}.json"):
+        print(e, file=sys.stderr)
+    (RESULTS_DIR / f"{rec['id']}.json").write_text(json.dumps(rec, indent=1) + "\n")
+    print(f"live-export: wrote research/results/{rec['id']}.json ({rec['first_month']}..{rec['final_month']}, "
+          f"{len(rec['runs'])} run(s))")
+    return 0
+
+
+def cmd_live_settings(write: bool) -> int:
+    t = live_tuning(json.loads(DEFAULT_CONFIG.read_text()))
+    text = live_settings_text(t)
+    if write:
+        (RESULTS_DIR / LIVE_SETTINGS).write_text(text)
+    d = json.loads(text)
+    print(f"PRISMATIC_BOT_SETTINGS={d['settings'] or ''}  # {d['chosen']}: {d['reason']}")
+    return 0 if d["chosen"] else 10
 
 
 def contestant_key(c: dict) -> str:
@@ -2145,7 +2549,13 @@ class Orchestrator:
                                  "variants": [{"label": v["label"], "genes": v["genes"],
                                                "parents": v["parents"], "fitness": f}
                                               for v, f in scored]})
-        state["variants"] = next_generation(t, state, scored)
+        # Live games (tracked research/results/live-*.json) veto the configurations that lost them.
+        live = live_entries(live_records(), t) if t.get("live") else []
+        for v, _ in scored:
+            veto = live_veto(t, v["genes"], live)
+            if veto:
+                self.event(f"TUNING {v['label']}: lost live game {veto['record']} ({veto['why']}): vetoed")
+        state["variants"] = next_generation(t, state, scored, live)
         state["generation"] += 1
         tuning_path(self.cfg).write_text(json.dumps(state, indent=1) + "\n")
         # Matches of the finished generation that still run are stopped through their pid files.
@@ -2957,6 +3367,13 @@ def cmd_render() -> int:
     region = replace_region(readme, render_region(latest_record()))
     if region != readme:
         README.write_text(region)
+    # The next live start's settings follow every new battle or live record (live-settings).
+    if tracked_records(LIVE_GLOB):
+        live = RESULTS_DIR / LIVE_SETTINGS
+        text = live_settings_text(live_tuning(json.loads(DEFAULT_CONFIG.read_text())))
+        if not live.is_file() or live.read_text() != text:
+            live.write_text(text)
+            written += 1
     print(f"battle render: {written} of {len(files) + len(ablations)} record page(s) "
           f"({len(files)} battle, {len(ablations)} ablation) rewritten, README leaderboard "
           + ("rewritten" if region != readme else "current"))
@@ -2983,6 +3400,12 @@ def cmd_check() -> int:
     latest = latest_record()
     cfg_raw = json.loads(DEFAULT_CONFIG.read_text())
     errs += config_errors(cfg_raw)  # every GA gene is a setting of info.nut, within its bounds
+    lives = tracked_records(LIVE_GLOB)
+    for f in lives:
+        errs += validate_live(json.loads(f.read_text()), f.name)
+    live = RESULTS_DIR / LIVE_SETTINGS
+    if lives and not errs and (not live.is_file() or live.read_text() != live_settings_text(live_tuning(cfg_raw))):
+        drift.append(f"{LIVE_SETTINGS}: not derived from the battle and live records (run battle.py render)")
     cfg_never = cfg_raw.get("never_last", [])
     if latest and latest["leaderboard"]:
         board = [r for r in latest["leaderboard"] if r["played"]]
@@ -3001,7 +3424,8 @@ def cmd_check() -> int:
     if drift:
         return 11
     n = len(files)
-    print(f"battle check: {n} record(s) and {len(ablations)} ablation record(s) valid, every page and "
+    print(f"battle check: {n} record(s), {len(ablations)} ablation and {len(lives)} live record(s) valid, "
+          "live-start.json, every page and "
           "the README leaderboard derived, "
           f"{len(gene_space(cfg_raw.get('tuning', {}), info_settings(info_nut_path(cfg_raw))))} "
           "GA gene(s) derived from info.nut")
@@ -3406,7 +3830,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("command", choices=["discover", "fetch", "prepare", "probe", "run", "status",
                                         "report", "render", "check", "fitness", "ablate", "reap", "power",
-                                        "replay"])
+                                        "live-export", "live-settings", "replay"])
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--allow-dirty", action="store_true",
@@ -3422,7 +3846,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--variant", action="append", default=[],
                     help='ablate: "name=setting=v,setting=v" (the first is the baseline), repeatable')
     ap.add_argument("--field", default="AAAHogEx,AdmiralAI", help="ablate: comma-separated opponents")
-    ap.add_argument("--write", action="store_true", help="ablate: record under research/results/")
+    ap.add_argument("--write", action="store_true", help="ablate: record under research/results/; live-settings: write live-start.json")
     ap.add_argument("--slot", type=int, default=0,
                     help="ablate: PrismaticAI's place in the start order (its company id), as in the arena")
     ap.add_argument("--lineup", type=Path,
@@ -3444,7 +3868,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--margin", type=float, default=1.10, help="power: the non-inferiority margin, a value ratio")
     ap.add_argument("--alpha", type=float, default=0.05, help="power: the one-sided significance level")
     ap.add_argument("--power", type=float, default=0.80, help="power: the power at no true difference")
+    ap.add_argument("--game-seed", type=int, help="live-export: the map seed of the live game")
+    ap.add_argument("--panel", help="live-export: the panel to read, e.g. http://127.0.0.1:8800 (read-only SQL)")
+    ap.add_argument("--db", type=Path, help="live-export: a copy of the panel's DuckDB store (never the live file)")
     a = ap.parse_args(argv)
+    if a.command == "live-export":
+        return cmd_live_export(a.game_seed, a.panel, a.db)
+    if a.command == "live-settings":
+        return cmd_live_settings(a.write)
     if a.command == "power":
         return cmd_power(a.margin, a.alpha, a.power)
     if a.command == "check":

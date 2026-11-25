@@ -1,0 +1,659 @@
+{
+ "schema": "ai-live-outcome/v1",
+ "id": "live-2927-1795374123856",
+ "generated_at": "2026-11-23T04:04:46+00:00",
+ "source": "panel:http://127.0.0.1:8800",
+ "instance": "panel-8800",
+ "seed": 2927,
+ "runs": [
+  {
+   "run_ms": 1795374123856,
+   "seed": 2927,
+   "first_month": "1950-02",
+   "last_month": "1957-12"
+  }
+ ],
+ "revision": "c5bf32182a",
+ "inputs_sha256": "beeb6b281f22acc046cac68f7562f682cba9c2f7a8466ae238b1e3dbc99d4ad0",
+ "first_month": "1950-02",
+ "final_month": "1957-12",
+ "companies": [
+  {
+   "company": 0,
+   "name": "Watburg Transport",
+   "ai": "PrismaticAI",
+   "settings_start": "aggressiveness=80,air_add_waiting=90,air_full_load=0,air_grow_money=0,air_keep_last=1,air_level_max=20,air_level_once=1,air_level_step=8,air_max_tiles=440,air_planes=5,air_reuse=1,air_routes_max=2,air_towns=35,cash_reserve=5000,catchment_stops=4,intercity=1,invest_air_cap=10,invest_borrow=1,invest_min=600,invest_ppv_div=6,invest_road_cap=12,line_budget=40000,max_routes=16,own_fail_pause=4,own_lines=4,rail_after=2,rail_twin_max=10,self_steward=1,statue_money=0",
+   "settings_requested": [
+    {
+     "date": "1952-07-07",
+     "name": "max_routes",
+     "value": 30,
+     "applied": "1952-08-18"
+    },
+    {
+     "date": "1952-07-07",
+     "name": "invest_min",
+     "value": 50,
+     "applied": "1952-08-19"
+    },
+    {
+     "date": "1952-07-07",
+     "name": "line_budget",
+     "value": 30000,
+     "applied": "1952-08-19"
+    },
+    {
+     "date": "1952-10-13",
+     "name": "rail_after",
+     "value": 1,
+     "applied": null
+    }
+   ]
+  },
+  {
+   "company": 1,
+   "name": "Bindingstone Bay Transport",
+   "ai": "PrismaticAI",
+   "settings_start": "aggressiveness=50,air_add_waiting=0,air_grow_money=0,air_level_max=35,air_level_step=0,air_max_tiles=480,air_routes_max=3,cash_reserve=0,catchment_stops=2,invest_ppv_div=5,invest_road_cap=14,line_budget=80000,max_routes=30,own_fail_pause=0,own_lines=0,rail_twin_max=2",
+   "settings_requested": []
+  },
+  {
+   "company": 2,
+   "name": "AAAHogEx",
+   "ai": "AAAHogEx",
+   "settings_start": "",
+   "settings_requested": []
+  },
+  {
+   "company": 3,
+   "name": "LuDiAI AfterFix",
+   "ai": "LuDiAI AfterFix",
+   "settings_start": "",
+   "settings_requested": []
+  },
+  {
+   "company": 4,
+   "name": "Argyle Coaches",
+   "ai": "CivilAI",
+   "settings_start": "",
+   "settings_requested": []
+  },
+  {
+   "company": 5,
+   "name": "AdmiralAI Transport",
+   "ai": "AdmiralAI",
+   "settings_start": "",
+   "settings_requested": []
+  },
+  {
+   "company": 6,
+   "name": "Findingville Transport",
+   "ai": "PrismaticAI",
+   "settings_start": "aggressiveness=100,cash_reserve=5000,intercity=1,max_routes=30,own_lines=8",
+   "settings_requested": []
+  },
+  {
+   "company": 7,
+   "name": "Rintfield Transport",
+   "ai": "PrismaticAI",
+   "settings_start": "aggressiveness=100,cash_reserve=5000,intercity=1,max_routes=30,own_lines=8,self_steward=1",
+   "settings_requested": []
+  }
+ ],
+ "series": {
+  "0": [
+   {
+    "month": "1950-12",
+    "value": 165155,
+    "money": 4292,
+    "loan": 260000,
+    "vehicles": 20
+   },
+   {
+    "month": "1951-12",
+    "value": 250278,
+    "money": 12084,
+    "loan": 280000,
+    "vehicles": 34
+   },
+   {
+    "month": "1952-12",
+    "value": 222196,
+    "money": 15044,
+    "loan": 260000,
+    "vehicles": 33
+   },
+   {
+    "month": "1953-12",
+    "value": 256533,
+    "money": 18648,
+    "loan": 290000,
+    "vehicles": 42
+   },
+   {
+    "month": "1954-12",
+    "value": 321972,
+    "money": 15289,
+    "loan": 230000,
+    "vehicles": 38
+   },
+   {
+    "month": "1955-12",
+    "value": 420485,
+    "money": 23460,
+    "loan": 160000,
+    "vehicles": 37
+   },
+   {
+    "month": "1956-12",
+    "value": 509127,
+    "money": 18920,
+    "loan": 0,
+    "vehicles": 35
+   },
+   {
+    "month": "1957-12",
+    "value": 659406,
+    "money": 197835,
+    "loan": 0,
+    "vehicles": 35
+   }
+  ],
+  "1": [
+   {
+    "month": "1950-12",
+    "value": 118007,
+    "money": 5077,
+    "loan": 230000,
+    "vehicles": 13
+   },
+   {
+    "month": "1951-12",
+    "value": 253979,
+    "money": 15289,
+    "loan": 290000,
+    "vehicles": 23
+   },
+   {
+    "month": "1952-12",
+    "value": 334912,
+    "money": 43828,
+    "loan": 270000,
+    "vehicles": 24
+   },
+   {
+    "month": "1953-12",
+    "value": 469228,
+    "money": 15676,
+    "loan": 110000,
+    "vehicles": 26
+   },
+   {
+    "month": "1954-12",
+    "value": 636796,
+    "money": 43343,
+    "loan": 0,
+    "vehicles": 26
+   },
+   {
+    "month": "1955-12",
+    "value": 885862,
+    "money": 129988,
+    "loan": 0,
+    "vehicles": 32
+   },
+   {
+    "month": "1956-12",
+    "value": 1077419,
+    "money": 305951,
+    "loan": 0,
+    "vehicles": 37
+   },
+   {
+    "month": "1957-12",
+    "value": 1253626,
+    "money": 519711,
+    "loan": 0,
+    "vehicles": 38
+   }
+  ],
+  "2": [
+   {
+    "month": "1950-12",
+    "value": 8575,
+    "money": 5343,
+    "loan": 270000,
+    "vehicles": 10
+   },
+   {
+    "month": "1951-12",
+    "value": 332867,
+    "money": 46073,
+    "loan": 300000,
+    "vehicles": 29
+   },
+   {
+    "month": "1952-12",
+    "value": 747120,
+    "money": 53665,
+    "loan": 270000,
+    "vehicles": 40
+   },
+   {
+    "month": "1953-12",
+    "value": 1518946,
+    "money": 59086,
+    "loan": 300000,
+    "vehicles": 66
+   },
+   {
+    "month": "1954-12",
+    "value": 2996576,
+    "money": 103809,
+    "loan": 160000,
+    "vehicles": 133
+   },
+   {
+    "month": "1955-12",
+    "value": 4814255,
+    "money": 150416,
+    "loan": 0,
+    "vehicles": 308
+   },
+   {
+    "month": "1956-12",
+    "value": 6499697,
+    "money": 369427,
+    "loan": 0,
+    "vehicles": 389
+   },
+   {
+    "month": "1957-12",
+    "value": 9006478,
+    "money": 1495695,
+    "loan": 0,
+    "vehicles": 428
+   }
+  ],
+  "3": [
+   {
+    "month": "1950-12",
+    "value": 59641,
+    "money": 10992,
+    "loan": 280000,
+    "vehicles": 16
+   },
+   {
+    "month": "1951-12",
+    "value": 159825,
+    "money": 8195,
+    "loan": 270000,
+    "vehicles": 22
+   },
+   {
+    "month": "1952-12",
+    "value": 303948,
+    "money": 7157,
+    "loan": 240000,
+    "vehicles": 48
+   },
+   {
+    "month": "1953-12",
+    "value": 415355,
+    "money": 10802,
+    "loan": 190000,
+    "vehicles": 66
+   },
+   {
+    "month": "1954-12",
+    "value": 603452,
+    "money": 4486,
+    "loan": 230000,
+    "vehicles": 91
+   },
+   {
+    "month": "1955-12",
+    "value": 736068,
+    "money": 10665,
+    "loan": 230000,
+    "vehicles": 114
+   },
+   {
+    "month": "1956-12",
+    "value": 619792,
+    "money": 9579,
+    "loan": 100000,
+    "vehicles": 81
+   },
+   {
+    "month": "1957-12",
+    "value": 633998,
+    "money": 9481,
+    "loan": 20000,
+    "vehicles": 84
+   }
+  ],
+  "4": [
+   {
+    "month": "1950-12",
+    "value": 1,
+    "money": 78923,
+    "loan": 300000,
+    "vehicles": 8
+   },
+   {
+    "month": "1951-12",
+    "value": 1,
+    "money": 17401,
+    "loan": 300000,
+    "vehicles": 19
+   },
+   {
+    "month": "1952-12",
+    "value": 42255,
+    "money": 34397,
+    "loan": 300000,
+    "vehicles": 31
+   },
+   {
+    "month": "1953-12",
+    "value": 93044,
+    "money": 56726,
+    "loan": 300000,
+    "vehicles": 43
+   },
+   {
+    "month": "1954-12",
+    "value": 149824,
+    "money": 101998,
+    "loan": 300000,
+    "vehicles": 53
+   },
+   {
+    "month": "1955-12",
+    "value": 159358,
+    "money": 132902,
+    "loan": 300000,
+    "vehicles": 58
+   },
+   {
+    "month": "1956-12",
+    "value": 137650,
+    "money": 157234,
+    "loan": 300000,
+    "vehicles": 58
+   },
+   {
+    "month": "1957-12",
+    "value": 102822,
+    "money": 191450,
+    "loan": 300000,
+    "vehicles": 48
+   }
+  ],
+  "5": [
+   {
+    "month": "1950-12",
+    "value": 1,
+    "money": 79637,
+    "loan": 300000,
+    "vehicles": 17
+   },
+   {
+    "month": "1951-12",
+    "value": 75061,
+    "money": 85361,
+    "loan": 300000,
+    "vehicles": 37
+   },
+   {
+    "month": "1952-12",
+    "value": 142396,
+    "money": 133051,
+    "loan": 300000,
+    "vehicles": 45
+   },
+   {
+    "month": "1953-12",
+    "value": 160520,
+    "money": 74668,
+    "loan": 300000,
+    "vehicles": 53
+   },
+   {
+    "month": "1954-12",
+    "value": 283608,
+    "money": 104899,
+    "loan": 300000,
+    "vehicles": 66
+   },
+   {
+    "month": "1955-12",
+    "value": 379574,
+    "money": 145522,
+    "loan": 300000,
+    "vehicles": 71
+   },
+   {
+    "month": "1956-12",
+    "value": 440334,
+    "money": 119553,
+    "loan": 300000,
+    "vehicles": 86
+   },
+   {
+    "month": "1957-12",
+    "value": 508248,
+    "money": 58303,
+    "loan": 300000,
+    "vehicles": 109
+   }
+  ],
+  "6": [
+   {
+    "month": "1950-12",
+    "value": 52297,
+    "money": 60042,
+    "loan": 300000,
+    "vehicles": 11
+   },
+   {
+    "month": "1951-12",
+    "value": 340037,
+    "money": 28999,
+    "loan": 300000,
+    "vehicles": 29
+   },
+   {
+    "month": "1952-12",
+    "value": 495566,
+    "money": 16142,
+    "loan": 290000,
+    "vehicles": 38
+   },
+   {
+    "month": "1953-12",
+    "value": 730045,
+    "money": 15715,
+    "loan": 50000,
+    "vehicles": 39
+   },
+   {
+    "month": "1954-12",
+    "value": 947880,
+    "money": 427186,
+    "loan": 300000,
+    "vehicles": 43
+   },
+   {
+    "month": "1955-12",
+    "value": 1097105,
+    "money": 182046,
+    "loan": 0,
+    "vehicles": 48
+   },
+   {
+    "month": "1956-12",
+    "value": 1252086,
+    "money": 388579,
+    "loan": 0,
+    "vehicles": 47
+   },
+   {
+    "month": "1957-12",
+    "value": 1495375,
+    "money": 561852,
+    "loan": 0,
+    "vehicles": 47
+   }
+  ],
+  "7": [
+   {
+    "month": "1950-12",
+    "value": 18739,
+    "money": 25065,
+    "loan": 280000,
+    "vehicles": 12
+   },
+   {
+    "month": "1951-12",
+    "value": 279735,
+    "money": 16785,
+    "loan": 280000,
+    "vehicles": 32
+   },
+   {
+    "month": "1952-12",
+    "value": 377096,
+    "money": 18924,
+    "loan": 260000,
+    "vehicles": 40
+   },
+   {
+    "month": "1953-12",
+    "value": 447319,
+    "money": 23690,
+    "loan": 170000,
+    "vehicles": 32
+   },
+   {
+    "month": "1954-12",
+    "value": 502648,
+    "money": 19762,
+    "loan": 50000,
+    "vehicles": 30
+   },
+   {
+    "month": "1955-12",
+    "value": 572635,
+    "money": 59798,
+    "loan": 0,
+    "vehicles": 32
+   },
+   {
+    "month": "1956-12",
+    "value": 591789,
+    "money": 136887,
+    "loan": 0,
+    "vehicles": 30
+   },
+   {
+    "month": "1957-12",
+    "value": 626398,
+    "money": 226002,
+    "loan": 0,
+    "vehicles": 25
+   }
+  ]
+ },
+ "mode_mix": {
+  "1": {
+   "train": 6,
+   "road": 19,
+   "ship": 0,
+   "aircraft": 13,
+   "stations": 73
+  },
+  "4": {
+   "train": 5,
+   "road": 43,
+   "ship": 0,
+   "aircraft": 0,
+   "stations": 9
+  },
+  "5": {
+   "train": 6,
+   "road": 102,
+   "ship": 0,
+   "aircraft": 0,
+   "stations": 29
+  },
+  "7": {
+   "train": 2,
+   "road": 15,
+   "ship": 0,
+   "aircraft": 8,
+   "stations": 75
+  },
+  "0": {
+   "train": 1,
+   "road": 24,
+   "ship": 0,
+   "aircraft": 10,
+   "stations": 72
+  },
+  "3": {
+   "train": 5,
+   "road": 71,
+   "ship": 2,
+   "aircraft": 6,
+   "stations": 25
+  },
+  "2": {
+   "train": 114,
+   "road": 289,
+   "ship": 0,
+   "aircraft": 24,
+   "stations": 166
+  },
+  "6": {
+   "train": 9,
+   "road": 23,
+   "ship": 0,
+   "aircraft": 15,
+   "stations": 78
+  }
+ },
+ "outcome": {
+  "leader": 2,
+  "leader_value": 9006478,
+  "reference": "AAAHogEx",
+  "reference_company": 2,
+  "prismatic": {
+   "0": {
+    "value": 659406,
+    "rank": 4,
+    "share_of_leader": 0.0732,
+    "ratio_to_reference": 0.0732
+   },
+   "1": {
+    "value": 1253626,
+    "rank": 3,
+    "share_of_leader": 0.1392,
+    "ratio_to_reference": 0.1392
+   },
+   "6": {
+    "value": 1495375,
+    "rank": 2,
+    "share_of_leader": 0.166,
+    "ratio_to_reference": 0.166
+   },
+   "7": {
+    "value": 626398,
+    "rank": 6,
+    "share_of_leader": 0.0695,
+    "ratio_to_reference": 0.0695
+   }
+  }
+ }
+}

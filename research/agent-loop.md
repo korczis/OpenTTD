@@ -53,13 +53,53 @@ loop's own view, stage by stage.
 |---|---|---|---|
 | Retrieve | PARTIAL | the panel's `GET /api/evidence?q=&k=` and the `mcp-evidence` CLI (`tools/research/mcp-rhai/src/evidence.rs`): BM25 over every git-tracked text file at `HEAD` (source, tests, rules, ADRs, knowledge, plans, docs, records), in windows of 30 lines; each passage carries its path, lines, source class, commit and file digest, is ranked current code and policy before plans and records, and is checked against the file now (`current`, moved, `stale`, `deleted`); a question no passage covers by half is answered `insufficient evidence`. Alongside it: `majordomus_search` over the `.ai/` layer and the Markdown, `majordomus context resolve` with a sha256 per document, `tools/knowledge/refs check` for every cited path and symbol | lexical, not semantic (no embeddings): recall@5 0.69 and MRR 0.60 on `research/evidence-benchmark.json` v1; uncommitted changes are not indexed; the CLI `majordomus search` reads only the unversioned `.ai/local/` records |
 | Coordinate | PARTIAL | the Majordomus mesh journal (prismatic-majordomus PR #3101, merged as `d02c59d447c`, release 1.2.0 declared, issue I4665): typed records `record_written` of kind observation, hypothesis, plan, decision, blocker, handoff or outcome, signed and replicated like a claim; the author is the writing session, only it revises and only at the revision it read (compare-and-swap), another session supersedes instead; refused before signing: `out_of_scope`, `not_own`, `stale_revision`, `invalid_input` (a handoff missing objective, current state, evidence, blockers or next action), `idempotency_conflict`; evidence state `asserted` unless a source is retrievable; stale leases and dead authors flagged, never deleted; free text redacted; written with `mesh.record.write` (MCP `majordomus_mesh_record_write`, `POST /api/v1/mesh/records`) and read with `mesh.records` (`GET /api/v1/mesh/records`) and in `blackboard.snapshot`; plus mesh claims, handovers, the peer board and `mcp-bus-blackboard` | Rhai scripts in this fork read and write them with `mesh_records` / `mesh_record_write` (src/mesh_records.rs), contract-tested against a fixture; the live check waits for an installed 1.2.0 `majordomus` (this machine has 1.0.2); the panel mirrors each `plan.directive` as a `decision` record and its `plan.directive_outcome` as an `outcome` record citing it when `$MAJORDOMUS_URL` and `$MAJORDOMUS_SESSION` are set (src/panel_mesh.rs, opt-in, off the game's path), contract-tested only; no command-line write; the typed bus (`panel_events.rs` `KINDS`) is local to one panel |
-| Observe | IMPLEMENTED in the panel | every answer of the panel's `GET /api/bridge/companies` is recorded as an observation: its game tick and date and a digest of the companies' identities (`panel_decision.rs` `observe`, `identity_digest`), readable at `GET /api/bridge/observation` | the Python bridge's `/companies` still carries no tick or digest |
-| Decide | PARTIAL | Prismatic's `GET /api/openttd/decision` (Monte Carlo over `aggressiveness`); the panel binds its directive to the observation Prismatic made during the pull | Prismatic does not echo `observed_digest` yet (the panel reads it when it does); a change in prismatic-platform |
+| Observe | IMPLEMENTED in the panel | every answer of the panel's `GET /api/bridge/companies` is recorded as an observation: its game tick and date and a digest of the companies' identities (`panel_decision.rs` `observe`, `identity_digest`), readable at `GET /api/bridge/observation` | the Python bridge's `/companies` carries no tick or digest: on its `origin/main` (`dd9119b16f`) the handler at `bridge/main.py:236` names neither, and the live answer was NOT RUN, nothing answering on 8730 ([cross-repository dependencies](#cross-repository-dependencies), `companies`) |
+| Decide | PARTIAL | Prismatic's `GET /api/openttd/decision` (Monte Carlo over `aggressiveness`); the panel binds its directive to the observation Prismatic made during the pull | Prismatic does not echo `observed_digest`: its `origin/main` (`b6df70205d`) has none in `OpenttdController`, whose answer is built at `apps/prismatic_api/lib/prismatic_api/controllers/openttd_controller.ex:50`, and the live answer was NOT RUN, nothing answering on 4004 (`echo`); the panel reads the echo when it comes; a change in prismatic-platform |
 | Validate | IMPLEMENTED | the panel's contract checks (`panel_decision.rs` `directive`, `fit_of`), its freshness check before any step (`freshness`: observed during the pull, the echoed digest, companies unchanged, at most 31 game days old, an AI company; 409 otherwise) and the game's `ValidateAction` | the bridge does not validate a directive |
-| Authorize | PARTIAL | the game's approval: one-time, bound to the exact canonical arguments, with a TTL (`prismatic_mcp_server.cpp`, `prismatic_mcp_detail.h`); the bridge no longer approves its own request (branch `feature/operator-approval` of openttd-prismatic-bridge, 09afefa); every settled step records how its approval was given (`approved_by`: the panel's API with the approver it declares, auto-approve with no person, or outside the panel) | the approver is declared, not authenticated: the loopback API checks no identity; the bridge's branch is not on its `main` yet |
-| Execute | IMPLEMENTED | `Command<>::Post` on the game's main thread, through the command system; the bridge's branch carries its `origin/main` fixes (the company id off by one, settings through `bot set`) | the bridge's checked-out `feat/live-behaviour` still lacks them until that branch is merged |
+| Authorize | PARTIAL | the game's approval: one-time, bound to the exact canonical arguments, with a TTL (`prismatic_mcp_server.cpp`, `prismatic_mcp_detail.h`); the bridge no longer approves its own request (branch `feature/operator-approval` of openttd-prismatic-bridge, 09afefa); every settled step records how its approval was given (`approved_by`: the panel's API with the approver it declares, auto-approve with no person, or outside the panel) | the approver is declared, not authenticated: the loopback API checks no identity; the bridge's `feature/operator-approval` (09afefa) is missing from its `origin/main` (`dd9119b16f`), which has no `POST /decision/resume` and still approves its own request at `bridge/decision.py:151` (`approval`) |
+| Execute | IMPLEMENTED | `Command<>::Post` on the game's main thread, through the command system; the bridge's branch carries its `origin/main` fixes (the company id off by one, settings through `bot set`) | the bridge's checked-out `feat/live-behaviour` (`513398c`, 1 ahead of and 17 behind its `origin/main`) lacks them until `feature/operator-approval` is merged (`approval`, its note) |
 | Verify | IMPLEMENTED in the panel | the game's verdict, read back (`AIConfig::GetSetting` for `ai.set_setting`), and the panel's step states follow it (`panel_decision.rs` `state_of`, `verdict_state`): `applied` only for `VERIFIED_SUCCESS` | a step with no verdict to read (an AI started through the console) is `sent`, not verified |
 | Record | IMPLEMENTED in the panel | `plan.directive` on the ZeroMQ bus and in the DuckDB store, with its inputs, observation, idempotency key, version and choice; a directive that waited is settled by `plan.directive_outcome` once the game's verdicts are in (or `expired` after an hour); a keyed pull runs once (`keyed`) | the game's own provenance lives in memory, capped at 128 |
+
+## Cross-repository dependencies
+
+Three pieces of the loop live in the other repositories, and nothing in this fork can supply them.
+`tools/research/agent-loop-deps` (I0171) reads them without changing anything: the repositories with
+`git show`, `git grep` and `git merge-base` at their `origin/main` as last fetched, and the live
+endpoints with one GET each. Each verdict is `met`, `missing` or `NOT RUN`. An endpoint that does
+not answer, or answers without deciding, is `NOT RUN`, never `met` and never `missing`; for such an
+endpoint the code on `main` is printed beside the verdict as a hint. The exit code is 0 when all
+three are met, 1 when one is missing, 3 when none is missing and one is `NOT RUN`, and 4 when all
+three are `NOT RUN`. The fixture tests (`tools/research/test_agent_loop_deps.py`) use scratch git
+repositories and a loopback server, and cover met, missing and unreachable for each dependency.
+The run of 2026-11-25T04:42:58Z ([record](results/agent-loop-deps-20261125T044258Z.md)) exited 1:
+
+| Dependency | Owner | Status | Evidence |
+|---|---|---|---|
+| `echo`: Prismatic echoes `observed_digest` in `GET /api/openttd/decision` | prismatic-platform | NOT RUN | `GET http://127.0.0.1:4004/api/openttd/decision`: connection refused; its `origin/main` `b6df70205d` has no `observed_digest` in `openttd_controller.ex`, whose answer is built at line 50 |
+| `approval`: the bridge's main holds `feature/operator-approval` | openttd-prismatic-bridge | missing | 09afefa is not an ancestor of `origin/main` `dd9119b16f`; no `POST /decision/resume` in `bridge/main.py`; the bridge approves its own request at `bridge/decision.py:151` |
+| `companies`: the bridge's `GET /companies` carries a tick and a digest | openttd-prismatic-bridge | NOT RUN | `GET http://127.0.0.1:8730/companies`: connection refused; on `origin/main` `dd9119b16f` the handler at `bridge/main.py:236` names no tick and no digest |
+
+The requests, one per unmet dependency, as the check prints them:
+
+<!-- open-finding kind=handoff -->
+prismatic-platform: echo `observed_digest`, the digest of the companies it read from
+`OPENTTD_BRIDGE_URL`, in the answer of `GET /api/openttd/decision` (`OpenttdController#decision`);
+this fork's panel already checks an echo (`tools/research/mcp-rhai/src/panel_decision.rs`
+`freshness`).
+
+<!-- open-finding kind=handoff -->
+openttd-prismatic-bridge: merge `feature/operator-approval` (09afefa: the bridge approves nothing
+itself, a waiting setting is answered `pending`, `POST /decision/resume` applies it once the
+operator approved it in the game) into `main`.
+
+<!-- open-finding kind=handoff -->
+openttd-prismatic-bridge: carry the game tick and a digest of the companies' identities on
+`GET /companies`, as this fork's panel records them
+(`tools/research/mcp-rhai/src/panel_decision.rs` `observe`, `identity_digest`).
+
+A dependency that is met moves its row of the table above: its cell under "What is missing" loses
+the clause, and the stage's status follows from what remains.
 
 ## What the gaps mean
 
