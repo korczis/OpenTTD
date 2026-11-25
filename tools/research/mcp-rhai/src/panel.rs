@@ -665,8 +665,26 @@ pub fn owner_cookie(secret: Option<&str>, port: u16, given: Option<&str>) -> Opt
     crate::web_access::same(s, g).then(|| owner_set_cookie(port, s))
 }
 
-/// How long the page keeps the owner signed in: a year, since the secret itself outlives restarts.
-pub const OWNER_COOKIE_MAX_AGE: u64 = 365 * 24 * 3600;
+/// How long the page keeps the owner signed in: 12 hours (the owner's decision of 2026-11-23), so a
+/// cookie taken from the browser serves a day at most.
+pub const OWNER_COOKIE_MAX_AGE: u64 = 12 * 3600;
+
+/// How long a one-time sign-in link (`?once=`, [`h_owner_once`]) serves, and that it serves once.
+pub const OWNER_ONCE_TTL: Duration = Duration::from_secs(60);
+
+/// A one-time sign-in nonce, made for a caller that holds the owner secret (`POST /api/owner/once`).
+pub fn owner_once(nonces: &mut HashMap<String, Instant>, now: Instant) -> Option<String> {
+    nonces.retain(|_, until| *until > now);
+    let n = crate::web_access::random_hex(16)?;
+    nonces.insert(n.clone(), now + OWNER_ONCE_TTL);
+    Some(n)
+}
+
+/// Spend `given` (`?once=`): true once for a nonce made within [`OWNER_ONCE_TTL`], false after, for
+/// a second use, and for one never made.
+pub fn spend_once(nonces: &mut HashMap<String, Instant>, given: &str, now: Instant) -> bool {
+    matches!(nonces.remove(given), Some(until) if until > now)
+}
 
 /// The Set-Cookie header of a signed-in owner: HttpOnly (no script reads it), SameSite=Strict (no
 /// other site sends it), kept across browser restarts.
@@ -781,7 +799,7 @@ pub fn owner_login(secret: Option<&str>, given: &str, failures: &mut VecDeque<In
 
 /// The POST routes only the owner secret opens, whoever else asks (the run token included). A route
 /// that decides for the owner is added here, and nowhere else.
-pub const OWNER_ROUTES: &[&str] = &["/api/approve", "/api/approvers"];
+pub const OWNER_ROUTES: &[&str] = &["/api/approve", "/api/approvers", "/api/owner/once"];
 
 /// The owner's routes: [`OWNER_ROUTES`] and switching auto-approve on (POST /api/auto-approve
 /// `{on: true}`; switching it off is open to anyone). They need the owner secret; any other request
@@ -1098,6 +1116,8 @@ pub struct Game {
     owner_file: Option<String>,
     /// The times of the recent failed sign-ins ([`owner_login`]).
     owner_failures: Mutex<VecDeque<Instant>>,
+    /// The one-time sign-in nonces not spent yet, each with when it stops serving ([`owner_once`]).
+    owner_nonces: Mutex<HashMap<String, Instant>>,
     /// The stack's run token ([`RUN_TOKEN_HEADER`]): from `--run-token-file`, else made for the
     /// panel's in-process scripts; Err when the file cannot serve (the panel stops at start).
     run_token: Result<String, String>,
@@ -1158,7 +1178,7 @@ impl Game {
             bus: Bus::new(), announced: Mutex::new(HashSet::new()),
             #[cfg(test)]
             test_approvals: Mutex::new(vec![]),
-            owner_secret, owner_note, owner_file, owner_failures: Mutex::new(VecDeque::new()),
+            owner_secret, owner_note, owner_file, owner_failures: Mutex::new(VecDeque::new()), owner_nonces: Mutex::new(HashMap::new()),
             mcp_up: AtomicBool::new(false), ai_started: AtomicBool::new(false), rpc_id: AtomicU64::new(0),
             server_tools: Mutex::new((vec![], None)), client_tools: Mutex::new((vec![], None)),
             owner_q: Mutex::new(None), plans_seen: Mutex::new(HashSet::new()), history: Mutex::new(VecDeque::new()),
@@ -2391,6 +2411,14 @@ fn h_owner_login(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
     }
 }
 
+/// A one-time sign-in link for the owner's browser (POST /api/owner/once, the owner secret's alone):
+/// `?once=<nonce>` sets the page's cookie once within a minute and redirects to the page without the
+/// query, so a launcher opens the page signed in and the secret is in no URL, history or process list.
+fn h_owner_once(g: &Arc<Game>, _: &Input) -> Result<(u16, Value), String> {
+    let n = owner_once(&mut g.owner_nonces.lock().unwrap(), Instant::now()).ok_or("no randomness: /dev/urandom cannot be read")?;
+    ok(json!({"once": n, "url": format!("{}/?once={n}", g.panel_url()), "expires_s": OWNER_ONCE_TTL.as_secs()}))
+}
+
 /// The owner signs this browser out (POST /api/owner/logout): its cookie is cleared; open to anyone,
 /// since it only ever takes the owner's power away from the browser that asks.
 fn h_owner_logout(g: &Arc<Game>, i: &Input) -> Result<(u16, Value), String> {
@@ -3071,6 +3099,8 @@ pub fn routes() -> Vec<Route> {
           s(json!({"secret": {"type": "string"}}), &["secret"]), h_owner_login),
         r("POST", "/api/owner/logout", "ownerLogout", "Sign this browser out of the owner's routes (its cookie is cleared); 204", false,
           Some(obj()), h_owner_logout),
+        r("POST", "/api/owner/once", "ownerOnce", "A one-time sign-in link for the owner's browser: `?once=<nonce>` (answered as `once` and `url`) sets the owner's cookie once within 60 s and redirects (303) to the page without the query; a spent or unknown nonce answers 401. Needs the owner secret", false,
+          Some(obj()), h_owner_once),
         r("POST", "/api/start-ai", "startAi", "Start a company AI with an optional settings string", false,
           s(json!({"ai": st(), "settings": st()}), &[]), h_start_ai),
         r("GET", "/api/bots", "bots", "The AIs the owner can run as their bot, their settings (from openttd.ai.list, else info.nut) and the running AI companies", true,
@@ -3581,10 +3611,25 @@ impl Panel {
             return if code == 204 { hub::respond(stream, 204, "text/plain", b"") } else { send_json(stream, code, &json!({"error": why})) };
         }
         let g = &self.game;
-        // The page opened once as ?owner=<secret> keeps the secret in an HttpOnly cookie, which its
-        // one API client sends with every request (src/web_access.rs carries the header on).
-        if let Some(c) = owner_cookie(g.owner_secret.as_deref(), g.args.panel_port, req.query.get("owner")) {
-            crate::web_access::set_headers(&format!("{}{c}", crate::web_access::headers()));
+        // The page opened once as ?once=<nonce> (a one-time link, POST /api/owner/once) or ?owner=<secret>
+        // keeps the secret in an HttpOnly cookie, which its one API client sends with every request
+        // (src/web_access.rs carries the header on). Either answers 303 to the page without the
+        // query, so neither stays in the address bar or the history.
+        if req.method == "GET" && (req.query.get("once").is_some() || req.query.get("owner").is_some()) {
+            let cookie = match req.query.get("once") {
+                Some(n) => {
+                    if !spend_once(&mut g.owner_nonces.lock().unwrap(), n, Instant::now()) {
+                        return send_json(stream, 401, &json!({"error": "that sign-in link is spent, expired or unknown: ask for a new one (POST /api/owner/once)",
+                                                             "refused": "owner_once"}));
+                    }
+                    let who = Who::of(g.owner_secret.as_deref(), g.args.panel_port, &req.headers);
+                    g.governance("owner_session", json!(false), json!(true), "GET ?once=", &Who { credential: "token", role: "owner", ..who });
+                    g.owner_secret.as_deref().map(|s| owner_set_cookie(g.args.panel_port, s))
+                }
+                None => owner_cookie(g.owner_secret.as_deref(), g.args.panel_port, req.query.get("owner")),
+            };
+            crate::web_access::set_headers(&format!("{}{}Location: {}\r\n", crate::web_access::headers(), cookie.unwrap_or_default(), req.path));
+            return hub::respond(stream, 303, "text/plain", b"");
         }
         let file = |stream: TcpStream, f: PathBuf, ctype: &str| match std::fs::read(&f) {
             Ok(b) => hub::respond(stream, 200, ctype, &b),
@@ -3961,8 +4006,8 @@ mod tests {
         // plays (GET /api/battle/contestants; panel_battle.rs).
         // And Deny beside Approve (POST /api/deny; ADR 0038), and the owner's sign-in and sign-out
         // (POST /api/owner/login, /api/owner/logout).
-        // And the in-game approvers (POST /api/approvers).
-        assert_eq!(rs.len(), 85);
+        // And the in-game approvers (POST /api/approvers), and the one-time sign-in link (POST /api/owner/once).
+        assert_eq!(rs.len(), 86);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -3970,7 +4015,7 @@ mod tests {
                        ("GET", "/api/scoreboard"), ("POST", "/api/scoreboard")] {
             assert!(rs.iter().any(|r| r.method == m && r.path == p), "{m} {p}");
         }
-        assert!(rs.iter().filter(|r| !r.needs_mcp).all(|r| ["/api/status", "/api/log", "/api/events", "/api/console", "/api/auto-approve", "/api/owner/login", "/api/owner/logout",
+        assert!(rs.iter().filter(|r| !r.needs_mcp).all(|r| ["/api/status", "/api/log", "/api/events", "/api/console", "/api/auto-approve", "/api/owner/login", "/api/owner/logout", "/api/owner/once",
             "/api/start-ai", "/api/bots/start", "/api/ui/classes", "/api/view/attach", "/api/view/tool", "/api/rhai",
             "/api/content", "/api/content/download", "/api/overview/history", "/api/results", "/api/result", "/api/duel", "/api/scoreboard", "/api/calibration",
             "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query", "/api/db/named",
@@ -5418,7 +5463,7 @@ mod tests {
         assert_eq!(g.script_token(&Who::none()), None, "a script sent without a credential holds no token");
         assert_eq!(g.script_token(&Who { role: "owner", ..Who::none() }), Some(run.clone()));
         assert_eq!(g.script_token(&Who { role: "run", ..Who::none() }), Some(run.clone()));
-        assert_eq!(OWNER_ROUTES, ["/api/approve", "/api/approvers"]);
+        assert_eq!(OWNER_ROUTES, ["/api/approve", "/api/approvers", "/api/owner/once"]);
         assert_eq!(post_as(&p, "/api/approve", json!({"id": 1}), &[(RUN_TOKEN_HEADER, &run)]).0, 401, "the run token opens no owner route");
     }
 
@@ -5444,5 +5489,66 @@ mod tests {
                 .any(|e| e["data"]["text"] == json!("start_ai PrismaticAI")), "the owner's script reaches the console");
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    #[test]
+    fn a_one_time_sign_in_link_serves_once_within_a_minute() {
+        let mut nonces = HashMap::new();
+        let t0 = Instant::now();
+        let a = owner_once(&mut nonces, t0).unwrap();
+        assert_eq!(a.len(), 32);
+        assert!(spend_once(&mut nonces, &a, t0 + Duration::from_secs(59)), "within the minute");
+        assert!(!spend_once(&mut nonces, &a, t0 + Duration::from_secs(59)), "never twice");
+        let b = owner_once(&mut nonces, t0).unwrap();
+        assert!(!spend_once(&mut nonces, &b, t0 + OWNER_ONCE_TTL), "not after the minute");
+        assert!(!spend_once(&mut nonces, "never-made", t0));
+        let _ = owner_once(&mut nonces, t0);
+        let _ = owner_once(&mut nonces, t0 + OWNER_ONCE_TTL + Duration::from_secs(1));
+        assert_eq!(nonces.len(), 1, "a spent minute's nonces are dropped");
+        assert_eq!(OWNER_COOKIE_MAX_AGE, 43_200, "the owner's cookie lasts 12 hours");
+        let (g, p) = bare_panel("18841");
+        let secret = g.owner_secret.clone().unwrap();
+        let run = g.run_token.clone().unwrap();
+        assert_eq!(post_to(&p, "/api/owner/once", json!({})).0, 401);
+        assert_eq!(post_as(&p, "/api/owner/once", json!({}), &[(RUN_TOKEN_HEADER, &run)]).0, 401, "the run token makes no sign-in link");
+        let (code, out) = post_as(&p, "/api/owner/once", json!({}), &[(OWNER_HEADER, &secret)]);
+        assert_eq!(code, 200, "{out}");
+        let n = out["once"].as_str().unwrap().to_string();
+        assert_eq!((out["url"].clone(), out["expires_s"].clone()), (json!(format!("http://127.0.0.1:18841/?once={n}")), json!(60)));
+        assert!(!out.to_string().contains(&secret));
+    }
+
+    /// One GET over TCP to a panel: the raw answer.
+    fn get_raw(port: u16, target: &str) -> String {
+        let mut c = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(c, "GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").unwrap();
+        let mut raw = String::new();
+        let _ = c.read_to_string(&mut raw);
+        raw
+    }
+
+    #[test]
+    fn opening_the_page_with_a_link_or_the_secret_signs_in_and_redirects_to_it_without_the_query() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let args = parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", &port.to_string()].map(String::from)).unwrap();
+        let g = Game::new(args);
+        let p = Arc::new(Panel { game: g.clone(), routes: routes() });
+        let secret = g.owner_secret.clone().unwrap();
+        thread::spawn(move || serve(l, p));
+        let n = owner_once(&mut g.owner_nonces.lock().unwrap(), Instant::now()).unwrap();
+        let since = g.bus.seq();
+        let first = get_raw(port, &format!("/?once={n}"));
+        assert!(first.starts_with("HTTP/1.1 303 See Other"), "{first}");
+        assert!(first.contains("\r\nLocation: /\r\n"), "{first}");
+        assert!(first.contains(&format!("Set-Cookie: mcp_owner_{port}={secret}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200")), "{first}");
+        let ev = governance_since(&g, since);
+        assert_eq!((ev[0]["setting"].clone(), ev[0]["via"].clone(), ev[0]["role"].clone()), (json!("owner_session"), json!("GET ?once="), json!("owner")), "{ev:?}");
+        let again = get_raw(port, &format!("/?once={n}"));
+        assert!(again.starts_with("HTTP/1.1 401") && again.contains("owner_once") && !again.contains("Set-Cookie"), "{again}");
+        let owner = get_raw(port, &format!("/scripts?owner={secret}"));
+        assert!(owner.starts_with("HTTP/1.1 303") && owner.contains("\r\nLocation: /scripts\r\n") && owner.contains("Set-Cookie: mcp_owner_"), "{owner}");
+        let wrong = get_raw(port, "/?owner=wrong");
+        assert!(wrong.starts_with("HTTP/1.1 303") && wrong.contains("\r\nLocation: /\r\n") && !wrong.contains("Set-Cookie"), "{wrong}");
     }
 }
