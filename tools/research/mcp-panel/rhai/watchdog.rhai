@@ -124,6 +124,7 @@ loop {
         let pending = status().pending ?? [];
         let services = [];
         try { services = api_services().services ?? []; } catch { }
+        let stalled = [];
         let bots = #{};
         for b in api_bots().running ?? [] { bots[`${b.id}`] = b; }
         for c in read("openttd://companies").data.companies ?? [] {
@@ -137,6 +138,7 @@ loop {
             v.name = c.name;
             v.date = state.game_date;
             if v.stalled {
+                stalled.push(`${c.name} (${v.quiet_days} d)`);
                 let bot = bots[`${c.id}`];
                 let budget = if type_of(bot) == "()" { 0 } else { setting_of(bot, "line_budget") };
                 v.reasons = reasons(c.id, pending, shared_get(`replan.${c.id}`), c.money, budget, services);
@@ -149,6 +151,10 @@ loop {
         }
         if gaps.len() > KEEP_GAPS { gaps = gaps.extract(gaps.len() - KEEP_GAPS); }
         shared_set("watchdog.tuning", #{ gaps: gaps, threshold_days: threshold_of(gaps), date: state.game_date });
+        // One line a round: what it found, and the heartbeat the panel's supervisor reads. A service
+        // that declares `// stall:` and prints nothing for that long is restarted; this one printed
+        // only on errors and was restarted 7 times in 1.9 game years (seed 10487, 2026-11-23).
+        print(`watchdog ${state.game_date}: threshold ${threshold} day(s), stalled: ${if stalled.is_empty() { "none" } else { joined(stalled) }}`);
     } catch (err) {
         print(`watchdog: ${err}`);
     }

@@ -236,6 +236,8 @@ try {
     .waitFor({ timeout: 10000 }).then(() => true).catch(() => false) && !(await autoOn()));
   await owner.locator('#owner-secret').fill(secret);
   await owner.locator('#owner-signin-form button[type="submit"]').click();
+  // autoOn() is awaited: an unawaited Promise is truthy, so the wait ended when the box closed, before
+  // the sign-in's answer set the cookie read next.
   check('the right secret signs in and the switch goes on', await until(async () => (await box.count()) === 0 && (await autoOn())));
   // The cookie itself, waited for (bounded): the browser may apply the sign-in's Set-Cookie a moment
   // after the box closes. It outlives the browser session (a persistent cookie, not a session one)

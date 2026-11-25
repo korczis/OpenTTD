@@ -32,7 +32,7 @@ the same.
 Prismatic still decides from one read of the companies and a hand growth model, not from recorded
 history (ADR 0034). This fork's half is done (I0085): the panel offers each company's history (the
 bus endpoint and a store query of its samples) and records the fit a directive reports, or states
-the fallback; fitting it is `prismatic-platform`'s own change. The Rust rewrite of the bridge client (ADR 0032, proposed) is not done. On a
+the fallback; fitting it is `prismatic-platform`'s own change. The Rust rewrite of the bridge client (ADR 0032, accepted) is not done. On a
 vanilla server the only control is still rcon `start_ai`/`reload_ai`, which restarts the AI.
 
 ## Maturity
@@ -46,5 +46,5 @@ vanilla server the only control is still rcon `start_ai`/`reload_ai`, which rest
   contract `research/prismatic-bridge/decision-contract.schema.json` and the panel's pull
   (`tools/research/mcp-rhai/src/panel_decision.rs:782:pull_with`), tested by
   `tools/research/mcp-rhai/src/panel_decision.rs:1176:the_contracts_example_and_prismatics_answer_are_directives`
-  and gated in CI (`.github/workflows/research-rust.yml:189-190:cargo`).
+  and gated in CI (`.github/workflows/research-rust.yml:190-191:cargo`).
 - **documented**: `research/prismatic-bridge/ARCHITECTURE.md`.

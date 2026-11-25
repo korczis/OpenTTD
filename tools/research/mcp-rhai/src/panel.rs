@@ -35,6 +35,7 @@ use crate::panel_bot;
 use crate::panel_decision;
 use crate::panel_events;
 use crate::panel_results;
+use crate::panel_bench;
 use crate::panel_realworld;
 use crate::panel_store;
 use crate::panel_town;
@@ -3664,6 +3665,7 @@ pub fn routes() -> Vec<Route> {
         r("GET", "/api/scoreboard", "scoreboard", "The README duel scoreboard as tools/research/readme-scoreboard derives it from research/results: best run, wins of all duels, the seed-31337 series, and whether README.md is current or stale", false, None, panel_results::h_scoreboard),
         r("POST", "/api/scoreboard", "scoreboardWrite", "Regenerate the scoreboard region of README.md from research/results (tools/research/readme-scoreboard); answers the new scoreboard. Commit and push stay the owner's", false,
           s(json!({}), &[]), panel_results::h_scoreboard_write),
+        r("GET", "/api/bench", "bench", "Every Rust benchmark record (research/results/bench-*.json, schema rust-bench/v1, written by the benchmark harness), oldest first: rev, host, toolchain, each bench's median, mean, stddev, min, max and samples, and the regressions against its baseline; a file off the schema is listed under `skipped` with its reason. ?id=bench-... answers that one record", false, None, panel_bench::h_bench),
         r("GET", "/api/realworld", "realWorld", "Every real-world place snapshot (tools/research/real-world/fixtures/*/snapshot.json, research/real-world-scenario.md): the query, the candidate it resolved to, the map's size and scale, each source with its licence and completeness, and what the offline compiler makes of it (entities and economy edges by evidence class: OBSERVED, DERIVED, INFERRED, HYPOTHETICAL)", false, None, panel_realworld::h_list),
         r("GET", "/api/realworld/scenario", "realWorldScenario", "One place compiled in process by the one compiler (?name=brno): the scenario (heightmap, towns, industries, landmark signs, economy edges, each with its evidence class, rationale, confidence and rule), the snapshot's candidates, sources, licences and features, the heightmap as a PNG data URI, and both validations. Offline and deterministic", false, None, panel_realworld::h_scenario),
         r("POST", "/api/realworld/compile", "realWorldCompile", "Write one place's compiled artifacts (heightmap.png, towns.json, the RealWorldScenario GameScript, openttd.cfg, preview.svg, scenario.json, SHA256SUMS) to build-real-world/<name>/ and say whether they match the hashes recorded with its fixture. Offline; the headless load is tools/research/real-world/rw-scenario load-check", false,
@@ -3876,6 +3878,8 @@ fn query_params(path: &str) -> &'static [(&'static str, bool)] {
         "/api/investment" => &[("params", false)],
         "/api/content" => &[("q", true)],
         "/api/result" => &[("name", true)],
+        // panel_bench::h_bench: one record by id; without it, every record.
+        "/api/bench" => &[("id", false)],
         "/api/db/query" => &[("sql", false)],
         // panel_realworld::h_scenario answers 400 without a place name.
         "/api/realworld/scenario" => &[("name", true)],
@@ -4306,6 +4310,17 @@ impl Panel {
                     Err(_) => send_json(stream, 404, &json!({"error": "static/results.html is missing"})),
                 };
             }
+            // The benchmark records: /bench is every bench, /bench/<group>/<name> one, titled from the records.
+            if path == "/bench" || path.starts_with("/bench/") {
+                let (title, description, found) = panel_bench::page_meta(&percent_decode(path));
+                return match std::fs::read_to_string(statics().join("bench.html")) {
+                    Ok(t) => {
+                        let html = t.replace("__TITLE__", &html_escape(&title)).replace("__DESCRIPTION__", &html_escape(&description));
+                        hub::respond(stream, if found { 200 } else { 404 }, "text/html; charset=utf-8", html.as_bytes())
+                    }
+                    Err(_) => send_json(stream, 404, &json!({"error": "static/bench.html is missing"})),
+                };
+            }
             // The script workspace: an editor for the Rhai library, its services and their logs
             // (static/scripts.html, src/panel_scripts.rs); /scripts/<name> opens one script.
             if path == "/scripts" || path.starts_with("/scripts/") {
@@ -4623,13 +4638,15 @@ mod tests {
         // And the store's named queries (GET and POST /api/db/named; sql/queries).
         // And the strategist and its blackboard (GET /api/strategy, POST /api/strategy/run, GET and
         // POST /api/blackboard; panel_strategy.rs), and the LAN battle's contestants the live arena
-        // plays (GET /api/battle/contestants; panel_battle.rs).
+        // plays (GET /api/battle/contestants; panel_battle.rs), and the Rust benchmark records
+        // (GET /api/bench; panel_bench.rs).
         // And Deny beside Approve (POST /api/deny; ADR 0038), and the owner's sign-in and sign-out
         // (POST /api/owner/login, /api/owner/logout). And the approvals list with its bulk decisions
         // and standing rules (GET /api/approvals; POST /api/approve/many, /api/deny/many,
         // /api/approve/all, /api/deny/all, /api/rules, /api/rules/remove).
         // And the in-game approvers (POST /api/approvers), and the one-time sign-in link (POST /api/owner/once).
-        assert_eq!(rs.len(), 93);
+        // And the Rust benchmark records (GET /api/bench).
+        assert_eq!(rs.len(), 94);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -4644,7 +4661,7 @@ mod tests {
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
             "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
             "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh",
-            "/api/strategy", "/api/strategy/run", "/api/blackboard", "/api/battle/contestants"].contains(&r.path)));
+            "/api/strategy", "/api/strategy/run", "/api/blackboard", "/api/battle/contestants", "/api/bench"].contains(&r.path)));
     }
 
     /// A store with two runs of one instance: the older run's days must not feed the books.

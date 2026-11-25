@@ -3,7 +3,8 @@ name: Research Rust
 # Fork-owned workflow, not part of upstream's CI. Runs the mcp-rhai tests that carry the Battlebrain
 # boundaries (rule project.decision-authority-boundaries, B1-B8 in src/authority_boundaries.rs),
 # the decision contract and executor (battlebrain_contract.rs, bin/battlebrain.rs,
-# panel_decision.rs), the knapsack checks (cargo.rs) and the cutover rehearsal
+# panel_decision.rs), the knapsack checks (cargo.rs), the battle post-mortem's causes
+# (postmortem.rs, bin/battle-postmortem.rs) and the cutover rehearsal
 # (tools/research/battlebrain-cutover-check), so a pull request cannot merge with them failing.
 # It also builds the performance benchmarks and checks their records (research/rust-bench.md).
 # The job always reports, so "Research Rust tests" can be a required check: when no path
@@ -183,11 +184,11 @@ jobs:
         if: steps.changes.outputs.run == 'true'
         run: cargo fetch --locked --manifest-path "$MANIFEST"
 
-      - name: cargo test --release (battlebrain, mcp-plan, mcp-intent, mcp-panel; default features)
+      - name: cargo test --release (battlebrain, mcp-plan, mcp-intent, mcp-panel, battle-postmortem; default features)
         if: steps.changes.outputs.run == 'true'
         run: |
           cargo test --release --locked --offline --manifest-path "$MANIFEST" \
-            --bin battlebrain --bin mcp-plan --bin mcp-intent --bin mcp-panel
+            --bin battlebrain --bin mcp-plan --bin mcp-intent --bin mcp-panel --bin battle-postmortem
 
       - uses: actions/setup-node@v7
         if: steps.changes.outputs.run == 'true'

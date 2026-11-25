@@ -1,24 +1,32 @@
 intent: the-research-bot-competes-and-its-losses-are-explained
-observed_at: 320ad87aea
-recorded_by: "claude-code (Opus 5.5, session 6cb93e2a, worktree plan/external-review-backlog) from an external review re-checked against origin/master on 2026-11-22"
-recorded_at: '2026-11-22'
+observed_at: eed5cb5fc5
+recorded_by: "claude-code (Opus 5.5, session 7709ab47, worktree doc/plan-reconcile-merged-work) re-observed against origin/master eed5cb5fc5 after the merged PrismaticAI work; first recorded 2026-11-22 by session 6cb93e2a from an external review"
+recorded_at: '2026-11-25'
 observations:
-- id: growth-gates-late
-  statement: "Added 2026-11-22 from an external review re-checked on master: InvestSurplus buys nothing until usable money reaches max(invest_min, 20 x cash_reserve), 500k at defaults (tools/research/prismatic-ai/PrismaticAI/fleet.nut:60,71); demand growth stops at 4 planes and 8 road vehicles per route (fleet.nut:165); the hoard check starts at 500k and exempts self-steward (tools/research/ai-battle/battle.json:78, :86-89); failed rail builds leave track and stations (rail.nut:794-812, 933-993) (I0125-I0137)"
+- id: growth-gates-still-late
+  statement: "Re-observed 2026-11-25 at origin/master eed5cb5fc5 after PRs #225-#284: INVEST_SURPLUS_RESERVES is still the constant 20 (tools/research/prismatic-ai/PrismaticAI/fleet.nut:253, used at :264); ManageFleet still caps demand growth at 4 planes and 8 road vehicles unless the steward is on (fleet.nut:422); there is no `fleet gate:` line, only the yearly per-mode FUNNEL line of PR #272 (funnel.nut); builds still draw the whole loan (SetLoanAmount(GetMaxLoanAmount()) at main.nut:463,668,694,744 and autopilot.nut:176) and PR #276's capital allocator spends what is above the reserve rather than sizing a borrow; a freight line is still scored at a fixed `tiles_a_day = 3.7` (rail.nut:1894); the road search still refuses every slope (intercity.nut:52); town.nut and town_model.nut are still not required (main.nut:113-132) (I0125-I0129, I0131, I0134)"
   source: file:tools/research/prismatic-ai/PrismaticAI/fleet.nut
-- id: nothing-preregistered
-  statement: "Added 2026-11-22 from an external review re-checked on master: the tuning rule says it is enforced by review, not by a tool (.ai/repo/rules/project/a-tuning-claim-needs-held-start-pairs.v1.md:6); no comparison was pre-registered; duel records carry no profit or cargo and the scoreboard rests on company value from unregistered, often single runs (research/duel-evidence-audit.md:31, :103) (I0161-I0167)"
-  source: file:research/duel-evidence-audit.md
+- id: failed-builds-partly-cleaned
+  statement: "Re-observed 2026-11-25 at origin/master eed5cb5fc5: a given-up rail line removes both its stations (AbandonLineStations, rail.nut:1242-1246, PRs #245/#248) but leaves its laid track; an intercity failure after its stops are built (not joined, no depot, no engine, no bus) removes nothing and does not enter FAILED_PAIRS (intercity.nut:143-174); the rail tried set and FAILED_PAIRS survive a load (main.nut:692,738; restore.nut:59,79,164,184); the fitness check fails on rail stations without a train for a year (trainless_stations, battle.py:1625, battle.json trainless_max, PR #245) but there is no `orphans` anomaly for other modes and no `battle.py recover` scenario (I0130, I0136)"
+  source: file:tools/research/prismatic-ai/PrismaticAI/rail.nut
+- id: self-steward-held-but-unmeasured
+  statement: "Re-observed 2026-11-25 at origin/master eed5cb5fc5: `PrismaticAI self-steward` is in fitness.must_not_hoard (tools/research/ai-battle/battle.json:93, since PR #89), but no fitness run on this master is recorded and branch runs disagreed (#280's passed; #276's branch reported self-steward hoarding 1964-01..1965-10 and #277's failed on trainless_stations); no held-start pairs self_steward=1 against 0 are under research/results/ (I0132)"
+  source: file:tools/research/ai-battle/battle.json
+- id: still-nothing-preregistered
+  statement: "Re-observed 2026-11-25 at origin/master eed5cb5fc5: tools/research/preregistration and tools/research/paired-report do not exist, mcp-duel takes no --protocol, the determinism A/B still runs one seed (tools/research/determinism-ab SEED=53744); the newest research/results/ ablations (PR #274, seed 15805) are one match per arm and say so (I0161-I0167)"
+  source: file:tools/research/determinism-ab
 conditions:
 - criterion: prismatic-ai-grows-and-recovers
   state: missing
-  because: "milestone prismatic-ai-grows-its-fleet-and-survives-its-own-failures owns the fix; nothing in it has started"
+  because: "milestone prismatic-ai-grows-its-fleet-and-survives-its-own-failures owns the fix; re-observed 2026-11-25: none of its 13 issues is done; I0130 and I0132 are partly met by merged work (see their observations), the rest untouched"
   observations:
-  - growth-gates-late
+  - growth-gates-still-late
+  - failed-builds-partly-cleaned
+  - self-steward-held-but-unmeasured
 - criterion: evaluations-are-pre-registered-and-paired
   state: missing
-  because: "milestone evaluations-are-fair-pre-registered-and-paired owns the fix; nothing in it has started"
+  because: "milestone evaluations-are-fair-pre-registered-and-paired owns the fix; re-observed 2026-11-25: nothing in it has started"
   observations:
-  - nothing-preregistered
+  - still-nothing-preregistered
 risks:
 - "The tournament host is shared with the owner and the remote GA orchestrator; experiments need the owner go-ahead for each session"
