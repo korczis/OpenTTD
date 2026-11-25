@@ -104,6 +104,9 @@ REF_FIELD = re.compile(r"(\w+)=(-?\d+)")
 MODES = ("rail", "road", "air", "water")
 # An AI's Squirrel error: "dbg: [script:1] [<company>] [S] <text>".
 SQ_ERROR = re.compile(r"\[script:\d\] \[(\d+)\] \[S\] ")
+# PrismaticAI's quarterly capital report (capital.nut, a warning, so it shows at `-d script=3`):
+# "dbg: [script:3] [<company>] [W] PrismaticAI: capital report <year>Q<n>: frozen=<d> days=<d> ...".
+CAP_LINE = re.compile(r"\[script:\d\] \[(\d+)\] \[W\] PrismaticAI: capital report (\d+)Q(\d): (.*)$")
 # The referee's shared producers: an industry one of whose cargoes rail stations of several companies
 # pick up (`cargo=` since 2026-11-23; a line without it counts for the whole industry).
 REF_SHARED = re.compile(r"REF S date=(\d+)-(\d+) ind=(\d+)(?: cargo=(\d+))? owners=([\d,]+) name=(.*)$")
@@ -1577,6 +1580,48 @@ def funnel_gaps(m: dict, keys: list[str]) -> list[str]:
     return fails
 
 
+def parse_capital(text: str) -> dict[int, list[dict]]:
+    """{company id: [{"year", "quarter", "frozen", "days", ...}, ...] in report order} from a match
+    log's PrismaticAI capital reports (CAP_LINE): per game quarter, the days its construction stood
+    frozen (main.nut BuildFrozen, counted by capital.nut from heartbeat to heartbeat) out of the days
+    counted, and the allocator's other counters."""
+    out: dict[int, list[dict]] = {}
+    for line in text.splitlines():
+        m = CAP_LINE.search(line)
+        if not m:
+            continue
+        rep = {"year": int(m.group(2)), "quarter": int(m.group(3))}
+        rep.update({k: int(v) for k, v in REF_FIELD.findall(m.group(4))})
+        out.setdefault(int(m.group(1)), []).append(rep)
+    return out
+
+
+def frozen_construction(m: dict, fit: dict) -> list[str]:
+    """The fitness failures of healthy PrismaticAI contestants (`must_be_healthy`) whose construction
+    stood frozen on more than `frozen_max` (default 0.15) of the days of their first `frozen_years`
+    (default 3) game years, from `m["capital"]` (parse_capital, keyed by company id in start order).
+    In the owner's live game of seed 12609 company 0 was frozen on 525 of the 1,096 days of 1950-1952
+    (47.9%): RepaySurplus left the balance just above StayAfloat's floor, a few days of costs later
+    the company "borrowed to stay afloat", and BuildFrozen stopped every build for 90 days while the
+    loan was above half its limit. A contestant whose log has no capital report there (a bot without
+    capital.nut) is not judged; one that reports fewer days than the window holds is judged on the
+    days it reported."""
+    rules = fit["rules"]
+    limit, years = rules.get("frozen_max", 0.15), rules.get("frozen_years", 3)
+    start = m.get("match_cfg", {}).get("start_year", 1950)
+    fails = []
+    for i, c in enumerate(m["lineup"]):
+        if not c["ai"].startswith("PrismaticAI") or c["key"] not in fit.get("must_be_healthy", []):
+            continue
+        reps = [r for r in m.get("capital", {}).get(i, []) if r["year"] < start + years]
+        days = sum(r.get("days", 0) for r in reps)
+        frozen = sum(r.get("frozen", 0) for r in reps)
+        if days > 0 and frozen > limit * days:
+            fails.append(f"{c['key']}: frozen:{frozen} of {days} days ({frozen / days:.1%}) in {start}-{start + years - 1} "
+                         f"(max {limit:.0%})")
+    return fails
+
+
 def trainless_stations(m: dict, rules: dict) -> list[str]:
     """The fitness failures of PrismaticAI companies that keep rail stations no train of theirs calls
     at (`m["trainless"]` from parse_trainless, keyed by company id in start order): more than
@@ -2975,6 +3020,7 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
     fails += sibling_producers(m)
     fails += trainless_stations(m, fit["rules"])
     fails += funnel_gaps(m, fit.get("must_funnel", []))
+    fails += frozen_construction(m, fit)
     # A contestant held to run trains ends with at least one: the test_trainless lineup refuses every
     # new line's first train, so a train at the end proves KeepTrainlessLine, the adoption and
     # KeepLinesServed's first train (research/incident-2026-11-23-trainless-lines.md).
@@ -3037,7 +3083,7 @@ def cmd_fitness(cfg: dict) -> int:
             (mper / "scripts" / "game_start.scr").write_text(start_script_text(lineup))
             procs.append(subprocess.Popen(
                 [str(binary), "-c", "battle.cfg", "-x", "-v", f"null:ticks={match_ticks(fit['years'])}",
-                 "-s", "null", "-m", "null", "-g", "-G", str(fit["seed"]), "-d", "script=1"],
+                 "-s", "null", "-m", "null", "-g", "-G", str(fit["seed"]), "-d", "script=3"],
                 cwd=tmp, env=dict(os.environ, HOME=str(mhome)), stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True))
         for i, (lineup, proc) in enumerate(zip(lineups, procs)):
@@ -3051,12 +3097,19 @@ def cmd_fitness(cfg: dict) -> int:
             m["shared"] = parse_shared(out)
             m["trainless"] = parse_trainless(out)
             m["funnel"] = {lineup[c]["key"]: r for c, r in parse_funnel(out).items() if c < len(lineup)}
+            m["capital"] = parse_capital(out)
             for c in lineup:
                 s = m["series"].get(c["key"], [])
                 peak, final = fleet_peak_final(s)
                 print(f"fitness[{i}]: {c['key']:26} value {s[-1]['value'] if s else 0:>12,}  vehicles "
                       f"peak {peak:>4} final {final:>4}  "
                       f"{' '.join(anomalies(s, m['errors'].get(c['key'], 0), fit['rules'])) or 'ok'}")
+            for cid, reps in sorted(m["capital"].items()):
+                if cid < len(lineup):
+                    early = [r for r in reps if r["year"] < mc["start_year"] + fit["rules"].get("frozen_years", 3)]
+                    print(f"fitness[{i}]: {lineup[cid]['key']:26} construction frozen "
+                          f"{sum(r.get('frozen', 0) for r in early)} of {sum(r.get('days', 0) for r in early)} days "
+                          f"in its first {fit['rules'].get('frozen_years', 3)} years")
             for ind, e in sorted(m["shared"].items()):
                 owners = ", ".join(lineup[o]["key"] if o < len(lineup) else f"company {o}"
                                    for o in sorted(e["owners"]))

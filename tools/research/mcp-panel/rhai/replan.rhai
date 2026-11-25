@@ -23,14 +23,25 @@
 //      (research/incident-2026-11-22-sibling-industries.md). A company without an entry is skipped.
 //   4. The switch, modelled before it is proposed. AlgoGlyph's bayes-update turns this company's
 //      own record (lines a year old or more that earned, and those that lost) into the chance that
-//      a new line pays, with a credible interval. AlgoGlyph's pert-monte-carlo then draws the
-//      months the new portfolio needs to pay back its investment: optimistic at the interval's
-//      upper end, likely at its mean, pessimistic at its lower end. The plan is proposed only when
-//      the lower end is at least MIN_PAYS and 80 % of the draws pay back within HORIZON_MONTHS.
-//      Otherwise the round says why it holds the current plan.
+//      a new line pays, with a credible interval. The record is kept per mode (rail, road, air,
+//      water, by the vehicles' type), and a plan is judged by the modes of the lines it adds: in
+//      game 10487 a pooled record of "3 of 5 lines earned" (two losing bus lines) held a rail plan
+//      while the trains earned 35.5k a vehicle. Where it adds lines of two modes, the weaker one
+//      decides; a plan that adds no line is judged on the whole record, as before. AlgoGlyph's
+//      pert-monte-carlo then draws the months the new portfolio needs to pay back its investment:
+//      optimistic at the interval's upper end, likely at its mean, pessimistic at its lower end.
+//      The plan is proposed only when the lower end is at least MIN_PAYS and 80 % of the draws pay
+//      back within HORIZON_MONTHS. Otherwise the round says why it holds the current plan.
 //   5. A proposed plan goes through build_plan::apply_to that company: only the settings that
 //      differ from its bot's live ones, each an openttd.ai.set_setting that waits for the owner's
-//      approval. This script approves nothing.
+//      approval, in one call (one plan). This script approves nothing. Before that the difference
+//      is guarded by bot_floors.rhai: a line's settings are filed together, and a plan never drops
+//      PrismaticAI's autopilot floors. A plan turns the bot "planned", and then main.nut no longer
+//      lifts own_lines to 10. In game 10487 the deadline approved such a plan on 1952-04-12, and
+//      the bot ran on its live own_lines=4 until the end (2114). So a plan that makes the bot
+//      planned also carries each floor its live settings would lose.
+//   Why a round holds (another planner, approvals still waiting, or the model) is printed and
+//   written as `held` into the record of step 6; null when it proposed or had nothing to change.
 //   6. The whole round (state, trend, competition, plan, model, verdict) goes on the shared
 //      blackboard as `replan.<company>`; every write is a rhai.shared event, so it lands on the
 //      bus and in the store. It also goes to the Majordomus mesh as a `plan` record when the
@@ -42,6 +53,7 @@
 import "ttd" as ttd;
 import "build_plan" as bp;
 import "fr_author" as fa;
+import "bot_floors" as bf;
 
 // The AI whose companies are re-planned: every running company of it (/api/bots).
 const AI = "PrismaticAI";
@@ -64,6 +76,8 @@ const RECORD_AGE_DAYS = 365;
 const ONCE = false;
 
 const TYPES = ["train", "road", "aircraft", "ship"];
+// The mode a vehicle type serves, as bot_floors.rhai names the modes of the lines a plan adds.
+const MODE_OF_TYPE = #{ train: "rail", road: "road", aircraft: "air", ship: "water" };
 
 // The paths a plan record claims on the mesh, which refuses a claim of none: a plan changes the
 // AI settings PrismaticAI declares there.
@@ -196,9 +210,11 @@ fn competition(company, stats, names) {
     rows
 }
 
-// This company's record: each line (vehicles sharing their orders) old enough, earned or lost.
+// This company's record: each line (vehicles sharing their orders) old enough, earned or lost,
+// in all and per mode (`by_mode`, MODE_OF_TYPE).
 fn record_of(company, vs) {
     let lines = #{};
+    let mode_of = #{};
     for v in vs {
         if v.owner != company || v.age < global::RECORD_AGE_DAYS || v.orders.is_empty() { continue; }
         let stops = [];
@@ -206,18 +222,42 @@ fn record_of(company, vs) {
         stops.sort();
         let k = `${v.type}:${stops}`;
         lines[k] = (lines[k] ?? 0) + v.profit_last_year;
+        mode_of[k] = global::MODE_OF_TYPE[v.type] ?? v.type;
     }
     let won = 0; let lost = 0;
-    for k in lines.keys() { if lines[k] > 0 { won += 1; } else { lost += 1; } }
-    #{ lines: lines.len(), earned: won, lost: lost }
+    let by_mode = #{};
+    for k in lines.keys() {
+        let m = mode_of[k];
+        if !(m in by_mode) { by_mode[m] = #{ lines: 0, earned: 0, lost: 0 }; }
+        let r = by_mode[m];
+        r.lines += 1;
+        if lines[k] > 0 { won += 1; r.earned += 1; } else { lost += 1; r.lost += 1; }
+        by_mode[m] = r;
+    }
+    #{ lines: lines.len(), earned: won, lost: lost, by_mode: by_mode }
 }
 
-// The switch model: bayes-update on the record, then pert-monte-carlo on the payback.
-fn model(rec, portfolio, monthly) {
-    let b = kernel("bayes-update", #{ successes: rec.earned, failures: rec.lost, prior: "jeffreys",
-                                      credible: global::CREDIBLE });
+// bayes-update on one record (#{earned, lost}).
+fn pays(r) {
+    kernel("bayes-update", #{ successes: r.earned, failures: r.lost, prior: "jeffreys", credible: global::CREDIBLE })
+}
+
+// The switch model: bayes-update on the record of each mode the plan adds lines of (`modes`, from
+// bot_floors::guard), the weakest deciding, or on the whole record when it adds none; then
+// pert-monte-carlo on the payback.
+fn model(rec, portfolio, monthly, modes) {
+    let judged = #{};
+    let by = "all";
+    let b = ();
+    for m in modes {
+        let r = rec.by_mode[m] ?? #{ lines: 0, earned: 0, lost: 0 };
+        let bm = pays(r);
+        judged[m] = #{ lines: r.lines, earned: r.earned, lost: r.lost, lower: bm.lower, mean: bm.mean, upper: bm.upper };
+        if type_of(b) == "()" || bm.lower < b.lower { b = bm; by = m; }
+    }
+    if type_of(b) == "()" { b = pays(rec); }
     let investment = (portfolio.investment_k ?? 0) * 1000;
-    let out = #{ pays_mean: b.mean, pays_lower: b.lower, pays_upper: b.upper,
+    let out = #{ pays_mean: b.mean, pays_lower: b.lower, pays_upper: b.upper, judged_by: by, by_mode: judged,
                  investment: investment, monthly_profit: monthly, payback: () };
     if monthly > 0 && investment > 0 && b.lower > 0 {
         let m = investment.to_float() / monthly.to_float();
@@ -227,7 +267,7 @@ fn model(rec, portfolio, monthly) {
     }
     out.adopt = out.payback != () && b.lower >= global::MIN_PAYS && out.payback.p80 <= global::HORIZON_MONTHS;
     out.why = if out.payback == () { "no payback to model (no investment, no profit, or no line in the record pays)" }
-              else if b.lower < global::MIN_PAYS { `a new line pays with ${b.lower} at the ${global::CREDIBLE} lower bound, below ${global::MIN_PAYS}` }
+              else if b.lower < global::MIN_PAYS { `a new ${if by == "all" { "" } else { by + " " }}line pays with ${b.lower} at the ${global::CREDIBLE} lower bound, below ${global::MIN_PAYS}` }
               else if out.payback.p80 > global::HORIZON_MONTHS { `80 % of draws pay back in ${out.payback.p80} months, beyond ${global::HORIZON_MONTHS}` }
               else { `pays with at least ${b.lower}; 80 % pay back within ${out.payback.p80} months` };
     out
@@ -331,34 +371,52 @@ fn plan_round(b, p) {
           if unpriced > 0 { ` (${unpriced} line(s) without a price count as 0)` } else { "" } +
           ` (${portfolio.solver ?? "?"}; rail lines with a route on the map: ${(portfolio.priced ?? #{}).with_route ?? "?"} of ${(portfolio.priced ?? #{}).lines ?? "?"}): ${chosen}`);
 
-    let rec = record_of(b.id, vs);
-    let m = model(rec, portfolio, monthly);
-    print(`   record: ${rec.earned} of ${rec.lines} line(s) a year old earned; ${m.why}`);
+    let g = bf::guard(b.settings ?? [], changes(settings_of(mine.start_ai), b.settings ?? []));
+    let diff = g.settings;
+    for x in g.raised { print(`   floor: ${x.name} ${x.from} -> ${x.to} (PrismaticAI's autopilot floor, which a planned bot no longer applies)`); }
+    if !g.grouped.is_empty() { print(`   filed with their line: ${g.grouped}`); }
 
-    let diff = changes(settings_of(mine.start_ai), b.settings ?? []);
+    let rec = record_of(b.id, vs);
+    let m = model(rec, portfolio, monthly, g.added_modes);
+    print(`   record: ${rec.earned} of ${rec.lines} line(s) a year old earned` +
+          if m.judged_by == "all" { "" } else { `; judged by ${m.judged_by}: ${m.by_mode[m.judged_by].earned} of ${m.by_mode[m.judged_by].lines}` } +
+          `; ${m.why}`);
+
+    // The floors a planned bot has already lost (game 10487 from 1952-04-15) are no bet on a new
+    // line: while the model holds the plan, they are proposed alone (the owner's approval still
+    // decides them).
+    let restore = #{};
+    for x in g.lost { restore[x.name] = x.to; }
     let applied = #{ pending: [], refused: [], lines: [] };
     let waiting = waiting_for_owner(b.id);
-    let held = fa::refusal(b.id, global::WRITER);
-    if type_of(held) != "()" {
+    let by = fa::refusal(b.id, global::WRITER);
+    let held = ();
+    if type_of(by) != "()" {
         // Another planner holds the company (e.g. Battlebrain's directive): one writer per company.
-        print(`   holding: ${held.why}`);
+        held = by.why;
     } else if waiting > 0 {
         // The owner has not answered the last proposal yet; a new one would only pile up beside it.
-        print(`   holding: ${waiting} earlier change(s) for company ${b.id + 1} still wait for the owner's approval`);
-    } else if m.adopt && !diff.is_empty() {
-        applied = bp::apply_to(#{ build: #{ settings: diff } }, global::WRITER, b);
+        held = `${waiting} earlier change(s) for company ${b.id + 1} still wait for the owner's approval`;
+    } else if !m.adopt && !diff.is_empty() {
+        held = `the model holds the current plan (${diff.len()} setting(s) would change): ${m.why}`;
+    }
+    let send = if type_of(held) == "()" { diff } else if type_of(by) == "()" && waiting == 0 { restore } else { #{} };
+    if type_of(held) != "()" { print(`   holding: ${held}`); }
+    if !send.is_empty() {
+        applied = bp::apply_to(#{ build: #{ settings: send } }, global::WRITER, b);
         for l in applied.lines { print(`   ${l}`); }
-        say(`new plan for ${b.name}: ${diff.len()} setting(s) wait for your approval (${applied.pending}); ${m.why}`);
-    } else if diff.is_empty() {
+        let why = if type_of(held) == "()" { m.why } else { "they restore PrismaticAI's autopilot floors, which the bot lost when it became planned" };
+        say(`new plan for ${b.name}: ${send.len()} setting(s) wait for your approval (${applied.pending}); ${why}`);
+    } else if type_of(held) == "()" {
         print("   the plan equals the bot's live settings");
-    } else {
-        print(`   holding the current plan: ${diff.len()} setting(s) would change`);
     }
 
     let summary = #{ date: r.date, company: b.id, bot: b.name, rank: r.rank, of: r.of, value: r.value, value_by_month: r.months,
                      finances: f, competitors: others, competition: comp, portfolio: chosen,
                      investment_k: portfolio.investment_k, predicted_monthly: monthly, record: rec,
-                     model: m, proposed: if type_of(held) == "()" { diff.keys() } else { [] }, held: held,
+                     model: m, floors: #{ raised: g.raised, lost: g.lost, grouped: g.grouped, planned_before: g.planned_before,
+                                                  planned_after: g.planned_after, modes: g.added_modes },
+                     proposed: if type_of(by) == "()" { diff.keys() } else { [] }, sent: send.keys(), held: held, held_by: by,
                      pending: applied.pending, refused: applied.refused };
     record(b.id, summary);
     summary

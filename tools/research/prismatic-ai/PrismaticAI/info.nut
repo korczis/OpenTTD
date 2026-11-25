@@ -653,6 +653,14 @@ class PrismaticAI extends AIInfo {
 			easy_value = 8, medium_value = 8, hard_value = 8, custom_value = 8, step_size = 1,
 			flags = CONFIG_INGAME,
 		});
+		/* Capital allocator (capital.nut): where money above the reserve goes, once a heartbeat. */
+		AddSetting({
+			name = "capital_alloc",
+			description = "Capital allocator, once a heartbeat in place of the plain loan repayment (capital.nut). 1: keep one loan interval above the stay-afloat floor, so a few days of costs no longer trigger a rescue and a 90-day construction freeze; 2 (and 1): before repaying, buy the investment with the best measured return whose payback is within invest_ppv_div years: one more vehicle on a road, air or water route (behind the fleet's caps and load guards) or one more train on an earning rail line with cargo waiting or a low source rating, or hold the money for it; 3 (default, and 2): after a quarter with money idle and no loan, one new air route where the air fleet as a whole pays; 0: repay everything above twice the reserve, as before.",
+			min_value = 0, max_value = 3,
+			easy_value = 3, medium_value = 3, hard_value = 3, custom_value = 3, step_size = 1,
+			flags = CONFIG_INGAME,
+		});
 		/* RESEARCH-ONLY test hook (rail.nut BuildTrain, TestRefuseDepot; lines.nut TestForgetTrainless): drives the paths a crowded map takes
 		 * only by chance, so the headless fitness check runs them on every change. */
 		AddSetting({

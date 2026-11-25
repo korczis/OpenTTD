@@ -158,6 +158,8 @@ function PrismaticAI::MaintenanceRound() {
 	local hold = AICompany.GetLoanAmount() + MAINT_RESERVE + AIController.GetSetting("line_budget");
 	this.ReconcileLines(hold, true);
 	PrismaticAI.KeepLinesServed(hold + PrismaticAI.MaintenanceHold());
+	/* The capital allocator's purchases, from the same money beyond the hold (capital.nut). */
+	this.AllocateCapitalInside(hold + PrismaticAI.MaintenanceHold());
 }
 
 /* The dearest first train (rail.nut FirstTrainPrice) of any open line, what a replacement bought by

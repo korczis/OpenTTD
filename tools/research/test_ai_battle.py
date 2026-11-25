@@ -205,6 +205,66 @@ class TrainlessStations(unittest.TestCase):
         self.assertIn("T: no_trains: no train at the end of the match", battle.fitness_verdict(m, fit))
 
 
+def capital(year, q, cid, frozen, days, **more):
+    """One PrismaticAI capital report line as capital.nut logs it (a warning, script level 3)."""
+    extra = "".join(f" {k}={v}" for k, v in more.items())
+    return (f"dbg: [script:3] [{cid}] [W] PrismaticAI: capital report {year}Q{q}: frozen={frozen} days={days}"
+            f" calls=4 bought=1 spent=30000 holds=0 idle=0 money=12000 loan=0 keep=15000 level=3{extra}")
+
+
+class FrozenConstruction(unittest.TestCase):
+    """capital.nut's quarterly report and the fitness failure of a healthy PrismaticAI company whose
+    construction stood frozen on too many days of its first years (the live game of seed 12609:
+    525 of 1,096 days in 1950-1952)."""
+
+    def test_parse_keeps_report_order_and_fields_per_company(self):
+        text = "\n".join([capital(1960, 1, 0, 10, 91), ref(1960, 4, 0, 1), capital(1960, 1, 2, 0, 50),
+                          capital(1960, 2, 0, 0, 91, extra=5),
+                          "dbg: [script:3] [0] [I] PrismaticAI: capital report 1960Q3: frozen=91 days=91",
+                          "dbg: [script:3] [0] [W] PrismaticAI: capital: no vehicle more on route 1,2,"])
+        got = battle.parse_capital(text)
+        self.assertEqual(sorted(got), [0, 2])
+        self.assertEqual([(r["year"], r["quarter"], r["frozen"], r["days"]) for r in got[0]],
+                         [(1960, 1, 10, 91), (1960, 2, 0, 91)])
+        self.assertEqual((got[0][1]["extra"], got[0][0]["level"], got[0][0]["spent"]), (5, 3, 30000))
+        self.assertEqual(battle.parse_capital("no reports"), {})
+
+    def match(self, reports):
+        return {"lineup": [{"ai": "PrismaticAI", "key": "P"}, {"ai": "AAAHogEx", "key": "AAAHogEx"},
+                           {"ai": "PrismaticAI", "key": "P2"}],
+                "match_cfg": {"start_year": 1950}, "capital": reports}
+
+    def reports(self, frozen):
+        return [{"year": 1950 + i // 4, "quarter": i % 4 + 1, "frozen": f, "days": 91} for i, f in enumerate(frozen)]
+
+    def test_more_than_the_limit_of_the_first_years_frozen_fails(self):
+        fit = {"rules": {}, "must_be_healthy": ["P", "P2"]}
+        # The live game's shape: 163 days in 1950, half of 1951, 170 days in 1952; then nothing.
+        live = self.reports([0, 72, 91, 0, 91, 75, 0, 15, 91, 79, 0, 8] + [91] * 8)
+        got = battle.frozen_construction(self.match({0: live, 2: self.reports([0] * 12)}), fit)
+        self.assertEqual(got, ["P: frozen:522 of 1092 days (47.8%) in 1950-1952 (max 15%)"])
+        # Only the first frozen_years count: the frozen 1953-1954 quarters above did not.
+        late = self.reports([0] * 12 + [91] * 8)
+        self.assertEqual(battle.frozen_construction(self.match({0: late}), fit), [])
+        # At the limit passes; the limit and the window come from the rules.
+        self.assertEqual(battle.frozen_construction(self.match({0: self.reports([0, 0, 0, 54])}), fit), [])
+        self.assertEqual(len(battle.frozen_construction(self.match({0: self.reports([0, 0, 0, 55])}), fit)), 1)
+        loose = {"rules": {"frozen_max": 0.5, "frozen_years": 1}, "must_be_healthy": ["P"]}
+        self.assertEqual(battle.frozen_construction(self.match({0: live}), loose), [])
+        self.assertEqual(battle.frozen_construction(self.match({0: self.reports([91] * 4)}), loose),
+                         ["P: frozen:364 of 364 days (100.0%) in 1950-1950 (max 50%)"])
+
+    def test_only_healthy_contestants_with_reports_are_judged(self):
+        frozen = self.reports([91] * 4)
+        self.assertEqual(battle.frozen_construction(self.match({0: frozen}), {"rules": {}, "must_be_healthy": []}), [])
+        self.assertEqual(battle.frozen_construction(self.match({}), {"rules": {}, "must_be_healthy": ["P"]}), [])
+        self.assertEqual(battle.frozen_construction(self.match({1: frozen}), {"rules": {}, "must_be_healthy": ["AAAHogEx"]}), [])
+        m = self.match({0: frozen})
+        m.update(status="done", errors={}, series={"P": [], "AAAHogEx": [], "P2": []})
+        self.assertIn("P: frozen:364 of 364 days (100.0%) in 1950-1952 (max 15%)",
+                      battle.fitness_verdict(m, {"rules": {}, "must_be_healthy": ["P"]}))
+
+
 class FitnessRun(unittest.TestCase):
     """cmd_fitness end to end against a fake game binary that prints referee lines: the shared
     producer is printed and fails the check."""
@@ -219,7 +279,8 @@ class FitnessRun(unittest.TestCase):
             lines = [ref(1960, 1, c, 10, veh=1) for c in range(3)] + \
                     [ref(1961, 1, c, 20 + c, veh=2) for c in range(3)] + [shared(1960, 4, 7, "0,1")] + \
                     [trainless(1960, 1, 1, 4, [5, 6]), trainless(1960, 4, 1, 4, [5, 6]), trainless(1960, 7, 1, 4, [5, 6]),
-                     trainless(1961, 1, 1, 4, [5, 6, 7]), trainless(1961, 1, 2, 8, [1, 2, 3])]
+                     trainless(1961, 1, 1, 4, [5, 6, 7]), trainless(1961, 1, 2, 8, [1, 2, 3]),
+                     capital(1960, 1, 0, 30, 91), capital(1960, 2, 0, 0, 91)]
             fake = repo / "build" / "openttd"
             fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\n")
             fake.chmod(0o755)
@@ -248,6 +309,7 @@ class FitnessRun(unittest.TestCase):
         self.assertIn("P b: trainless_stations:2 rail station(s) without a train from 1960-01 to 1961-01 "
                       "(stations 5, 6; max 0)", err.getvalue())
         self.assertNotIn("AAAHogEx: trainless", err.getvalue())
+        self.assertIn("P a                        construction frozen 30 of 182 days in its first 3 years", out.getvalue())
 
 
 def funnel(year, cid, mode, fields, level="E"):
