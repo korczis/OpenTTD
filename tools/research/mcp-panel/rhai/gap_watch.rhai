@@ -597,7 +597,7 @@ fn judge(month, next, tallies) {
     let owner = ttd::owner_company();
     for b in api_bots().running ?? [] {
         if ai == "" || b.ai != ai { continue; }
-        try { month_of_company(b, month, tallies, executed_all, pending, paused, type_of(owner) != "()" && b.id == owner); }
+        try { month_of_company(b, month, tallies, executed_all, pending, paused, type_of(owner) != "()" && ttd::as_company(b.id) == owner); }
         catch (err) { print(`gap_watch: company ${b.id + 1}: ${err}`); }
     }
     for k in tallies.keys() {
