@@ -16,6 +16,17 @@
 //   #7 openttd.cmd.CreateGoal   deny ignored after `fake ignore 7` (never marked denied)
 // `fake ...` lines are this stand-in's own; the real game has no such command.
 //
+// `fake seed bulk` replaces that queue with the approvals list's own (tools/research/mcp-approval-ui-check,
+// its bulk part) and turns on the approval-rules core as feature/approval-rules specifies it: standing
+// rules in openttd://approvals (`rules`, and `matched_rule` on each approval they decided), applied to
+// waiting and new approvals, deny winning over allow, a panel line (`--via panel`) never deciding an
+// owner-only tool. Its console lines: `prismatic_mcp approve all|deny all [<glob> [<json>]] [--via panel]`,
+// `prismatic_mcp rule allow|deny <glob> [<json>] [--persist] [--via panel]`, `prismatic_mcp rules`,
+// `prismatic_mcp rule remove <id>`, `prismatic_mcp approve|deny <id> <id> ... [--via <c>]`, each with
+// `--nonce <n>` answered by one `[approval-core] {...}` result line; `prismatic_mcp approvers ...`;
+// `fake add <tool> <json, ' for ">` adds a new approval, as a bot asking would; `fake insert` adds it
+// first in the queue.
+//
 // Usage (as mcp-panel calls it): mcp-fake-game -D <host:port> -x -g ... -c <cfg> -d ...
 import fs from 'node:fs';
 import http from 'node:http';
@@ -37,26 +48,228 @@ export const queue = [
 ];
 export const decisions = [];
 const ignored = new Set();
-const OUTCOME = { 1: { command_result: 'succeeded', verdict: 'VERIFIED_SUCCESS' },
+let OUTCOME = { 1: { command_result: 'succeeded', verdict: 'VERIFIED_SUCCESS' },
   2: { command_result: 'rejected', verdict: 'VERIFIED_FAILURE', error: 'not enough cash' } };
+/** The approval-rules core's standing rules; null while it is off (the default seed: a core without rules). */
+let rules = null;
+let nextRule = 1;
+const OWNER_ONLY = ['openttd.ai.set_settings'];
+
+/** The approvals list's queue: tools, companies, an expired one and an owner-only one. */
+function seedBulk() {
+  queue.splice(0, queue.length,
+    approval(11, 'openttd.ai.set_setting', { company: 1, name: 'max_trains', value: 40 }),
+    approval(12, 'openttd.ai.set_setting', { company: 1, name: 'max_roadveh', value: 20 }),
+    approval(13, 'openttd.ai.set_setting', { company: 2, name: 'max_trains', value: 12 }),
+    approval(14, 'openttd.cmd.BuildRoad', { company: 2, tile: 777 }),
+    approval(15, 'openttd.cmd.BuildRoad', { company: 1, tile: 778 }),
+    approval(16, 'openttd.ai.set_settings', { company: 1, settings: { fr_1_a: 3 } }),
+    { ...approval(17, 'openttd.game.set_pause', { pause: true }), expired: true },
+    approval(18, 'openttd.cmd.CreateGoal', { company: 'deity', params: [255, 0, 0, 'a goal'] }),
+    approval(19, 'openttd.cmd.CreateGoal', { company: 'deity', params: [255, 0, 0, 'another goal'] }),
+    approval(20, 'openttd.game.set_pause', { pause: false }),
+    approval(21, 'openttd.cmd.BuildRoad', { company: 1, tile: 779 }),
+    approval(22, 'openttd.cmd.BuildRoad', { company: 1, tile: 780 }));
+  decisions.splice(0, decisions.length);
+  OUTCOME = {};
+  rules = [];
+  nextRule = 1;
+}
+
+/** A console line split as the game splits it (src/console.cpp IConsoleCmdExec): spaces separate,
+ *  `"` toggles a quoted run, `\"` is a literal quote. */
+export function tokens(line) {
+  const out = []; let buf = ''; let found = false; let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === ' ' && !quoted) { if (found) { out.push(buf); buf = ''; found = false; } continue; }
+    if (c === '"') { quoted = !quoted; found = true; continue; }
+    if (c === '\\' && line[i + 1] === '"') { buf += '"'; i++; found = true; continue; }
+    buf += c; found = true;
+  }
+  if (found) out.push(buf);
+  return out;
+}
+
+/** `glob` (* and ?) over the whole of `s`. */
+export const globMatch = (glob, s) => new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 's').test(s);
+/** The values a JSON path ($.a.b, $.list[0], $.list[*]) names in `v`. */
+function pathValues(v, p) {
+  let cur = [v];
+  for (const part of p.replace(/^\$\.?/, '').match(/[^.[\]]+|\[\*\]|\[\d+\]/g) || []) {
+    cur = cur.flatMap((x) => {
+      if (part === '[*]') return Array.isArray(x) ? x : [];
+      if (/^\[\d+\]$/.test(part)) { const i = Number(part.slice(1, -1)); return Array.isArray(x) && i < x.length ? [x[i]] : []; }
+      return x && typeof x === 'object' && part in x ? [x[part]] : [];
+    });
+  }
+  return cur;
+}
+/** One matcher value against one argument value: "*" any present value, a string a glob over a
+ *  string or the JSON text of anything else, an object a matcher of its own, any other JSON equal. */
+function valueMatches(pattern, value) {
+  if (value === undefined) return false;
+  if (pattern === '*') return true;
+  if (typeof pattern === 'string') return globMatch(pattern, typeof value === 'string' ? value : JSON.stringify(value));
+  if (pattern && typeof pattern === 'object' && !Array.isArray(pattern)) return !!value && typeof value === 'object' && matches(pattern, value);
+  return JSON.stringify(pattern) === JSON.stringify(value);
+}
+/** A JSON matcher against an approval's arguments: plain keys match a subset, $ keys are JSON paths
+ *  (every value the path names must match, and it must name one). */
+export function matches(matcher, args) {
+  return Object.entries(matcher || {}).every(([k, p]) => {
+    if (!k.startsWith('$')) return valueMatches(p, args?.[k]);
+    const vs = pathValues(args, k);
+    return vs.length > 0 && vs.every((v) => valueMatches(p, v));
+  });
+}
+const takes = (glob, m, a) => (globMatch(glob, a.tool) || globMatch(glob, a.tool.replace(/^openttd\./, ''))) && matches(m, a.args);
+/** Approve `a` as the core does: consumed, with the decision recorded. */
+function carryOut(a, via) {
+  a.state = 'consumed';
+  const reject = rules && a.args && a.args.reject ? { command_result: 'rejected', verdict: 'VERIFIED_FAILURE', error: 'not enough cash' } : null;
+  const o = OUTCOME[a.id] || reject || (rules ? { command_result: 'succeeded', verdict: 'VERIFIED_SUCCESS' } : null);
+  if (o) decisions.push({ decision_id: 100 + a.id, approval_id: a.id, action: a.tool, approved_via: via, error: '', ...o });
+  return o;
+}
+/** The standing rules over every waiting approval: deny wins, then allow; a panel's rule never
+ *  decides an owner-only tool (its approval only records the match). Answers the ids it decided. */
+function applyRules() {
+  if (!rules) return [];
+  const n = [];
+  for (const a of queue.filter((x) => x.state === 'pending' && !x.expired)) {
+    const hit = (effect) => rules.find((r) => r.effect === effect && takes(r.tool, r.match, a));
+    const r = hit('deny') || hit('allow');
+    if (!r) continue;
+    const decides = !(r.effect === 'allow' && OWNER_ONLY.includes(a.tool) && r.created_via === 'panel');
+    a.matched_rule = { id: r.id, effect: r.effect, decides };
+    if (!decides) continue;
+    r.hits++; n.push(a.id);
+    if (r.effect === 'deny') a.state = 'denied'; else carryOut(a, `rule #${r.id}`);
+  }
+  return n;
+}
+/** A flag's value among a line's words (`--via panel`, `--nonce 7`), or ''. */
+const flag = (words, name) => (words.includes(name) ? words[words.indexOf(name) + 1] || '' : '');
+/** The core's one result line for a command sent with `--nonce` (feature/approval-rules). */
+function result(words, out) {
+  const nonce = flag(words, '--nonce');
+  if (nonce) say(`[approval-core] ${JSON.stringify({ nonce, ok: true, ...out })}`);
+}
+/** A refusal: the console's error, and the result line with ok false. */
+const refuse = (words, error) => { say(`ERROR: ${error}`); result(words, { ok: false, error }); return true; };
+
+/** The glob and matcher words after a subcommand: [glob, matcher, via, persist] or a refusal. */
+function scopeOf(words) {
+  const flags = words.filter((w, i) => w.startsWith('--') || ['--via', '--nonce'].includes(words[i - 1]));
+  const rest = words.filter((w) => !flags.includes(w));
+  let m = null;
+  if (rest[1] !== undefined) {
+    try { m = JSON.parse(rest[1].replace(/'/g, '"')); } catch (e) { return { error: `the matcher is not JSON: ${e.message}` }; }
+  }
+  if (rest[0] !== undefined && !/^[A-Za-z0-9._*?-]+$/.test(rest[0])) return { error: `${rest[0]} is not a tool glob` };
+  return { glob: rest[0] || '*', m, via: flag(words, '--via') || 'console', persist: words.includes('--persist') };
+}
+
+/** The approval-rules core's own lines; true when `w` was one. */
+function rulesLine(w) {
+  if (w[0] !== 'prismatic_mcp' || !rules) return false;
+  if ((w[1] === 'approve' || w[1] === 'deny') && w[2] === 'all') {
+    const s = scopeOf(w.slice(3));
+    if (s.error) return refuse(w, s.error);
+    const owned = (a) => OWNER_ONLY.includes(a.tool) && s.via !== 'console';
+    const hit = queue.filter((a) => a.state === 'pending' && !a.expired && takes(s.glob, s.m, a) && !(w[1] === 'approve' && owned(a)));
+    for (const a of hit) { if (w[1] === 'deny') a.state = 'denied'; else carryOut(a, s.via); }
+    say(`${w[1] === 'deny' ? 'Denied' : 'Approved'} ${hit.length} approval(s).`);
+    result(w, { decided: hit.map((a) => a.id) });
+    return true;
+  }
+  if (w[1] === 'rules') {
+    say(rules.length ? rules.map((r) => `#${r.id} ${r.effect} ${r.tool} ${JSON.stringify(r.match)} hits ${r.hits}`).join('\n') : 'No standing rules.');
+    result(w, { rules });
+    return true;
+  }
+  if (w[1] === 'rule' && (w[2] === 'allow' || w[2] === 'deny')) {
+    const s = scopeOf(w.slice(3));
+    if (s.error) return refuse(w, s.error);
+    if (s.m !== null && (typeof s.m !== 'object' || Array.isArray(s.m))) return refuse(w, 'the matcher is a JSON object');
+    const r = { id: nextRule++, effect: w[2], tool: s.glob, match: s.m, created_via: s.via, created_tick: 1000, hits: 0, persisted: s.persist };
+    rules.push(r);
+    const n = applyRules();
+    say(`Rule #${r.id} added: always ${r.effect} ${r.tool}; it decided ${n.length} waiting approval(s).`);
+    result(w, { rule_id: r.id, decided: n });
+    return true;
+  }
+  if (w[1] === 'rule' && w[2] === 'remove') {
+    const i = rules.findIndex((r) => r.id === Number(w[3]));
+    if (i < 0) return refuse(w, `no rule #${w[3]}`);
+    rules.splice(i, 1);
+    say(`Rule #${w[3]} removed.`);
+    result(w, {});
+    return true;
+  }
+  return false;
+}
+
+/** `prismatic_mcp approve|deny <id> [<id> ...] [--via <channel>] [--nonce <n>]`: each id decided as
+ *  the core decides it, a panel line never deciding an owner-only tool; one result line names each. */
+function decideLine(w) {
+  const ids = [];
+  for (const x of w.slice(2)) { if (!/^\d+$/.test(x)) break; ids.push(Number(x)); }
+  const via = flag(w, '--via') || 'console';
+  // As the real core answers: an id it would not decide goes under `refused`; one it approved whose
+  // command the game rejected under `rejected` with the reason.
+  const out = { decided: [], refused: [], skipped: [], rejected: [] };
+  for (const id of ids) {
+    const a = queue.find((x) => x.id === id);
+    if (!a || a.state !== 'pending') { say(`Approval #${id} is not pending.`); out.refused.push({ id, error: 'not pending' }); continue; }
+    if (w[1] === 'deny') {
+      if (ignored.has(a.id)) { say(`(fake) deny #${a.id} ignored`); out.skipped.push({ id, error: 'the server ignored the denial' }); continue; }
+      a.state = 'denied';
+      say(`Denied approval #${a.id}.`);
+    } else {
+      if (OWNER_ONLY.includes(a.tool) && via !== 'console') { say(`Refused #${id}: the owner approves it at the console.`); out.refused.push({ id, error: 'owner-only' }); continue; }
+      const o = carryOut(a, via);
+      say(`Approved #${a.id}: carried out.`);
+      if (o && o.command_result === 'rejected') { out.rejected.push({ id, error: o.error }); continue; }
+    }
+    out.decided.push(id);
+  }
+  result(w, out);
+}
+
+/** `prismatic_mcp approvers [add <client id> | remove <key prefix>]`, as the game answers it. */
+const approvers = [];
+function approversLine(w) {
+  if (w[2] === 'add') {
+    if (w[3] !== '2') return say(`No connected client #${w[3]} with a key ('clients' lists them).`);
+    if (!approvers.includes('owner-key-0000')) approvers.push('owner-key-0000');
+    return say('Client #2 (owner) is an approver now.');
+  }
+  if (w[2] === 'remove') {
+    const i = approvers.findIndex((k) => k.startsWith(w[3]));
+    if (i < 0) return say(`No single approver's key starts with '${w[3]}'.`);
+    return say(`Removed the approver ${approvers.splice(i, 1)[0]}.`);
+  }
+  return say(approvers.length ? approvers.map((k) => `approver ${k}`).join('\n') : "No approvers registered: 'prismatic_mcp approvers add <client id>'.");
+}
 
 /** One console line, as the game's console answers it. */
 export function consoleLine(line) {
-  const w = line.trim().split(/\s+/);
+  const w = tokens(line.trim());
   const find = (id) => queue.find((a) => a.id === Number(id));
   if (w[0] === 'prismatic_mcp' && w[1] === 'start') return start(Number(w[2]));
-  if (w[0] === 'prismatic_mcp' && (w[1] === 'approve' || w[1] === 'deny')) {
-    const a = find(w[2]);
-    if (!a || a.state !== 'pending') return say(`Approval #${w[2]} is not pending.`);
-    if (w[1] === 'deny') {
-      if (ignored.has(a.id)) return say(`(fake) deny #${a.id} ignored`);
-      a.state = 'denied';
-      return say(`Denied approval #${a.id}.`);
-    }
-    a.state = 'consumed';
-    if (OUTCOME[a.id]) decisions.push({ decision_id: 100 + a.id, approval_id: a.id, action: a.tool, approved_via: 'console', error: '', ...OUTCOME[a.id] });
-    return say(`Approved #${a.id}: carried out.`);
+  if (rulesLine(w)) return undefined;
+  if (w[0] === 'fake' && w[1] === 'seed' && w[2] === 'bulk') { seedBulk(); return say('(fake) the approvals list\'s queue, rules on'); }
+  if (w[0] === 'fake' && (w[1] === 'add' || w[1] === 'insert')) {
+    const id = Math.max(0, ...queue.map((a) => a.id)) + 1;
+    // `insert` puts it first in the queue, above every row a page shows (a re-ordering refresh).
+    queue[w[1] === 'add' ? 'push' : 'unshift'](approval(id, w[2], JSON.parse((w[3] || '{}').replace(/'/g, '"'))));
+    say(`(fake) #${id} waits; rules decided ${applyRules().length}`);
+    return undefined;
   }
+  if (w[0] === 'prismatic_mcp' && (w[1] === 'approve' || w[1] === 'deny')) return decideLine(w);
+  if (w[0] === 'prismatic_mcp' && w[1] === 'approvers') return approversLine(w);
   if (w[0] === 'fake' && w[1] === 'consume') { const a = find(w[2]); if (a) a.state = 'consumed'; return say(`(fake) #${w[2]} consumed`); }
   if (w[0] === 'fake' && w[1] === 'drop') { const i = queue.findIndex((a) => a.id === Number(w[2])); if (i >= 0) queue.splice(i, 1); return say(`(fake) #${w[2]} dropped`); }
   if (w[0] === 'fake' && w[1] === 'ignore') { ignored.add(Number(w[2])); return say(`(fake) deny #${w[2]} will be ignored`); }
@@ -95,7 +308,7 @@ export function answer(method, params) {
   if (method === 'initialize') return { result: { protocolVersion: '2025-11-25', serverInfo: { name: 'mcp-fake-game', version: '1' }, capabilities: { tools: {}, resources: {} } } };
   if (method === 'tools/list') return { result: { tools: [] } };
   if (method === 'resources/list') return { result: { resources: ['openttd://approvals', 'openttd://decisions'].map((uri) => ({ uri, name: uri })) } };
-  if (method === 'resources/read' && params.uri === 'openttd://approvals') return text({ approvals: queue, capacity: 64 });
+  if (method === 'resources/read' && params.uri === 'openttd://approvals') return text({ approvals: queue, capacity: 64, ...(rules ? { rules } : {}) });
   if (method === 'resources/read' && params.uri === 'openttd://decisions') return text({ decisions });
   return { error: { code: -32602, message: `mcp-fake-game: no ${method} ${params.uri || params.name || ''}`.trim() } };
 }

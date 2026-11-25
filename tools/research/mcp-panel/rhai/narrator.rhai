@@ -74,16 +74,11 @@ fn fleet(c) {
 
 fn as_int(x) { if type_of(x) == "f64" { x.to_int() } else { x } }
 
-// The owner's company: $NARRATOR_COMPANY, else the first running company of the panel's AI; ()
-// while no such bot runs yet.
+// The owner's company: $NARRATOR_COMPANY, else the one every service asks (ttd::owner_company():
+// $OWNER_COMPANY, where a registered approver plays, the panel's AI); () while none is known.
 fn owner_company() {
     let fixed = env("NARRATOR_COMPANY");
-    if fixed != "" { return parse_int(fixed); }
-    let ai = status().ai ?? "";
-    for r in api_bots().running ?? [] {
-        if ai == "" || r.ai == ai { return as_int(r.id); }
-    }
-    ()
+    if fixed != "" { parse_int(fixed) } else { ttd::owner_company() }
 }
 
 // Whether an event is the owner's: an ai.log line is only when its company is the owner's.

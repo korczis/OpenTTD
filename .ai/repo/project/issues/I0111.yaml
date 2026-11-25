@@ -27,4 +27,18 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
-updated_at: '2026-11-22'
+updated_at: 2026-11-25T03:56:49Z
+started_at: 2026-11-25T03:55:30Z
+started_event: sha256:d3c886bbdfca859f8fa92b44b17028813a8225ca48c1690382825f9a3fade4f3
+verified_at: 2026-11-25T03:55:59Z
+verified_event: sha256:75983ce88205405a4e6c536cd9ad0f1f8bbc5b01dd8f053dc1dca6f02db105cf
+completed_at: 2026-11-25T03:56:49Z
+completed_event: sha256:24c5b14f962694114b6481317e9ab2a76efb0f1d5506dcaa8cd669af6353d8ad
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "tools/check-prismatic-docs.sh; python3 -B -m unittest tools/research/test_check_prismatic_docs.py; tools/surfaces/surfaces check"
+    result: "Delivered by 614c3c1e1d (Doc: [PrismaticMCP] The server header and the control guide describe the tools master ships), merged in PR #221 (merge 4ca2d9fca9, 2026-11-22T20:05Z); no merge title names I0111, so plan drift did not flag it. The server header (prismatic_mcp_server.cpp:19-28) lists reads, approval-gated tools, client mode and armed input and points to 07-resource-catalog.md and 08-tool-catalog.md; research/mcp-control.md lists no shipped capability as planned; check-prismatic-docs refuses 'does NOT expose any mutation' and a planned openttd.ai.* entry, and the pre-commit hook refused the branch's first commit while the old header stood (PR #97/#221 body). Re-run on origin/master eed5cb5fc5 on 2026-11-25: check-prismatic-docs PASS, test_check_prismatic_docs 4/4 OK, surfaces check 909 documents 0 findings."
+    artifact: "https://github.com/korczis/OpenTTD/pull/221"
+    commit: eed5cb5fc51439b56924840ff6a6a5fef8753a4f
+    recorded_at: 2026-11-25T03:56:28Z

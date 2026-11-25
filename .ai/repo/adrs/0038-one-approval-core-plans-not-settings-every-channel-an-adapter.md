@@ -79,7 +79,10 @@ Therefore:
    - **Chat:** `!approve <plan>` and `!deny <plan>`, received by the server, take the same path.
    - **In-game window:** its buttons issue the console line.
 
-   "No approve all" stays: a channel names the plan it approves.
+   "No approve all" stayed until 2026-11-23: a channel named the plan it approved. Amended by
+   ADR 0041 at the owner's order: `approve all` and `deny all` over a filter, and standing
+   allow/deny rules, are the owner's acts in this same core (the console, the owner's click in the
+   control window, the panel's owner routes), never an MCP client, a script or injected input.
 3. **One web access policy for the panel and the hub**:
    - A POST, or a WebSocket upgrade, is accepted from its own origin under any host name (the
      `Origin` authority equals `Host`), or from an origin listed with `--allow-origin`, which

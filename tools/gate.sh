@@ -744,11 +744,28 @@ cmd_research() {
   run_ctest "$RESEARCH_BUILD_DIR" || status=$?
 
   if [[ "$mcp" == ON ]]; then
-    echo "==> $RESEARCH_BUILD_DIR/openttd_test '[prismatic_mcp]'"
-    "$RESEARCH_BUILD_DIR/openttd_test" '[prismatic_mcp]'
+    # From the build directory, as ctest runs it: a case that finds its fixture next to its source
+    # (__FILE__, which the build names relative to the build directory) finds it from there only.
+    echo "==> (cd $RESEARCH_BUILD_DIR && ./openttd_test '[prismatic_mcp]')"
+    (cd "$RESEARCH_BUILD_DIR" && ./openttd_test '[prismatic_mcp]') || status=$(worst "$status" 1)
+    window_check "$bin" || status=$(worst "$status" $?)
   fi
 
   finish_tier research "$status"
+}
+
+# The Prismatic control window end to end (ADR 0041), in a game of its own in the null video
+# driver: 0 PASS, 1 a check failed, NOT RUN (PARTIAL) without node or without a base set.
+window_check() {
+  local bin="$1" rc=0
+  if ! command -v node >/dev/null 2>&1; then
+    echo "NOT RUN tools/research/mcp-control-window-check: no node"
+    return "$EXIT_PARTIAL"
+  fi
+  echo "==> tools/research/mcp-control-window-check --bin $bin"
+  node tools/research/mcp-control-window-check --bin "$bin" || rc=$?
+  if [[ "$rc" -eq 3 ]]; then return "$EXIT_PARTIAL"; fi
+  return "$rc"
 }
 
 # The Rust performance benchmarks against the newest committed record of this host

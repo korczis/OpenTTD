@@ -35,7 +35,7 @@ value.
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by status
     %% links: README.md?col=Status&filter=verified#records-generated | README.md?col=Status&filter=candidate#records-generated | README.md?col=Status&filter=superseded#records-generated | README.md?col=Status&filter=active#records-generated
-    "verified" : 85
+    "verified" : 87
     "candidate" : 9
     "superseded" : 3
     "active" : 2
@@ -47,8 +47,8 @@ pie showData title Documents under .ai/repo/knowledge/ by status
 pie showData title Documents under .ai/repo/knowledge/ by route
     %% links: README.md?col=Route&filter=platform#records-generated | README.md?col=Route&filter=project#records-generated | README.md?col=Route&filter=#records-generated | README.md?col=Route&filter=enforcement#records-generated | README.md?col=Route&filter=documentation#records-generated | README.md?col=Route&filter=generator#records-generated
     "platform" : 64
-    "project" : 23
-    "unknown" : 4
+    "project" : 24
+    "unknown" : 5
     "enforcement" : 3
     "documentation" : 3
     "generator" : 2
@@ -58,10 +58,10 @@ pie showData title Documents under .ai/repo/knowledge/ by route
 <!-- surfaces:begin docs-index dir=.ai/repo/knowledge as=pie by=epistemics -->
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by epistemics
-    %% links: README.md?col=Epistemics&filter=observed#records-generated | README.md?col=Epistemics&filter=inferred#records-generated | README.md?col=Epistemics&filter=decided#records-generated | README.md?col=Epistemics&filter=#records-generated
+    %% links: README.md?col=Epistemics&filter=observed#records-generated | README.md?col=Epistemics&filter=decided#records-generated | README.md?col=Epistemics&filter=inferred#records-generated | README.md?col=Epistemics&filter=#records-generated
     "observed" : 91
+    "decided" : 5
     "inferred" : 3
-    "decided" : 3
     "unknown" : 2
 ```
 <!-- surfaces:end docs-index -->
@@ -150,6 +150,7 @@ pie showData title Documents under .ai/repo/knowledge/ by epistemics
 | [A road depot or bay stop faces its front tile but is not connected to it; drive-through stops run along the road's axis](curated/road-stops-and-depots-need-their-entrance-road.md) | verified | platform | observed | When a bot, a Rhai script or an MCP caller builds a road station, a road depot, a rail depot or a train station. |
 | [AIs and the Game Script run only on the server, and the Game Script keeps ticking while the game is paused](curated/scripts-run-only-on-the-server-and-the-game-script-runs-while-paused.md) | verified | platform | observed | Before designing a bridge, MCP or experiment flow that pauses the game or expects script activity on clients. |
 | [A TextEffectID stored in a game object is per-client view state; game logic must never branch on it](curated/text-effect-ids-are-client-local.md) | verified | platform | observed | When reading or adding a TextEffectID (loading indicators, income text) in a vehicle, station or other pooled object. |
+| [The AI-battle arena runs the repository's current BattleReferee, so its matches log what the fitness rules judge (owner, 2026-11-25)](curated/the-arena-follows-the-repositorys-referee.md) | verified |  | decided | When provisioning or updating the ttd-battle arena, calibrating a fitness rule on arena matches, or wondering why arena match logs lack a field the referee logs. |
 | [PrismaticAI's rail pathfinder: land, level crossings, bridges and tunnels, each taken only as the game allows it](curated/the-bots-rail-pathfinder-lays-plain-track-only.md) | verified | platform | observed | When choosing which planned rail line the owner's bot builds, or reading why a bot company has no trains. |
 | [-c makes the file's folder the working-dir search path, the config directory and the personal directory](curated/the-config-flag-moves-the-personal-directory.md) | verified | platform | observed | When starting OpenTTD with -c for an experiment, a test or a second instance, and looking for its saves, logs, crash files or downloaded content. |
 | [Multiplayer desync detection compares only random.state[0] at sync frames; a divergence that never feeds Random() goes unseen](curated/the-desync-check-compares-only-the-game-random-state.md) | verified | platform | observed | When using 'no desync reported' as evidence that a hook or experiment left clients in step. |
@@ -158,6 +159,7 @@ pie showData title Documents under .ai/repo/knowledge/ by epistemics
 | [Under the null sound driver no mixer channel is ever freed, so after eight effects every StartSound returns early](curated/the-null-sound-driver-never-frees-a-mixer-channel.md) | verified | platform | observed | When instrumenting or counting sound effects in a headless (-s null) research or regression run. |
 | [Under -v null, work queued with VideoDriver::QueueOnMainThread never runs, so an MCP screenshot writes no file](curated/the-null-video-driver-never-drains-the-main-thread-queue.md) | verified | platform | observed | Before using a capture or any queued main-thread work in a null-video (regression or headless) run. |
 | [The owner auto-answers the bot's questions with openttd.view.ask.auto, so no 'Your bot asks' dialog interrupts play](curated/the-owner-can-auto-answer-the-bots-questions.md) | verified | platform | observed | When the bot asks yes/no questions through openttd.view.ask and the owner does not want to click each red dialog. |
+| [The owner's answers of 2026-11-25: Majordomus learns this session's four lessons generically, and the live game on :8800 is left as it is](curated/the-owners-answers-of-2026-11-25-on-majordomus-and-the-live-game.md) | verified | project | decided | When a session asks whether the live game's stack may be redeployed with merged PrismaticAI fixes, or which of this repository's lessons were handed to prismatic-majordomus and on whose word. |
 | [The panel's bus carries game, company, decision, console, news, panel and plan events from one declared table; the hub's own audit and derived game events go to the hub's bus and store](curated/the-panel-bus-carries-these-event-kinds.md) | verified | project | observed | Before subscribing to a panel's or the hub's bus, its ZeroMQ socket or its DuckDB store (ADR 0033), or before a decision reads recorded history (ADR 0034): which event kinds exist (the table src/panel_events.rs declares, GET /api/bus kinds of each), who publishes each, what each carries, how often, what the plan. events carry, where the hub's events are stored, and what is not on any bus at all. |
 | [The planner predicts more profit per vehicle than the running lines earn](curated/the-planner-overpredicts-what-a-line-earns.md) | verified | project | observed | Before trusting a plan's monthly_profit or score, or when choosing params for a new plan; read the game's own calibration first. |
 | [Selecting an engine in the purchase window with a cargo filter builds, refits and sells a real vehicle on the local client](curated/the-purchase-window-cost-query-builds-a-real-vehicle.md) | verified | platform | observed | When changing BuildVehicleWindow::SelectEngine, CmdBuildVehicle's refit path, or anything a vehicle build triggers (pool, group statistics, events). |

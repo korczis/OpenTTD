@@ -1,0 +1,16 @@
+# The approval core's result lines, copied from a dedicated server running feature/approval-rules
+# (#270, head 8b588f9db4; its PR description), one per command sent with --nonce: r1 a rejected
+# command, r2 deny of a pending and a non-pending id, r3 a deny rule, r4 a refused broad allow, r5
+# approve all, r6 rule remove, r7 an unknown id, r8 a usage error. panel.rs
+# the_real_cores_result_lines_are_read parses every line.
+[approval-core] {"decided":[],"error":"","nonce":"r1","ok":true,"refused":[],"rejected":[{"error":"approved #3 (command.RenameTown): rejected rejected -- the command failed without an error message (CMD_ERROR: invalid parameters)","id":3}],"rule_id":0,"skipped":[]}
+[approval-core] {"decided":[1],"error":"","nonce":"r2","ok":true,"refused":[{"error":"approval #3 is not pending","id":3}],"rejected":[],"rule_id":0,"skipped":[]}
+[approval-core] {"decided":[],"error":"","nonce":"r3","ok":true,"refused":[],"rejected":[],"rule_id":1,"skipped":[]}
+[approval-core] {"decided":[],"error":"an allow rule for every tool of 'openttd.cmd.*' with a matcher that matches any arguments approves whatever they ask: give a narrower matcher, name one tool, or add --force at the game's console","nonce":"r4","ok":false,"refused":[],"rejected":[],"rule_id":0,"skipped":[]}
+[approval-core] {"decided":[2],"error":"","nonce":"r5","ok":true,"refused":[],"rejected":[],"rule_id":0,"skipped":[]}
+[approval-core] {"decided":[],"error":"","nonce":"r6","ok":true,"refused":[],"rejected":[],"rule_id":1,"skipped":[]}
+[approval-core] {"decided":[],"error":"","nonce":"r7","ok":true,"refused":[{"error":"no approval #999","id":999}],"rejected":[],"rule_id":0,"skipped":[]}
+[approval-core] {"decided":[],"error":"usage","nonce":"r8","ok":false,"refused":[],"rejected":[],"rule_id":0,"skipped":[]}
+# From #270's Catch2 case "The result line names why each id was refused, rejected or skipped"
+# (src/tests/test_prismatic_mcp.cpp, PrismaticMCP::ResultLine "n1"): all four kinds with reasons.
+[approval-core] {"decided":[7],"error":"","nonce":"n1","ok":true,"refused":[{"error":"approval #8 is not pending","id":8}],"rejected":[{"error":"the pause command was refused","id":9}],"rule_id":4,"skipped":[{"error":"expired","id":10}]}

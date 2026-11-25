@@ -109,8 +109,14 @@ impl Client {
             return Err(Error::Config("the query is a map of filters".into()));
         }
         let path = if params.is_empty() { "/api/v1/mesh/records".to_string() } else { format!("/api/v1/mesh/records?{}", params.join("&")) };
-        let v = self.call("GET", &path, None)?;
+        let mut v = self.call("GET", &path, None)?;
         check_list(&v)?;
+        // A script reads the documented shape: an answer that leaves conflicts or ignored out has none.
+        if v["active"] == json!(true) {
+            for f in ["conflicts", "ignored"] {
+                if v.get(f).map_or(true, Value::is_null) { v[f] = json!([]); }
+            }
+        }
         Ok(v)
     }
 
@@ -124,7 +130,22 @@ impl Client {
             m.insert("session".into(), json!(s));
         }
         check_write(&r)?;
-        let v = self.call("POST", "/api/v1/mesh/records", Some(r))?;
+        let v = match self.call("POST", "/api/v1/mesh/records", Some(r.clone())) {
+            // Outside the session's live claims: a long-running writer claims its record's own scope
+            // (advisory: overlaps are reported, never refused) and writes once more (prismatic-
+            // majordomus I4740). Only that refusal, only once, and only for a scope the record names.
+            Err(Error::Refused { code, message, status }) if code == "out_of_scope" => {
+                let scope: Vec<Value> = r["scope"].as_array().cloned().unwrap_or_default();
+                if scope.is_empty() { return Err(Error::Refused { status, code, message }); }
+                let claim = json!({"session": r["session"], "scope": scope, "mode": "advisory",
+                                   "intent": format!("records of {}", r["task"].as_str().unwrap_or("this session"))});
+                if let Err(e) = self.call("POST", "/api/v1/mesh/claims", Some(claim)) {
+                    return Err(Error::Refused { status, code, message: format!("{message}; claiming the record's scope failed: {e}") });
+                }
+                self.call("POST", "/api/v1/mesh/records", Some(r))?
+            }
+            other => other?,
+        };
         let ok = v.get("key").and_then(Value::as_str).is_some_and(|k| k.contains('/')) && v.get("revision").is_some_and(Value::is_u64);
         if !ok { return Err(Error::Invalid("POST /api/v1/mesh/records: no key and revision".into())); }
         Ok(v)
@@ -143,8 +164,12 @@ pub fn check_list(v: &Value) -> Result<(), Error> {
         None => bad("no active field"),
         Some(false) => if v.get("reason").is_some_and(Value::is_string) { Ok(()) } else { bad("inactive without a reason") },
         Some(true) => {
-            for f in ["records", "conflicts", "ignored"] {
-                if !v.get(f).is_some_and(Value::is_array) { return bad(&format!("{f} is not a list")); }
+            // MeshRecordList (Majordomus 1.2.0 OpenAPI) requires active, digest and records;
+            // conflicts and ignored are optional, and a list wherever they are present. Only what
+            // a script reads is checked: a stricter client refused every answer of 1.2.0.
+            if !v.get("records").is_some_and(Value::is_array) { return bad("records is not a list"); }
+            for f in ["conflicts", "ignored"] {
+                if v.get(f).is_some_and(|x| !x.is_null() && !x.is_array()) { return bad(&format!("{f} is not a list")); }
             }
             let rec_ok = |r: &Value| ["key", "author", "kind", "task"].iter().all(|f| r.get(*f).is_some_and(Value::is_string)) && r.get("revision").is_some_and(Value::is_u64);
             if v["records"].as_array().is_some_and(|rs| rs.iter().all(rec_ok)) { Ok(()) } else { bad("a record lacks key, author, kind, task or revision") }
@@ -227,7 +252,10 @@ mod tests {
                 log.lock().unwrap().push(text.clone());
                 let mut parts = text.lines().next().unwrap_or("").split(' ');
                 let key = format!("{} {}", parts.next().unwrap_or(""), parts.next().unwrap_or("").split('?').next().unwrap_or(""));
-                let Some((_, status, body)) = answers.iter().find(|(k, _, _)| *k == key) else { continue };
+                // The answers of one route in their order, the last one again once they are used.
+                let n_seen = log.lock().unwrap().iter().filter(|t| t.lines().next().is_some_and(|l| l.starts_with(&format!("{key} ")))).count();
+                let mine: Vec<_> = answers.iter().filter(|(k, _, _)| *k == key).collect();
+                let Some((_, status, body)) = mine.get(n_seen.saturating_sub(1)).or(mine.last()).copied() else { continue };
                 if *status == 0 { continue; }
                 let _ = write!(s, "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
             }
@@ -257,12 +285,59 @@ mod tests {
     fn an_inactive_mesh_is_passed_through_and_a_malformed_list_is_invalid() {
         let (base, _) = fixture(vec![("GET /api/v1/mesh/records", 200, r#"{"active": false, "reason": "no mesh here"}"#)]);
         assert_eq!(client(&base).records(&Value::Null).unwrap()["reason"], "no mesh here");
-        for bad in [json!({}), json!({"active": false}), json!({"active": true, "records": [], "conflicts": []}),
+        assert_eq!(check_list(&json!({"active": true, "records": [], "conflicts": []})), Ok(()), "ignored is optional");
+        for bad in [json!({}), json!({"active": false}),
+                    json!({"active": true, "digest": "d", "records": {}}),
+                    json!({"active": true, "digest": "d", "records": [], "conflicts": "none"}),
                     json!({"active": true, "records": [{"key": "k"}], "conflicts": [], "ignored": []})] {
             assert!(matches!(check_list(&bad), Err(Error::Invalid(_))), "{bad}");
         }
         let (b2, _) = fixture(vec![("GET /api/v1/mesh/records", 200, "<html>")]);
         assert!(matches!(client(&b2).records(&Value::Null), Err(Error::Invalid(m)) if m.contains("not JSON")));
+    }
+
+    #[test]
+    fn a_write_outside_the_sessions_claims_claims_its_scope_advisory_and_writes_once_more() {
+        const OUT: &str = r#"{"error": {"code": "out_of_scope", "message": "tools/x.nut is outside session board-p1's live claims"}}"#;
+        let rec = json!({"kind": "plan", "task": "openttd:replan:0", "scope": ["tools/x.nut"], "title": "replan"});
+        // Refused once, claimed, written.
+        let (base, seen) = fixture(vec![("POST /api/v1/mesh/records", 422, OUT), ("POST /api/v1/mesh/records", 200, WROTE),
+                                        ("POST /api/v1/mesh/claims", 200, r#"{"claimed": true}"#)]);
+        assert_eq!(client(&base).write(rec.clone()).unwrap()["key"], "s1/r2");
+        let seen = seen.lock().unwrap();
+        let firsts: Vec<&str> = seen.iter().map(|t| t.lines().next().unwrap_or("")).collect();
+        assert_eq!(firsts.iter().filter(|l| l.starts_with("POST /api/v1/mesh/records ")).count(), 2, "{firsts:?}");
+        let claim = seen.iter().find(|t| t.starts_with("POST /api/v1/mesh/claims ")).expect("a claim");
+        let body: Value = serde_json::from_str(claim.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body, json!({"session": "board-p1", "scope": ["tools/x.nut"], "mode": "advisory", "intent": "records of openttd:replan:0"}));
+        drop(seen);
+        // Refused again after the claim: that refusal reaches the script, and nothing loops.
+        let (b2, seen2) = fixture(vec![("POST /api/v1/mesh/records", 422, OUT), ("POST /api/v1/mesh/claims", 200, r#"{"claimed": true}"#)]);
+        assert!(matches!(client(&b2).write(rec.clone()), Err(Error::Refused { code, .. }) if code == "out_of_scope"));
+        assert_eq!(seen2.lock().unwrap().iter().filter(|t| t.starts_with("POST /api/v1/mesh/records ")).count(), 2);
+        // The claim refused: the write's refusal says so.
+        let (b3, _) = fixture(vec![("POST /api/v1/mesh/records", 422, OUT),
+                                   ("POST /api/v1/mesh/claims", 409, r#"{"error": {"code": "conflict", "message": "held"}}"#)]);
+        assert!(matches!(client(&b3).write(rec), Err(Error::Refused { message, .. }) if message.contains("claiming the record's scope failed")));
+        // A record without a scope is not claimed for: the refusal as it came.
+        let (b4, seen4) = fixture(vec![("POST /api/v1/mesh/records", 422, OUT)]);
+        assert!(matches!(client(&b4).write(json!({"kind": "observation", "task": "t", "scope": [], "title": "x"})),
+                         Err(Error::Refused { code, .. }) if code == "out_of_scope"));
+        assert!(!seen4.lock().unwrap().iter().any(|t| t.starts_with("POST /api/v1/mesh/claims ")));
+    }
+
+    #[test]
+    fn an_answer_without_conflicts_or_ignored_is_read_with_both_empty() {
+        // Majordomus 1.2.0's GET /api/v1/mesh/records, as the live server answered on 2026-11-25:
+        // active, digest and records only (MeshRecordList requires just those three).
+        const BARE: &str = r#"{"active": true, "digest": "d", "records": [{"key": "s1/r1", "author": "s1/board-p1", "kind": "decision",
+            "task": "I0094", "scope": [], "status": "open", "title": "t", "revision": 1, "evidence": "asserted"}]}"#;
+        let (base, _) = fixture(vec![("GET /api/v1/mesh/records", 200, BARE)]);
+        let v = client(&base).records(&Value::Null).unwrap();
+        assert_eq!((v["records"][0]["key"].clone(), v["conflicts"].clone(), v["ignored"].clone()), (json!("s1/r1"), json!([]), json!([])));
+        // Lists the server sends are kept as they came.
+        let (b2, _) = fixture(vec![("GET /api/v1/mesh/records", 200, LIST)]);
+        assert_eq!(client(&b2).records(&Value::Null).unwrap()["records"][0]["revision"], 2);
     }
 
     #[test]

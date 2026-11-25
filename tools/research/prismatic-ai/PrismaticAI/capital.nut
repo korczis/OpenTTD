@@ -272,11 +272,16 @@ function PrismaticAI::CapitalBuy(b, keep, afloat, q, may_hold) {
  * lays the line from the loan it took): no repayment, no hold, no new route, never borrowing. */
 function PrismaticAI::AllocateCapitalInside(hold) {
 	local b = CAPITAL.b;
-	if (b == null || AIController.GetSetting("capital_alloc") < 2) return;
+	local level = AIController.GetSetting("capital_alloc");
+	if (b == null || level < 2) return;
 	local afloat = PrismaticAI.QuarterRunningCost();
 	if (this.BuildFrozen(afloat)) return;
 	local keep = max(hold, max(2 * b.cash_reserve, afloat) + AICompany.GetLoanInterval());
-	this.CapitalBuy(b, keep, afloat, PrismaticAI.PressureQuarter(), false);
+	/* A round in a new quarter opens it, so its purchases count in that quarter's report and the
+	 * last quarter's skipped candidates are tried again (a search can outlast a quarter). */
+	local q = PrismaticAI.PressureQuarter();
+	PrismaticAI.CapitalQuarter(q, keep, level);
+	this.CapitalBuy(b, keep, afloat, q, false);
 }
 
 /* One heartbeat's allocation (see the head of this file). `afloat`: StayAfloat's floor, a quarter

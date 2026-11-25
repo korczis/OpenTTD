@@ -500,6 +500,7 @@ decides when a measurement may change a default.
 | [A road depot or bay stop faces its front tile but is not connected to it; drive-through stops run along the road's axis](.ai/repo/knowledge/curated/road-stops-and-depots-need-their-entrance-road.md) | When a bot, a Rhai script or an MCP caller builds a road station, a road depot, a rail depot or a train station. |
 | [AIs and the Game Script run only on the server, and the Game Script keeps ticking while the game is paused](.ai/repo/knowledge/curated/scripts-run-only-on-the-server-and-the-game-script-runs-while-paused.md) | Before designing a bridge, MCP or experiment flow that pauses the game or expects script activity on clients. |
 | [A TextEffectID stored in a game object is per-client view state; game logic must never branch on it](.ai/repo/knowledge/curated/text-effect-ids-are-client-local.md) | When reading or adding a TextEffectID (loading indicators, income text) in a vehicle, station or other pooled object. |
+| [The AI-battle arena runs the repository's current BattleReferee, so its matches log what the fitness rules judge (owner, 2026-11-25)](.ai/repo/knowledge/curated/the-arena-follows-the-repositorys-referee.md) | When provisioning or updating the ttd-battle arena, calibrating a fitness rule on arena matches, or wondering why arena match logs lack a field the referee logs. |
 | [PrismaticAI's rail pathfinder: land, level crossings, bridges and tunnels, each taken only as the game allows it](.ai/repo/knowledge/curated/the-bots-rail-pathfinder-lays-plain-track-only.md) | When choosing which planned rail line the owner's bot builds, or reading why a bot company has no trains. |
 | [-c makes the file's folder the working-dir search path, the config directory and the personal directory](.ai/repo/knowledge/curated/the-config-flag-moves-the-personal-directory.md) | When starting OpenTTD with -c for an experiment, a test or a second instance, and looking for its saves, logs, crash files or downloaded content. |
 | [Multiplayer desync detection compares only random.state[0] at sync frames; a divergence that never feeds Random() goes unseen](.ai/repo/knowledge/curated/the-desync-check-compares-only-the-game-random-state.md) | When using 'no desync reported' as evidence that a hook or experiment left clients in step. |
@@ -508,6 +509,7 @@ decides when a measurement may change a default.
 | [Under the null sound driver no mixer channel is ever freed, so after eight effects every StartSound returns early](.ai/repo/knowledge/curated/the-null-sound-driver-never-frees-a-mixer-channel.md) | When instrumenting or counting sound effects in a headless (-s null) research or regression run. |
 | [Under -v null, work queued with VideoDriver::QueueOnMainThread never runs, so an MCP screenshot writes no file](.ai/repo/knowledge/curated/the-null-video-driver-never-drains-the-main-thread-queue.md) | Before using a capture or any queued main-thread work in a null-video (regression or headless) run. |
 | [The owner auto-answers the bot's questions with openttd.view.ask.auto, so no 'Your bot asks' dialog interrupts play](.ai/repo/knowledge/curated/the-owner-can-auto-answer-the-bots-questions.md) | When the bot asks yes/no questions through openttd.view.ask and the owner does not want to click each red dialog. |
+| [The owner's answers of 2026-11-25: Majordomus learns this session's four lessons generically, and the live game on :8800 is left as it is](.ai/repo/knowledge/curated/the-owners-answers-of-2026-11-25-on-majordomus-and-the-live-game.md) | When a session asks whether the live game's stack may be redeployed with merged PrismaticAI fixes, or which of this repository's lessons were handed to prismatic-majordomus and on whose word. |
 | [The panel's bus carries game, company, decision, console, news, panel and plan events from one declared table; the hub's own audit and derived game events go to the hub's bus and store](.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds.md) | Before subscribing to a panel's or the hub's bus, its ZeroMQ socket or its DuckDB store (ADR 0033), or before a decision reads recorded history (ADR 0034): which event kinds exist (the table src/panel_events.rs declares, GET /api/bus kinds of each), who publishes each, what each carries, how often, what the plan. events carry, where the hub's events are stored, and what is not on any bus at all. |
 | [The planner predicts more profit per vehicle than the running lines earn](.ai/repo/knowledge/curated/the-planner-overpredicts-what-a-line-earns.md) | Before trusting a plan's monthly_profit or score, or when choosing params for a new plan; read the game's own calibration first. |
 | [Selecting an engine in the purchase window with a cargo filter builds, refits and sells a real vehicle on the local client](.ai/repo/knowledge/curated/the-purchase-window-cost-query-builds-a-real-vehicle.md) | When changing BuildVehicleWindow::SelectEngine, CmdBuildVehicle's refit path, or anything a vehicle build triggers (pool, group statistics, events). |
@@ -789,22 +791,22 @@ from the code. The right-hand column says what was counted.
 |---|---|---|
 | **146** | [game commands, each an MCP tool an agent can call (`openttd.cmd.*`)](research/mcp-api.md) | `DEF_CMD_TRAIT\(Commands::` in `src/*_cmd.h` |
 | **24** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
-| **46** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
+| **71** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **60** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **71** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
-| **24** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
-| **38** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
-| **209** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
-| **99** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
+| **25** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
+| **40** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
+| **224** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
+| **101** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
 <!-- surfaces:end facts -->
 
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 60
+    "research tools and checks (tools/research/, shell and Python)" : 71
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 13
-    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 24
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 25
 ```
 <!-- surfaces:end facts -->
 
@@ -1326,14 +1328,14 @@ What the fork delivers, from its `.ai/` feature records:
 <!-- surfaces:begin ai-features -->
 | Feature | Status | What it gives |
 |---|---|---|
-| [Validation gate](.ai/repo/features/layered-validation-gate.md) | stable | One script checks a change at the cost its size needs, and a report can only say what actually ran. |
+| [Validation gate](.ai/repo/features/layered-validation-gate.md) | draft | One script checks a change at the cost its size needs, and a report can only say what actually ran. |
 | [Instrumentation](.ai/repo/features/research-instrumentation.md) | stable | Internal state becomes observable in research builds and provably absent from every other build. |
-| [Research CLI](.ai/repo/features/research-experiment-cli.md) | stable | An experiment records its own build profile, toolchain, commands and results, and its report is generated from that record. |
+| [Research CLI](.ai/repo/features/research-experiment-cli.md) | draft | An experiment records its own build profile, toolchain, commands and results, and its report is generated from that record. |
 | [Bridge](.ai/repo/features/prismatic-bridge.md) | draft | Prismatic decides, a standalone bridge relays over the admin network, and a normal Company AI acts in the game. |
-| [AI battle](.ai/repo/features/lan-ai-battle.md) | draft | Every SSH-reachable machine runs headless free-for-all matches between PrismaticAI and BaNaNaS AIs, the leaderboard is a derived record, and a browser dashboard shows the run live. |
-| [Battle post-mortem](.ai/repo/features/battle-postmortem.md) | draft | After each round, a Rust tool analyses every finished match in parallel, names why each contestant lost against fixed thresholds, counts PrismaticAI's last places, and proposes settings for the next edition. |
-| [MCP server](.ai/repo/features/embedded-mcp-server.md) | draft | An agent reads live game state over MCP and changes it only with an operator's approval of the exact arguments, through the command system. |
-| [Event bus and store](.ai/repo/features/event-bus-and-store.md) | draft | Any process on the machine follows a game live over ZeroMQ, and every decision can query what earlier games recorded. |
+| [AI battle](.ai/repo/features/lan-ai-battle.md) | stable | Every SSH-reachable machine runs headless free-for-all matches between PrismaticAI and BaNaNaS AIs, the leaderboard is a derived record, and a browser dashboard shows the run live. |
+| [Battle post-mortem](.ai/repo/features/battle-postmortem.md) | stable | After each round, a Rust tool analyses every finished match in parallel, names why each contestant lost against fixed thresholds, counts PrismaticAI's last places, and proposes settings for the next edition. |
+| [MCP server](.ai/repo/features/embedded-mcp-server.md) | stable | An agent reads live game state over MCP and changes it only with an operator's approval of the exact arguments, through the command system. |
+| [Event bus and store](.ai/repo/features/event-bus-and-store.md) | stable | Any process on the machine follows a game live over ZeroMQ, and every decision can query what earlier games recorded. |
 | [Surfaces](.ai/repo/features/published-surfaces.md) | stable | The site, the wiki and the Markdown index tables, all generated from what git tracks and the .ai/ layer, and checked on every commit. |
 | [AI layer](.ai/repo/features/supervised-ai-layer.md) | stable | Decisions, rules, plan, intents and knowledge live in tracked records that every agent and provider reads the same way. |
 <!-- surfaces:end ai-features -->
@@ -1342,8 +1344,8 @@ What the fork delivers, from its `.ai/` feature records:
 ```mermaid
 pie showData title Features by status
     %% links: README.md?col=Status&filter=stable#042-published-surfaces | README.md?col=Status&filter=draft#042-published-surfaces
-    "stable" : 5
-    "draft" : 5
+    "stable" : 7
+    "draft" : 3
 ```
 <!-- surfaces:end ai-features -->
 
@@ -1362,9 +1364,13 @@ itself (generated):
 | [Battle brain and live tuner](research/battle-brain.md) | RESEARCH-ONLY. Self-improvement in two loops, both fed from the LAN battle's recorded data: |
 | [Battle post-mortem](research/battle-postmortem.md) | RESEARCH-ONLY. After each round of the LAN AI battle, the post-mortem answers where each contestant loses, and PrismaticAI above all. battle.py already writes a post-mortem per match into its machine store.... |
 | [Capability matrix: what every capability runs on today](research/capability-matrix.md) | RESEARCH-ONLY. One row per capability of this fork: who owns it, the code that does it (cited as path:line:Symbol), what it reads from a live game, what happens when that input or its engine is missing, where its... |
+| [Config evolution: from a lost game to a tested settings proposal](research/config-evolution-loop.md) | RESEARCH-ONLY. battle.py evolve closes the loop from "PrismaticAI falls behind" to a settings change that was tested before anyone was asked to approve it. A trigger (the gap watch, the strategy review, or a live... |
+| [Control loops audit: why nothing reacted while we fell behind](research/control-loops-audit.md) | RESEARCH-ONLY. A read-only audit of the owner's live game of 2026-11-22/23 (panel :8800, server :3979, MCP :8731), made on 2026-11-23. Company 0 (company 1 in the game) runs PrismaticAI; company 1 runs AAAHogEx, the... |
 | [Co-play: the owner and the bot in one company](research/coplay.md) | RESEARCH-ONLY, UNSTABLE. A server-side join policy behind OPTION_RESEARCH_INSTRUMENTATION. Default off. |
+| [Design note: the owner's companies settle their approvals by a countdown](research/design-approval-countdown-owner-companies.md) | RESEARCH-ONLY. Status: revision 2, not implemented. It went to review before any code, under the owner's order of 2026-11-23 to consult other models and peers first. Peer session openttd-36 reviewed it. A three-pass... |
 | [Duel evidence audit and a frozen duel set](research/duel-evidence-audit.md) | RESEARCH-ONLY. What the recorded duels (research/results/duel-.json) hold constant and what they let vary, and one set of duels run with every input frozen and named. Tool: tools/research/mcp-duel; scoreboard:... |
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |
+| [Failure regimes](research/failure-regimes.md) | RESEARCH-ONLY. A failure regime is a failure that lasts: a company that stops expanding while its rivals grow, falls behind the strongest rival faster than the rest of the field, runs a mode whose vehicles lose... |
 | [PrismaticAI's growth funnel: where a line stops before it pays](research/growth-funnel.md) | PrismaticAI logs one FUNNEL line per transport mode once a game year. Each line counts the stages a new line passes: candidate discovery, affordability, construction, and operation that pays. The code is... |
 | [Incident 2026-11-19 to 11-22: an unowned AI battle held three machines, and master's CI broke twice](research/incident-2026-11-19-ai-battle-overload.md) | Post-mortem. Two failures overlapped. For three days the AI battle tournament held this Mac and the Linux build host at their limits, and nobody on either machine could tell whose processes they were. In the same... |
 | [Incident 2026-11-22: four PrismaticAI companies of one map built on the same mines](research/incident-2026-11-22-sibling-industries.md) | Post-mortem. In the owner's live 8-company game on :8800 (seed 2927, master c5bf32182a), four companies ran PrismaticAI: 0, 1, 6 and 7. Two or more of them built rail lines from the same mine or forest, so each such... |
@@ -1383,6 +1389,7 @@ itself (generated):
 | [Rail lines that pay: geometry, a steward and a monitor](research/rail-steward.md) | RESEARCH-ONLY. How the owner's bot builds rail that trains can always run, and what keeps each line paying afterwards. The parts: |
 | [A real game: a real opponent, over the real internet](research/real-game.md) | RESEARCH-ONLY. The owner's goal (2026-11-18): play a real game, over the real internet, against a real opponent. This page covers: |
 | [Real-world scenarios: a place as an OpenTTD map](research/real-world-scenario.md) | A place name becomes a playable OpenTTD map: resolved to explicit candidates, acquired from lawful open data into a versioned snapshot, compiled offline into a heightmap, towns, industries and an economy whose every... |
+| [Replay 2026-11-25: live saves before and after the PrismaticAI fixes](research/replay-2026-11-25-after-fixes.md) | Verification note (openttd-36, agent "replay"). Copies of the owner's live saves were loaded headless with battle.py replay (#274), once with master's PrismaticAI and once with the pre-fix eb0d839ce0, for four game... |
 | [The Rhai IDE: edit, run, debug and inspect scripts in the panel](research/rhai-ide.md) | RESEARCH-ONLY. Milestone rhai-is-a-live-ide (issues I0088 to I0093). This page states what the panel's Scripts page is meant to become and what is built so far. The status table below is the only place a part is... |
 | [Rust performance benchmarks](research/rust-bench.md) | How fast the Rust host runs the hot paths of the panel and the planner, measured by criterion benchmarks in tools/research/mcp-rhai/benches/hot_paths.rs, recorded as rust-bench/v1 JSON under results/ by... |
 | [Research-mode tooling](research/tooling.md) | This document is the detailed reference for tools/research/research, the canonical entry point that turns the policy in AGENTS.md §"Research-mode access to internals" and this directory's README.md into runnable,... |
@@ -1470,10 +1477,10 @@ choices, with its status (generated from [`.ai/repo/adrs/`](./.ai/repo/adrs/READ
 <!-- surfaces:begin ai-adrs as=pie -->
 ```mermaid
 pie showData title Decisions by status
-    %% links: README.md?col=Status&filter=accepted#071-architecture-decisions | README.md?col=Status&filter=superseded#071-architecture-decisions | README.md?col=Status&filter=proposed#071-architecture-decisions
+    %% links: README.md?col=Status&filter=accepted#071-architecture-decisions | README.md?col=Status&filter=proposed#071-architecture-decisions | README.md?col=Status&filter=superseded#071-architecture-decisions
     "accepted" : 36
+    "proposed" : 3
     "superseded" : 1
-    "proposed" : 1
 ```
 <!-- surfaces:end ai-adrs -->
 
@@ -1520,6 +1527,8 @@ pie showData title Decisions by status
 | [adr-0037](.ai/repo/adrs/0037-battlebrain-in-this-fork-is-the-one-authority-for-the-freigh.md) | accepted | Battlebrain in this fork is the one authority for the freight-line decision; planner and AlgoGlyph only produce candidates, the executor only applies |
 | [adr-0038](.ai/repo/adrs/0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md) | accepted | One approval core on the game server: a plan is approved as a whole and executes on approval, and every channel (web, console, game command, chat) is an adapter to it |
 | [adr-0039](.ai/repo/adrs/0039-algoglyph-is-a-git-submodule-pinned-at-one-commit-and-its-ru.md) | proposed | AlgoGlyph is a git submodule pinned at one commit, and its Rust kernels run in-process as native-rust catalogue entries |
+| [adr-0041](.ai/repo/adrs/0041-bulk-consent-and-standing-approval-rules.md) | proposed | The owner's bulk consent and standing approval rules: approve or deny all over a filter, and always-allow or always-deny rules of a tool glob and a JSON matcher, applied in the one approval core |
+| [adr-0042](.ai/repo/adrs/0042-a-strategy-review-cycle-runs-on-the-game-s-month-quarter-and.md) | proposed | A strategy review cycle runs on the game's month, quarter and week, judges every company against the leader from recorded data, and turns a lasting gap into a replan request, an approval-gated plan, labelled learning rows and an owner digest |
 <!-- surfaces:end ai-adrs -->
 
 </details>
@@ -1642,13 +1651,13 @@ Milestones of the plan with the issues done and still open, derived from the iss
 | M1 | [The fork states what it is, and one set of ground rules binds every agent](.ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml) | 2/2 | — |
 | M2 | [A change is validated at the tier its size needs, and the report cannot round up](.ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml) | 4/4 | — |
 | M3 | [Internal state is observable through gated instrumentation, and every experiment records how it ran](.ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml) | 8/8 | — |
-| M4 | [Prismatic steers a company in a live game through the standalone bridge](.ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 11/12 | I0228 |
+| M4 | [Prismatic steers a company in a live game through the standalone bridge](.ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml) | 12/12 | — |
 | M5 | [An agent reads and, with approval, changes the game over an embedded MCP server](.ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml) | 53/53 | — |
 | M6 | [The fork is published, supervised by Majordomus, and current with upstream](.ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml) | 7/7 | — |
 | M7 | [NoirGFX: the game in the owner's SIG NIHL noir, from OpenGFX and Kenney models](.ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml) | 1/1 | — |
 | M8 | [Planning decisions read recorded history from the store and publish what they chose as data](.ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml) | 7/7 | — |
 | M9 | [Rhai is a live IDE: edited, run, debugged and inspected in the panel, and it reaches Prismatic's models and blackboard](.ai/repo/project/milestones/rhai-is-a-live-ide.yaml) | 6/6 | — |
-| M10 | [Every status surface and record says what the code does today, and a capability matrix proves it](.ai/repo/project/milestones/records-and-status-tell-the-truth.yaml) | 0/8 | I0110, I0111, I0112, I0113, I0114, I0115, I0116, I0226 |
+| M10 | [Every status surface and record says what the code does today, and a capability matrix proves it](.ai/repo/project/milestones/records-and-status-tell-the-truth.yaml) | 5/8 | I0113, I0115, I0116 |
 | M11 | [The fork's own toolchain carries no open dependency vulnerability, and new alerts are seen and triaged](.ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml) | 1/1 | — |
 | M12 | [Every changed line is run by a test, and a coverage gate refuses a change whose new lines no test ran](.ai/repo/project/milestones/every-changed-line-is-tested.yaml) | 0/4 | I0180, I0181, I0189, I0190 |
 | M13 | [Every AI battle match records why each company won or lost, with the settings it actually ran under, and replays identically on another arena](.ai/repo/project/milestones/every-battle-match-explains-itself.yaml) | 0/7 | I0118, I0119, I0120, I0121, I0122, I0123, I0124 |
@@ -1660,8 +1669,9 @@ Milestones of the plan with the issues done and still open, derived from the iss
 | M19 | [Governed access is authenticated, and every capability is derived onto every surface and exercised live](.ai/repo/project/milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml) | 0/7 | I0182, I0183, I0184, I0185, I0186, I0187, I0188 |
 | M20 | [The live agent workbench: in-game commands, Rhai revisions with rollback, AlgoGlyph flows](.ai/repo/project/milestones/the-live-agent-workbench.yaml) | 0/10 | I0192, I0193, I0194, I0195, I0196, I0197, I0198, I0199, I0200, I0201 |
 | M21 | [The panel has integrity: every control works, every view is derived](.ai/repo/project/milestones/the-panel-has-integrity.yaml) | 0/8 | I0203, I0204, I0205, I0206, I0207, I0208, I0209, I0211 |
-| M22 | [AlgoGlyph is accountable: cost fixtures, plan receipts, predicted versus actual, fault injection](.ai/repo/project/milestones/algoglyph-is-accountable.yaml) | 0/7 | I0212, I0213, I0214, I0215, I0216, I0217, I0227 |
+| M22 | [AlgoGlyph is accountable: cost fixtures, plan receipts, predicted versus actual, fault injection](.ai/repo/project/milestones/algoglyph-is-accountable.yaml) | 1/7 | I0212, I0213, I0214, I0215, I0216, I0217 |
 | M23 | [A remote human plays the bot over the internet](.ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml) | 0/2 | I0218, I0219 |
+| M24 | [The strategy is reviewed on the game's week, month and quarter, and a gap to the leader becomes a proposal, a learning row and an owner digest](.ai/repo/project/milestones/the-strategy-is-reviewed-on-a-cadence.yaml) | 0/15 | I0270, I0271, I0272, I0273, I0274, I0275, I0276, I0277, I0278, I0279, I0280, I0281, I0282, I0283, I0284 |
 <!-- surfaces:end ai-plan -->
 
 <!-- surfaces:begin ai-plan as=bar -->
@@ -1677,12 +1687,12 @@ config:
 ---
 xychart-beta
     title "Issues done (bar) and planned (line) per milestone, in plan order"
-    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21", "M22", "M23"]
+    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21", "M22", "M23", "M24"]
     %% series: Issues done | Issues planned
-    %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml | .ai/repo/project/milestones/records-and-status-tell-the-truth.yaml | .ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml | .ai/repo/project/milestones/every-changed-line-is-tested.yaml | .ai/repo/project/milestones/every-battle-match-explains-itself.yaml | .ai/repo/project/milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml | .ai/repo/project/milestones/the-planner-reads-one-coherent-priced-world.yaml | .ai/repo/project/milestones/battlebrain-decides-live-with-rollback.yaml | .ai/repo/project/milestones/evaluations-are-fair-pre-registered-and-paired.yaml | .ai/repo/project/milestones/prismatic-closes-one-real-loop.yaml | .ai/repo/project/milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml | .ai/repo/project/milestones/the-live-agent-workbench.yaml | .ai/repo/project/milestones/the-panel-has-integrity.yaml | .ai/repo/project/milestones/algoglyph-is-accountable.yaml | .ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml
+    %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml | .ai/repo/project/milestones/records-and-status-tell-the-truth.yaml | .ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml | .ai/repo/project/milestones/every-changed-line-is-tested.yaml | .ai/repo/project/milestones/every-battle-match-explains-itself.yaml | .ai/repo/project/milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml | .ai/repo/project/milestones/the-planner-reads-one-coherent-priced-world.yaml | .ai/repo/project/milestones/battlebrain-decides-live-with-rollback.yaml | .ai/repo/project/milestones/evaluations-are-fair-pre-registered-and-paired.yaml | .ai/repo/project/milestones/prismatic-closes-one-real-loop.yaml | .ai/repo/project/milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml | .ai/repo/project/milestones/the-live-agent-workbench.yaml | .ai/repo/project/milestones/the-panel-has-integrity.yaml | .ai/repo/project/milestones/algoglyph-is-accountable.yaml | .ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml | .ai/repo/project/milestones/the-strategy-is-reviewed-on-a-cadence.yaml
     y-axis "Issues done" 0 --> 58.3
-    bar [2, 4, 8, 11, 53, 7, 1, 7, 6, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    line [2, 4, 8, 12, 53, 7, 1, 7, 6, 8, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 7, 2]
+    bar [2, 4, 8, 12, 53, 7, 1, 7, 6, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+    line [2, 4, 8, 12, 53, 7, 1, 7, 6, 8, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 7, 2, 15]
 ```
 <!-- surfaces:end ai-plan -->
 

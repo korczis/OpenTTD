@@ -56,6 +56,10 @@ function PrismaticAI::Save() {
 		routes = this.routes,
 		air_done = this.air_done,
 		rail_done = this.rail_done,
+		/* main.nut PairDue: the date the passenger pair first was due, and that pair, so a load
+		 * keeps its wait. */
+		pair_due_since = this.pair_due_since,
+		pair_due_key = this.pair_due_key,
 		freight_tried = this.freight_tried,
 		own_built = this.own_built,
 		own_failed = this.own_failed,
@@ -119,30 +123,49 @@ function PrismaticAI::Restore(b) {
 	local old_claims = PrismaticAI.ClaimsAfterRestart();
 	local freight = 0;
 	foreach (line in RAIL_LINES) if ("from" in line) freight++;
+	/* The planner's passenger pair (main.nut PairDue), when there is one. */
+	local pair = "";
+	if (b.rail_a >= 0 && b.rail_b >= 0) {
+		if (this.rail_done == b.rail_a + "-" + b.rail_b) pair = "; passenger pair done";
+		else if (this.pair_due_since >= 0) pair = "; passenger pair due since " + PrismaticAI.RestoreDate(this.pair_due_since);
+		else pair = "; passenger pair not due yet";
+	}
 	AILog.Info("PrismaticAI: restored after a restart: " + RAIL_LINES.len() + " rail lines (" + freight + " freight), " +
 		this.auto_air + " autopilot air routes, " + this.routes + " routes, " + this.freight_tried.len() + " freight lines tried, " +
 		this.own_built + " own, " + this.twins + " twins, " + this.used_towns.len() + " road towns, " + AIR_PORTS.len() +
-		" airports, " + old_claims + " foreign rail station tiles of unknown age taken as old (" + how + ")");
+		" airports, " + old_claims + " foreign rail station tiles of unknown age taken as old (" + how + ")" + pair);
 }
 
-/* own_built after a load: the own freight lines built (restored RAIL_LINES whose producer,
- * acceptor and cargo the planner did not hand over in fr_* .. fr16_*, each pair once, closed ones
- * too: closing a line at runtime does not give its slot back, so neither does a load), never the
- * saved count. Before main.nut stopped counting a failed own line (PR #234), the saved count held
- * every line tried: the owner's live game (seed 15805) was saved with "4 own" and one rail line,
- * so after its load with the fix it still planned no own line. `saved` is the count the save
- * held, logged when it differs. */
-function PrismaticAI::RestoreOwnBuilt(saved) {
+/* `date` (AIDate) as YYYY-MM-DD. */
+function PrismaticAI::RestoreDate(date) {
+	local m = AIDate.GetMonth(date), d = AIDate.GetDayOfMonth(date);
+	return AIDate.GetYear(date) + "-" + (m < 10 ? "0" : "") + m + "-" + (d < 10 ? "0" : "") + d;
+}
+
+/* The own freight lines that stand: RAIL_LINES not closed whose producer, acceptor and cargo the
+ * planner did not hand over in fr_* .. fr16_*, each pair once (a twin is its pair's). */
+function PrismaticAI::OwnLinesOpen() {
 	local planned = {};
 	foreach (fl in PrismaticAI.FreightLines()) planned[fl.from + "-" + fl.to + "-" + fl.cargo] <- true;
 	local own = {};
 	foreach (l in RAIL_LINES) {
-		if (!("from" in l) || !("to" in l)) continue;
+		if (l.closed || !("from" in l) || !("to" in l)) continue;
 		local key = l.from + "-" + l.to + "-" + l.cargo;
 		if (!planned.rawin(key)) own[key] <- true;
 	}
-	if (own.len() != saved) AILog.Info("PrismaticAI: own lines counted from the restored lines: " + own.len() + " (the save said " + saved + ")");
 	return own.len();
+}
+
+/* own_built after a load: the own freight lines that stand (OwnLinesOpen), never the saved count.
+ * A closed line gives its slot back (lines.nut CloseLine), so a load does not count it either.
+ * Before main.nut stopped counting a failed own line (PR #234), the saved count held every line
+ * tried: the owner's live game (seed 15805) was saved with "4 own" and one rail line, so after its
+ * load with the fix it still planned no own line. `saved` is the count the save held, logged when
+ * it differs. */
+function PrismaticAI::RestoreOwnBuilt(saved) {
+	local own = PrismaticAI.OwnLinesOpen();
+	if (own != saved) AILog.Info("PrismaticAI: own lines counted from the restored lines: " + own + " (the save said " + saved + ")");
+	return own;
 }
 
 /* The state Save wrote. */
@@ -161,6 +184,9 @@ function PrismaticAI::RestoreFromSave(data) {
 	this.routes = PrismaticAI.RestoreField(data, "routes", 0);
 	this.air_done = PrismaticAI.RestoreField(data, "air_done", "");
 	this.rail_done = PrismaticAI.RestoreField(data, "rail_done", "");
+	/* A save from before it was saved has none: the wait starts again, as it did then. */
+	this.pair_due_since = PrismaticAI.RestoreField(data, "pair_due_since", -1);
+	this.pair_due_key = PrismaticAI.RestoreField(data, "pair_due_key", "");
 	this.freight_tried = PrismaticAI.RestoreField(data, "freight_tried", {});
 	this.own_built = PrismaticAI.RestoreOwnBuilt(PrismaticAI.RestoreField(data, "own_built", 0));
 	this.own_failed = PrismaticAI.RestoreField(data, "own_failed", 0);
@@ -252,7 +278,7 @@ function PrismaticAI::RestoreFromMap(b) {
 	trains.Valuate(AIVehicle.GetVehicleType);
 	trains.KeepValue(AIVehicle.VT_RAIL);
 	trains.Sort(AIList.SORT_BY_ITEM, AIList.SORT_ASCENDING);
-	local seen = {}, depots = {}, keys = {};
+	local seen = {}, depots = {}, keys = {}, pair_line = false;
 	local cap_platforms = max(1, b.rail_platforms);
 	if (b.rail_double == 1) cap_platforms = max(cap_platforms, 2);
 	foreach (v, _ in trains) {
@@ -276,8 +302,10 @@ function PrismaticAI::RestoreFromMap(b) {
 			trains_max = max(platforms, group.Count()), path = [], stations = [], closed = false,
 			platforms = platforms, first = v};
 		if (AICargo.HasCargoClass(cargo, AICargo.CC_PASSENGERS)) {
-			line.label = AITown.GetName(AIStation.GetNearestTown(AIStation.GetStationID(a))) + " - " +
-				AITown.GetName(AIStation.GetNearestTown(AIStation.GetStationID(bt)));
+			local ta = AIStation.GetNearestTown(AIStation.GetStationID(a));
+			local tb = AIStation.GetNearestTown(AIStation.GetStationID(bt));
+			line.label = AITown.GetName(ta) + " - " + AITown.GetName(tb);
+			if ((ta == b.rail_a && tb == b.rail_b) || (ta == b.rail_b && tb == b.rail_a)) pair_line = true;
 		} else {
 			local from = PrismaticAI.RestoreIndustryNear(AIIndustryList_CargoProducing(cargo), a);
 			local to = PrismaticAI.RestoreIndustryNear(AIIndustryList_CargoAccepting(cargo), bt);
@@ -318,7 +346,11 @@ function PrismaticAI::RestoreFromMap(b) {
 		this.freight_tried[key] <- true;
 		if (!planned.rawin(key)) this.own_built++;
 	}
-	if (RAIL_LINES.len() > 0) this.rail_done = b.rail_a + "-" + b.rail_b;
+	/* The planner's passenger pair is done only when a passenger line between its two towns stands:
+	 * any rail line marked it done before, so a bot with freight lines and no pair line never built
+	 * the pair after such a restart. Whether it was tried and failed the map cannot tell; it is tried
+	 * again. Its wait (PairDue) starts again too: only a save holds it. */
+	if (pair_line) this.rail_done = b.rail_a + "-" + b.rail_b;
 
 	/* Air: routes are the distinct station sets of our aircraft (fleet.nut RouteKey); airports by
 	 * their town (air.nut AIR_PORTS, autopilot air_towns). */

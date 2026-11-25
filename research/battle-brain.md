@@ -191,6 +191,28 @@ so that CmdLevelLand stops before the reserve. It turned the year-one bust of `g
 steep-site busts, which the brain's target already clamps at `BRAIN_SHARE_FLOOR`, so the brain needs
 neither a cut nor a rebase for it.
 
+No arena edition ran between `ac8bc71d06` (#46, rich growth with its air lifts, default on) and
+`c560f5565f` (#68, `rich_air=0`): the tournament was paused from 06:02 to past both merges on
+2026-11-22. #46 as merged replayed at -29.2% against `fced659668` (8 matches); with #68, master
+`c5bf32182a` replays at -1.8% geometric against `c86fbd1ccb`, the last master before #46 (24 matches,
+14 up and 10 down, 0.56 to 1.51). That is within replay noise, so #46 plus #68 needs neither a cut nor
+a rebase of its own. The rebase pending from `fced659668` (rail_len=4 and TrainsOf, +5.7% over 8
+matches against `386b0bf3b5`) still applies once the arena resumes: older rows by 1/1.057, with the
+`5e5b9f93` cut kept.
+
+Master `5cc9cdbf8d` then merged three bot changes: #213 (a rail search that cannot find its line
+stops within its distance's budget), #163 (ship routes, off by default) and #217 (a road depot's exit
+always leads onto the route). Together they replay at +11.8% geometric against `c5bf32182a` over the
+same 24 matches (19 up and 5 down, 0.73 to 1.88). #213 alone (`3e4ec154ff`) carries it: +14.4% against
+`c5bf32182a` (17 up), and #163 with #217 on top replays at -2.3% (14 up), within noise. A rail search
+that ran most of a game year left the bot's money and its other plans idle for that year. That step is large enough to need a rebase of its
+own when the arena resumes: rows played before `5cc9cdbf8d` by 1/1.118, on top of the 1/1.057 for rows
+before `fced659668`.
+
+Master `6333347512` (#232: a second track is no longer refused for a cost its search only estimated;
+two companies no longer build from the same producer; air income logged per aircraft) replays at
+-1.0% against `5cc9cdbf8d` (24 matches, 12 up), within noise: no rebase of its own.
+
 ### Why trust-region parents need four rows
 
 In edition `eb9cae38` the safe pick `g241.brainSafe` finished last on seed 199435860. The four other

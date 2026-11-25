@@ -15,6 +15,7 @@ records a commit can hold (git index in a hook).
 import importlib.util
 import io
 import json
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -442,6 +443,47 @@ class GrowthFunnel(unittest.TestCase):
                 orch.poll_host(host)
         self.assertIn("\\] \\[E\\] FUNNEL ", seen[0])
         self.assertEqual(m["funnel"], {"A": [{"year": 1960, "mode": "rail", "tried": 3, "stations": 1}]})
+
+
+    def test_a_healthy_prismatic_that_stops_expanding_fails_with_a_named_regime(self):
+        """research/failure-regimes.md: PrismaticAI keeps 10 vehicles for three years while both
+        rivals grow and pull away; the check names the regime, prints it, and fails."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            repo = tmp / "repo"
+            (repo / "build").mkdir(parents=True)
+            (repo / "ai" / "PrismaticAI").mkdir(parents=True)
+            (repo / "referee" / "BattleReferee").mkdir(parents=True)
+            lines = []
+            for q in range(13):
+                y, mo = 1960 + q // 4, 3 * (q % 4) + 1
+                lines += [ref(y, mo, 0, 1000 + q, veh=10), ref(y, mo, 1, 2000 * (q + 1), veh=5 + 2 * q),
+                          ref(y, mo, 2, 1500 + 100 * q, veh=5 + q)]
+            fake = repo / "build" / "openttd"
+            fake.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\n")
+            fake.chmod(0o755)
+            arena = tmp / "cache" / "arena"
+            (arena / "baseset").mkdir(parents=True)
+            (arena / "ai" / "library").mkdir(parents=True)
+            (arena / "ai" / "AAAHogEx.tar").write_bytes(b"")
+            cfg = {"cache": tmp / "cache", "prismatic": {"path": "ai/PrismaticAI"},
+                   "referee": {"path": "referee/BattleReferee"},
+                   "match": {"years": 3, "start_year": 1960, "landscape": "temperate", "map_x": 8, "map_y": 8},
+                   "fitness": {"years": 3, "seed": 1, "rules": {}, "must_be_healthy": ["PrismaticAI"],
+                               "lineups": [[{"ai": "PrismaticAI"}, {"ai": "AAAHogEx"}, {"ai": "AdmiralAI"}]]}}
+            old = battle.REPO
+            battle.REPO = repo
+            out, err = io.StringIO(), io.StringIO()
+            try:
+                with redirect_stdout(out), redirect_stderr(err):
+                    code = battle.cmd_fitness(cfg)
+            finally:
+                battle.REPO = old
+        self.assertEqual(code, 10, out.getvalue() + err.getvalue())
+        self.assertIn(f"fitness[0]: {'PrismaticAI':26} regime no_expansion: 1960-01..1963-01 "
+                      "(known 1962-01): fleet 10->10", out.getvalue())
+        self.assertIn("FAIL [0] PrismaticAI: regime:no_expansion: 1960-01..1963-01", err.getvalue())
+        self.assertNotIn("AAAHogEx: regime", err.getvalue())
 
 
 class MatchContract(unittest.TestCase):
@@ -1039,6 +1081,32 @@ class Telemetry(unittest.TestCase):
             lineup = json.loads(st.query("SELECT lineup FROM matches")["rows"][0][0])
             self.assertEqual(lineup[0], {"key": "A", "ai": "A", "settings": ""})
 
+    def test_store_keeps_each_samples_loan_in_a_new_and_in_an_old_store(self):
+        # The hoard rules judge money net of the loan; a stored sample must keep the loan for any
+        # analysis that judges it later (research/design-net-investment-hoard-rule.md).
+        with tempfile.TemporaryDirectory() as tmp:
+            old = Path(tmp) / "old.sqlite"
+            db = sqlite3.connect(old)  # a store from before the loan column
+            db.executescript(battle.SCHEMA.replace(" loan INTEGER,", ""))
+            db.execute("INSERT INTO samples (edition, match_id, contestant, t, money) "
+                       "VALUES ('e0', 'm-0000', 'A', '1960-01', 7)")
+            db.commit()
+            db.close()
+            for path in (Path(tmp) / "new.sqlite", old):
+                st = battle.Store(path)
+                m = match("m-0001", "h1", 1, [3, 2, 1])
+                m.update(edition="e1", started_at=0.0, ticks=1,
+                         lineup=[{"key": k, "ai": k} for k in KEYS])
+                for series in m["series"].values():
+                    for s in series:
+                        s.update(money=900_000, loan=300_000)
+                st.match(m)
+                rows = st.query("SELECT money, loan FROM samples WHERE edition = 'e1'")["rows"]
+                self.assertTrue(rows, path.name)
+                self.assertEqual({tuple(r) for r in rows}, {(900_000, 300_000)}, path.name)
+            older = battle.Store(old).query("SELECT loan FROM samples WHERE edition = 'e0'")["rows"]
+            self.assertEqual(older, [(None,)], "a sample from before the column reads unrecorded")
+
     def test_fitness_fails_when_a_never_last_bot_is_last(self):
         lineup = [{"ai": "PrismaticAI", "key": "PrismaticAI"}, {"ai": "X", "key": "X"}]
         fl = Health.fleet
@@ -1433,6 +1501,469 @@ class Export(unittest.TestCase):
         r = subprocess.run(["git", "-C", str(battle.REPO), "ls-tree", "-d", "HEAD", path],
                            capture_output=True, text=True)
         return bool(r.stdout.strip())
+
+
+# ------------------------------------------------------------------ live outcome learning (fixtures)
+LIVE_T = {"seed": "t", "group": "P", "label_prefix": "P GA", "population": 4, "mutation_rate": 0.5,
+          "fixed": {}, "start": {"a": 50, "b": 4}, "defaults": {"a": 30, "b": 4},
+          "space": {"a": [0, 100, 10], "b": [2, 10, 2]}, "live": {"horizon_years": 4}}
+
+
+def live_store():
+    """Canned answers of a panel store for every LIVE_SQL query: a game (seed 7) of two runs, the
+    second a --load under run seed 99, with two PrismaticAI configurations, AAAHogEx and an unknown
+    company; an older run of seed 7 and an unrelated game (seed 5)."""
+    def ev(run, seq, kind, date, text=None, data=None):
+        return {"run_ms": run, "seq": seq, "game_date": date, "kind": kind, "text": text,
+                "data": json.dumps(data if data is not None else {"text": text})}
+    months = {100: ["1950-06", "1950-12", "1951-12", "1952-12"], 200: ["1952-12", "1953-06"]}
+    vals = {0: [10, 20, 50, 100], 1: [10, 30, 100, 200], 2: [10, 20, 100, 400], 3: [1, 1, 1, 1]}
+    series = []
+    for run, ms in months.items():
+        for c, vs in vals.items():
+            for i, m in enumerate(ms):
+                v = vs[i] if run == 100 else vs[-1] + 10 * (i + 1)
+                series.append({"run_ms": run, "company": c, "name": f"Co {c}", "month": m, "value": v,
+                               "money": 1, "loan": 0, "vehicles": 2})
+    answers = {
+        "runs": [{"instance": "panel-1", "seed": 7, "run_ms": 50, "first_month": "1950-01", "last_month": "1950-02"},
+                 {"instance": "panel-1", "seed": 7, "run_ms": 100, "first_month": "1950-06", "last_month": "1952-12"},
+                 {"instance": "panel-1", "seed": 99, "run_ms": 200, "first_month": "1952-12", "last_month": "1953-06"},
+                 {"instance": "panel-1", "seed": 5, "run_ms": 300, "first_month": "1953-07", "last_month": "1953-09"}],
+        "edges": [{"run_ms": 100, "month": "1952-12", "name": "Co 0"}, {"run_ms": 200, "month": "1952-12", "name": "Co 0"},
+                  {"run_ms": 300, "month": "1953-07", "name": "Someone else"}],
+        "series": series,
+        "events": [ev(100, 1, "company.founded", "1950-06-01", data={"id": 0}),
+                   ev(100, 2, "panel.ai", "1950-06-01", "start_ai PrismaticAI a=40,aggressiveness=40,fr_from=3,b=x sent: the company"),
+                   ev(100, 3, "company.founded", "1950-06-02", data={"id": 1}),
+                   ev(100, 4, "panel.console", "1950-06-02", 'start_ai "AAAHogEx"'),
+                   ev(100, 5, "company.founded", "1950-06-03", data={"id": 2}),
+                   ev(100, 6, "panel.console", "1950-06-03", 'start_ai "PrismaticAI" a=70,b=8,aggressiveness=70'),
+                   ev(100, 7, "company.founded", "1950-06-04", data={"id": 2}),
+                   ev(100, 8, "company.founded", "1950-06-05", data={"id": 3}),
+                   ev(100, 9, "panel.mcp", "1951-02-01",
+                      'openttd.ai.set_setting({"company": 0, "name": "a", "value": 40}) -> pending approval #1'),
+                   # Never enacted (no decision): it changes nothing and does not end company 0's window.
+                   ev(100, 10, "panel.mcp", "1951-03-01",
+                      'openttd.ai.set_setting({"company": 0, "name": "a", "value": 90}) -> pending approval #4'),
+                   ev(200, 11, "panel.mcp", "1953-02-01",
+                      'openttd.ai.set_setting({"company": 2, "name": "b", "value": 10}) -> pending approval #2'),
+                   ev(200, 12, "panel.mcp", "1953-02-01",
+                      'openttd.ai.set_setting({"company": 2, "name": "fr_to", "value": 3}) -> pending approval #3'),
+                   ev(200, 13, "decision.recorded", "1953-02-02",
+                      data={"action_type": "ai.set_setting", "approval_id": 2, "command_result": "succeeded"}),
+                   ev(200, 14, "decision.recorded", "1953-02-03",
+                      data={"action_type": "ai.start", "approval_id": 3, "command_result": "succeeded"}),
+                   ev(100, 15, "panel.mcp", "1951-04-01",
+                      'openttd.ai.set_setting({"company": 0, "name": "b", "value": 6})')],
+        "watchdog": [{"key": "watchdog.0", "value": json.dumps({"signature": "train 2 road 3 ship 0 aircraft 1 stations 4"})},
+                     {"key": "watchdog.tuning", "value": "7"}],
+        "revision": [{"version": json.dumps({"revision": "abc123"})}],
+    }
+
+    def query(name, sql):
+        if "{runs}" in battle.LIVE_SQL[name]:
+            assert "100,200" in sql, sql
+        return answers[name]
+    return query
+
+
+def live_rec():
+    return battle.live_record(live_store(), 7, "test")
+
+
+class Live(unittest.TestCase):
+    def test_record_follows_the_load_maps_ais_and_keeps_only_strategy_settings(self):
+        rec = live_rec()
+        self.assertEqual(rec["id"], "live-7-100")
+        self.assertEqual([r["run_ms"] for r in rec["runs"]], [100, 200])
+        self.assertEqual((rec["first_month"], rec["final_month"], rec["revision"]), ("1950-06", "1953-06", "abc123"))
+        comp = {c["company"]: c for c in rec["companies"]}
+        self.assertEqual([comp[c]["ai"] for c in range(4)], ["PrismaticAI", "AAAHogEx", "PrismaticAI", None])
+        self.assertEqual(comp[0]["settings_start"], "a=40,aggressiveness=40")   # no fr_from, no non-number
+        # a=40 again is no change; a=90 and b=6 were requested and never enacted.
+        self.assertEqual(comp[0]["settings_requested"], [
+            {"date": "1951-03-01", "name": "a", "value": 90, "applied": None},
+            {"date": "1951-04-01", "name": "b", "value": 6, "applied": None}])
+        self.assertEqual(comp[2]["settings_requested"],
+                         [{"date": "1953-02-01", "name": "b", "value": 10, "applied": "1953-02-02"}])
+        self.assertEqual([p["month"] for p in rec["series"]["0"]], ["1950-12", "1951-12", "1952-12", "1953-06"])
+        self.assertEqual(rec["series"]["0"][2]["value"], 110)          # the loaded run's month replaces it
+        self.assertEqual(rec["mode_mix"], {"0": {"train": 2, "road": 3, "ship": 0, "aircraft": 1, "stations": 4}})
+        self.assertEqual(rec["outcome"]["leader"], 2)
+        self.assertEqual(rec["outcome"]["prismatic"]["0"]["rank"], 3)
+        self.assertEqual(battle.validate_live(rec, "live-7-100.json"), [])
+        with self.assertRaises(SystemExit):
+            battle.live_record(live_store(), 12345, "test")
+
+    def test_validation_refuses_a_forged_or_incomplete_record(self):
+        rec = live_rec()
+        self.assertIn("missing outcome", battle.validate_live({k: v for k, v in rec.items() if k != "outcome"}, "x")[0])
+        bad = json.loads(json.dumps(rec))
+        bad["schema"], bad["outcome"]["leader_value"] = "other", 1
+        errs = "\n".join(battle.validate_live(bad, "live-8-1.json"))
+        self.assertIn("schema other", errs)
+        self.assertIn("does not name the file", errs)
+        bad = json.loads(json.dumps(rec))
+        bad["outcome"]["leader_value"] = 1
+        self.assertIn("not derived", battle.validate_live(bad, "live-7-100.json")[0])
+        del bad["series"]["3"]
+        self.assertIn("company 3 has no series", battle.validate_live(bad, "live-7-100.json")[0])
+        no_ref = json.loads(json.dumps(rec))
+        no_ref["companies"][1]["ai"] = "Other"
+        self.assertIsNone(battle.live_outcome(no_ref)["prismatic"]["0"]["ratio_to_reference"])
+
+    def test_helpers(self):
+        self.assertEqual(battle.next_month("1950-12"), "1951-01")
+        self.assertEqual(battle.next_month("1950-01"), "1950-02")
+        self.assertEqual(battle.settings_dict("a=1, rail_a=3,line2_trains=1,x=y,b=-2,"), {"a": 1, "b": -2})
+        self.assertEqual(battle.game_runs([], [], 7), [])
+        self.assertEqual(battle.live_genes(LIVE_T, {"a": 37}), {"a": 40, "b": 4})
+        self.assertEqual(battle.live_genes({k: v for k, v in LIVE_T.items() if k != "defaults"}, {}), {"a": 50, "b": 4})
+        self.assertEqual(battle.live_cfg({})["reference"], "AAAHogEx")
+
+    def test_judging_pairs_a_game_and_stops_at_the_first_setting_change(self):
+        live = {(e["company"]): e for e in battle.live_entries([live_rec()], LIVE_T)}
+        # Company 2's change in 1953 ends its window at 1952-12; the game is judged there.
+        self.assertEqual((live[0]["at"], live[2]["at"]), ("1952-12", "1952-12"))
+        self.assertEqual((live[0]["ratio"], live[2]["ratio"]), (0.5238, 1.9524))
+        self.assertTrue(live[0]["lost"] and live[0]["paired"])
+        self.assertFalse(live[2]["lost"])
+        self.assertIn("the game's best", live[0]["why"])
+        # Alone and short: no evidence; alone and long enough: judged against loss_ratio.
+        rec = live_rec()
+        rec["companies"][2]["ai"] = "Other"
+        rec["companies"][0]["settings_requested"] = [{"date": "1951-03-01", "name": "a", "value": 90,
+                                                      "applied": "1951-03-05"}]
+        (e,) = battle.live_entries([rec], LIVE_T)
+        self.assertFalse(e["evidence"])
+        self.assertIn("first setting change 1951", e["why"])
+        rec["companies"][0]["settings_requested"][0]["applied"] = None   # requested, never enacted
+        (e,) = battle.live_entries([rec], LIVE_T)
+        self.assertEqual((e["ratio"], e["lost"], e["paired"]), (0.5238, False, False))
+        self.assertIn("a loss is under 0.5", e["why"])
+        (e,) = battle.live_entries([rec], dict(LIVE_T, live={"loss_ratio": 0.6}))
+        self.assertEqual((e["lost"], e["radius"]), (True, 3))          # lost to the rival: a wider veto
+        self.assertEqual(battle.live_veto(LIVE_T, {"a": 100, "b": 10}, [e])["company"], 0)
+        (e,) = battle.live_entries([rec], dict(LIVE_T, live={"min_years": 5}))
+        self.assertIn("first setting change none", e["why"])
+
+    def test_the_ga_never_keeps_a_configuration_that_lost_live_and_plays_the_live_winner(self):
+        live = battle.live_entries([live_rec()], LIVE_T)       # lost: a=40,b=4; won: a=70,b=8
+        self.assertEqual(battle.live_veto(LIVE_T, {"a": 40, "b": 4}, live)["company"], 0)
+        self.assertIsNone(battle.live_veto(LIVE_T, {"a": 40, "b": 6}, live))
+        wide = battle.live_entries([live_rec()], dict(LIVE_T, live={"veto_genes": 1}))
+        self.assertIsNotNone(battle.live_veto(LIVE_T, {"a": 40, "b": 6}, wide))
+        g0 = [battle.variant(LIVE_T, 0, i, g, []) for i, g in enumerate(
+            [{"a": 10, "b": 2}, {"a": 20, "b": 2}, {"a": 30, "b": 2}, {"a": 40, "b": 4}])]
+        scored = [(v, {"score": i}) for i, v in enumerate(g0)]   # the lost configuration scores best
+        g1 = battle.next_generation(LIVE_T, {"generation": 0, "history": []}, scored, live)
+        self.assertEqual(g1[0]["genes"], {"a": 30, "b": 2})       # the elite is the best not vetoed
+        self.assertTrue(g1[1]["label"].endswith("g1.live"))
+        self.assertEqual((g1[1]["genes"], g1[1]["parents"]), ({"a": 70, "b": 8}, ["live-7-100:2"]))
+        self.assertTrue(all(v["genes"] != {"a": 40, "b": 4} for v in g1))
+        # Played already: no seed again. Every variant vetoed: no elite, children from all of them.
+        hist = {"generation": 0, "history": [{"variants": [{"genes": {"a": 70, "b": 8}}]}]}
+        self.assertEqual(battle.live_seeds(LIVE_T, live, [{"a": 70, "b": 8}]), [])
+        lost = [(battle.variant(LIVE_T, 0, i, {"a": 40, "b": 4}, []), {"score": i}) for i in range(2)]
+        g1 = battle.next_generation(LIVE_T, hist, lost, live)
+        self.assertEqual(len(g1), 4)
+        self.assertFalse(any(v["label"].endswith("g1.0") and v["parents"] == [lost[1][0]["label"]] for v in g1))
+        pop1 = dict(LIVE_T, population=1)
+        self.assertEqual(len(battle.next_generation(pop1, {"generation": 0}, scored, live)), 1)
+
+    def test_live_settings_take_only_a_configuration_with_live_evidence(self):
+        brec = {"id": "battle-x", "contestants": [
+            {"key": "P lost", "ai": "PrismaticAI", "settings": "a=40,b=4"},
+            {"key": "P won", "ai": "PrismaticAI", "settings": "a=70,b=8,rail_a=2"},
+            {"key": "P arena", "ai": "PrismaticAI", "settings": "a=60,b=4"},
+            {"key": "P unplayed", "ai": "PrismaticAI", "settings": "a=90"},
+            {"key": "AAAHogEx", "ai": "AAAHogEx", "settings": ""}],
+            "leaderboard": [{"key": "AAAHogEx", "played": 4, "avg_value": 1000},
+                            {"key": "P lost", "played": 4, "avg_value": 300},
+                            {"key": "P arena", "played": 4, "avg_value": 250},
+                            {"key": "P won", "played": 4, "avg_value": 200},
+                            {"key": "P unplayed", "played": 0, "avg_value": 0}]}
+        d = battle.derive_live_settings(LIVE_T, brec, [live_rec()])
+        # The arena's best did not lose live but has no live evidence either: not chosen.
+        self.assertEqual((d["chosen"], d["settings"]), ("live-7-100:2", "a=70,aggressiveness=70,b=8"))
+        self.assertEqual(d["candidates"][0]["arena"], "P won")
+        self.assertIn("found not lost", d["reason"])
+        self.assertEqual([(a["candidate"], a["vetoed_by"]) for a in d["arena"]],
+                         [("P lost", "live-7-100:0"), ("P arena", None), ("P won", None)])
+        self.assertEqual(d["seeds"], [])                                  # the arena has played it
+        # Its only winner lost elsewhere (a loss to the rival, within 3 genes): nothing is derived.
+        loser = live_rec()
+        loser["id"], loser["companies"][2]["ai"] = "live-8-1", "Other"
+        loser["companies"][0]["settings_start"] = "a=70,b=8"
+        none = battle.derive_live_settings(dict(LIVE_T, live={"loss_ratio": 0.6}), None, [live_rec(), loser])
+        self.assertEqual((none["chosen"], none["settings"], none["arena"]), (None, None, []))
+        self.assertEqual(none["candidates"][0]["vetoed_by"], "live-8-1:0")
+        self.assertIn("no configuration has live evidence", none["reason"])
+
+    def test_runners_read_the_panel_and_a_store_copy(self):
+        import http.server
+        import os
+        import threading
+        from unittest import mock
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+                out = ({"error": "no"} if "bad" in body["sql"] else
+                       {"columns": ["x", "o"], "rows": [[1, self.headers["origin"]]], "capped": False})
+                data = json.dumps(out).encode()
+                self.send_response(200)
+                self.send_header("content-length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{srv.server_port}/"
+        try:
+            q = battle.panel_query(url)
+            self.assertEqual(q("n", "SELECT 1"), [{"x": 1, "o": url.rstrip("/")}])
+            with self.assertRaises(SystemExit):
+                q("n", "bad")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "duckdb"
+            fake.write_text("#!/bin/sh\ncase \"$5\" in *bad*) echo broken >&2; exit 1;; esac\n"
+                            "echo '[{\"x\": 2}]'\n")
+            fake.chmod(0o755)
+            with mock.patch.dict(os.environ, {"PATH": f"{tmp}:{os.environ['PATH']}"}):
+                q = battle.duckdb_query(Path(tmp) / "copy.duckdb")
+                self.assertEqual(q("n", "SELECT 2"), [{"x": 2}])
+                with self.assertRaises(SystemExit):
+                    q("n", "bad")
+
+    def test_export_settings_render_and_check(self):
+        import contextlib
+        import os
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp).resolve()
+            readme = d / "README.md"
+            readme.write_text(f"x\n{battle.render_region(None)}\n")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            err = io.StringIO()
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    mock.patch.object(battle, "RESULTS_DIR", d), mock.patch.object(battle, "README", readme), \
+                    mock.patch.object(battle, "REPO", d), redirect(), contextlib.redirect_stderr(err), \
+                    mock.patch.object(battle, "panel_query", lambda url: live_store()), \
+                    mock.patch.object(battle, "duckdb_query", lambda path: live_store()):
+                self.assertEqual(battle.main(["live-export", "--game-seed", "7"]), 2)
+                self.assertEqual(battle.main(["live-export", "--game-seed", "7", "--panel", "http://x",
+                                              "--db", "c.duckdb"]), 2)
+                self.assertEqual(battle.main(["live-export", "--game-seed", "7", "--db", str(d / "c.duckdb")]), 0)
+                with mock.patch.object(battle, "validate_live", lambda rec, name: ["odd"]):
+                    self.assertEqual(battle.main(["live-export", "--game-seed", "7", "--panel", "http://x"]), 0)
+                self.assertIn("odd", err.getvalue())
+                rec = json.loads((d / "live-7-100.json").read_text())
+                self.assertEqual(rec["source"], "panel:http://x")
+                self.assertEqual(battle.cmd_check(), 11)                 # live-start.json missing
+                self.assertIn("live-start.json: not derived", err.getvalue())
+                self.assertEqual(battle.cmd_render(), 0)
+                self.assertEqual(battle.cmd_check(), 0)
+                self.assertEqual(battle.cmd_render(), 0)                 # current: nothing rewritten
+                self.assertEqual(battle.main(["live-settings", "--write"]), 0)
+                self.assertEqual(json.loads((d / "live-start.json").read_text())["chosen"], "live-7-100:2")
+                with mock.patch.object(battle, "derive_live_settings", lambda *a: {"chosen": None, "settings": None,
+                                                                                   "reason": "none"}):
+                    self.assertEqual(battle.main(["live-settings"]), 10)   # nothing evidenced: no start
+                rec["outcome"]["leader_value"] = 1                        # a forged record
+                (d / "live-7-100.json").write_text(json.dumps(rec))
+                self.assertEqual(battle.cmd_check(), 10)
+
+    def test_the_orchestrator_vetoes_a_variant_that_lost_live(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            orch, _host = Guards.orchestrator(tmp)
+            t = dict(LIVE_T, enabled=True, matches_per_variant=1)
+            orch.cfg["tuning"] = t
+            variants = [battle.variant(t, 0, i, g, []) for i, g in enumerate(
+                [{"a": 40, "b": 4}, {"a": 20, "b": 2}])]
+            path = battle.tuning_path(orch.cfg)
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"generation": 0, "variants": variants, "history": []}))
+            orch.matches = {"m": {"status": "done", "standings": [
+                {"key": variants[0]["label"], "value": 9}, {"key": variants[1]["label"], "value": 5}]}}
+            with mock.patch.object(battle, "cmd_report"), mock.patch.object(battle, "live_records",
+                                                                            return_value=[live_rec()]):
+                self.assertTrue(orch.tuning_step())
+            self.assertTrue(any("vetoed" in e["msg"] and variants[0]["label"] in e["msg"] for e in orch.events))
+            state = json.loads(path.read_text())
+            self.assertEqual(state["variants"][0]["genes"], {"a": 20, "b": 2})
+
+    def test_game_15805_is_a_loss_and_vetoes_the_ga_pick_it_ran(self):
+        """The committed record of live game 15805 (PrismaticAI 1 train, 36x behind AAAHogEx by 1964):
+        replan's request of rail_after=7 (1952-05-08) was never enacted, so it does not end the window;
+        judged at 1953-12 the company lost to AAAHogEx, and GA g347.3 (which it ran, with three owner
+        overrides) is vetoed."""
+        results = HERE.parents[1] / "research" / "results"
+        t = battle.live_tuning(json.loads(BATTLE_JSON.read_text()))
+        rec = json.loads(next(results.glob("live-15805-*.json")).read_text())
+        self.assertTrue(any(r["name"] == "rail_after" and not r["applied"]
+                            for r in rec["companies"][0]["settings_requested"]))
+        (e,) = [x for x in battle.live_entries([rec], t) if x["company"] == 0]
+        self.assertEqual((e["at"], e["lost"]), ("1953-12", True))
+        self.assertLess(e["ratio"], 0.5)
+        board = json.loads((results / "battle-20261122T045411-a80cc94a.json").read_text())
+        g347 = next(c for c in board["contestants"] if c["key"] == "PrismaticAI GA g347.3")
+        self.assertIs(battle.live_veto(t, battle.live_genes(t, battle.settings_dict(g347["settings"])), [e]), e)
+
+    def test_battle_json_declares_the_live_rule_and_it_resolves(self):
+        cfg_raw = json.loads(BATTLE_JSON.read_text())
+        t = battle.live_tuning(cfg_raw)
+        self.assertEqual(set(battle.live_cfg(t)), set(battle.LIVE_DEFAULTS))
+        self.assertTrue(set(t["defaults"]) <= set(t["space"]))
+
+
+class RefereeFollow(unittest.TestCase):
+    """The arena follows the repository's referee (owner, 2026-11-25: new matches log loan=)."""
+    PATH = "tools/research/ai-battle/referee/BattleReferee"
+
+    def setUp(self):
+        if not Export._tracked(self.PATH):
+            self.skipTest("referee not committed yet")
+        self.head = battle.git("rev-parse", "HEAD")
+
+    def cfg(self, tmp, **referee):
+        cache = Path(tmp)
+        return {"cache": cache, "results": cache / "results", "hosts_file": cache / "hosts.json",
+                "baseset": cache / "opengfx-8.0.tar", "match": MC, "contestants": [],
+                "prismatic": {"path": "tools/research/prismatic-ai/PrismaticAI"},
+                "referee": {"path": self.PATH, **referee}}
+
+    def old_arena(self, cfg):
+        game = cfg["cache"] / "arena" / "game"
+        game.mkdir(parents=True)
+        with tarfile.open(game / battle.REFEREE_TAR, "w") as t:   # a pre-loan referee
+            data = b"function Start() {}\n"
+            info = tarfile.TarInfo("BattleReferee/main.nut")
+            info.size = len(data)
+            t.addfile(info, io.BytesIO(data))
+        prov = {"rev": "b" * 40, "dirty": False, "ais": ["PrismaticAI.tar"]}
+        (cfg["cache"] / "arena" / "PROVENANCE.json").write_text(json.dumps(prov))
+        return game / battle.REFEREE_TAR
+
+    def test_refresh_replaces_only_the_referee_and_records_its_commit(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp)
+            tar = self.old_arena(cfg)
+            msg = battle.refresh_referee(cfg)
+            self.assertIn(f"arena referee bbbbbbbbbb -> {self.head[:10]}", msg)
+            self.assertIn("loan=", battle.tar_files(tar)["BattleReferee/main.nut"].decode())
+            self.assertFalse(tar.with_name(battle.REFEREE_TAR + ".new").exists())
+            prov = json.loads((cfg["cache"] / "arena" / "PROVENANCE.json").read_text())
+            self.assertEqual((prov["rev"], prov["referee_rev"], prov["ais"]),
+                             ("b" * 40, self.head, ["PrismaticAI.tar"]))
+            self.assertIn("referee_prepared_at", prov)
+            # Same files again: nothing changes, so neither does the edition.
+            self.assertIsNone(battle.refresh_referee(cfg))
+            self.assertFalse(tar.with_name(battle.REFEREE_TAR + ".new").exists())
+            with mock.patch.object(battle, "log") as log:
+                battle.follow_referee(cfg)
+            log.assert_called_once_with("arena referee is the repository's")
+
+    def test_refresh_refuses_a_missing_or_dirty_arena(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp)
+            with self.assertRaisesRegex(RuntimeError, "no prepared arena"):
+                battle.refresh_referee(cfg)
+            with mock.patch.object(battle, "log") as log:
+                battle.follow_referee(cfg)          # run goes on, and says why it did not follow
+            self.assertIn("referee not followed: no prepared arena", log.call_args[0][0])
+            self.old_arena(cfg)
+            prov = cfg["cache"] / "arena" / "PROVENANCE.json"
+            prov.write_text(json.dumps({"rev": "b" * 40, "dirty": True}))
+            with self.assertRaisesRegex(RuntimeError, "uncommitted"):
+                battle.refresh_referee(cfg)
+
+    def test_follow_can_be_turned_off(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp, follow=False)
+            tar = self.old_arena(cfg)
+            with mock.patch.object(battle, "log") as log:
+                battle.follow_referee(cfg)
+            log.assert_not_called()
+            self.assertNotIn(b"loan=", battle.tar_files(tar)["BattleReferee/main.nut"])
+            with mock.patch.object(battle, "log") as log:
+                battle.follow_referee(self.cfg(tmp))
+            self.assertIn("arena referee bbbbbbbbbb ->", log.call_args[0][0])
+
+    def test_prepare_exports_the_referee_at_its_own_rev(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp, rev="HEAD")
+            if len(battle.git("rev-list", "--max-count=2", "HEAD").split()) < 2:
+                self.skipTest("a shallow clone has no older commit to pin PrismaticAI to")
+            cfg["prismatic"]["rev"] = "HEAD~1"       # a pinned bot is refereed by today's referee
+            cfg["baseset"].write_bytes(b"")
+            with mock.patch.object(battle, "log"):
+                battle.cmd_prepare(cfg, False)
+            prov = json.loads((cfg["cache"] / "arena" / "PROVENANCE.json").read_text())
+            self.assertEqual((prov["rev"], prov["referee_rev"]),
+                             (battle.git("rev-parse", "HEAD~1"), self.head))
+            self.assertIsNone(battle.refresh_referee(cfg))
+
+    def test_cli_referee_only_and_run_follow(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp)
+            conf = Path(tmp, "battle.json")
+            conf.write_text(json.dumps({**{k: str(v) for k, v in cfg.items()
+                                           if isinstance(v, Path)},
+                                        **{k: v for k, v in cfg.items()
+                                           if not isinstance(v, Path)}}))
+            with mock.patch.object(battle, "log") as log:
+                self.assertEqual(battle.main(["prepare", "--referee-only", "--config", str(conf)]), 10)
+            self.assertIn("refusing: no prepared arena", log.call_args[0][0])
+            self.old_arena(cfg)
+            with mock.patch.object(battle, "log") as log:
+                self.assertEqual(battle.main(["prepare", "--referee-only", "--config", str(conf)]), 0)
+            self.assertIn("arena referee bbbbbbbbbb ->", log.call_args[0][0])
+            with mock.patch.object(battle, "log") as log:
+                battle.main(["prepare", "--referee-only", "--config", str(conf)])
+            log.assert_called_once_with("arena referee is already the repository's")
+            with mock.patch.object(battle, "follow_referee") as follow, \
+                    mock.patch.object(battle, "Orchestrator") as orch:
+                battle.main(["run", "--config", str(conf), "--port", "1"])
+            follow.assert_called_once()
+            orch.return_value.run.assert_called_once_with(1)
+
+    def test_records_name_the_referee_commit(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            orch, _ = Guards.orchestrator(tmp)
+            orch.provenance = {"prismatic_path": "p", "referee_path": "r", "rev": "a" * 40,
+                               "referee_rev": "c" * 40, "dirty": False, "baseset": "b", "ais": []}
+            with mock.patch.object(battle, "log"):
+                rec = battle.build_record(orch.cfg, orch)
+            self.assertEqual(rec["provenance"]["referee_rev"], "c" * 40)
+            del orch.provenance["referee_rev"]      # an arena prepared before 2026-11-25
+            self.assertNotIn("referee_rev", battle.build_record(orch.cfg, orch)["provenance"])
+        p = record()["provenance"]
+        self.assertEqual(battle.code_at(p), f"PrismaticAI and referee at `{'a' * 40}`")
+        self.assertEqual(battle.code_at(dict(p, referee_rev="a" * 40)),
+                         f"PrismaticAI and referee at `{'a' * 40}`")
+        self.assertEqual(battle.code_at(dict(p, referee_rev="c" * 40)),
+                         f"PrismaticAI at `{'a' * 40}`, referee at `{'c' * 40}`")
+        rec = record()
+        rec["provenance"]["referee_rev"] = "c" * 40
+        self.assertEqual(battle.validate_record(rec, Records.NAME), [])
+        self.assertIn("referee at `" + "c" * 40, battle.render_md(rec))
+        rec["provenance"]["referee_rev"] = "HEAD"
+        self.assertIn("provenance.referee_rev is not a full commit hash",
+                      "\n".join(battle.validate_record(rec, Records.NAME)))
 
 
 # ------------------------------------------------------------------ live-like arena and replay

@@ -222,6 +222,46 @@ if [[ -z "${MCP_ALGOGLYPH_DIR:-}" ]]; then
 fi
 [[ -n "${MCP_ALGOGLYPH_DIR:-}" ]] && echo "    AlgoGlyph runner: $MCP_ALGOGLYPH_DIR"
 
+# The stack's run token (mcp-panel --run-token-file, panel.rs RUN_TOKEN_HEADER): the panel and its
+# helpers (mcp-rhai --panel-token-file) read it from a 0600 file of this run, so it is on no command
+# line, in no log and in no environment. It names a caller as this stack's own and never opens an
+# owner's route (approving, auto-approve, the approvers).
+make_run_token() {
+  local file="$1"
+  ( umask 077; od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$file" )
+  [[ -s "$file" ]]
+}
+
+# A client's personal directory holds its secrets.cfg, where the owner's client keeps the key that
+# makes it the approver (#228): only the owner may read it. The client is started under umask 077,
+# and this closes what was made before or around it.
+seal_client_home() {
+  local home="$1"
+  [[ -d "$home" ]] || return 0
+  chmod 700 "$home"
+  find "$home" -name secrets.cfg -type f -exec chmod 600 {} +
+}
+
+# Every secrets.cfg under `home` that its group or others may read, one per line; none is the
+# answer the stack checks for once the client has started.
+open_client_secrets() {
+  local home="$1"
+  [[ -d "$home" ]] || return 0
+  find "$home" -name secrets.cfg -type f \( -perm -040 -o -perm -020 -o -perm -010 -o -perm -004 -o -perm -002 -o -perm -001 \)
+}
+
+# A POST of this stack's own to its panel: the run token goes in X-Panel-Token, read from its file
+# by the shell itself and handed to curl on stdin, so no command line or process list shows it.
+stack_post() {
+  local url="$1" body="$2"
+  printf 'X-Panel-Token: %s\n' "$(tr -d '[:space:]' < "$RUN_TOKEN")" \
+    | curl -s -X POST -H @- -H 'Content-Type: application/json' -d "$body" "$url"
+}
+
+# $MCP_E2E_RUN_TOKEN_FILE lets a caller that drives the stack (mcp-duel) hold the token too.
+RUN_TOKEN="${MCP_E2E_RUN_TOKEN_FILE:-$TMP/panel-run-token}"
+make_run_token "$RUN_TOKEN" || { echo "mcp-e2e: could not make the run token ($RUN_TOKEN)" >&2; exit 1; }
+
 # The panel: mcp-panel from tools/research/mcp-rhai (I0035; server.py, its Python predecessor, is
 # gone). One cargo build makes it and mcp-rhai, which runs the director and the other helpers; in a
 # fresh worktree that build takes minutes, later ones seconds. More instances follow.
@@ -231,7 +271,7 @@ export MCP_PANEL="$PANEL_IMPL"
 cargo build --offline --release --quiet --manifest-path "$ROOT_DIR/tools/research/mcp-rhai/Cargo.toml"
 PANEL_CMD=("$ROOT_DIR/tools/research/mcp-rhai/target/release/mcp-panel")
 echo "==> panel ($PANEL_IMPL) + dedicated server ($([[ ${#LOAD[@]} -gt 0 ]] && echo "savegame ${LOAD[1]}" || echo "seed $SEED"))"
-"${PANEL_CMD[@]}" --bin "$BIN" --panel-port "$PANEL_PORT" --mcp-port "$MCP_PORT" \
+"${PANEL_CMD[@]}" --bin "$BIN" --panel-port "$PANEL_PORT" --mcp-port "$MCP_PORT" --run-token-file "$RUN_TOKEN" \
   --game-port "$GAME_PORT" --seed "$SEED" ${AUTO[@]+"${AUTO[@]}"} ${PLAN[@]+"${PLAN[@]}"} ${LOAD[@]+"${LOAD[@]}"} &
 PANEL_PID=$!
 
@@ -248,22 +288,53 @@ echo "==> MCP up; control window: $URL"
 # and a windowless client;
 # every panel lists them all (GET /api/instances) and can drive any of them.
 for ((n = 2; n <= INSTANCES; n++)); do
-  "${BASH_SOURCE[0]}" --bin "$BIN" --no-gui --no-browser --null-client --seed "$((SEED + n))" \
+  MCP_E2E_RUN_TOKEN_FILE="" "${BASH_SOURCE[0]}" --bin "$BIN" --no-gui --no-browser --null-client --seed "$((SEED + n))" \
     > "$TMP/instance-$n.log" 2>&1 &
   EXTRA_PIDS+=($!)
   echo "==> instance $n of $INSTANCES starting (log $TMP/instance-$n.log)"
 done
+# register_owner_approver URL CLIENT_ID SECRET_FILE: makes the owner's client an in-game approver
+# through the panel's owner route POST /api/approvers (/api/console refuses every approvers line,
+# #258). The secret comes from the owner's own 0600 file; curl reads the header from stdin, so the
+# secret is never in a command line, a process list or this script's output.
+# Tested by tools/research/test_mcp_e2e_approver.py, which runs this function as written here.
+register_owner_approver() {
+  local url="$1" id="$2" file="$3" reg
+  if [[ -r "$file" && -s "$file" ]]; then
+    reg="$(printf 'X-Panel-Owner: %s\n' "$(tr -d '[:space:]' < "$file")" \
+      | curl -s -X POST -H @- -H 'Content-Type: application/json' -d "{\"add\":$id}" "$url/api/approvers" \
+      | jq -r '.error // ([.output[]? | select(test("approver"))] | last) // empty' 2>/dev/null || true)"
+    echo "==> approver: the owner's client #$id (${reg:-no answer})"
+  else
+    echo "mcp-e2e: --coplay: no owner secret file ($file), so the owner's client is no approver; approve in the panel" >&2
+  fi
+}
+
 # The owner's browser signs in by opening the panel with the owner secret once (the cookie it sets
 # is what Approve and auto-approve check). The secret is read from the owner's own 0600 file, which
 # mcp-panel keeps stable across restarts, and never printed; without the file the plain URL opens.
+# The owner's browser signs in through a one-time link (POST /api/owner/once with the secret on
+# curl's stdin): `?once=<nonce>` sets the cookie once within a minute and redirects to the page
+# without the query, so the secret is in no URL, browser history or process list. Without the file
+# (or a panel that makes no link) the plain URL opens.
+open_owner_page() {
+  local url="$1" file="$2" once=""
+  if [[ -r "$file" && -s "$file" ]]; then
+    once="$(printf 'X-Panel-Owner: %s\n' "$(tr -d '[:space:]' < "$file")" \
+      | curl -s -X POST -H @- -H 'Content-Type: application/json' -d '{}' "$url/api/owner/once" \
+      | jq -r '.once // empty' 2>/dev/null || true)"
+  fi
+  if [[ -n "$once" ]]; then
+    "${OPEN_CMD:-open}" "$url/?once=$once"
+    echo "==> the panel opened in your browser, signed in as the owner (a one-time link; the secret stays in $file)"
+  else
+    "${OPEN_CMD:-open}" "$url"
+  fi
+}
+
 OWNER_SECRET_FILE="${PRISMATIC_PANEL_OWNER_SECRET_FILE:-$HOME/.config/prismatic/panel-owner-secret}"
 if [[ "$BROWSER" == 1 ]]; then
-  if [[ -r "$OWNER_SECRET_FILE" && -s "$OWNER_SECRET_FILE" ]]; then
-    open "$URL/?owner=$(tr -d '[:space:]' < "$OWNER_SECRET_FILE")"
-    echo "==> the panel opened in your browser, signed in as the owner (secret from $OWNER_SECRET_FILE)"
-  else
-    open "$URL"
-  fi
+  open_owner_page "$URL" "$OWNER_SECRET_FILE"
 fi
 
 if [[ "$GUI" == 1 ]]; then
@@ -302,7 +373,7 @@ if [[ "$GUI" == 1 ]]; then
     done
     [[ -n "$BOT_COMPANY" ]] || { echo "mcp-e2e: --coplay: no bot company appeared in 120 s" >&2; exit 1; }
     JOIN=$((BOT_COMPANY + 1))
-    OPENED="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"command\":\"research_coplay allow $JOIN\"}" "$URL/api/console" \
+    OPENED="$(stack_post "$URL/api/console" "{\"command\":\"research_coplay allow $JOIN\"}" \
       | jq -r '.output[]? | select(startswith("research_coplay"))' 2>/dev/null || true)"
     grep -Eq "open=\[([0-9]+,)*$JOIN(,[0-9]+)*\]" <<<"$OPENED" \
       || { echo "mcp-e2e: --coplay: the server did not open company $JOIN (${OPENED:-no answer}; a build without research_coplay?)" >&2; exit 1; }
@@ -315,7 +386,10 @@ if [[ "$GUI" == 1 ]]; then
   fi
   # Supervised: the client comes back whenever it exits (closed window, crash) while the panel runs;
   # its autoexec.scr writes a fresh token file each time, which the director rereads on every call.
+  # Under umask 077: what the client writes (its secrets.cfg, with the approver key) only the owner reads.
+  seal_client_home "$CHOME"
   (
+    umask 077
     while kill -0 "$PANEL_PID" 2>/dev/null; do
       # -I on every start: the client saves its config on exit, so a set picked once in Game
       # Options would otherwise stick to every later start of this run.
@@ -324,8 +398,11 @@ if [[ "$GUI" == 1 ]]; then
       # Bring it to the front (a full-screen window opens on a Space of its own on macOS), and
       # attach it to the panel, which shows and drives its view.
       for ((j = 0; j < 30; j++)); do [[ -s "$VIEW_TOKEN" ]] && break; sleep 1; done
+      seal_client_home "$CHOME"
+      OPEN_SECRETS="$(open_client_secrets "$CHOME")"
+      [[ -z "$OPEN_SECRETS" ]] || echo "mcp-e2e: readable beyond the owner: $OPEN_SECRETS" >&2
       osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $CPID) to true" >/dev/null 2>&1 || true
-      curl -s -X POST -H 'Content-Type: application/json' -d "{\"token_file\":\"$VIEW_TOKEN\"}" "$URL/api/view/attach" >/dev/null || true
+      stack_post "$URL/api/view/attach" "{\"token_file\":\"$VIEW_TOKEN\"}" >/dev/null || true
       # `|| rc=$?`: under set -e a crashed client (wait returns 134) used to end this loop, so the
       # supervisor stopped restarting exactly when it was needed (seen 2026-11-22).
       rc=0; wait "$CPID" || rc=$?
@@ -344,16 +421,15 @@ if [[ "$GUI" == 1 ]]; then
   elif [[ "$COPLAY" == 1 ]]; then
     OWNER_ID=""
     for ((i = 0; i < 60; i++)); do
-      OWNER_ID="$(curl -s -X POST -H 'Content-Type: application/json' -d '{"command":"clients"}' "$URL/api/console" \
+      OWNER_ID="$(stack_post "$URL/api/console" '{"command":"clients"}' \
         | jq -r '.output[]?' 2>/dev/null | sed -nE "s/^Client #([0-9]+) +name: 'owner' .*/\1/p" || true)"
       OWNER_ID="${OWNER_ID%%$'\n'*}"
       [[ -n "$OWNER_ID" ]] && break
       sleep 1
     done
     if [[ -n "$OWNER_ID" ]]; then
-      REG="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"command\":\"prismatic_mcp approvers add $OWNER_ID\"}" "$URL/api/console" \
-        | jq -r '[.output[]? | select(test("approver"))] | last // empty' 2>/dev/null || true)"
-      echo "==> approver: the owner's client #$OWNER_ID (${REG:-no answer})"
+      # /api/console refuses every approvers line (#258): the owner's route registers it.
+      register_owner_approver "$URL" "$OWNER_ID" "$OWNER_SECRET_FILE"
     else
       echo "mcp-e2e: --coplay: the owner's client did not join within 60 s; no approver registered (approve in the panel)" >&2
     fi
@@ -365,24 +441,24 @@ if [[ "$GUI" == 1 ]]; then
       echo "==> director (camera), narrator (chat and news), steward (asks you in the game) and ask relay (answers you)"
       # Supervised the same way: a helper that stops is started again.
       ( while kill -0 "$PANEL_PID" 2>/dev/null; do
-          MCP_VIEW_TOKEN="$VIEW_TOKEN" "$RHAI" --panel "$URL" "$PANEL_DIR/rhai/director.rhai" >> "$TMP/director.log" 2>&1
+          MCP_VIEW_TOKEN="$VIEW_TOKEN" "$RHAI" --panel "$URL" --panel-token-file "$RUN_TOKEN" "$PANEL_DIR/rhai/director.rhai" >> "$TMP/director.log" 2>&1
           sleep 3
         done ) &
       HELPER_PIDS+=($!)
       ( while kill -0 "$PANEL_PID" 2>/dev/null; do
-          MCP_PANEL_URL="$URL" "$RHAI" --panel "$URL" "$PANEL_DIR/rhai/narrator.rhai" >> "$TMP/narrator.log" 2>&1
+          MCP_PANEL_URL="$URL" "$RHAI" --panel "$URL" --panel-token-file "$RUN_TOKEN" "$PANEL_DIR/rhai/narrator.rhai" >> "$TMP/narrator.log" 2>&1
           sleep 3
         done ) &
       HELPER_PIDS+=($!)
       ( while kill -0 "$PANEL_PID" 2>/dev/null; do
-          "$RHAI" --panel "$URL" "$PANEL_DIR/rhai/steward.rhai" >> "$TMP/steward.log" 2>&1
+          "$RHAI" --panel "$URL" --panel-token-file "$RUN_TOKEN" "$PANEL_DIR/rhai/steward.rhai" >> "$TMP/steward.log" 2>&1
           sleep 3
         done ) &
       HELPER_PIDS+=($!)
       # What the owner asks in the game (the toolbar's Ask item, or plan/ask/do in the ~ console)
       # is queued in the client's openttd://ui/requests; the relay answers it through the planner.
       ( while kill -0 "$PANEL_PID" 2>/dev/null; do
-          MCP_VIEW_TOKEN="$VIEW_TOKEN" "$RHAI" --panel "$URL" "$PANEL_DIR/rhai/ask_relay.rhai" >> "$TMP/ask_relay.log" 2>&1
+          MCP_VIEW_TOKEN="$VIEW_TOKEN" "$RHAI" --panel "$URL" --panel-token-file "$RUN_TOKEN" "$PANEL_DIR/rhai/ask_relay.rhai" >> "$TMP/ask_relay.log" 2>&1
           sleep 3
         done ) &
       HELPER_PIDS+=($!)
@@ -404,13 +480,15 @@ if [[ "$GUI" == 0 && "$NULL_CLIENT" == 1 ]]; then
   printf 'prismatic_mcp start %s %s\n' "$(any_port)" "$NULL_TOKEN" > "$NPD/scripts/autoexec.scr"
   printf '[network]\nclient_name = cluster-client\n[gui]\nautosave = off\n' > "$TMP/null-client.cfg"
   echo "==> windowless client (null video driver, own MCP) joining 127.0.0.1:$GAME_PORT as a spectator"
+  seal_client_home "$NHOME"
   (
+    umask 077
     while kill -0 "$PANEL_PID" 2>/dev/null; do
       HOME="$NHOME" "$BIN" -v null:ticks=2000000000 -s null -m null -c "$TMP/null-client.cfg" \
         -n "127.0.0.1:$GAME_PORT#255" >> "$TMP/null-client.log" 2>&1 &
       CPID=$!
       for ((j = 0; j < 60; j++)); do [[ -s "$NULL_TOKEN" ]] && break; sleep 1; done
-      curl -s -X POST -H 'Content-Type: application/json' -d "{\"token_file\":\"$NULL_TOKEN\"}" "$URL/api/view/attach" >/dev/null || true
+      stack_post "$URL/api/view/attach" "{\"token_file\":\"$NULL_TOKEN\"}" >/dev/null || true
       rc=0; wait "$CPID" || rc=$?   # a crash must not end the loop under set -e (see the GUI loop)
       echo "client exited with $rc; restarting in 3 s" >> "$TMP/null-client.log"
       rm -f "$NULL_TOKEN"
@@ -429,7 +507,7 @@ if [[ -n "$LINEUP" && ${#LOAD[@]} -eq 0 ]]; then
     ai="$(sed -E 's/^ +| +$//g' <<<"$ai")"
     [[ -n "$ai" ]] || continue
     before="$(curl -s "$URL/api/bots" | jq '.running | length' 2>/dev/null || echo 0)"
-    curl -s -X POST -H 'Content-Type: application/json' -d "$(jq -nc --arg c "start_ai \"$ai\"" '{command:$c}')" "$URL/api/console" >/dev/null || true
+    stack_post "$URL/api/console" "$(jq -nc --arg c "start_ai \"$ai\"" '{command:$c}')" >/dev/null || true
     started=0
     for ((j = 0; j < 30; j++)); do
       now="$(curl -s "$URL/api/bots" | jq '.running | length' 2>/dev/null || echo 0)"
@@ -441,14 +519,19 @@ if [[ -n "$LINEUP" && ${#LOAD[@]} -eq 0 ]]; then
 fi
 
 # The services a co-play game runs (research/coplay.md "Services"): the arena fills the other
-# companies (unless --lineup names them), replan re-plans the bot every game month, the watchdog
-# says when a company stalls and why. Started here, never by hand; MCP_SERVICES names another list
-# (empty: none).
-DEFAULT_SERVICES="arena replan watchdog"
-[[ -n "$LINEUP" || ${#LOAD[@]} -gt 0 ]] && DEFAULT_SERVICES="replan watchdog build_audit rail_monitor"
+# companies (unless --lineup names them), replan re-plans the bot every game month, and the
+# monitors watch every company without changing the game: the watchdog (a stall and why), the build
+# audit, the rail monitor (advice from the game's news) and the capital watch (money not put back
+# to work). With --lineup or --load the owner's company is the only PrismaticAI one, so the
+# leader-gap watch runs there too; in an arena the other PrismaticAI companies are rivals', and
+# gap_watch tells and proposes only for the owner's company once #319 is on master. Started here,
+# never by hand; MCP_SERVICES names another list (empty: none).
+MONITORS="watchdog build_audit rail_monitor capital_watch"
+DEFAULT_SERVICES="arena replan $MONITORS"
+[[ -n "$LINEUP" || ${#LOAD[@]} -gt 0 ]] && DEFAULT_SERVICES="replan $MONITORS gap_watch"
 if [[ "$COPLAY" == 1 ]]; then
   for svc in ${MCP_SERVICES-$DEFAULT_SERVICES}; do
-    out="$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"name\":\"$svc\"}" "$URL/api/services/start" || true)"
+    out="$(stack_post "$URL/api/services/start" "{\"name\":\"$svc\"}" || true)"
     if grep -q '"running": true' <<<"$out"; then echo "==> service $svc started"; else echo "mcp-e2e: service $svc did not start: ${out:-no answer}" >&2; fi
   done
 fi

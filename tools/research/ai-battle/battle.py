@@ -16,7 +16,8 @@ Commands:
   discover   find the SSH-reachable machines on the local /24 and write the local hosts file
   fetch      download the BaNaNaS contestants and the live-like rivals into the cache (throwaway
              loopback -D server); says which live rival's version the download lacks
-  prepare    assemble the arena bundle: base set, AIs, PrismaticAI and referee at a clean commit
+  prepare    assemble the arena bundle: base set, AIs, PrismaticAI and referee at a clean commit;
+             --referee-only swaps in just the repository's referee (run does it on start)
   probe      show which hosts are usable now (state, build, load, disk; paused and busy hosts)
   run        schedule matches forever and serve the dashboard (SIGTERM / Ctrl-C stops; STOP holds it)
   status     print the current edition's leaderboard
@@ -37,6 +38,19 @@ Commands:
   power      the recorded battle's noise (split-half Kendall tau of the GA score, the paired
              deviation across seeds) and the held-start pairs a strategy comparison needs for a
              margin (--margin 1.10); reads research/results only, starts nothing
+  live-export    one live game (--game-seed) from a panel's store, read-only (--panel <url> SELECTs
+                 through /api/db/query; --db <copy> reads a copy with the duckdb CLI), as
+                 research/results/live-<seed>-<run_ms>.json
+  live-settings  the next live start's PRISMATIC_BOT_SETTINGS, derived from the newest battle record
+                 and the live records (--write: research/results/live-start.json; `render` keeps
+                 it current and `check` refuses drift)
+  evolve     the config-evolution loop, once: a trigger (--live <live record>, or --panel <url>
+             reading gap.<company> and review.<company>.month; --force with --baseline) -> the gap
+             attributed per mode -> candidate settings from the recorded battles -> paired
+             null-driver matches on battle.json evolve.seeds, the best confirmed on confirm_seeds ->
+             a proposal under <cache>/evolve/ (--propose <url>: also the blackboard key
+             evolve.proposal.<company>). Applies and approves nothing; bounded by evolve.budget and
+             max_minutes, stopped by <cache>/STOP or PAUSED, one at a time (research/config-evolution-loop.md)
 
 Guards (after an incident where `run` kept ~32 matches per host going for three days, drove targets
 to load 86 on 18 cores and 35 of 37 GB swap, and nobody on a target could tell whose they were):
@@ -84,6 +98,9 @@ import threading
 import time
 import urllib.parse
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import regimes  # noqa: E402  (failure regimes: research/failure-regimes.md)
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
@@ -428,6 +445,8 @@ def resolve_genes(cfg: dict) -> None:
     for g in t["space"]:
         if g not in start:
             start[g] = settings[g]["default"]
+    # What a live game's bot ran with for a gene its settings do not name (live_genes).
+    t["defaults"] = {g: settings[g]["default"] for g in t["space"] if g in settings}
 
 def paired_vs(matches: list[dict], base: str) -> list[dict]:
     """Every configuration against `base` on the same seeds (common random numbers): pairs, mean
@@ -594,13 +613,21 @@ def fitness_of(key: str, matches: list[dict], last_penalty: float = 0.0) -> dict
             "score": round(sum(pts) / n + 0.1 * sum(logs) / n - last_penalty * lasts / n, 4) if n else -9.0}
 
 
-def next_generation(t: dict, state: dict, scored: list[tuple[dict, dict]]) -> list[dict]:
+def next_generation(t: dict, state: dict, scored: list[tuple[dict, dict]],
+                    live: list[dict] | None = None) -> list[dict]:
     """Elitism (the best survives unchanged), then children of two tournament-chosen parents by
-    uniform crossover and mutation. Deterministic per generation."""
+    uniform crossover and mutation. Deterministic per generation. With live evidence (`live`, the
+    entries of live_entries): a variant that is a configuration which lost a live game is neither
+    the elite nor a parent (live_veto), and the best paired live configuration not yet tried in the
+    arena joins as a child (live_seeds)."""
     gen = state["generation"] + 1
     rng = random.Random(f"{t['seed']}:{gen}")
     ranked = [v for v, _ in sorted(scored, key=lambda x: -x[1]["score"])]
-    out = [variant(t, gen, 0, dict(ranked[0]["genes"]), [ranked[0]["label"]])]
+    live = live or []
+    allowed = [v for v in ranked if not live_veto(t, v["genes"], live)]
+    # Every variant vetoed: no elite this generation, and the children breed from the whole field.
+    out = [variant(t, gen, 0, dict(allowed[0]["genes"]), [allowed[0]["label"]])] if allowed else []
+    ranked = allowed or ranked
 
     def pick():
         a, b = rng.sample(ranked[:max(2, len(ranked))], 2) if len(ranked) > 1 else (ranked[0], ranked[0])
@@ -618,12 +645,400 @@ def next_generation(t: dict, state: dict, scored: list[tuple[dict, dict]]) -> li
         used.add(tag)
         out.append(variant(t, gen, len(out), genes, [tag]))
         out[-1]["label"] = f"{t['label_prefix']} g{gen}.{tag}"
+    tried = [v["genes"] for h in state.get("history", []) for v in h["variants"]] + [v["genes"] for v in ranked]
+    for k, (genes, source) in enumerate(live_seeds(t, live, tried)):
+        if len(out) >= t["population"]:
+            break
+        out.append(variant(t, gen, len(out), genes, [source]))
+        out[-1]["label"] = f"{t['label_prefix']} g{gen}.live{k or ''}"
     while len(out) < t["population"]:
         p1, p2 = pick(), pick()
         child = {k: (p1["genes"] if rng.random() < 0.5 else p2["genes"]).get(k, t["start"].get(k))
                  for k in t["space"]}
         out.append(variant(t, gen, len(out), mutate(t, child, rng), [p1["label"], p2["label"]]))
     return out
+
+
+# --------------------------------------------------------------------------- live outcome learning
+#
+# The owner's live games are recorded by their panel in a DuckDB store. `live-export` turns one game
+# into research/results/live-<seed>-<run_ms>.json from that store alone (schema ai-live-outcome/v1),
+# and everything below reads only tracked records, so each derived figure is reproducible from the
+# repository (rule project.battle-records-are-reproducible). The evidence enters the GA as a veto
+# and a seed, not as a score term: a configuration that lost a live game is never the elite or a
+# parent again, and the best configuration of a paired live comparison is played in the arena.
+# research/ai-battle/README.md ("Live outcomes") describes the rule and its reasons.
+
+LIVE_SCHEMA = "ai-live-outcome/v1"
+LIVE_GLOB = "live-[0-9]*.json"
+LIVE_SETTINGS = "live-start.json"
+LIVE_SETTINGS_SCHEMA = "ai-live-settings/v1"
+# Settings that name one map's objects (the planner's industry slots, per-line train counts, fixed
+# town and airport pairs) are instance data, not strategy: dropped from every live configuration.
+MAP_SETTING = re.compile(r"^(fr\d*_(from|to|cargo)|line\d+_(trains|wagons)|rail_[ab]|air_[ab])$")
+LIVE_DEFAULTS = {"reference": "AAAHogEx", "horizon_years": 4, "min_years": 2, "loss_ratio": 0.5,
+                 "paired_margin": 0.8, "veto_genes": 0, "loss_veto_genes": 3, "seed_offspring": 1}
+START_AI = re.compile(r'^start_ai\s+(?:"([^"]+)"|(\S+))(?:\s+(\S*=\S*))?')
+SET_SETTING = re.compile(r"^openttd\.ai\.set_setting\((\{.*?\})\)(?:.*?approval #(\d+))?")
+WATCHDOG = re.compile(r"(train|road|ship|aircraft|stations) (\d+)")
+LIVE_SQL = {
+    "runs": "SELECT m.instance, m.seed, m.run_ms, min(m.month) AS first_month, max(m.month) AS last_month "
+            "FROM company_month m GROUP BY ALL ORDER BY m.run_ms",
+    "edges": "SELECT run_ms, month, name FROM company_month WHERE company = 0 QUALIFY "
+             "month = min(month) OVER (PARTITION BY run_ms) OR month = max(month) OVER (PARTITION BY run_ms)",
+    "series": "SELECT run_ms, company, name, month, value, money, loan, vehicles FROM company_month "
+              "WHERE run_ms IN ({runs}) ORDER BY run_ms, company, month",
+    "events": "SELECT run_ms, seq, game_date, kind, data->>'text' AS text, CAST(data AS VARCHAR) AS data "
+              "FROM run_events WHERE run_ms IN ({runs}) AND (kind IN ('company.founded', 'decision.recorded') OR (kind IN "
+              "('panel.ai', 'panel.console') AND (data->>'text') LIKE 'start_ai%') OR (kind = 'panel.mcp' "
+              "AND (data->>'text') LIKE 'openttd.ai.set_setting(%')) ORDER BY run_ms, seq",
+    "watchdog": "SELECT data->>'key' AS key, CAST(data->'value' AS VARCHAR) AS value FROM run_events "
+                "WHERE run_ms IN ({runs}) AND kind = 'rhai.shared' AND (data->>'key') LIKE 'watchdog.%' "
+                "QUALIFY row_number() OVER (PARTITION BY data->>'key' ORDER BY run_ms DESC, seq DESC) = 1",
+    "revision": "SELECT CAST(version AS VARCHAR) AS version FROM plan_decisions WHERE run_ms IN ({runs}) "
+                "ORDER BY run_ms, seq LIMIT 1",
+}
+
+
+def panel_query(url: str):
+    """A query runner over the panel's read-only SQL endpoint (POST /api/db/query, SELECT only)."""
+    import urllib.request
+
+    def run(name: str, sql: str) -> list[dict]:
+        req = urllib.request.Request(url.rstrip("/") + "/api/db/query", data=json.dumps({"sql": sql}).encode(),
+                                     headers={"content-type": "application/json", "origin": url.rstrip("/")})
+        with urllib.request.urlopen(req, timeout=180) as r:
+            d = json.loads(r.read())
+        if d.get("error") or d.get("capped"):
+            raise SystemExit(f"live-export: query {name}: {d.get('error') or 'result capped by the panel'}")
+        return [dict(zip(d["columns"], row)) for row in d["rows"]]
+    return run
+
+
+def duckdb_query(path: Path):
+    """A query runner over a copy of the store through the duckdb CLI, opened read-only."""
+    def run(name: str, sql: str) -> list[dict]:
+        p = subprocess.run(["duckdb", "-readonly", "-json", str(path), "-c", sql],
+                           capture_output=True, text=True)
+        if p.returncode:
+            raise SystemExit(f"live-export: query {name}: {p.stderr.strip()}")
+        return json.loads(p.stdout or "[]")
+    return run
+
+
+def next_month(month: str) -> str:
+    y, m = int(month[:4]), int(month[5:7])
+    return f"{y + m // 12}-{m % 12 + 1:02d}"
+
+
+def settings_dict(text: str) -> dict:
+    """A "k=v,k=v" settings text as {k: int}, without the map's own settings (MAP_SETTING)."""
+    out = {}
+    for kv in (text or "").split(","):
+        k, _, v = kv.partition("=")
+        if k.strip() and not MAP_SETTING.match(k.strip()) and re.fullmatch(r"-?\d+", v.strip()):
+            out[k.strip()] = int(v.strip())
+    return out
+
+
+def game_runs(runs: list[dict], edges: list[dict], seed: int) -> list[dict]:
+    """The runs of one game: the newest run started with `seed` (a fresh start under the same seed
+    replaces the older one), then every later run of the same panel whose first month continues the
+    previous run's last month under the same company 0 name (a `--load` gets a new run seed)."""
+    name = {(e["run_ms"], e["month"]): e["name"] for e in edges}
+    own = [r for r in runs if r["seed"] == seed]
+    if not own:
+        return []
+    chain = [own[-1]]
+    for r in runs:
+        last = chain[-1]
+        if (r["run_ms"] > last["run_ms"] and r["instance"] == last["instance"]
+                and r["first_month"] in (last["last_month"], next_month(last["last_month"]))
+                and name.get((r["run_ms"], r["first_month"])) == name.get((last["run_ms"], last["last_month"]))):
+            chain.append(r)
+    return chain
+
+
+def live_record(query, seed: int, source: str) -> dict:
+    """The live outcome record of the game played with map seed `seed`, from the panel store alone
+    (`query(name, sql)` runs LIVE_SQL[name]). Raises SystemExit when the store has no such game."""
+    chain = game_runs(query("runs", LIVE_SQL["runs"]), query("edges", LIVE_SQL["edges"]), seed)
+    if not chain:
+        raise SystemExit(f"live-export: no run with seed {seed} in the store")
+    ids = ",".join(str(r["run_ms"]) for r in chain)
+    fetched = {k: query(k, LIVE_SQL[k].format(runs=ids)) for k in ("series", "events", "watchdog", "revision")}
+    series: dict[str, dict[str, dict]] = {}
+    names: dict[int, str] = {}
+    for row in fetched["series"]:          # a later run's month replaces an earlier run's
+        series.setdefault(str(row["company"]), {})[row["month"]] = {
+            k: int(row[k]) for k in ("value", "money", "loan", "vehicles")}
+        names[int(row["company"])] = row["name"]
+    yearly = {}
+    for c, months in series.items():
+        last_of_year = {}
+        for m in sorted(months):
+            last_of_year[m[:4]] = m
+        yearly[c] = [dict(month=m, **months[m]) for m in sorted(last_of_year.values())]
+    founded, starts, requests, enacted = [], [], {}, {}
+    for ev in fetched["events"]:
+        if ev["kind"] == "company.founded":
+            cid = json.loads(ev["data"])["id"]
+            if cid not in founded:
+                founded.append(cid)
+        elif ev["kind"] == "decision.recorded":
+            # The approval server's verdict on an approval of this run: what it enacted, and when.
+            d = json.loads(ev["data"])
+            if d.get("action_type") == "ai.set_setting" and d.get("command_result") == "succeeded":
+                enacted[(ev["run_ms"], int(d["approval_id"]))] = ev["game_date"]
+        elif ev["kind"] == "panel.mcp":
+            m = SET_SETTING.match(ev["text"])
+            args = json.loads(m.group(1))
+            requests.setdefault(int(args["company"]), []).append(
+                {"date": ev["game_date"], "name": args["name"], "value": int(args["value"]),
+                 "key": (ev["run_ms"], int(m.group(2))) if m.group(2) else None})
+        else:
+            m = START_AI.match(ev["text"])
+            starts.append((m.group(1) or m.group(2), m.group(3) or ""))
+    ai_of = dict(zip(founded, starts))
+    companies = []
+    for cid in sorted(names):
+        ai, text = ai_of.get(cid, (None, ""))
+        start = settings_dict(text)
+        current, changes = dict(start), []
+        for r in requests.get(cid, []):    # only a request that would change a setting counts
+            if not MAP_SETTING.match(r["name"]) and current.get(r["name"]) != r["value"]:
+                # Applied: the approval it waited for was enacted (decision.recorded, succeeded).
+                applied = enacted.get(r.pop("key"))
+                if applied:
+                    current[r["name"]] = r["value"]
+                changes.append(dict(r, applied=applied))
+        companies.append({"company": cid, "name": names[cid], "ai": ai,
+                          "settings_start": settings_str(start), "settings_requested": changes})
+    mode_mix = {}
+    for w in fetched["watchdog"]:
+        cid = w["key"].split(".", 1)[1]
+        if cid.isdigit():                           # watchdog.<company>; other keys are its own state
+            sig = json.loads(w["value"]).get("signature", "")
+            mode_mix[cid] = {k: int(v) for k, v in WATCHDOG.findall(sig)}
+    rev = fetched["revision"][0]["version"] if fetched["revision"] else None
+    first = min(m for months in series.values() for m in months)
+    final = max(m for months in series.values() for m in months)
+    digest = hashlib.sha256(json.dumps(fetched, sort_keys=True, default=str).encode()).hexdigest()
+    rec = {"schema": LIVE_SCHEMA, "id": f"live-{seed}-{chain[0]['run_ms']}",
+           "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+           "source": source, "instance": chain[0]["instance"], "seed": seed,
+           "runs": [{k: r[k] for k in ("run_ms", "seed", "first_month", "last_month")} for r in chain],
+           "revision": json.loads(rev).get("revision") if rev else None, "inputs_sha256": digest,
+           "first_month": first, "final_month": final, "companies": companies, "series": yearly,
+           "mode_mix": mode_mix or None}
+    rec["outcome"] = live_outcome(rec)
+    return rec
+
+
+def live_outcome(rec: dict, reference: str = LIVE_DEFAULTS["reference"]) -> dict:
+    """Leader, reference and every PrismaticAI company's final standing, from the record's series."""
+    final = {c["company"]: rec["series"][str(c["company"])][-1]["value"] for c in rec["companies"]}
+    leader = max(final, key=lambda c: (final[c], -c))
+    ref = next((c["company"] for c in rec["companies"] if c["ai"] == reference), None)
+    ours = {}
+    for c in rec["companies"]:
+        if c["ai"] == "PrismaticAI":
+            v = final[c["company"]]
+            ours[str(c["company"])] = {
+                "value": v, "rank": 1 + sum(x > v for x in final.values()),
+                "share_of_leader": round(v / max(1, final[leader]), 4),
+                "ratio_to_reference": round(v / max(1, final[ref]), 4) if ref is not None else None}
+    return {"leader": leader, "leader_value": final[leader], "reference": reference,
+            "reference_company": ref, "prismatic": ours}
+
+
+def validate_live(rec: dict, name: str) -> list[str]:
+    errs = [f"{name}: missing {k}" for k in ("schema", "id", "seed", "runs", "companies", "series",
+                                              "first_month", "final_month", "outcome") if k not in rec]
+    if errs:
+        return errs
+    if rec["schema"] != LIVE_SCHEMA:
+        errs.append(f"{name}: schema {rec['schema']} is not {LIVE_SCHEMA}")
+    if name != f"{rec['id']}.json" or not rec["id"].startswith(f"live-{rec['seed']}-"):
+        errs.append(f"{name}: id {rec['id']} does not name the file and the seed")
+    for c in rec["companies"]:
+        if not rec["series"].get(str(c["company"])):
+            errs.append(f"{name}: company {c['company']} has no series")
+    if not errs and live_outcome(rec, rec["outcome"].get("reference", "AAAHogEx")) != rec["outcome"]:
+        errs.append(f"{name}: outcome is not derived from its series")
+    return errs
+
+
+def live_cfg(t: dict) -> dict:
+    return {**LIVE_DEFAULTS, **t.get("live", {})}
+
+
+def live_genes(t: dict, settings: dict) -> dict:
+    """A configuration's genes in the GA's space: a gene the settings do not name is what the bot ran
+    with, info.nut's default (t["defaults"], set by resolve_genes)."""
+    d = t.get("defaults", t["start"])
+    return {g: clamp_gene(t["space"], g, settings.get(g, d.get(g, t["space"][g][0]))) for g in t["space"]}
+
+
+def live_entries(records: list[dict], t: dict) -> list[dict]:
+    """Every PrismaticAI company of every live record, judged at a year end against the reference
+    AI. A company is judged on one configuration only: its end is the last year end before its first
+    applied setting change (a request the approval server enacted; one never enacted changed
+    nothing), at most `horizon_years` game years in and at least `min_years`. The companies of one
+    game share the earliest of their ends, so they are compared at the same date. Lost: in a game
+    with several judged PrismaticAI configurations, worth less than paired_margin x the best of them
+    (vetoes genes within `veto_genes`); alone, worth less than loss_ratio x the reference AI (a loss
+    to the rival itself, which vetoes genes within `loss_veto_genes`)."""
+    lc = live_cfg(t)
+    out = []
+    for rec in records:
+        y0 = int(rec["first_month"][:4])
+        ref = next((c["company"] for c in rec["companies"] if c["ai"] == lc["reference"]), None)
+        ref_v = {p["month"]: p["value"] for p in rec["series"].get(str(ref), [])}
+        game = []
+        for c in rec["companies"]:
+            if c["ai"] != "PrismaticAI":
+                continue
+            # A request that was never enacted (unanswered, expired, denied) changed nothing.
+            changed = min((r["applied"][:4] for r in c["settings_requested"] if r.get("applied")), default="9999")
+            end = min(y0 + lc["horizon_years"] - 1, int(changed) - 1)
+            vals = {p["month"]: p["value"] for p in rec["series"][str(c["company"])]}
+            reached = [y for y in range(y0, end + 1) if f"{y}-12" in vals and f"{y}-12" in ref_v]
+            e = {"record": rec["id"], "seed": rec["seed"], "company": c["company"], "at": None,
+                 "settings": c["settings_start"], "genes": live_genes(t, settings_dict(c["settings_start"])),
+                 "ratio": None, "evidence": False, "why": "", "vals": vals}
+            if not reached or reached[-1] - y0 + 1 < lc["min_years"]:
+                e["why"] = (f"one configuration for under {lc.get('min_years', 2)} game year(s) "
+                            f"(first setting change {changed if changed != '9999' else 'none'})")
+            else:
+                e.update(evidence=True, at=f"{reached[-1]}-12")
+            game.append(e)
+        judged = [e for e in game if e["evidence"]]
+        at = min((e["at"] for e in judged), default=None)
+        for e in judged:
+            e["at"], e["ratio"] = at, round(e["vals"][at] / max(1, ref_v[at]), 4)
+        best = max((e["ratio"] for e in judged), default=0)
+        for e in judged:
+            e["paired"] = len(judged) > 1
+            if e["paired"]:
+                e["lost"], e["radius"] = e["ratio"] < lc["paired_margin"] * best, lc["veto_genes"]
+                e["why"] = f"{e['ratio']:.3f} of {lc['reference']} at {at}, the game's best {best:.3f}"
+            else:
+                e["lost"], e["radius"] = e["ratio"] < lc["loss_ratio"], lc["loss_veto_genes"]
+                e["why"] = f"{e['ratio']:.3f} of {lc['reference']} at {at} (a loss is under {lc['loss_ratio']})"
+        for e in game:
+            del e["vals"]
+        out += game
+    return out
+
+
+def live_veto(t: dict, genes: dict, live: list[dict]) -> dict | None:
+    """The live entry that lost with this configuration: genes equal to its genes except in at most
+    the entry's radius (live_entries: `veto_genes` for a paired loss, `loss_veto_genes` for a loss to
+    the reference AI). None when no lost entry matches."""
+    for e in live:
+        n = e.get("radius", live_cfg(t)["veto_genes"])
+        if e.get("lost") and sum(genes.get(g) != e["genes"][g] for g in e["genes"]) <= n:
+            return e
+    return None
+
+
+def live_seeds(t: dict, live: list[dict], tried: list[dict]) -> list[tuple[dict, str]]:
+    """Up to `seed_offspring` configurations to play in the arena: the winners of paired live
+    comparisons (several PrismaticAI configurations in one game) that did not lose, best first, whose
+    genes no variant has had yet. Live play suggests them; the arena measures them."""
+    out = []
+    for e in sorted((e for e in live if e.get("paired") and not e["lost"]), key=lambda e: -e["ratio"]):
+        if e["genes"] not in tried and len(out) < live_cfg(t).get("seed_offspring", 1):
+            out.append((dict(e["genes"]), f"{e['record']}:{e['company']}"))
+    return out
+
+
+def live_records(results: Path | None = None) -> list[dict]:
+    return [json.loads(f.read_text()) for f in tracked_records(LIVE_GLOB, results)]
+
+
+def derive_live_settings(t: dict, battle_rec: dict | None, records: list[dict]) -> dict:
+    """The next live start's settings, derived from the records alone. Only a configuration with
+    live evidence is chosen: one that a live game judged and found not lost (live_entries), best
+    ratio to the reference first, unless another game's loss vetoes it (live_veto). The arena's
+    PrismaticAI configurations of the newest battle record are listed with their arena ratio and
+    their veto, as context; none is chosen on arena evidence alone. Nothing judged and not lost:
+    no settings (`chosen` null), so a start never falls back to info.nut's defaults unseen."""
+    live = live_entries(records, t)
+    ref_key = live_cfg(t)["reference"]
+    arena = []
+    if battle_rec:
+        board = {r["key"]: r for r in battle_rec["leaderboard"]}
+        ref = board.get(ref_key, {}).get("avg_value", 0)
+        for c in battle_rec["contestants"]:
+            row = board.get(c["key"], {})
+            if c["ai"] != "PrismaticAI" or not row.get("played") or not ref:
+                continue
+            veto = live_veto(t, live_genes(t, settings_dict(c.get("settings", ""))), live)
+            arena.append({"candidate": c["key"], "settings": c.get("settings", ""),
+                          "arena_ratio": round(row["avg_value"] / ref, 4), "played": row["played"],
+                          "vetoed_by": f"{veto['record']}:{veto['company']}" if veto else None})
+    arena.sort(key=lambda c: (-c["arena_ratio"], c["candidate"]))
+    cands = []
+    for e in sorted((e for e in live if e["evidence"] and not e["lost"]),
+                    key=lambda e: (-e["ratio"], e["record"], e["company"])):
+        veto = live_veto(t, e["genes"], live)
+        same = next((a for a in arena if live_genes(t, settings_dict(a["settings"])) == e["genes"]), None)
+        cands.append({"candidate": f"{e['record']}:{e['company']}", "settings": settings_str(settings_dict(e["settings"])),
+                      "live_ratio": e["ratio"], "at": e["at"], "why": e["why"],
+                      "arena": same["candidate"] if same else None,
+                      "vetoed_by": f"{veto['record']}:{veto['company']}" if veto else None})
+    chosen = next((c for c in cands if not c["vetoed_by"]), None)
+    return {"schema": LIVE_SETTINGS_SCHEMA,
+            "derived_by": "tools/research/ai-battle/battle.py live-settings (battle.json tuning.live)",
+            "rule": live_cfg(t), "battle_record": battle_rec["id"] if battle_rec else None,
+            "live_records": [r["id"] for r in records],
+            "chosen": chosen["candidate"] if chosen else None,
+            "settings": chosen["settings"] if chosen else None,
+            "reason": (f"the best configuration a live game judged and found not lost ({chosen['why']})"
+                       if chosen else "no configuration has live evidence of not losing: no live start is derived"),
+            "candidates": cands, "arena": arena,
+            "live": [{k: e.get(k) for k in ("record", "company", "at", "ratio", "evidence", "paired", "lost", "radius",
+                                            "why", "settings")} for e in live],
+            "seeds": [s for _, s in live_seeds(t, live, [live_genes(t, settings_dict(c["settings"]))
+                                                         for c in arena])]}
+
+
+def live_settings_text(t: dict, results: Path | None = None) -> str:
+    rec = latest_record()
+    return json.dumps(derive_live_settings(t, rec, live_records(results)), indent=1) + "\n"
+
+
+def live_tuning(cfg_raw: dict) -> dict:
+    """battle.json's `tuning` with its genes resolved against info.nut, read-only (no state file)."""
+    cfg = {"tuning": json.loads(json.dumps(cfg_raw["tuning"])), "prismatic": cfg_raw.get("prismatic", {})}
+    resolve_genes(cfg)
+    return cfg["tuning"]
+
+
+def cmd_live_export(seed: int, panel: str | None, db: Path | None) -> int:
+    if not (panel or db) or (panel and db):
+        print("live-export: give exactly one of --panel <url> and --db <copy of the store>", file=sys.stderr)
+        return 2
+    query = panel_query(panel) if panel else duckdb_query(db)
+    rec = live_record(query, seed, f"panel:{panel}" if panel else f"duckdb:{db.name}")
+    for e in validate_live(rec, f"{rec['id']}.json"):
+        print(e, file=sys.stderr)
+    (RESULTS_DIR / f"{rec['id']}.json").write_text(json.dumps(rec, indent=1) + "\n")
+    print(f"live-export: wrote research/results/{rec['id']}.json ({rec['first_month']}..{rec['final_month']}, "
+          f"{len(rec['runs'])} run(s))")
+    return 0
+
+
+def cmd_live_settings(write: bool) -> int:
+    t = live_tuning(json.loads(DEFAULT_CONFIG.read_text()))
+    text = live_settings_text(t)
+    if write:
+        (RESULTS_DIR / LIVE_SETTINGS).write_text(text)
+    d = json.loads(text)
+    print(f"PRISMATIC_BOT_SETTINGS={d['settings'] or ''}  # {d['chosen']}: {d['reason']}")
+    return 0 if d["chosen"] else 10
 
 
 def contestant_key(c: dict) -> str:
@@ -1009,6 +1424,9 @@ def edition_of(cfg: dict) -> str:
     return hashlib.sha256((arena_digest(cfg["cache"]) + rules).encode()).hexdigest()[:16]
 
 
+REFEREE_TAR = "BattleReferee.tar"
+
+
 def export_tree(path: str, rev: str, dest_tar: Path) -> None:
     """`git archive` a repository directory with its parents stripped: <basename>/... in the tar."""
     raw = subprocess.run(["git", "-C", str(REPO), "archive", "--format=tar", rev, path],
@@ -1047,20 +1465,73 @@ def cmd_prepare(cfg: dict, allow_dirty: bool) -> None:
         sys.exit(f"refusing: uncommitted changes under the exported paths:\n{dirty}\n"
                  "commit them, or pass --allow-dirty for a run whose records `check` refuses")
     rev = git("rev-parse", p.get("rev", "HEAD"))
+    # The referee follows the repository (battle.json referee.rev, default HEAD), not PrismaticAI's
+    # pin: a bot pinned to an old commit is still refereed by the current fields (loan=, REF S/T).
+    ref_rev = git("rev-parse", ref.get("rev", "HEAD"))
     export_tree(p["path"], rev, arena / "ai" / "PrismaticAI.tar")
     if dirty:  # --allow-dirty: the referee as it is on disk, and the edition marked dirty
         subprocess.run(["cp", "-R", str(REPO / ref["path"]), str(arena / "game")], check=True)
     else:
-        export_tree(ref["path"], rev, arena / "game" / "BattleReferee.tar")
+        export_tree(ref["path"], ref_rev, arena / "game" / REFEREE_TAR)
 
     (arena / "PROVENANCE.json").write_text(json.dumps({
         "prismatic_path": p["path"], "referee_path": ref["path"], "rev": rev,
-        "dirty": bool(dirty), "baseset": cfg["baseset"].name,
+        "referee_rev": ref_rev, "dirty": bool(dirty), "baseset": cfg["baseset"].name,
         "ais": sorted(str(t.relative_to(arena / "ai")) for t in (arena / "ai").rglob("*.tar")),
         "prepared_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }, indent=2) + "\n")
     log(f"arena prepared: rev {rev[:10]}{' (DIRTY)' if dirty else ''}, "
         f"edition {edition_of(cfg)}")
+
+
+def tar_files(path: Path) -> dict[str, bytes]:
+    """The regular files of a tar by name: two tars with the same files hold the same script."""
+    with tarfile.open(path) as t:
+        return {m.name: t.extractfile(m).read() for m in t.getmembers() if m.isfile()}
+
+
+def refresh_referee(cfg: dict) -> str | None:
+    """Bring a prepared arena's referee to the repository's (battle.json referee.rev, default HEAD)
+    and leave the rest of the bundle as it is: PrismaticAI, the AIs and `rev` keep their commit.
+    The new tar is written beside the old one and renamed over it, so a match that is running
+    keeps the file it opened and only matches that start afterwards read the new one. Returns what
+    changed, or None when the arena already had that referee (same files, so the edition stays).
+    Raises RuntimeError when there is no prepared arena or the referee has uncommitted changes."""
+    arena = cfg["cache"] / "arena"
+    prov_file, ref = arena / "PROVENANCE.json", cfg["referee"]
+    if not prov_file.is_file():
+        raise RuntimeError(f"no prepared arena at {arena} (battle.py prepare)")
+    prov = json.loads(prov_file.read_text())
+    if prov.get("dirty") or git("status", "--porcelain", "--", ref["path"]):
+        raise RuntimeError(f"the referee at {ref['path']} or the arena is uncommitted (dirty); "
+                           "commit it and run prepare")
+    rev = git("rev-parse", ref.get("rev", "HEAD"))
+    dest = arena / "game" / REFEREE_TAR
+    tmp = dest.with_name(REFEREE_TAR + ".new")   # no .tar suffix: OpenTTD never scans it
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    export_tree(ref["path"], rev, tmp)
+    if dest.is_file() and tar_files(dest) == tar_files(tmp):
+        tmp.unlink()
+        return None
+    os.replace(tmp, dest)
+    old = prov.get("referee_rev", prov.get("rev", ""))
+    prov.update(referee_rev=rev, referee_prepared_at=dt.datetime.now(dt.timezone.utc)
+                .isoformat(timespec="seconds"))
+    prov_file.write_text(json.dumps(prov, indent=2) + "\n")
+    return f"arena referee {old[:10] or '?'} -> {rev[:10]}, edition {edition_of(cfg)}"
+
+
+def follow_referee(cfg: dict) -> None:
+    """`run` starts on the repository's referee (battle.json referee.follow, default true): an
+    arena prepared before a referee change would otherwise keep logging the old fields for good."""
+    if not cfg["referee"].get("follow", True):
+        return
+    try:
+        changed = refresh_referee(cfg)
+    except (RuntimeError, subprocess.CalledProcessError) as exc:
+        log(f"referee not followed: {exc}")
+        return
+    log(changed or "arena referee is the repository's")
 
 
 def cmd_fetch(cfg: dict) -> None:
@@ -1800,7 +2271,7 @@ CREATE TABLE IF NOT EXISTS matches (id TEXT, edition TEXT, host TEXT, host_versi
 CREATE TABLE IF NOT EXISTS samples (edition TEXT, match_id TEXT, contestant TEXT, t TEXT,
   value INTEGER, money INTEGER, income INTEGER, perf INTEGER, vehicles INTEGER, stations INTEGER,
   rail INTEGER, road INTEGER, air INTEGER, water INTEGER, prail INTEGER, proad INTEGER,
-  pair INTEGER, pwater INTEGER, cargo INTEGER, expenses INTEGER,
+  pair INTEGER, pwater INTEGER, cargo INTEGER, expenses INTEGER, loan INTEGER,
   PRIMARY KEY (edition, match_id, contestant, t));
 CREATE TABLE IF NOT EXISTS standings (edition TEXT, match_id TEXT, rank INTEGER, contestant TEXT,
   value INTEGER, vehicles INTEGER, stations INTEGER, errors INTEGER, anomalies TEXT,
@@ -1812,8 +2283,10 @@ CREATE TABLE IF NOT EXISTS host_perf (edition TEXT, match_id TEXT, host TEXT, ho
   game_years REAL, wall_s REAL, years_per_min REAL, PRIMARY KEY (edition, match_id));
 CREATE TABLE IF NOT EXISTS events (at REAL, edition TEXT, msg TEXT);
 """
+# loan: since the referee logs it (2026-11-23). Without it a stored `money` (the bank balance, the
+# loan included) cannot be judged net of the loan, as the hoard rules judge the live series.
 SAMPLE_COLS = ("value", "money", "income", "perf", "vehicles", "stations", "rail", "road", "air",
-               "water", "prail", "proad", "pair", "pwater", "cargo", "expenses")
+               "water", "prail", "proad", "pair", "pwater", "cargo", "expenses", "loan")
 
 
 class Store:
@@ -1828,6 +2301,13 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA busy_timeout=30000")
         self.db.executescript(SCHEMA)
+        # A store made before a sample column existed gets it added (columns are only ever added,
+        # never renamed); its older rows read NULL there, which says "not recorded", not 0.
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(samples)")}
+        for col in SAMPLE_COLS:
+            if col not in have:
+                self.db.execute(f"ALTER TABLE samples ADD COLUMN {col} INTEGER")
+        self.db.commit()
         self.lock = threading.Lock()
 
     def match(self, m: dict) -> None:
@@ -1840,8 +2320,10 @@ class Store:
                                                  for c in m["lineup"]])))
             rows = [(m["edition"], m["id"], key, s["t"], *[s.get(c) for c in SAMPLE_COLS])
                     for key, series in m["series"].items() for s in series]
-            self.db.executemany("INSERT OR REPLACE INTO samples VALUES (" + ",".join("?" * 20) + ")",
-                                rows)
+            # By name: an added column sits last in an old store and in its place in a new one.
+            cols = ("edition", "match_id", "contestant", "t", *SAMPLE_COLS)
+            self.db.executemany(f"INSERT OR REPLACE INTO samples ({','.join(cols)}) VALUES "
+                                f"({','.join('?' * len(cols))})", rows)
             for rank, f in enumerate(m.get("standings") or [], 1):
                 self.db.execute("INSERT OR REPLACE INTO standings VALUES (?,?,?,?,?,?,?,?,?)", (
                     m["edition"], m["id"], rank, f["key"], f["value"], f["vehicles"],
@@ -2077,7 +2559,13 @@ class Orchestrator:
                                  "variants": [{"label": v["label"], "genes": v["genes"],
                                                "parents": v["parents"], "fitness": f}
                                               for v, f in scored]})
-        state["variants"] = next_generation(t, state, scored)
+        # Live games (tracked research/results/live-*.json) veto the configurations that lost them.
+        live = live_entries(live_records(), t) if t.get("live") else []
+        for v, _ in scored:
+            veto = live_veto(t, v["genes"], live)
+            if veto:
+                self.event(f"TUNING {v['label']}: lost live game {veto['record']} ({veto['why']}): vetoed")
+        state["variants"] = next_generation(t, state, scored, live)
         state["generation"] += 1
         tuning_path(self.cfg).write_text(json.dumps(state, indent=1) + "\n")
         # Matches of the finished generation that still run are stopped through their pid files.
@@ -2453,7 +2941,8 @@ def build_record(cfg: dict, orch: Orchestrator) -> dict:
         "generated_at": now.isoformat(timespec="seconds"),
         "edition": orch.digest,
         "provenance": {k: orch.provenance[k] for k in
-                       ("prismatic_path", "referee_path", "rev", "dirty", "baseset", "ais")},
+                       ("prismatic_path", "referee_path", "rev", "referee_rev", "dirty", "baseset",
+                        "ais") if k in orch.provenance},
         "match_cfg": cfg["match"],
         "contestants": [{"key": c["key"], "ai": c["ai"], "settings": c.get("settings", "")}
                         for c in orch.contestants],
@@ -2590,6 +3079,14 @@ def render_charts(rec: dict) -> str:
     return "\n".join(out + [CHARTS_END])
 
 
+def code_at(p: dict) -> str:
+    """Which commit PrismaticAI and the referee came from (one commit unless the referee followed
+    the repository on its own: prepare --referee-only, run)."""
+    if p.get("referee_rev", p["rev"]) == p["rev"]:
+        return f"PrismaticAI and referee at `{p['rev']}`"
+    return f"PrismaticAI at `{p['rev']}`, referee at `{p['referee_rev']}`"
+
+
 def render_md(rec: dict, charts: bool = True) -> str:
     p, mc = rec["provenance"], rec["match_cfg"]
     done = [m for m in rec["matches"] if m["status"] == "done" and not m["replica_of"]]
@@ -2599,7 +3096,7 @@ def render_md(rec: dict, charts: bool = True) -> str:
         f"# {rec['id']}", "",
         f"Derived from `{rec['id']}.json` by `tools/research/ai-battle/battle.py report`; "
         "do not edit.", "",
-        f"- Edition `{rec['edition']}`: PrismaticAI and referee at `{p['rev']}`"
+        f"- Edition `{rec['edition']}`: {code_at(p)}"
         f"{' (DIRTY)' if p['dirty'] else ''}, base set `{p['baseset']}`",
         f"- {mc['years']}-year free-for-all from {mc['start_year']}, map "
         f"{2 ** mc['map_x']}x{2 ** mc['map_y']} {mc['landscape']}, breakdowns "
@@ -2713,8 +3210,9 @@ def validate_record(rec: dict, name: str) -> list[str]:
     p = rec["provenance"]
     if p.get("dirty") is not False:
         errs.append(f"{name}: edition built from uncommitted PrismaticAI/referee (prepare --allow-dirty)")
-    if not re.fullmatch(r"[0-9a-f]{40}", str(p.get("rev", ""))):
-        errs.append(f"{name}: provenance.rev is not a full commit hash")
+    for k in ("rev", "referee_rev") if "referee_rev" in p else ("rev",):
+        if not re.fullmatch(r"[0-9a-f]{40}", str(p.get(k, ""))):
+            errs.append(f"{name}: provenance.{k} is not a full commit hash")
     keys = {c["key"] for c in rec["contestants"]}
     for m in rec["matches"]:
         missing = [k for k in REQUIRED_MATCH if k not in m]
@@ -2769,12 +3267,72 @@ ABLATION_REQUIRED = {"schema": str, "id": str, "generated_at": str, "seed": int,
                      "field": list, "match_cfg": dict, "rev": str, "tree_dirty": bool, "rows": list}
 ABLATION_ROW = ("variant", "settings", "exit_code", "value", "money", "vehicles", "rail", "road", "air",
                 "errors", "field_best", "t", "vs_first")
+# Optional per row (records from 2026-11-23 on): `standings`, every company of the variant's match in
+# company-id order, keyed as its lineup names it, with its final value (and fleet, profit and errors),
+# so a reader derives rank and strongest rival.
+# Optional per record: `imported`, the provenance of a record built after the run from its kept log.
 
 
 def ablation_vs_first(rows: list[dict]) -> list[float]:
     """Each variant's final value against the first (the baseline), as cmd_ablate records it."""
     base = rows[0]["value"] or 1
     return [round(r["value"] / base - 1, 4) for r in rows]
+
+
+MODE_KEYS = ("rail", "road", "air", "water", "prail", "proad", "pair", "pwater")
+
+
+def ablation_row(name: str, settings: str, exit_code: int | None, text: str, field: list[str],
+                 slot: int) -> dict:
+    """One variant's ablation row from its match log: its last quarterly referee sample, the best
+    opponent's final value, and `standings`, every company of the lineup in company-id order (the
+    opponents keyed by AI, the variant by its name, at `slot`) with its final value, fleet per mode,
+    last year's profit per mode and Squirrel errors. `ablate_rows` builds every row with it, and
+    `tools/research/strategy-surfaces import` builds one from a kept log.
+    `exit_code` is None when the run's exit status was not kept (a record imported from a log)."""
+    series, errors = parse_log(text)
+    me = min(slot, len(field))
+    lineup = list(field)
+    lineup.insert(me, name)
+    mine = series.get(me, [])
+    last = mine[-1] if mine else {}
+    field_best = max((s[-1]["value"] for c, s in series.items() if c != me and s), default=0)
+    standings = []
+    for cid, key in enumerate(lineup):
+        f = (series.get(cid) or [{}])[-1]
+        standings.append({"company": cid, "key": key, "value": f.get("value", 0),
+                          "vehicles": f.get("vehicles", 0), "errors": errors.get(cid, 0),
+                          **{k: f.get(k, 0) for k in MODE_KEYS}})
+    return {"variant": name, "settings": settings, "exit_code": exit_code,
+            "value": last.get("value", 0), "money": last.get("money", 0),
+            "vehicles": last.get("vehicles", 0), "rail": last.get("rail"), "road": last.get("road"),
+            "air": last.get("air"), "errors": errors.get(me, 0), "field_best": field_best,
+            "t": last.get("t", ""), "standings": standings}
+
+
+def standings_errors(rec: dict, r: dict, name: str) -> list[str]:
+    """What a row's optional `standings` must hold: one entry per company, each key named once
+    (the variant and every AI of the field), integer values, and the row's own value and best
+    opponent agreeing with them."""
+    st, where = r["standings"], f"{name}: row {r['variant']} standings"
+    if not isinstance(st, list) or not all(isinstance(e, dict) for e in st):
+        return [f"{where}: not a list of companies"]
+    if any(not isinstance(e.get("key"), str) or type(e.get("value")) is not int for e in st):
+        return [f"{where}: an entry lacks a string key or an integer value"]
+    keys = [e["key"] for e in st]
+    if len(set(keys)) != len(keys):
+        return [f"{where}: a company is named twice"]
+    want = set(rec["field"]) | {r["variant"]}
+    if set(keys) != want:
+        return [f"{where}: names {sorted(set(keys))}, the match held {sorted(want)}"]
+    value = {e["key"]: e["value"] for e in st}
+    errs = []
+    if value[r["variant"]] != r["value"]:
+        errs.append(f"{where}: the variant's value {value[r['variant']]} is not the row's {r['value']}")
+    best = max((v for k, v in value.items() if k != r["variant"]), default=0)
+    if best != r["field_best"]:
+        errs.append(f"{where}: the best opponent {best} is not the row's field_best {r['field_best']}")
+    return errs
 
 
 def validate_ablation(rec: dict, name: str) -> list[str]:
@@ -2804,6 +3362,9 @@ def validate_ablation(rec: dict, name: str) -> list[str]:
         errs.append(f"{name}: a variant is named twice")
     if [r["vs_first"] for r in rows] != ablation_vs_first(rows):
         errs.append(f"{name}: vs_first is not derived from the values")
+    for r in rows:
+        if "standings" in r:
+            errs += standings_errors(rec, r, name)
     return errs
 
 
@@ -2844,6 +3405,13 @@ def render_ablation_charts(rec: dict) -> str:
     return "\n".join(out)
 
 
+def imported_line(imp: dict) -> str:
+    """The provenance sentence of a record built after the run from its kept log."""
+    binary = f", binary `{imp['binary']}`" if imp.get("binary") else ""
+    return (f"Imported after the run from its kept log `{imp['log']}` (sha256 `{imp['log_sha256'][:16]}`)"
+            f"{binary}, by `{imp['by']}`; the run's exit status was not kept. {imp.get('note', '')}").rstrip()
+
+
 def render_ablation_md(rec: dict, charts: bool = True) -> str:
     mc, rows = rec["match_cfg"], rec["rows"]
     md = [f"# {rec['id']}", "",
@@ -2852,6 +3420,7 @@ def render_ablation_md(rec: dict, charts: bool = True) -> str:
           f"{rec['years']} years from {mc['start_year']}, at `{rec['rev'][:10]}`"
           f"{' (tree dirty)' if rec['tree_dirty'] else ''}. "
           "Each value is the variant's last quarterly referee sample. One seed: a direction, not a verdict.", "",
+          *([imported_line(rec["imported"]), ""] if rec.get("imported") else []),
           "| Variant | Value | vs first | Vehicles | Rail | Road | Air | Squirrel errors | Settings |",
           "|---|---|---|---|---|---|---|---|---|"]
     md += [f"| {r['variant']} | {r['value']:,} | {r['vs_first']:+.1%} | {r['vehicles']} | {r['rail']} | "
@@ -2879,6 +3448,13 @@ def cmd_render() -> int:
     region = replace_region(readme, render_region(latest_record()))
     if region != readme:
         README.write_text(region)
+    # The next live start's settings follow every new battle or live record (live-settings).
+    if tracked_records(LIVE_GLOB):
+        live = RESULTS_DIR / LIVE_SETTINGS
+        text = live_settings_text(live_tuning(json.loads(DEFAULT_CONFIG.read_text())))
+        if not live.is_file() or live.read_text() != text:
+            live.write_text(text)
+            written += 1
     print(f"battle render: {written} of {len(files) + len(ablations)} record page(s) "
           f"({len(files)} battle, {len(ablations)} ablation) rewritten, README leaderboard "
           + ("rewritten" if region != readme else "current"))
@@ -2905,6 +3481,12 @@ def cmd_check() -> int:
     latest = latest_record()
     cfg_raw = json.loads(DEFAULT_CONFIG.read_text())
     errs += config_errors(cfg_raw)  # every GA gene is a setting of info.nut, within its bounds
+    lives = tracked_records(LIVE_GLOB)
+    for f in lives:
+        errs += validate_live(json.loads(f.read_text()), f.name)
+    live = RESULTS_DIR / LIVE_SETTINGS
+    if lives and not errs and (not live.is_file() or live.read_text() != live_settings_text(live_tuning(cfg_raw))):
+        drift.append(f"{LIVE_SETTINGS}: not derived from the battle and live records (run battle.py render)")
     cfg_never = cfg_raw.get("never_last", [])
     if latest and latest["leaderboard"]:
         board = [r for r in latest["leaderboard"] if r["played"]]
@@ -2923,7 +3505,8 @@ def cmd_check() -> int:
     if drift:
         return 11
     n = len(files)
-    print(f"battle check: {n} record(s) and {len(ablations)} ablation record(s) valid, every page and "
+    print(f"battle check: {n} record(s), {len(ablations)} ablation and {len(lives)} live record(s) valid, "
+          "live-start.json, every page and "
           "the README leaderboard derived, "
           f"{len(gene_space(cfg_raw.get('tuning', {}), info_settings(info_nut_path(cfg_raw))))} "
           "GA gene(s) derived from info.nut")
@@ -2998,6 +3581,13 @@ def anomalies(series: list[dict], errors: int, rules: dict) -> list[str]:
     return out
 
 
+def match_regimes(m: dict, key: str, fit: dict) -> list[dict]:
+    """The failure regimes of contestant `key` in one match, against the contestants that are not
+    PrismaticAI (a sibling is not a rival: two copies are judged against the same field)."""
+    rivals = [c["key"] for c in m["lineup"] if not c["ai"].startswith("PrismaticAI")]
+    return regimes.detect(m["series"], key, [k for k in rivals if k != key], fit.get("regimes"))
+
+
 def fitness_verdict(m: dict, fit: dict) -> list[str]:
     """The fitness check's failures for one finished local match (empty: PASS)."""
     fails = []
@@ -3019,6 +3609,11 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
         fails += [f"{c['key']}: {b}" for b in bad]
     fails += sibling_producers(m)
     fails += trainless_stations(m, fit["rules"])
+    # Failure regimes (research/failure-regimes.md): a contestant held healthy must not stop
+    # expanding while its rivals grow, nor fall behind the strongest rival faster than the field.
+    for c in m["lineup"]:
+        if c["ai"].startswith("PrismaticAI") and c["key"] in fit.get("must_be_healthy", []):
+            fails += regimes.failures(match_regimes(m, c["key"], fit), c["key"], fit.get("regimes"))
     fails += funnel_gaps(m, fit.get("must_funnel", []))
     fails += frozen_construction(m, fit)
     # A contestant held to run trains ends with at least one: the test_trainless lineup refuses every
@@ -3104,6 +3699,8 @@ def cmd_fitness(cfg: dict) -> int:
                 print(f"fitness[{i}]: {c['key']:26} value {s[-1]['value'] if s else 0:>12,}  vehicles "
                       f"peak {peak:>4} final {final:>4}  "
                       f"{' '.join(anomalies(s, m['errors'].get(c['key'], 0), fit['rules'])) or 'ok'}")
+                for r in match_regimes(m, c["key"], fit):
+                    print(f"fitness[{i}]: {c['key']:26} regime {regimes.describe(r)}")
             for cid, reps in sorted(m["capital"].items()):
                 if cid < len(lineup):
                     early = [r for r in reps if r["year"] < mc["start_year"] + fit["rules"].get("frozen_years", 3)]
@@ -3233,20 +3830,25 @@ def cmd_power(margin: float, alpha: float, power_: float) -> int:
     return 0 if out["pairs"]["n"] is not None else 12
 
 
-def cmd_ablate(cfg: dict, seed: int, years: int, variants: list[str], field: list[str],
-               write: bool, log_dir: str | None = None, slot: int = 0) -> int:
-    """Run one local match per variant of the working tree's PrismaticAI (settings "name=a=1,b=2"),
-    each against the same field on the same seed, in parallel, and print (and with --write record
-    under research/results/) every variant's final standing. Deterministic: same tree, binary and
-    seed, same table."""
+def ablate_rows(cfg: dict, seed: int, years: int, variants: list[str], field: list[str],
+                log_dir: str | None = None, slot: int = 0, binary: Path | None = None,
+                owner: str = "", timeout: int = 1800) -> list[dict] | None:
+    """One local null-driver match per variant of the working tree's PrismaticAI (settings
+    "name=a=1,b=2") against the same field on the same seed, in parallel; a row per variant with its
+    final standing and, under `standings`, every company's final value, fleet per mode and last
+    year's profit per mode (company-id order, keyed as the lineup names them). None when the binary
+    or the prepared arena is missing. `owner` goes into every match's environment as
+    TTD_BATTLE_ORCHESTRATOR (rule project.long-runs-are-owned-bounded-and-stoppable). A match that
+    outlives `timeout` is killed, as are the others when one fails, so no game process outlives
+    the call."""
     arena = cfg["cache"] / "arena"
-    binary = REPO / "build" / "openttd"
-    if not binary.is_file() or not (arena / "baseset").is_dir():
-        print("ablate: NOT RUN: needs build/openttd and a prepared arena cache")
-        return 12
+    binary = binary or REPO / "build" / "openttd"
+    if not Path(binary).is_file() or not (arena / "baseset").is_dir():
+        return None
     import tempfile
     mc = dict(cfg["match"], years=years)
     rows = []
+    env_owner = {"TTD_BATTLE_ORCHESTRATOR": owner} if owner else {}
     with tempfile.TemporaryDirectory(prefix="battle-ablate-") as tmp:
         ai = Path(tmp) / "ai"
         ai.mkdir()
@@ -3255,59 +3857,638 @@ def cmd_ablate(cfg: dict, seed: int, years: int, variants: list[str], field: lis
                         if t.name != "PrismaticAI.tar"], str(ai)], check=True)
         (Path(tmp) / "battle.cfg").write_text(battle_cfg_text(mc))
         procs = []
-        for v in variants:
-            name, _, settings = v.partition("=")
-            home = Path(tmp) / f"h-{name}"
-            per = home / "Documents" / "OpenTTD"
-            (per / "scripts").mkdir(parents=True)
-            os.symlink(ai, per / "ai")
-            os.symlink(arena / "baseset", per / "baseset")
-            os.symlink(arena / "game", per / "game")
-            (home / ".local" / "share").mkdir(parents=True)
-            os.symlink(per, home / ".local" / "share" / "openttd")
-            # `slot`: PrismaticAI's place in the start order (company id), as in the arena's match;
-            # who starts first gets the first airport sites, so a replay must keep it.
-            lineup = [{"ai": f, "key": f} for f in field]
-            lineup.insert(min(slot, len(lineup)), {"ai": "PrismaticAI", "key": name, "settings": settings})
-            (per / "scripts" / "game_start.scr").write_text(start_script_text(lineup))
-            procs.append((name, settings, lineup, subprocess.Popen(
-                [str(binary), "-c", "battle.cfg", "-x", "-v", f"null:ticks={match_ticks(years)}", "-s", "null",
-                 "-m", "null", "-g", "-G", str(seed), "-d", f"script={4 if log_dir else 1}"], cwd=tmp,
-                env=dict(os.environ, HOME=str(home)), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)))
-        for name, settings, lineup, proc in procs:
-            out, _ = proc.communicate(timeout=1800)
-            if log_dir:
-                Path(log_dir).mkdir(parents=True, exist_ok=True)
-                (Path(log_dir) / f"{name}.log").write_text(out)
-            series, errors = parse_log(out)
-            me = min(slot, len(field))
-            mine = series.get(me, [])
-            last = mine[-1] if mine else {}
-            field_best = max((s[-1]["value"] for c, s in series.items() if c != me and s), default=0)
-            rows.append({"variant": name, "settings": settings, "exit_code": proc.returncode,
-                         "value": last.get("value", 0), "money": last.get("money", 0),
-                         "vehicles": last.get("vehicles", 0), "rail": last.get("rail"), "road": last.get("road"),
-                         "air": last.get("air"), "errors": errors.get(0, 0), "field_best": field_best,
-                         "t": last.get("t", "")})
+        try:
+            for v in variants:
+                name, _, settings = v.partition("=")
+                home = Path(tmp) / f"h-{name}"
+                per = home / "Documents" / "OpenTTD"
+                (per / "scripts").mkdir(parents=True)
+                os.symlink(ai, per / "ai")
+                os.symlink(arena / "baseset", per / "baseset")
+                os.symlink(arena / "game", per / "game")
+                (home / ".local" / "share").mkdir(parents=True)
+                os.symlink(per, home / ".local" / "share" / "openttd")
+                # `slot`: PrismaticAI's place in the start order (company id), as in the arena's
+                # match; who starts first gets the first airport sites, so a replay must keep it.
+                lineup = [{"ai": f, "key": f} for f in field]
+                lineup.insert(min(slot, len(lineup)), {"ai": "PrismaticAI", "key": name, "settings": settings})
+                (per / "scripts" / "game_start.scr").write_text(start_script_text(lineup))
+                procs.append((name, settings, lineup, subprocess.Popen(
+                    [str(binary), "-c", "battle.cfg", "-x", "-v", f"null:ticks={match_ticks(years)}", "-s", "null",
+                     "-m", "null", "-g", "-G", str(seed), "-d", f"script={4 if log_dir else 1}"], cwd=tmp,
+                    env=dict(os.environ, HOME=str(home), **env_owner), stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, text=True)))
+            for name, settings, lineup, proc in procs:
+                out, _ = proc.communicate(timeout=timeout)
+                if log_dir:
+                    Path(log_dir).mkdir(parents=True, exist_ok=True)
+                    (Path(log_dir) / f"{name}.log").write_text(out)
+                rows.append(ablation_row(name, settings, proc.returncode, out, field, slot))
+        finally:
+            for *_, proc in procs:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+                proc.stdout.close()
+    return rows
+
+
+def ablation_record(cfg: dict, seed: int, years: int, field: list[str], slot: int, rows: list[dict]) -> dict:
+    """The ablation record of one seed's rows (research/results/ablation-<utc>-seed<seed>.json)."""
+    now = dt.datetime.now(dt.timezone.utc)
+    return {"schema": ABLATION_SCHEMA, "id": f"ablation-{now.strftime('%Y%m%dT%H%M%S')}-seed{seed}",
+            "generated_at": now.isoformat(timespec="seconds"), "seed": seed, "years": years, "field": field,
+            "slot": slot, "match_cfg": dict(cfg["match"], years=years), "rev": git("rev-parse", "HEAD"),
+            "tree_dirty": bool(git("status", "--porcelain", "--", cfg["prismatic"]["path"])), "rows": rows}
+
+
+def write_ablation(rec: dict) -> None:
+    for e in validate_ablation(rec, f"{rec['id']}.json"):
+        log(f"warning: {e}")
+    (RESULTS_DIR / f"{rec['id']}.json").write_text(json.dumps(rec, indent=1) + "\n")
+    # The page (table and charts) is derived from the JSON alone, as `render` re-derives it.
+    (RESULTS_DIR / f"{rec['id']}.md").write_text(render_ablation_md(rec))
+    log(f"wrote research/results/{rec['id']}.{{json,md}}")
+
+
+def cmd_ablate(cfg: dict, seed: int, years: int, variants: list[str], field: list[str],
+               write: bool, log_dir: str | None = None, slot: int = 0) -> int:
+    """Run one local match per variant of the working tree's PrismaticAI (ablate_rows), print (and
+    with --write record under research/results/) every variant's final standing. Deterministic:
+    same tree, binary and seed, same table."""
+    rows = ablate_rows(cfg, seed, years, variants, field, log_dir, slot)
+    if rows is None:
+        print("ablate: NOT RUN: needs build/openttd and a prepared arena cache")
+        return 12
     for r, vs in zip(rows, ablation_vs_first(rows)):
         r["vs_first"] = vs
         print(f"ablate: {r['variant']:12} value {r['value']:>12,} ({r['vs_first']:+.1%})  veh {r['vehicles']:>4} "
               f"rail {r['rail']} road {r['road']} air {r['air']}  err {r['errors']}  [{r['settings']}]")
     if write:
-        now = dt.datetime.now(dt.timezone.utc)
-        rid = f"ablation-{now.strftime('%Y%m%dT%H%M%S')}-seed{seed}"
-        rec = {"schema": ABLATION_SCHEMA, "id": rid, "generated_at": now.isoformat(timespec="seconds"),
-               "seed": seed, "years": years, "field": field, "slot": slot, "match_cfg": mc,
-               "rev": git("rev-parse", "HEAD"), "tree_dirty": bool(git("status", "--porcelain", "--",
-                                                                        cfg["prismatic"]["path"])),
-               "rows": rows}
-        for e in validate_ablation(rec, f"{rid}.json"):
-            log(f"warning: {e}")
-        (RESULTS_DIR / f"{rid}.json").write_text(json.dumps(rec, indent=1) + "\n")
-        # The page (table and charts) is derived from the JSON alone, as `render` re-derives it.
-        (RESULTS_DIR / f"{rid}.md").write_text(render_ablation_md(rec))
-        log(f"wrote research/results/{rid}.{{json,md}}")
+        write_ablation(ablation_record(cfg, seed, years, field, slot, rows))
     return 0
+
+
+# ------------------------------------------------------------------------- config evolution (evolve)
+#
+# The closed loop from "we fall behind" to a tested settings proposal (research/config-evolution-loop.md):
+# a trigger (the gap watch's gap.<company>, the strategy review's review.<company>.month, or a live
+# outcome record live-*.json) -> the gap attributed per transport mode from the referee's profit per
+# mode -> candidate settings: the GA genes of the losing modes and of capital, ranked and directed by
+# their recorded association with the ratio to the reference AI -> every candidate and the baseline in
+# paired null-driver matches on the same seeds -> the best candidate confirmed on fresh seeds -> a
+# proposal record, and with --propose a blackboard key. The loop never applies a setting and never
+# approves anything (rule project.decision-authority-boundaries): the owner, or the executor ADR 0042
+# names, files it as one approval.
+
+EVOLVE_SCHEMA = "config-evolution/v1"
+# The referee's transport modes and the blackboard's names for them (gap_watch, ADR 0042 reviews).
+MODE_ALIASES = {"rail": "rail", "train": "rail", "road": "road", "bus": "road", "truck": "road",
+                "air": "air", "aircraft": "air", "plane": "air", "water": "water", "ship": "water"}
+EVOLVE_LIFECYCLE = ["proposed", "requested", "approved|denied|retired", "applied", "verified|failed"]
+
+
+def evolve_cfg(cfg: dict) -> dict:
+    """The loop's policy: battle.json's `evolve`, under the configuration's own when it has one."""
+    base = json.loads(DEFAULT_CONFIG.read_text()).get("evolve", {})
+    return {**base, **cfg.get("evolve", {})}
+
+
+def gene_mode(gene: str, ev: dict) -> str:
+    """The transport mode a GA gene steers: battle.json evolve.gene_modes when it names the gene, else
+    the first token of its name that evolve.mode_tokens lists (air_routes_max: air; max_routes: road),
+    else "capital" (reserve, investment pace, aggressiveness: they move every mode)."""
+    if gene in ev.get("gene_modes", {}):
+        return ev["gene_modes"][gene]
+    for tok in gene.split("_"):
+        for mode, toks in ev.get("mode_tokens", {}).items():
+            if tok in toks:
+                return mode
+    return "capital"
+
+
+def mode_gaps(ours: dict, rival: dict) -> dict:
+    """The gap to the rival per mode from two final referee samples (ADR 0042, section 2): the profit
+    gap P_R - P_O, its volume term (n_R - n_O) x p_R and its yield term n_O x (p_R - p_O), where n is
+    the fleet of the mode and p its profit last year per vehicle. A mode the rival does not run has
+    no volume term; one we do not run has no yield term."""
+    out = {}
+    for mode in MODES:
+        n_o, n_r = ours.get(mode) or 0, rival.get(mode) or 0
+        p_o, p_r = ours.get("p" + mode) or 0, rival.get("p" + mode) or 0
+        y_o, y_r = (p_o / n_o if n_o else 0.0), (p_r / n_r if n_r else 0.0)
+        out[mode] = {"gap": p_r - p_o, "volume": round((n_r - n_o) * y_r), "yield": round(n_o * (y_r - y_o)),
+                     "ours": n_o, "rival": n_r}
+    return out
+
+
+def attributed_modes(gaps: dict, cover: float) -> list[str]:
+    """The modes that make up `cover` of the positive volume gap, largest first; when no mode has a
+    positive volume term (we run as many vehicles but each earns less), the same over the positive
+    profit gap."""
+    for term in ("volume", "gap"):
+        pos = sorted(((g[term], m) for m, g in gaps.items() if g[term] > 0), reverse=True)
+        total = sum(v for v, _ in pos)
+        if total > 0:
+            out, acc = [], 0.0
+            for v, m in pos:
+                out.append(m)
+                acc += v
+                if acc >= cover * total:
+                    break
+            return out
+    return []
+
+
+def sum_gaps(per_seed: list[dict]) -> dict:
+    out = {m: {"gap": 0, "volume": 0, "yield": 0, "ours": 0, "rival": 0} for m in MODES}
+    for g in per_seed:
+        for m, v in g.items():
+            for k in out[m]:
+                out[m][k] += v[k]
+    return out
+
+
+def trigger_gaps(value) -> dict | None:
+    """A review record's per-type gap terms (`gaps: [{type, volume, yield}]`, ADR 0042) as mode_gaps'
+    shape, None when the trigger carries none."""
+    if not isinstance(value, dict) or not isinstance(value.get("gaps"), list):
+        return None
+    out = {m: {"gap": 0, "volume": 0, "yield": 0, "ours": 0, "rival": 0} for m in MODES}
+    for g in value["gaps"]:
+        m = MODE_ALIASES.get(str(g.get("type", "")).lower())
+        if m:
+            vol, yld = int(g.get("volume") or 0), int(g.get("yield") or 0)
+            out[m].update(volume=out[m]["volume"] + vol, gap=out[m]["gap"] + vol + yld,
+                          **{"yield": out[m]["yield"] + yld})
+    return out
+
+
+def _ranks(xs: list[float]) -> list[float]:
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    ranks = [0.0] * len(xs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
+            j += 1
+        for k in range(i, j + 1):
+            ranks[order[k]] = (i + j) / 2
+        i = j + 1
+    return ranks
+
+
+def spearman(x: list[float], y: list[float]) -> float:
+    rx, ry = _ranks(x), _ranks(y)
+    n = len(x)
+    mx, my = sum(rx) / n, sum(ry) / n
+    sxy = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    sxx, syy = sum((a - mx) ** 2 for a in rx), sum((b - my) ** 2 for b in ry)
+    return 0.0 if sxx == 0 or syy == 0 else sxy / math.sqrt(sxx * syy)
+
+
+def lever_evidence(records: list[dict], t: dict, reference: str) -> dict:
+    """What the recorded battles say about each gene: {gene: {rho, n, values}}, rho being Spearman's
+    correlation between the gene's value in a PrismaticAI configuration and log(value / reference's
+    value) in the same match, the log ratio centred per arena edition (code changed between them).
+    Finished, non-replay matches only, each configuration once per edition and seed across records. Hypothesis
+    generation only: the GA's genes co-vary, so a correlation is a direction to try, never a cause."""
+    obs: list[tuple[str, dict, float]] = []
+    seen = set()
+    for rec in records:
+        ident = {c["key"]: c for c in rec.get("contestants", [])}
+        for m in rec.get("matches", []):
+            if m.get("status") != "done" or m.get("replica_of"):
+                continue
+            vals = {f["key"]: f["value"] for f in m.get("standings") or []}
+            if not vals.get(reference):
+                continue
+            for k, v in vals.items():
+                c = ident.get(k, {})
+                if c.get("ai") != "PrismaticAI":
+                    continue
+                key = (rec.get("edition", ""), c.get("settings", ""), m.get("seed"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                genes = live_genes(t, settings_dict(c.get("settings", "")))
+                obs.append((rec.get("edition", ""), genes, math.log(max(1, v) / vals[reference])))
+    by_ed: dict[str, list[float]] = {}
+    for ed, _, y in obs:
+        by_ed.setdefault(ed, []).append(y)
+    mean = {ed: sum(ys) / len(ys) for ed, ys in by_ed.items()}
+    ys = [y - mean[ed] for ed, _, y in obs]
+    out = {}
+    for g in t["space"]:
+        xs = [genes[g] for _, genes, _ in obs]
+        out[g] = {"rho": round(spearman(xs, ys), 4) if len(xs) > 2 else 0.0, "n": len(xs),
+                  "values": len(set(xs))}
+    return out
+
+
+def evolve_candidates(base: dict, space: dict, evidence: dict, modes: list[str], ev: dict) -> list[dict]:
+    """Candidate gene settings from the data: the genes of the attributed modes, then those of
+    capital; within each, those with a recorded direction (|rho| >= min_rho over >= min_history
+    matches, over three distinct values or every value a switch has) first by |rho|. Each is moved
+    step_frac of its range from the baseline in that direction (both directions for a gene without
+    one): at most `levers` single-gene candidates, then one with every directed move together. A move
+    a bound swallows is skipped."""
+    pool = [g for g in space if gene_mode(g, ev) in set(modes) | {"capital"}]
+
+    def directed(g):
+        e = evidence.get(g, {})
+        lo, hi, step = space[g]
+        ok = (abs(e.get("rho", 0)) >= ev["min_rho"] and e.get("n", 0) >= ev["min_history"]
+              and e.get("values", 0) >= min(3, (hi - lo) // step + 1))
+        return (1 if e["rho"] > 0 else -1) if ok else 0
+    order = sorted(pool, key=lambda g: (directed(g) == 0, gene_mode(g, ev) == "capital",
+                                        -abs(evidence.get(g, {}).get("rho", 0)), g))
+    out, moves = [], {}
+    for g in order:
+        lo, hi, step = space[g]
+        delta = max(step, round(ev["step_frac"] * (hi - lo) / step) * step)
+        d = directed(g)
+        for sign in ([d] if d else [1, -1]):
+            if len(out) >= ev["levers"]:
+                break
+            b = base.get(g, lo)
+            v = clamp_gene(space, g, b + sign * delta)
+            if v == b:
+                continue
+            out.append({"name": f"c{len(out) + 1}", "changed": {g: [b, v]},
+                        "why": f"{g} ({gene_mode(g, ev)}) {'up' if v > b else 'down'}: "
+                               + (f"rho {evidence[g]['rho']:+.3f} over {evidence[g]['n']} recorded matches"
+                                  if d else "no recorded direction, both tried")})
+            if d:
+                moves[g] = [b, v]
+    if len(moves) >= 2:
+        out.append({"name": "combo", "changed": dict(moves), "why": "every directed move together"})
+    return out
+
+
+def apply_changes(settings: dict, changed: dict) -> str:
+    return settings_str({**settings, **{g: v for g, (_, v) in changed.items()}})
+
+
+def rival_of(row: dict, reference: str) -> int:
+    return next((s["value"] for s in row.get("standings", []) if s["key"] == reference), 0)
+
+
+def pair_of(seed: int, base: dict, cand: dict, reference: str) -> dict:
+    """One held pair: the candidate against the baseline on one seed. `ours` is the value ratio,
+    `spread` how far the unchanged reference AI moved between the two arms (what the change did to the
+    field, read as the pair's noise), `relative` the change in our ratio to the reference. It favours
+    the candidate only beyond the spread (rule project.a-tuning-claim-needs-held-start-pairs)."""
+    rb, rc = rival_of(base, reference), rival_of(cand, reference)
+    ours = max(1, cand["value"]) / max(1, base["value"])
+    spread = abs(max(1, rc) / max(1, rb) - 1)
+    rel = (max(1, cand["value"]) / max(1, rc)) / (max(1, base["value"]) / max(1, rb))
+    ok = cand["exit_code"] == 0 and cand["errors"] <= base["errors"]
+    return {"seed": seed, "base": base["value"], "cand": cand["value"], "rival_base": rb, "rival_cand": rc,
+            "ours": round(ours, 4), "spread": round(spread, 4), "relative": round(rel, 4),
+            "errors": [base["errors"], cand["errors"]], "favours": ok and ours > 1 + spread}
+
+
+def geo(xs: list[float]) -> float:
+    return round(math.exp(sum(math.log(max(1e-9, x)) for x in xs) / len(xs)), 4) if xs else 0.0
+
+
+def judge(pairs: list[dict], ev: dict) -> tuple[bool, str]:
+    """A candidate is kept when it has min_pairs pairs, every pair favours it beyond the reference's
+    spread, and its geometric mean value ratio reaches min_gain."""
+    if len(pairs) < ev["min_pairs"]:
+        return False, f"{len(pairs)} pair(s), {ev['min_pairs']} needed"
+    lost = [p["seed"] for p in pairs if not p["favours"]]
+    if lost:
+        return False, f"not beyond the reference's spread (or more errors) on seed(s) {', '.join(map(str, lost))}"
+    g = geo([p["ours"] for p in pairs])
+    if g < ev["min_gain"]:
+        return False, f"geometric mean {g:.3f} under min_gain {ev['min_gain']}"
+    return True, f"every pair favours it, geometric mean {g:.3f}"
+
+
+class EvolveGuard:
+    """Owned, bounded and stoppable (rule project.long-runs-are-owned-bounded-and-stoppable): a lock
+    directory with an OWNER file (host, pid, start, commit, how to stop), refused while a live process
+    holds it; before every batch the STOP and PAUSED files of the cache root, the match budget, the
+    wall-clock cap and this machine's load and disk floor (battle.json resource_floor)."""
+
+    def __init__(self, root: Path, budget: int, max_minutes: float, floor: dict, clock=time.time):
+        self.root, self.budget, self.floor, self.clock = root, budget, floor, clock
+        self.deadline = clock() + max_minutes * 60
+        self.used = 0
+        self.lock = root / "evolve" / "lock"
+        self.marker = "evolve:" + owner_marker(socket.gethostname(), os.getpid())
+
+    def acquire(self) -> str | None:
+        self.lock.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.lock.mkdir()
+        except FileExistsError:
+            held = (self.lock / "OWNER").read_text() if (self.lock / "OWNER").is_file() else ""
+            m = re.search(r"^pid=(\d+)$", held, re.M)
+            h = re.search(r"^host=(.*)$", held, re.M)
+            alive = False
+            if m and h and h.group(1) == socket.gethostname():
+                try:
+                    os.kill(int(m.group(1)), 0)
+                    alive = True
+                except (OSError, ValueError):
+                    alive = False
+            if alive or not m:
+                return f"held: {held.strip() or self.lock}"
+            log(f"evolve: taking over the lock of dead pid {m.group(1)}")
+        (self.lock / "OWNER").write_text(
+            f"# battle.py evolve (tools/research/ai-battle/battle.py): headless matches for a settings proposal\n"
+            f"host={socket.gethostname()}\npid={os.getpid()}\nstarted_at={dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')}\n"
+            f"commit={git('rev-parse', 'HEAD')}\nmarker=TTD_BATTLE_ORCHESTRATOR={self.marker}\n"
+            f"how_to_stop=create {self.root}/STOP (no new batch; the running one finishes) or "
+            f"kill -TERM {os.getpid()}\n")
+        return None
+
+    def release(self) -> None:
+        for f in (self.lock / "OWNER",):
+            if f.is_file():
+                f.unlink()
+        if self.lock.is_dir():
+            self.lock.rmdir()
+
+    def admit(self, want: int) -> tuple[int, str]:
+        """How many matches the next batch may start: 0 with the reason when it must not."""
+        why = stop_requested(self.root)
+        if why:
+            return 0, f"STOP: {why}"
+        paused = sorted(self.root.glob("PAUSED*"))
+        if paused:
+            first = (paused[0].read_text(errors="replace").splitlines() or [""])[0].strip()
+            return 0, f"PAUSED: {first or paused[0]}"
+        if self.clock() >= self.deadline:
+            return 0, "wall-clock cap reached"
+        left = self.budget - self.used
+        if left <= 0:
+            return 0, f"match budget {self.budget} spent"
+        try:
+            load = os.getloadavg()[0]
+        except OSError:
+            load = None
+        import shutil
+        free = shutil.disk_usage(self.root).free // 1024
+        n, why = floor_decision(load, os.cpu_count(), free, min(want, left), self.floor)
+        return n, ("" if n else why or "no room")
+
+
+def evolve_batches(run, guard: EvolveGuard, seeds: list[int], variants: list[str],
+                   have: dict | None = None) -> tuple[dict, str]:
+    """{seed: {variant: row}} of every variant on every seed, a batch at a time (each as large as the
+    guard admits), and why it stopped early ("" when complete). `have` holds rows already played:
+    the null-driver match is deterministic, so a baseline played once per seed is not played again."""
+    rows = {s: dict(v) for s, v in (have or {}).items()}
+    for seed in seeds:
+        rows.setdefault(seed, {})
+        todo = [v for v in variants if v.partition("=")[0] not in rows[seed]]
+        while todo:
+            n, why = guard.admit(len(todo))
+            if n <= 0:
+                return rows, why
+            batch, todo = todo[:n], todo[n:]
+            got = run(seed, batch)
+            if got is None:
+                return rows, "NOT RUN: needs build/openttd and a prepared arena cache"
+            guard.used += len(batch)
+            for r in got:
+                rows[seed][r["variant"]] = r
+    return rows, ""
+
+
+def http_json(url: str, body: dict | None = None, timeout: int = 30):
+    """GET (or POST `body`) JSON from a panel; None for a 404."""
+    import urllib.error
+    import urllib.request
+    base = re.match(r"^(https?://[^/]+)", url)
+    req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"content-type": "application/json",
+                                          "origin": base.group(1) if base else url})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
+def shared_value(panel: str, key: str):
+    """A blackboard key's value (GET /api/rhai/shared?key=), None when absent."""
+    d = http_json(f"{panel.rstrip('/')}/api/rhai/shared?key={urllib.parse.quote(key)}")
+    return d.get("value") if isinstance(d, dict) else None
+
+
+def evolve_trigger(a, ev: dict, t_cfg: dict) -> dict:
+    """What set the loop off, read-only: {fired, kind, source, company, why, baseline, gaps, levers}.
+    A live outcome record fires when live_entries judges the company's configuration lost (battle.json
+    tuning.live: under loss_ratio of the reference, or of the game's best PrismaticAI); a panel fires on gap.<company> at level >= trigger.gap_level or an alarm in review.<company>.month;
+    --force fires with --baseline alone. The baseline is --baseline, else the record's start settings,
+    else the running bot's settings (GET /api/bots)."""
+    tr = ev["trigger"]
+    t = {"fired": False, "kind": "manual", "source": "", "company": a.company, "why": "", "baseline": None,
+         "gaps": None, "levers": []}
+    if a.live:
+        rec = json.loads(Path(a.live).read_text())
+        t.update(kind="live", source=rec.get("id", str(a.live)))
+        e = next((e for e in live_entries([rec], t_cfg) if e["company"] == a.company), None)
+        if e is None:
+            t["why"] = f"company {a.company} is not a PrismaticAI company of {t['source']}"
+        else:
+            t.update(baseline=e["settings"], fired=bool(e.get("lost")),
+                     why=("lost: " if e.get("lost") else "not lost: ") + e["why"])
+    elif a.panel:
+        gap = shared_value(a.panel, f"gap.{a.company}")
+        review = shared_value(a.panel, f"review.{a.company}.month")
+        t.update(kind="panel", source=a.panel)
+        why = []
+        if isinstance(gap, dict) and (gap.get("level") or 0) >= tr["gap_level"]:
+            why.append(f"gap.{a.company} level {gap['level']} ({', '.join(sorted(gap.get('flags') or {}))})")
+            t["levers"] = [lv.get("name") for lv in gap.get("levers") or [] if isinstance(lv, dict)]
+        if isinstance(review, dict) and review.get("alarms"):
+            why.append(f"review.{a.company}.month alarms {review['alarms']}")
+            t["gaps"] = trigger_gaps(review)
+        t["fired"] = bool(why)
+        t["why"] = "; ".join(why) or (f"gap.{a.company} level {(gap or {}).get('level', 'absent')}, "
+                                      f"review.{a.company}.month {'without alarms' if review else 'absent'}")
+        if t["fired"] and not a.baseline:
+            bots = http_json(f"{a.panel.rstrip('/')}/api/bots") or {}
+            run = next((b for b in bots.get("running", []) if b.get("id") == a.company), {})
+            t["baseline"] = ",".join(f"{s['name']}={s['value']}" for s in run.get("settings", [])
+                                     if isinstance(s, dict) and "name" in s and "value" in s)
+    if a.force:
+        t["fired"], t["why"] = True, (t["why"] + "; " if t["why"] else "") + "forced (--force)"
+    if a.baseline:
+        t["baseline"] = a.baseline
+    return t
+
+
+def cmd_evolve(cfg: dict, a, run=None, records: list[dict] | None = None, live: list[dict] | None = None) -> int:
+    """The config-evolution loop, once (research/config-evolution-loop.md). Exit 0 when it ran to a
+    verdict or had nothing to do, 10 when another evolve holds the lock, 12 when it could not run a
+    match, 2 on a trigger without a baseline."""
+    ev = evolve_cfg(cfg)
+    # load_config has resolved a configuration's genes already (space and defaults); a raw one is resolved here.
+    tun = cfg.get("tuning") or json.loads(DEFAULT_CONFIG.read_text())["tuning"]
+    t_cfg = tun if "defaults" in tun else live_tuning({"tuning": tun, "prismatic": cfg.get("prismatic", {})})
+    t = evolve_trigger(a, ev, t_cfg)
+    print(f"evolve: trigger {t['kind']} {t['source']}: {t['why']}")
+    if not t["fired"]:
+        print("evolve: no trigger fired; nothing run")
+        return 0
+    if not t["baseline"]:
+        print("evolve: no baseline settings (give --baseline)", file=sys.stderr)
+        return 2
+    base_settings = settings_dict(t["baseline"])
+    base_text = settings_str(base_settings)
+    out_dir = cfg["cache"] / "evolve"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    sig = hashlib.sha256(json.dumps([t["kind"], t["source"], t["company"], base_text], sort_keys=True).encode()).hexdigest()[:16]
+    last_f = out_dir / "last.json"
+    last = json.loads(last_f.read_text()) if last_f.is_file() else {}
+    if not a.force and sig in last and time.time() - last[sig] < ev["cooldown_hours"] * 3600:
+        print(f"evolve: the same trigger ran {(time.time() - last[sig]) / 3600:.1f} h ago "
+              f"(cooldown {ev['cooldown_hours']} h); nothing run")
+        return 0
+    base_genes = live_genes(t_cfg, base_settings)
+    guard = EvolveGuard(cfg["cache"], a.budget or ev["budget"], a.max_minutes or ev["max_minutes"],
+                        cfg.get("resource_floor", {}))
+    held = guard.acquire()
+    if held:
+        print(f"evolve: another evolve runs ({held}); nothing run", file=sys.stderr)
+        return 10
+    binary = Path(a.binary) if a.binary else None
+    run = run or (lambda seed, vs: ablate_rows(cfg, seed, ev["years"], vs, ev["field"], None, ev["slot"],
+                                               binary, guard.marker))
+    try:
+        rec = evolve_once(cfg, ev, t, run, guard, base_settings, base_genes, t_cfg, records, live)
+    finally:
+        guard.release()
+    played = rec.pop("_rows")
+    last[sig] = time.time()
+    last_f.write_text(json.dumps(last, indent=1) + "\n")
+    path = out_dir / f"{rec['id']}.json"
+    path.write_text(json.dumps(rec, indent=1) + "\n")
+    print(f"evolve: {rec['status']}: {rec['verdict']}")
+    print(f"evolve: wrote {path}")
+    if a.write:
+        for seed, rows in played.items():
+            ordered = [rows[n] for n in ["baseline"] + [c["name"] for c in rec["candidates"]] if n in rows]
+            if not ordered or ordered[0]["variant"] != "baseline":
+                continue
+            for r, vs in zip(ordered, ablation_vs_first(ordered)):
+                r["vs_first"] = vs
+            write_ablation(ablation_record(cfg, seed, ev["years"], ev["field"], ev["slot"], ordered))
+    if a.propose:
+        key = f"evolve.proposal.{t['company']}" if rec["status"] == "proposed" else f"evolve.status.{t['company']}"
+        http_json(f"{a.propose.rstrip('/')}/api/rhai/shared", {"key": key, "value": rec, "writer": "evolve"})
+        print(f"evolve: blackboard {key} on {a.propose} (a record; it applies nothing)")
+    return 12 if rec["status"] == "not_run" else 0
+
+
+def evolve_once(cfg: dict, ev: dict, t: dict, run, guard: EvolveGuard, base_settings: dict,
+                base_genes: dict, t_cfg: dict, records: list[dict] | None, live: list[dict] | None) -> dict:
+    """One pass: baseline on the screening seeds, attribution, candidates (a configuration that lost a
+    live game is vetoed, the winner of a paired live comparison joins: live_veto, live_seeds),
+    screening, confirmation; the record (its `_rows` holds every row, for --write)."""
+    space = t_cfg["space"]
+    now = dt.datetime.now(dt.timezone.utc)
+    seeds, confirm = list(ev["seeds"]), list(ev["confirm_seeds"])
+    base_v = f"baseline={settings_str(base_settings)}"
+    rec = {"schema": EVOLVE_SCHEMA, "id": f"evolve-{now.strftime('%Y%m%dT%H%M%S')}-c{t['company']}",
+           "generated_at": now.isoformat(timespec="seconds"), "status": "incomplete", "verdict": "",
+           "lifecycle": EVOLVE_LIFECYCLE, "trigger": {k: v for k, v in t.items() if k != "fired"},
+           "binds": {"company": t["company"], "source": t["source"], "rev": git("rev-parse", "HEAD"),
+                     "baseline": settings_str(base_settings),
+                     "baseline_sha": hashlib.sha256(settings_str(base_settings).encode()).hexdigest(),
+                     "field": ev["field"], "slot": ev["slot"], "years": ev["years"], "reference": ev["reference"],
+                     "seeds": seeds, "confirm_seeds": confirm},
+           "expires_at": (now + dt.timedelta(hours=ev["expiry_hours"])).isoformat(timespec="seconds"),
+           "apply": "never by this loop: the owner (or the executor ADR 0042 names) files it as one "
+                    "set_settings approval; a committed default still needs held-start pairs",
+           "attribution": None, "evidence": {}, "candidates": [], "winner": None, "matches": 0, "_rows": {}}
+    rows, why = evolve_batches(run, guard, seeds, [base_v])
+    rec["_rows"], rec["matches"] = rows, guard.used
+    if why:
+        rec.update(status="not_run" if why.startswith("NOT RUN") else "incomplete", verdict=f"baseline: {why}")
+        return rec
+    per_seed = []
+    for seed in seeds:
+        b = rows[seed]["baseline"]
+        me = next((s for s in b["standings"] if s["key"] == "baseline"), {})
+        rv = next((s for s in b["standings"] if s["key"] == ev["reference"]), {})
+        per_seed.append(mode_gaps(me, rv))
+    headless = sum_gaps(per_seed)
+    gaps = t.get("gaps") or headless
+    modes = attributed_modes(gaps, ev["cover"])
+    rec["attribution"] = {"source": "trigger" if t.get("gaps") else "baseline matches", "modes": modes,
+                          "gaps": gaps, "headless": headless}
+    evidence = lever_evidence(records if records is not None else
+                              [json.loads(f.read_text()) for f in tracked_records(RECORD_GLOB)],
+                              t_cfg, ev["reference"])
+    cands = evolve_candidates(base_genes, space, evidence, modes, ev)
+    live = live_entries(live_records(), t_cfg) if live is None else live
+    tried = [base_genes] + [dict(base_genes, **{g: v for g, (_, v) in c["changed"].items()}) for c in cands]
+    for k, (genes, source) in enumerate(live_seeds(t_cfg, live, tried)):
+        changed = {g: [base_genes[g], v] for g, v in genes.items() if v != base_genes[g]}
+        if changed:
+            cands.append({"name": f"live{k + 1}", "changed": changed,
+                          "why": f"won a paired live comparison ({source}); the arena measures it"})
+    rec["vetoed"] = []
+    for c in list(cands):
+        veto = live_veto(t_cfg, dict(base_genes, **{g: v for g, (_, v) in c["changed"].items()}), live)
+        if veto:
+            cands.remove(c)
+            rec["vetoed"].append({"name": c["name"], "changed": c["changed"],
+                                  "by": f"{veto['record']}:{veto['company']}", "why": veto["why"]})
+    # The budget holds every candidate on every screening seed and two confirmation arms per seed.
+    room = (guard.budget - guard.used - 2 * len(confirm)) // max(1, len(seeds))
+    cands = cands[:max(0, room)]
+    rec["evidence"] = {g: dict(evidence[g], mode=gene_mode(g, ev)) for g in space
+                       if gene_mode(g, ev) in set(modes) | {"capital"}}
+    rec["candidates"] = [dict(c, settings=apply_changes(base_settings, c["changed"])) for c in cands]
+    if not cands:
+        rec.update(status="inconclusive", verdict=f"no candidate for modes {modes} within the budget")
+        return rec
+    rows, why = evolve_batches(run, guard, seeds, [f"{c['name']}={c['settings']}" for c in rec["candidates"]], rows)
+    rec["_rows"], rec["matches"] = rows, guard.used
+    for c in rec["candidates"]:
+        c["pairs"] = [pair_of(s, rows[s]["baseline"], rows[s][c["name"]], ev["reference"])
+                      for s in seeds if c["name"] in rows[s]]
+        c["kept"], c["judged"] = judge(c["pairs"], ev)
+        c["relative"] = geo([p["relative"] for p in c["pairs"]])
+    if why:
+        rec.update(status="incomplete", verdict=f"screening: {why}")
+        return rec
+    kept = sorted((c for c in rec["candidates"] if c["kept"]), key=lambda c: -c["relative"])
+    if not kept:
+        rec.update(status="inconclusive", verdict="no candidate favoured on every screening seed: "
+                   + "; ".join(f"{c['name']} {c['judged']}" for c in rec["candidates"]))
+        return rec
+    best = kept[0]
+    rows, why = evolve_batches(run, guard, confirm, [base_v, f"{best['name']}={best['settings']}"], rows)
+    rec["_rows"], rec["matches"] = rows, guard.used
+    best["confirm"] = [pair_of(s, rows[s]["baseline"], rows[s][best["name"]], ev["reference"])
+                       for s in confirm if best["name"] in rows.get(s, {})]
+    ok, judged = judge(best["confirm"], ev)
+    if why:
+        rec.update(status="incomplete", verdict=f"confirmation of {best['name']}: {why}")
+    elif not ok:
+        rec.update(status="inconclusive", verdict=f"{best['name']} won the screening but not the "
+                                                   f"confirmation seeds: {judged}")
+    else:
+        rec["winner"] = {"name": best["name"], "settings": best["settings"], "changed": best["changed"],
+                         "screening": best["judged"], "confirmation": judged,
+                         "relative": geo([p["relative"] for p in best["pairs"] + best["confirm"]])}
+        rec.update(status="proposed", verdict=f"{best['name']} ({', '.join(f'{g} {a}->{b}' for g, (a, b) in best['changed'].items())}): "
+                                              f"{judged} on the confirmation seeds")
+    rec["proposal_sha"] = hashlib.sha256(json.dumps({k: rec[k] for k in ("binds", "winner", "expires_at")},
+                                                    sort_keys=True).encode()).hexdigest()
+    return rec
 
 
 def cmd_status(cfg: dict) -> None:
@@ -3328,11 +4509,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("command", choices=["discover", "fetch", "prepare", "probe", "run", "status",
                                         "report", "render", "check", "fitness", "ablate", "reap", "power",
-                                        "replay"])
+                                        "live-export", "live-settings", "replay", "evolve"])
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--allow-dirty", action="store_true",
                     help="prepare: export uncommitted PrismaticAI/referee (records are refused)")
+    ap.add_argument("--referee-only", action="store_true",
+                    help="prepare: replace only the arena's referee with the repository's "
+                         "(battle.json referee.rev, default HEAD); PrismaticAI and the AIs stay")
     ap.add_argument("--check", action="store_true", help="report: only check, write nothing")
     ap.add_argument("--seed", type=int, help="ablate: the map seed (default 930967890; with "
                                                    "--live-like the live game's, battle.json live_like.seed)")
@@ -3341,7 +4525,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--variant", action="append", default=[],
                     help='ablate: "name=setting=v,setting=v" (the first is the baseline), repeatable')
     ap.add_argument("--field", default="AAAHogEx,AdmiralAI", help="ablate: comma-separated opponents")
-    ap.add_argument("--write", action="store_true", help="ablate: record under research/results/")
+    ap.add_argument("--write", action="store_true", help="ablate: record under research/results/; live-settings: write live-start.json")
     ap.add_argument("--slot", type=int, default=0,
                     help="ablate: PrismaticAI's place in the start order (its company id), as in the arena")
     ap.add_argument("--lineup", type=Path,
@@ -3357,13 +4541,27 @@ def main(argv: list[str] | None = None) -> int:
                          "rivals, PrismaticAI's slot, seed and arms (unless --variant names others)")
     ap.add_argument("--save", help="replay: the live save to load (default battle.json replay.save)")
     ap.add_argument("--rev", help="replay: PrismaticAI at this commit instead of the working tree")
-    ap.add_argument("--binary", help="replay: the OpenTTD binary (default build/openttd)")
+    ap.add_argument("--binary", help="replay, evolve: the OpenTTD binary (default build/openttd)")
     ap.add_argument("--edition", help="report: a past edition (its arena bundle must still be the "
                                       "prepared one, for its provenance)")
     ap.add_argument("--margin", type=float, default=1.10, help="power: the non-inferiority margin, a value ratio")
     ap.add_argument("--alpha", type=float, default=0.05, help="power: the one-sided significance level")
     ap.add_argument("--power", type=float, default=0.80, help="power: the power at no true difference")
+    ap.add_argument("--game-seed", type=int, help="live-export: the map seed of the live game")
+    ap.add_argument("--panel", help="live-export: the panel to read, e.g. http://127.0.0.1:8800 (read-only SQL); evolve: the panel whose blackboard\n(gap.<company>, review.<company>.month) is the trigger, read only")
+    ap.add_argument("--db", type=Path, help="live-export: a copy of the panel's DuckDB store (never the live file)")
+    ap.add_argument("--live", help="evolve: a live outcome record (research/results/live-*.json) as the trigger")
+    ap.add_argument("--company", type=int, default=0, help="evolve: the company the trigger is about")
+    ap.add_argument("--baseline", help="evolve: the baseline settings (else the trigger's)")
+    ap.add_argument("--force", action="store_true", help="evolve: run without a fired trigger and past the cooldown")
+    ap.add_argument("--budget", type=int, help="evolve: at most this many matches (battle.json evolve.budget)")
+    ap.add_argument("--max-minutes", type=float, help="evolve: wall-clock cap (battle.json evolve.max_minutes)")
+    ap.add_argument("--propose", help="evolve: a panel to write the proposal to as a blackboard key")
     a = ap.parse_args(argv)
+    if a.command == "live-export":
+        return cmd_live_export(a.game_seed, a.panel, a.db)
+    if a.command == "live-settings":
+        return cmd_live_settings(a.write)
     if a.command == "power":
         return cmd_power(a.margin, a.alpha, a.power)
     if a.command == "check":
@@ -3375,6 +4573,12 @@ def main(argv: list[str] | None = None) -> int:
         cmd_discover(cfg)
     elif a.command == "fetch":
         cmd_fetch(cfg)
+    elif a.command == "prepare" and a.referee_only:
+        try:
+            log(refresh_referee(cfg) or "arena referee is already the repository's")
+        except RuntimeError as exc:
+            log(f"refusing: {exc}")
+            return 10
     elif a.command == "prepare":
         cmd_prepare(cfg, a.allow_dirty)
     elif a.command == "probe":
@@ -3386,6 +4590,7 @@ def main(argv: list[str] | None = None) -> int:
             if h.res.get("unparsed"):
                 print(f"{'':10} probe figures not understood: {'; '.join(h.res['unparsed'])}")
     elif a.command == "run":
+        follow_referee(cfg)
         Orchestrator(cfg).run(a.port)
     elif a.command == "status":
         cmd_status(cfg)
@@ -3397,6 +4602,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_replay(cfg, a.save, a.years, a.rev, a.binary, a.log_dir)
     elif a.command == "reap":
         Orchestrator(cfg).reap()
+    elif a.command == "evolve":
+        return cmd_evolve(cfg, a)
     elif a.command == "ablate":
         field, slot, variants = a.field.split(","), a.slot, list(a.variant)
         seed, years = (930967890 if a.seed is None else a.seed), (6 if a.years is None else a.years)

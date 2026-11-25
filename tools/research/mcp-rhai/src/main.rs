@@ -82,6 +82,8 @@ mod graph;
 mod plan;
 pub mod mesh_records;
 mod prismatic;
+#[cfg(test)]
+mod gap_watch_tests;
 
 use rhai::{Dynamic, Engine, EvalAltResult, Map};
 use serde_json::{json, Value};
@@ -106,15 +108,26 @@ fn set_http_timeout(seconds: i64) -> i64 {
     HTTP_TIMEOUT.with(|t| t.replace(seconds.clamp(1, 3600) as u64)) as i64
 }
 
+/// The header a panel's own script sends its run token in (panel.rs RUN_TOKEN_HEADER): it names the
+/// caller as the stack's own, and never grants an owner's route.
+pub(crate) const RUN_TOKEN_HEADER: &str = "X-Panel-Token";
+
 #[derive(Clone)]
 struct Panel {
     base: String,
+    /// The panel's run token (`--panel-token-file`, or the panel's own for its in-process scripts).
+    token: Option<String>,
 }
 
 impl Panel {
+    /// A request to the panel, with the run token when the script holds one.
+    fn request(&self, method: &str, path: &str) -> ureq::Request {
+        let r = ureq::request(method, &format!("{}{}", self.base, path)).timeout(http_timeout());
+        match &self.token { Some(t) => r.set(RUN_TOKEN_HEADER, t), None => r }
+    }
+
     fn get(&self, path: &str) -> R<Dynamic> {
-        let v: Value = ureq::get(&format!("{}{}", self.base, path))
-            .timeout(http_timeout())
+        let v: Value = self.request("GET", path)
             .call()
             .map_err(|e| format!("GET {path}: {e}"))?
             .into_json()
@@ -123,9 +136,7 @@ impl Panel {
     }
 
     fn post(&self, path: &str, body: Value) -> R<Dynamic> {
-        let resp = ureq::post(&format!("{}{}", self.base, path))
-            .timeout(http_timeout())
-            .send_json(body);
+        let resp = self.request("POST", path).send_json(body);
         let v: Value = match resp {
             Ok(r) => r.into_json().map_err(|e| format!("POST {path}: {e}"))?,
             Err(ureq::Error::Status(code, r)) => {
@@ -449,15 +460,24 @@ fn derive(e: &mut Engine, panel: &Panel) -> (Vec<String>, Vec<String>) {
             None => to_dyn(v),
         }
     };
-    if let Ok(cat) = panel.get("/api/catalogue").and_then(from_dyn) {
-        for t in cat.pointer("/tools/result/tools").and_then(Value::as_array).into_iter().flatten() {
-            let Some(name) = t.get("name").and_then(Value::as_str) else { continue };
-            let (p1, n1) = (panel.clone(), name.to_string());
-            e.register_fn(ident(name), move |args: Map| -> R<Dynamic> { call(&p1, &n1, from_dyn(Dynamic::from_map(args))?) });
-            let (p0, n0) = (panel.clone(), name.to_string());
-            e.register_fn(ident(name), move || -> R<Dynamic> { call(&p0, &n0, json!({})) });
-            tools.push(ident(name));
-        }
+    // A game the panel runs may not answer yet (a service started right after the panel came up):
+    // wait for it rather than run without its functions. No game: nothing to wait for.
+    let wait = match panel.get("/api/status").and_then(from_dyn) {
+        Ok(Value::Object(st)) if st.get("server_running").and_then(Value::as_bool) == Some(true) => derive_wait(),
+        _ => Duration::ZERO,
+    };
+    let names = until_listed("the game's MCP tools", wait, || {
+        panel.get("/api/catalogue").and_then(from_dyn).ok().map(|cat: Value| {
+            cat.pointer("/tools/result/tools").and_then(Value::as_array).into_iter().flatten()
+                .filter_map(|t| t.get("name").and_then(Value::as_str).map(str::to_string)).collect()
+        }).unwrap_or_default()
+    });
+    for name in names {
+        let (p1, n1) = (panel.clone(), name.clone());
+        e.register_fn(ident(&name), move |args: Map| -> R<Dynamic> { call(&p1, &n1, from_dyn(Dynamic::from_map(args))?) });
+        let (p0, n0) = (panel.clone(), name.clone());
+        e.register_fn(ident(&name), move || -> R<Dynamic> { call(&p0, &n0, json!({})) });
+        tools.push(ident(&name));
     }
     // One function per operation of the panel's own OpenAPI document (api_<operationId>): every
     // route the panel declares, and every route it derives from the catalogue, is callable here.
@@ -484,21 +504,48 @@ fn derive(e: &mut Engine, panel: &Panel) -> (Vec<String>, Vec<String>) {
         }
     }
     let mut commands = Vec::new();
-    if let Ok(out) = panel.post("/api/console", json!({"command": "list_cmds", "wait": 1.0})).and_then(from_dyn) {
-        for line in out.get("output").and_then(Value::as_array).into_iter().flatten() {
-            let Some(cmd) = line.as_str().map(str::trim) else { continue };
-            if cmd.is_empty() || !cmd.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
-                continue;
-            }
-            let fname = format!("con_{}", ident(cmd));
-            let (p0, c0) = (panel.clone(), cmd.to_string());
-            e.register_fn(fname.clone(), move || -> R<Dynamic> { console_lines(&p0, &c0) });
-            let (p1, c1) = (panel.clone(), cmd.to_string());
-            e.register_fn(fname.clone(), move |args: &str| -> R<Dynamic> { console_lines(&p1, &format!("{c1} {args}")) });
-            commands.push(fname);
-        }
+    let cmds = until_listed("the game's console commands", wait, || {
+        panel.post("/api/console", json!({"command": "list_cmds", "wait": 1.0})).and_then(from_dyn).ok().map(|out: Value| {
+            out.get("output").and_then(Value::as_array).into_iter().flatten()
+                .filter_map(|l| l.as_str().map(str::trim))
+                .filter(|c| !c.is_empty() && c.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+                .map(str::to_string).collect()
+        }).unwrap_or_default()
+    });
+    for cmd in cmds {
+        let fname = format!("con_{}", ident(&cmd));
+        let (p0, c0) = (panel.clone(), cmd.clone());
+        e.register_fn(fname.clone(), move || -> R<Dynamic> { console_lines(&p0, &c0) });
+        let (p1, c1) = (panel.clone(), cmd.clone());
+        e.register_fn(fname.clone(), move |args: &str| -> R<Dynamic> { console_lines(&p1, &format!("{c1} {args}")) });
+        commands.push(fname);
     }
     (tools, commands)
+}
+
+/// How long derive() waits for a running game to answer (its MCP tools, list_cmds) before the
+/// script starts without those functions: $PRISMATIC_RHAI_DERIVE_WAIT_S, default 60 s. A service
+/// the panel started right after it came up used to run with no con_* at all ("Function not
+/// found" on con_say until it was restarted).
+fn derive_wait() -> Duration {
+    Duration::from_secs(std::env::var("PRISMATIC_RHAI_DERIVE_WAIT_S").ok().and_then(|v| v.parse().ok()).unwrap_or(60))
+}
+
+/// `fetch` again every 2 s until it lists something or `wait` has passed; the last list (empty
+/// when nothing answered, said on stderr, since the script then lacks `what`).
+fn until_listed<T>(what: &str, wait: Duration, mut fetch: impl FnMut() -> Vec<T>) -> Vec<T> {
+    let start = std::time::Instant::now();
+    loop {
+        let got = fetch();
+        let left = wait.saturating_sub(start.elapsed());
+        if !got.is_empty() || left.is_zero() {
+            if got.is_empty() && !wait.is_zero() {
+                eprintln!("mcp-rhai: {what}: none listed within {} s; the script runs without them", wait.as_secs());
+            }
+            return got;
+        }
+        std::thread::sleep(left.min(Duration::from_secs(2)));
+    }
 }
 
 fn console_lines(panel: &Panel, command: &str) -> R<Dynamic> {
@@ -556,7 +603,12 @@ pub(crate) fn rhai_dir() -> std::path::PathBuf {
 /// (and from the hub, when given), and `import` resolved against MCP_RHAI_PATH, else the panel's
 /// rhai/ library. mcp-rhai runs one script in it; mcp-panel runs /api/rhai scripts in it in process.
 pub(crate) fn host(base: &str, hub: Option<&str>) -> Engine {
-    let panel = Panel { base: base.trim_end_matches('/').to_string() };
+    host_as(base, hub, None)
+}
+
+/// [`host`] for a script that holds the panel's run `token` ([`RUN_TOKEN_HEADER`] on every call).
+pub(crate) fn host_as(base: &str, hub: Option<&str>, token: Option<String>) -> Engine {
+    let panel = Panel { base: base.trim_end_matches('/').to_string(), token };
     let mut engine = engine(panel.clone());
     engine.set_module_resolver(rhai::module_resolvers::FileModuleResolver::new_with_path(rhai_dir()));
     let (mut tools, commands) = derive(&mut engine, &panel);
@@ -575,10 +627,38 @@ pub(crate) fn host(base: &str, hub: Option<&str>) -> Engine {
     engine
 }
 
+/// A token or secret kept in a file only its owner reads: the trimmed text of `path`. Err for a file
+/// that cannot be read, is empty, or that its group or others may read (a secret must not be).
+pub(crate) fn read_secret_file(path: &str) -> Result<String, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).map_err(|e| format!("{path}: {e}"))?.permissions().mode();
+    if mode & 0o077 != 0 {
+        return Err(format!("{path} is readable beyond its owner (mode {:o}): chmod 600 {path}", mode & 0o777));
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let token = text.trim();
+    if token.is_empty() { return Err(format!("{path} is empty")); }
+    Ok(token.to_string())
+}
+
+/// `--panel-token-file FILE` taken out of `args`: the run token in FILE (never on the command line
+/// itself, where a process list would show it), None without the flag.
+fn take_token_file(args: &mut Vec<String>) -> Result<Option<String>, String> {
+    let Some(i) = args.iter().position(|a| a == "--panel-token-file") else { return Ok(None) };
+    if i + 1 >= args.len() { return Err("--panel-token-file needs a file".into()); }
+    let file = args.remove(i + 1);
+    args.remove(i);
+    read_secret_file(&file).map(Some)
+}
+
 fn main() {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
+    let token = take_token_file(&mut args).unwrap_or_else(|e| {
+        eprintln!("mcp-rhai: {e}");
+        std::process::exit(2);
+    });
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("usage: mcp-rhai [--panel URL] [--hub URL] (<script.rhai> | -e '<script>')");
+        println!("usage: mcp-rhai [--panel URL] [--panel-token-file FILE] [--hub URL] (<script.rhai> | -e '<script>')");
         return;
     }
     let mut base = "http://127.0.0.1:8800".to_string();
@@ -609,11 +689,11 @@ fn main() {
             }
         },
         _ => {
-            eprintln!("usage: mcp-rhai [--panel URL] [--hub URL] (<script.rhai> | -e '<script>')");
+            eprintln!("usage: mcp-rhai [--panel URL] [--panel-token-file FILE] [--hub URL] (<script.rhai> | -e '<script>')");
             std::process::exit(2);
         }
     };
-    let engine = host(&base, hub.as_deref());
+    let engine = host_as(&base, hub.as_deref(), token);
     match engine.eval::<Dynamic>(&script) {
         Ok(v) if !v.is_unit() => println!("{v}"),
         Ok(_) => {}
@@ -630,10 +710,43 @@ mod capital_watch_tests;
 
 #[cfg(test)]
 mod tests {
+    /// A file holding `text` with `mode`, in a fresh directory of this test.
+    fn token_file(name: &str, text: &str, mode: u32) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mcp-rhai-token-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("token");
+        std::fs::write(&f, text).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(mode)).unwrap();
+        f.display().to_string()
+    }
+
+    #[test]
+    fn the_run_token_comes_from_a_file_only_its_owner_reads() {
+        let ok = token_file("ok", "  t0ken\n", 0o600);
+        assert_eq!(super::read_secret_file(&ok).unwrap(), "t0ken");
+        let wide = token_file("wide", "t0ken", 0o640);
+        assert!(super::read_secret_file(&wide).unwrap_err().contains("chmod 600"));
+        let empty = token_file("empty", " \n", 0o600);
+        assert!(super::read_secret_file(&empty).unwrap_err().contains("is empty"));
+        assert!(super::read_secret_file("/nonexistent/token").is_err());
+        let mut args: Vec<String> = ["--panel", "http://x", "--panel-token-file", ok.as_str(), "s.rhai"].map(String::from).to_vec();
+        assert_eq!(super::take_token_file(&mut args).unwrap().as_deref(), Some("t0ken"));
+        assert_eq!(args, ["--panel", "http://x", "s.rhai"], "the flag and its file are taken out");
+        assert_eq!(super::take_token_file(&mut args).unwrap(), None, "no flag, no token");
+        let mut bare = vec!["--panel-token-file".to_string()];
+        assert!(super::take_token_file(&mut bare).is_err());
+        let p = super::Panel { base: "http://127.0.0.1:9".into(), token: Some("t0ken".into()) };
+        assert_eq!(p.request("GET", "/api/status").header(super::RUN_TOKEN_HEADER), Some("t0ken"));
+        let p = super::Panel { base: "http://127.0.0.1:9".into(), token: None };
+        assert_eq!(p.request("GET", "/api/status").header(super::RUN_TOKEN_HEADER), None);
+    }
+
     #[test]
     fn a_script_cannot_approve_or_switch_auto_approve_on() {
         // Port 9 (discard) answers nothing: a refusal that needed the panel would be a connection error.
-        let e = super::engine(super::Panel { base: "http://127.0.0.1:9".into() });
+        let e = super::engine(super::Panel { base: "http://127.0.0.1:9".into(), token: None });
         for call in ["approve(7)", "auto_approve(true)"] {
             let err = e.eval::<rhai::Dynamic>(call).unwrap_err().to_string();
             assert!(err.contains("approval is the owner's") && err.contains("prismatic_mcp approve"), "{call}: {err}");
@@ -1063,7 +1176,7 @@ mod tests {
         }
         let golden: Value = serde_json::from_str(&std::fs::read_to_string(
             concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-human/golden/human-pointing.v1.json")).unwrap()).unwrap();
-        let e = engine(Panel { base: "http://127.0.0.1:9".into() });
+        let e = engine(Panel { base: "http://127.0.0.1:9".into(), token: None });
         for c in golden["cases"].as_array().unwrap().iter().take(3) {
             let script = format!("kernel(\"human-pointing\", #{{from: {}, to: {}, width: {:.1}, seed: {}, drag: {}}})",
                 c["from"], c["to"], c["width"].as_f64().unwrap(), c["seed"], c["drag"]);
@@ -1077,7 +1190,7 @@ mod tests {
     /// (the refusal names the install), so the test never boots npm.
     #[test]
     fn a_script_runs_a_native_algoglyph_kernel_in_process() {
-        let e = engine(Panel { base: "http://127.0.0.1:9".into() });
+        let e = engine(Panel { base: "http://127.0.0.1:9".into(), token: None });
         let id = algoglyph::native::entries(&serde_json::json!([]))[0]["id"].as_str().unwrap().to_string();
         let got = from_dyn(e.eval::<Dynamic>(&format!("kernel(\"{id}\", #{{keys: [3, 1, 2]}})")).unwrap()).unwrap();
         assert_eq!(got["outcome"], "sorted", "{got}");
@@ -1152,6 +1265,8 @@ mod tests {
                 "openttd://depots" => super::to_dyn(w["depots"].clone()),
                 "openttd://map/ways" => super::to_dyn(w["ways"].clone()),
                 "openttd://map" => super::to_dyn(w["map"].clone()),
+                // The owner co-plays company 0 as the registered approver (ttd::owner_company()).
+                "openttd://approvals" => super::to_dyn(json!({"data": {"approver_companies": [{"company": 0, "client_id": 2}]}})),
                 other => Err(format!("unexpected read {other}").into()),
             }
         });
@@ -1269,6 +1384,7 @@ mod tests {
             match uri {
                 "openttd://game/state" => super::to_dyn(json!({"game_tick": tick, "game_date": format!("1951-01-{:02}", n + 1)})),
                 "openttd://stations" => super::to_dyn(json!({"data": {"stations": [{"owner": 0}, {"owner": 0}, {"owner": 1}]}})),
+                "openttd://approvals" => super::to_dyn(json!({"data": {"approver_companies": [{"company": 0, "client_id": 2}]}})),
                 "openttd://companies" => super::to_dyn(json!({"data": {"companies": [
                     {"id": 0, "name": "Owner Co", "money": 9000, "fleet": {"train": 1, "road": 25, "ship": 0, "aircraft": 6}},
                     {"id": 1, "name": "Rival", "money": 90000, "fleet": {"train": 0, "road": 10 + n, "ship": 0, "aircraft": 0}}]}})),
@@ -1296,9 +1412,17 @@ mod tests {
         });
         let t = said.clone();
         e.register_fn("con_say", move |text: &str| { t.lock().unwrap().push(text.to_string()); });
+        let printed = Arc::new(Mutex::new(Vec::<String>::new()));
+        let p = printed.clone();
+        e.on_print(move |s| p.lock().unwrap().push(s.to_string()));
         let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai/watchdog.rhai")).unwrap();
         e.run(&script).unwrap();
 
+        // A line every round: the heartbeat its `// stall:` declaration needs, and what it found.
+        let printed = printed.lock().unwrap();
+        assert_eq!(printed.len(), 6, "the start line and one per round: {printed:?}");
+        assert_eq!(printed[1], "watchdog 1951-01-01: threshold 7 day(s), stalled: none");
+        assert_eq!(printed[5], "watchdog 1951-01-05: threshold 7 day(s), stalled: Owner Co (40 d)");
         assert_eq!(*looks.lock().unwrap(), 4, "five rounds, a sleep between each");
         let shared = shared.lock().unwrap();
         let w0 = &shared["watchdog.0"];
@@ -1318,6 +1442,59 @@ mod tests {
         let said = said.lock().unwrap();
         assert_eq!(said.len(), 1, "the owner's company is told once per stall: {said:?}");
         assert!(said[0].starts_with("\"[watchdog] Owner Co: nothing built or bought for 10 game day(s) (threshold 7): 1 approval(s) wait"), "{}", said[0]);
+    }
+
+    /// derive()'s wait for a game that does not answer yet: it asks again until something is
+    /// listed, gives up after the wait with what it last got, and never waits without a game.
+    #[test]
+    fn until_listed_asks_again_until_the_game_answers_and_gives_up_after_the_wait() {
+        use std::time::Duration;
+        let mut n = 0;
+        let got = super::until_listed("x", Duration::from_secs(30), || { n += 1; if n < 3 { vec![] } else { vec!["con_say"] } });
+        assert_eq!((got, n), (vec!["con_say"], 3), "the third answer lists it");
+        let mut m = 0;
+        let start = std::time::Instant::now();
+        let none: Vec<&str> = super::until_listed("x", Duration::from_millis(300), || { m += 1; vec![] });
+        assert!(none.is_empty() && m >= 2 && start.elapsed() < Duration::from_secs(2), "asked {m} times, then gave up");
+        let mut k = 0;
+        let _: Vec<&str> = super::until_listed("x", Duration::ZERO, || { k += 1; vec![] });
+        assert_eq!(k, 1, "no game: asked once");
+    }
+
+    /// ttd::owner_company(), the one source of the owner's company every service asks: the
+    /// $OWNER_COMPANY override, else where a registered approver plays (openttd://approvals), else
+    /// the first company the panel's AI runs, else (); a failed source is skipped, never fatal, and
+    /// a script-defined function reaches it through the global import.
+    #[test]
+    fn owner_company_is_derived_from_the_override_the_approver_seat_or_the_panel_ai() {
+        use serde_json::{json, Value};
+        use std::sync::{Arc, Mutex};
+        let case = |over: &str, approvals: Option<Value>, ai: &str, running: Value| -> rhai::Dynamic {
+            let mut e = lib_engine();
+            let over = over.to_string();
+            e.register_fn("env", move |name: &str| -> String { if name == "OWNER_COMPANY" { over.clone() } else { String::new() } });
+            let a = Arc::new(Mutex::new(approvals));
+            e.register_fn("read", move |uri: &str| -> super::R<rhai::Dynamic> {
+                match (uri, a.lock().unwrap().clone()) {
+                    ("openttd://approvals", Some(v)) => super::to_dyn(v),
+                    _ => Err(format!("unexpected read {uri}").into()),
+                }
+            });
+            let ai = ai.to_string();
+            e.register_fn("status", move || -> super::R<rhai::Dynamic> { super::to_dyn(json!({"ai": ai.clone()})) });
+            let r = Arc::new(Mutex::new(running));
+            e.register_fn("api_bots", move || -> super::R<rhai::Dynamic> { super::to_dyn(json!({"running": r.lock().unwrap().clone()})) });
+            e.eval::<rhai::Dynamic>("import \"ttd\" as ttd; fn owner() { ttd::owner_company() } owner()").unwrap()
+        };
+        let seat = |c: Value| Some(json!({"data": {"approver_companies": [{"company": c, "client_id": 2}, {"company": 6, "client_id": 3}]}}));
+        let bots = json!([{"id": 4, "ai": "AAAHogEx"}, {"id": 2.0, "ai": "PrismaticAI"}]);
+        assert_eq!(case("5", seat(json!(1)), "PrismaticAI", bots.clone()).as_int().unwrap(), 5, "the override wins");
+        assert_eq!(case("", seat(json!(1)), "PrismaticAI", bots.clone()).as_int().unwrap(), 1, "then the approver's seat, the first one");
+        assert_eq!(case("", seat(json!(3.0)), "", json!([])).as_int().unwrap(), 3, "a float id is an integer");
+        assert_eq!(case("", Some(json!({"data": {"approver_companies": []}})), "PrismaticAI", bots.clone()).as_int().unwrap(), 2,
+                   "no approver plays: the panel's AI, not another bot");
+        assert_eq!(case("", None, "", bots.clone()).as_int().unwrap(), 4, "approvals unreadable, no AI named: the first running bot");
+        assert!(case("", None, "PrismaticAI", json!([])).is_unit(), "nothing known: ()");
     }
 
     /// The threshold follows the data: the start value until MIN_GAPS quiet times, then 1.5 times

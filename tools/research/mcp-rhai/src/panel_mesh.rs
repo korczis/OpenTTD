@@ -113,15 +113,30 @@ fn note(line: String) {
 }
 
 /// Mirror one plan event when configured, on its own thread; its line waits in `take_lines`.
-/// The thread's handle, or None when nothing is mirrored.
-pub fn mirror(kind: &str, seq: u64, data: &Value, instance: &str) -> Option<std::thread::JoinHandle<()>> {
+/// The thread's handle, or None when nothing is mirrored. The thread also returns its line, so a
+/// caller that joins it reads its own line even when another drained the shared buffer first
+/// (`Game::plan` takes every waiting line on each plan event, from any thread).
+pub fn mirror(kind: &str, seq: u64, data: &Value, instance: &str) -> Option<std::thread::JoinHandle<Option<String>>> {
     if !configured() || record_of(kind, seq, data, instance, "", None).is_none() { return None; }
     let (kind, data, instance) = (kind.to_string(), data.clone(), instance.to_string());
     let at = utc_now();
-    Some(std::thread::spawn(move || match Client::from_env() {
-        Ok(c) => { if let Some(line) = write(&c, &kind, seq, &data, &instance, &at) { note(line); } }
-        Err(e) => note(format!("{kind} {seq} not mirrored to the mesh: {e}")),
+    Some(std::thread::spawn(move || {
+        let line = match Client::from_env() {
+            Ok(c) => write(&c, &kind, seq, &data, &instance, &at),
+            Err(e) => Some(format!("{kind} {seq} not mirrored to the mesh: {e}")),
+        };
+        if let Some(l) = &line { note(l.clone()); }
+        line
     }))
+}
+
+/// One lock for every test that changes MAJORDOMUS_URL or MAJORDOMUS_SESSION: the environment is
+/// the process's, and the tests of this binary run on parallel threads (panel_mesh_page reads the
+/// same variable). A test that failed holding it leaves it poisoned; the next one takes it anyway.
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static ENV: Mutex<()> = Mutex::new(());
+    ENV.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[cfg(test)]
@@ -196,8 +211,7 @@ mod tests {
 
     #[test]
     fn mirroring_is_off_unless_both_variables_are_set() {
-        let _e = ENV.lock().unwrap();
-        take_lines();
+        let _e = test_env_lock();
         std::env::remove_var("MAJORDOMUS_URL");
         std::env::set_var("MAJORDOMUS_SESSION", "s");
         assert!(!configured());
@@ -205,13 +219,12 @@ mod tests {
         std::env::set_var("MAJORDOMUS_URL", "http://10.1.2.3:9");
         assert!(configured());
         assert!(mirror("plan.portfolio", 2, &json!({}), "p").is_none(), "a kind not mirrored starts nothing");
-        mirror("plan.directive", 3, &directive("applied"), "p").unwrap().join().unwrap();
-        let got = take_lines();
-        assert!(got.len() == 1 && got[0].contains("not mirrored") && got[0].contains("not a loopback"), "{got:?}");
-        assert!(take_lines().is_empty(), "taken once");
+        // the thread's own line: the shared buffer is drained by every panel test that publishes a plan
+        let got = mirror("plan.directive", 3, &directive("applied"), "p").unwrap().join().unwrap();
+        let got = got.expect("a line about the refused mirror");
+        assert!(got.contains("not mirrored") && got.contains("not a loopback"), "{got}");
         std::env::remove_var("MAJORDOMUS_URL");
         std::env::remove_var("MAJORDOMUS_SESSION");
     }
 
-    static ENV: Mutex<()> = Mutex::new(());
 }

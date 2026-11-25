@@ -25,4 +25,18 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
-updated_at: '2026-11-22'
+updated_at: 2026-11-25T06:28:12Z
+started_at: 2026-11-25T06:26:41Z
+started_event: sha256:578df1bc0a8950e7466557dbc4827c823d18b551d41c0df94d18ca2e15ff44b2
+verified_at: 2026-11-25T06:27:13Z
+verified_event: sha256:cd0d5f605700595c43ff46dec0b179e6e30166af528b76577ed2166dcaae77a8
+completed_at: 2026-11-25T06:28:12Z
+completed_event: sha256:231cf9ae990bf18e30855a9f574fab0f1b82f117181a27faa9b2465fff66568f
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "tools/surfaces/surfaces check (runs tools/surfaces/maturity.py); python3 -B -m unittest tools/surfaces/test_maturity.py; tools/knowledge/refs check --pathspec ':(glob).ai/repo/features/*.md' --strict-lines; majordomus product validate; majordomus doctor"
+    result: "Delivered by PR #301 (f50322d30a: maturity levels in .ai/repo/features/README.md, a Maturity section per record, tools/surfaces/maturity.py enforced by surfaces check) and its follow-up doc/feature-records-current-state: battle-postmortem's unit tests gated in CI's Research Rust tests and the record promoted to stable; the MCP server, event bus and store, LAN battle and bridge bodies brought to master's current state. On f50322d30a plus the follow-up: test_maturity OK, surfaces check 912 documents 0 findings, refs strict-lines 101 references 0 failures, product validate 0 errors. Superseded PR #298."
+    artifact: "https://github.com/korczis/OpenTTD/pull/301"
+    commit: f50322d30a030f1e857736bfb33b569165f722c3
+    recorded_at: 2026-11-25T06:27:44Z

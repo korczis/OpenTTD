@@ -1,0 +1,27 @@
+id: I0276
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "outcome.<company> is a contract key: gap_watch and the digest read it, and its verdict is a flag"
+slug: outcome-in-the-contract
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: M (fix/planner-outcome-feedback), O (digest SIGNALS), J (flag). Name outcome.<company> in the digest's signals (not planner_mismatch) and in gap_watch's reads; a mismatch verdict that holds becomes a flag with a streak, and its per-mode ratios are shown in the month digest."
+why: "The planner over-predicts (knowledge the-planner-overpredicts-what-a-line-earns); M now measures it, but nobody reads the key."
+scope:
+- "tools/research/mcp-panel/rhai/digest.rhai"
+- "tools/research/mcp-panel/rhai/gap_watch.rhai"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0270
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "a stubbed outcome.<company> with verdict mismatch shows in the digest and in gap.<company> (script test)"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+- "tools/research/mcp-digest-check"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

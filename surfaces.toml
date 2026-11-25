@@ -147,6 +147,14 @@ outputs = ["research/ai-battle/README.md", "research/results"]
 sync = ["python3", "-B", "tools/research/ai-battle/battle.py", "render"]
 check = ["python3", "-B", "tools/research/ai-battle/battle.py", "check"]
 
+# PrismaticAI against its field and the post-mortems (research/strategy/README.md), derived from
+# the ablation records' standings and the research documents' lead paragraphs.
+[[generators.items]]
+id = "strategy-state"
+outputs = ["research/strategy/README.md"]
+sync = ["tools/research/strategy-surfaces", "render"]
+check = ["tools/research/strategy-surfaces", "render", "--check"]
+
 [[generators.items]]
 id = "duel-charts"
 outputs = ["research/results"]
@@ -183,6 +191,15 @@ outputs = ["research/capability-matrix.md"]
 sync = ["tools/knowledge/refs", "check", "--pathspec", "research/capability-matrix.md", "--strict-lines", "--fix-lines"]
 check = ["tools/knowledge/refs", "check", "--pathspec", "research/capability-matrix.md", "--strict-lines"]
 
+# A feature record's maturity cites its evidence by anchored line (`path:line:Symbol`; I0112,
+# .ai/repo/features/README.md "Maturity levels"): `sync` moves a line whose symbol moved, and a
+# cited file, symbol or line that is gone fails until the record is re-graded.
+[[generators.items]]
+id = "feature-maturity-refs"
+outputs = [".ai/repo/features"]
+sync = ["tools/knowledge/refs", "check", "--pathspec", ":(glob).ai/repo/features/*.md", "--strict-lines", "--fix-lines"]
+check = ["tools/knowledge/refs", "check", "--pathspec", ":(glob).ai/repo/features/*.md", "--strict-lines"]
+
 # Pages of the site beyond the documents, each drawn by its own script from a JSON data contract
 # that a declared command prints when the site is built (tools/surfaces/README.md, "Declared pages").
 # The cards the data carries are rendered as plain HTML; the script draws the interactive views; the
@@ -194,6 +211,14 @@ summary = "Every recorded duel, A/B and LAN battle record, and the README's own 
 data = ["tools/research/atlas/atlas", "data"]
 script = "tools/research/atlas/atlas.js"
 e2e = "tools/research/atlas/atlas.e2e.mjs"
+
+# Feature maturity (tools/surfaces/maturity.py, I0112): every feature record's status is one of
+# these levels, and its `## Maturity` section carries one `- **label**:` line per required piece of
+# evidence, each citing a tracked path, an issue or a pull request. What each level means and how to
+# check each label is defined once, in the document `definition` names.
+[features]
+definition = ".ai/repo/features/README.md#maturity-levels"
+levels = { stable = { requires = ["shipped", "tested", "gated", "documented"] }, draft = { requires = ["missing"], allows = ["shipped", "tested", "gated", "documented"] }, deprecated = { requires = ["replaced"] } }
 
 # Open findings (tools/surfaces/README.md, "Open findings"): what the records say is missing,
 # blocked, handed off, not run or failed, rendered by the `open-findings` region of

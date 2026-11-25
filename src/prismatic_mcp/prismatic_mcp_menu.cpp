@@ -56,7 +56,7 @@ namespace PrismaticMCP::Menu {
  * table of research/prismatic-mcp/README.md (tools/research/prismatic-mcp-menu) all derive from it.
  * An item with a group sits in that submenu; the top level lists the other items and one row per
  * group, in the order the groups first appear here. */
-static constexpr std::array<Item, 14> ITEMS = {{
+static constexpr std::array<Item, 15> ITEMS = {{
 	{"Prismatic control...", Action::Window, "control"},
 	{"Ask the planner...", Action::Ask, "ask"},
 	/* Rows of the human-like player (tools/research/mcp-human, openttd-07): it answers these kinds. */
@@ -72,6 +72,7 @@ static constexpr std::array<Item, 14> ITEMS = {{
 	{"World view", Action::Browse, "/viz", {}, "Hub and API"},
 	{"API (Swagger)", Action::Browse, "/docs", {}, "Hub and API"},
 	{"GraphQL schema", Action::Browse, "/graphql/schema", {}, "Hub and API"},
+	{"Open approvals in the browser", Action::Browse, "panel:/#approvals", {}, "Hub and API"},
 }};
 
 std::span<const Item> Items()
@@ -81,10 +82,27 @@ std::span<const Item> Items()
 
 std::string HubUrl()
 {
+	/* A co-play stack (mcp-e2e) starts the panel and no hub: without PRISMATIC_HUB_URL the hub's
+	 * pages lead to the panel, which answers them, rather than to a port where nothing listens. */
 	const char *env = std::getenv("PRISMATIC_HUB_URL");
-	std::string url = (env != nullptr && *env != '\0') ? env : "http://127.0.0.1:8790";
+	if (env == nullptr || *env == '\0') return PanelUrl();
+	std::string url = env;
 	while (!url.empty() && url.back() == '/') url.pop_back();
 	return url;
+}
+
+std::string PanelUrl()
+{
+	const char *env = std::getenv("PRISMATIC_PANEL_URL");
+	std::string url = (env != nullptr && *env != '\0') ? env : "http://127.0.0.1:8800";
+	while (!url.empty() && url.back() == '/') url.pop_back();
+	return url;
+}
+
+std::string BrowseUrl(std::string_view target)
+{
+	if (target.starts_with("panel:")) return PanelUrl() + std::string{target.substr(6)};
+	return HubUrl() + std::string{target};
 }
 
 /** The switches of the Toggle items, by index; off until flipped. */
@@ -187,7 +205,7 @@ bool Run(int index)
 			if (_iconsole_mode == IConsoleMode::Closed) IConsoleSwitch();
 			return false;
 		case Action::Browse:
-			OpenBrowser(HubUrl() + std::string{item.arg});
+			OpenBrowser(BrowseUrl(item.arg));
 			return false;
 		case Action::Ask:
 			return true;
@@ -251,7 +269,7 @@ json Describe()
 	if (_network_dedicated) return {{"items", json::array()}, {"hub", HubUrl()}, {"dedicated", true}};
 	json items = json::array();
 	for (size_t i = 0; i < ITEMS.size(); i++) {
-		json target = ITEMS[i].action == Action::Browse ? json(HubUrl() + std::string{ITEMS[i].arg}) : json(std::string{ITEMS[i].arg});
+		json target = ITEMS[i].action == Action::Browse ? json(BrowseUrl(ITEMS[i].arg)) : json(std::string{ITEMS[i].arg});
 		json item = {{"index", i}, {"label", ITEMS[i].label}, {"action", ActionName(ITEMS[i].action)}, {"target", target},
 			{"group", ITEMS[i].group.empty() ? json(nullptr) : json(std::string{ITEMS[i].group})}};
 		if (ITEMS[i].action == Action::Toggle) { item["key"] = ITEMS[i].key; item["on"] = _toggled[i]; }

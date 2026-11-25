@@ -39,6 +39,12 @@ observations:
 - id: crawl-not-recorded
   statement: "Added 2026-11-22 from an external review re-checked on master: CI only checks that every page is declared and runs the node tests (.github/workflows/surfaces.yml:56, :65); the crawl's only result lives in the PR #47 description, and it fetches links without following them (tools/research/mcp-ui-crawl-check:15, :155-165) (I0203-I0211)"
   source: file:tools/research/mcp-ui-crawl-check
+- id: changed-line-gate-partial-browser
+  statement: "Added 2026-11-25 at origin/master eed5cb5fc5: tools/research/mcp-approval-ui-check collects Chrome V8 coverage for app.js and shell.js on one page and refused two unreachable lines (PR #229), and CI runs it (.github/workflows/research-rust.yml:200-208), but its coverage does not feed a changed-line gate and the web-ui-is-covered-end-to-end rule cites none (I0181 partly met; I0180 not started)"
+  source: file:tools/research/mcp-approval-ui-check
+- id: replan-holds-say-why
+  statement: "Added 2026-11-25 at origin/master eed5cb5fc5: since PR #275 a re-plan judges each mode on its own lines and a held round proposes nothing and records why as free text in replan.<company> (tools/research/mcp-panel/rhai/replan.rhai:393-419; tests rhai_shared.rs:785,821), but there is no cooldown or hysteresis band, no event-triggered round and no typed hold kind among the plan.* events (I0197 partly met)"
+  source: file:tools/research/mcp-panel/rhai/replan.rhai
 conditions:
 - criterion: ground-rules-are-one-source
   state: satisfied
@@ -83,14 +89,16 @@ conditions:
   - zip-advisories-fixed
 - criterion: every-changed-line-is-tested
   state: missing
-  because: "milestone every-changed-line-is-tested owns the fix; nothing in it has started"
+  because: "milestone every-changed-line-is-tested owns the fix; re-observed 2026-11-25: none of its issues is done; I0181 is partly met by the browser coverage of PR #229"
   observations:
   - no-changed-line-gate
+  - changed-line-gate-partial-browser
 - criterion: the-workbench-drives-the-game-end-to-end
   state: missing
-  because: "milestone the-live-agent-workbench owns the fix; nothing in it has started"
+  because: "milestone the-live-agent-workbench owns the fix; re-observed 2026-11-25: none of its issues is done; I0197 is partly met by PR #275"
   observations:
   - workbench-not-joined
+  - replan-holds-say-why
 - criterion: every-panel-control-works
   state: missing
   because: "milestone the-panel-has-integrity owns the fix; nothing in it has started"

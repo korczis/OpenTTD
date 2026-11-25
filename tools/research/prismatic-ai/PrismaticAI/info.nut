@@ -627,9 +627,9 @@ class PrismaticAI extends AIInfo {
 		/* Yield (fleet.nut RouteLoad, RoadPays; autopilot.nut AirRoutesPay): money goes where it earns. */
 		AddSetting({
 			name = "load_add_min",
-			description = "Yield: no vehicle is added to a road, air or water route (fleet growth, InvestSurplus) whose vehicles ran under this percent full over the last heartbeats, sampled while they run (fleet.nut RouteLoad; 0: off).",
+			description = "Yield: no vehicle is added to a road, air or water route (fleet growth, InvestSurplus) whose vehicles ran under this percent full over the last heartbeats, sampled while they run (fleet.nut RouteLoad; 0 (default): off; 50 cost 29.6% of company value over 24 replayed 20-year arena matches, with 332 fewer planes, 2026-11-23).",
 			min_value = 0, max_value = 100,
-			easy_value = 50, medium_value = 50, hard_value = 50, custom_value = 50, step_size = 5,
+			easy_value = 0, medium_value = 0, hard_value = 0, custom_value = 0, step_size = 5,
 			flags = CONFIG_INGAME,
 		});
 		AddSetting({
