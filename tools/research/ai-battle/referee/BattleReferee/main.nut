@@ -13,12 +13,13 @@
  * values: a company that just drew its whole loan to build shows the loan as money, so the
  * orchestrator judges hoarding on money minus loan (battle.py hoarding).
  *
- * Shared producers, one line per producing industry whose output rail stations of two or more
- * companies pick up (a station with a rating for one of its cargoes), after the company lines
- * of each quarter:
- *   REF S date=<y>-<m> ind=<industry id> owners=<cid>,<cid>[,...] name=<industry name>
- * Two lines at one producer split its output by station rating; the orchestrator fails the fitness
- * check when two of them are PrismaticAI's (research/incident-2026-11-22-sibling-industries.md).
+ * Shared producers, one line per producing industry and cargo that rail stations of two or more
+ * companies pick up (stations with a rating for that cargo), after the company lines of each
+ * quarter:
+ *   REF S date=<y>-<m> ind=<industry id> cargo=<cargo id> owners=<cid>,<cid>[,...] name=<industry name>
+ * Two lines taking one cargo from a producer split it by station rating; the orchestrator fails the
+ * fitness check when two of them are PrismaticAI's (research/incident-2026-11-22-sibling-industries.md).
+ * Two companies taking different cargoes of one farm split nothing, so they are no shared producer.
  *
  * Trainless rail stations, one line per company with a rail station, after the shared producers:
  *   REF T date=<y>-<m> cid=<n> rail_stations=<n> trainless=<n> ids=<station id>,<station id>[,...]
@@ -74,25 +75,24 @@ function BattleReferee::ReportShared(d)
 		if (tiles.IsEmpty()) continue;
 		tiles.Valuate(GSRail.IsRailStationTile);
 		tiles.KeepValue(1);
-		/* Only a station that picks up what the industry produces: one with a rating for one of
-		 * its cargoes. A station that delivers to a sawmill or a factory also catches it, and two
-		 * companies delivering to one acceptor take nothing from each other. */
-		local made = GSCargoList_IndustryProducing(i);
-		local owners = {};
-		foreach (t, _ in tiles) {
-			local st = GSStation.GetStationID(t);
-			foreach (c, _ in made) {
-				if (GSStation.HasCargoRating(st, c)) { owners[GSTile.GetOwner(t)] <- true; break; }
+		/* Only a station that picks up what the industry produces: one with a rating for the cargo.
+		 * A station that delivers to a sawmill or a factory also catches it, and two companies
+		 * delivering to one acceptor take nothing from each other; nor do two taking different
+		 * cargoes of one farm. */
+		foreach (c, _ in GSCargoList_IndustryProducing(i)) {
+			local owners = {};
+			foreach (t, _ in tiles) {
+				if (GSStation.HasCargoRating(GSStation.GetStationID(t), c)) owners[GSTile.GetOwner(t)] <- true;
 			}
+			if (owners.len() < 2) continue;
+			local ids = [];
+			foreach (o, _ in owners) ids.push(o);
+			ids.sort();
+			local list = "";
+			foreach (k, o in ids) list += (k > 0 ? "," : "") + o;
+			GSLog.Error("REF S date=" + GSDate.GetYear(d) + "-" + GSDate.GetMonth(d) + " ind=" + i + " cargo=" + c
+				+ " owners=" + list + " name=" + GSIndustry.GetName(i));
 		}
-		if (owners.len() < 2) continue;
-		local ids = [];
-		foreach (o, _ in owners) ids.push(o);
-		ids.sort();
-		local list = "";
-		foreach (k, o in ids) list += (k > 0 ? "," : "") + o;
-		GSLog.Error("REF S date=" + GSDate.GetYear(d) + "-" + GSDate.GetMonth(d) + " ind=" + i
-			+ " owners=" + list + " name=" + GSIndustry.GetName(i));
 	}
 }
 

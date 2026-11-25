@@ -34,10 +34,25 @@ flowchart TB
   ST -->|"openttd.ai.set_setting, gated"| SET
 ```
 
-- **Heartbeat** (`main.nut` `Start`). Every round reads the settings again (`Behaviour`), then:
-  the planner's air pair, freight lines (`fr_*` to `fr16_*`) and passenger rail first, then the
-  bot's own lines and buses, the fleet, line reconciliation and the loan. Old vehicles are renewed
-  by the game's own autorenew.
+- **Heartbeat** (`main.nut` `Start`). Every round reads the settings again (`Behaviour`). Then come
+  the planner's air pair, the autopilot's air routes, the planner's freight lines (`fr_*` to
+  `fr16_*`), the bot's own freight line, the planner's passenger rail pair and buses, then the
+  fleet, line reconciliation and the loan. The passenger pair takes a heartbeat in which the bot
+  started no own freight line. Once it has waited two game years it may take any heartbeat
+  (`PairDue`, `TryRailPair`).
+  Old vehicles are renewed by the game's own autorenew.
+- **A plan is added on top of the autopilot** (`main.nut` `Behaviour`). With `autopilot=1` a
+  planned bot keeps the autopilot's floors: at least 10 own lines, up to 30 routes, intercity roads,
+  at most a 5000 reserve. Producers nobody serves are taken by rivals within the first years, and a
+  town pair is not, so the planner's passenger pair no longer runs ahead of the bot's first own
+  freight line. On the live settings a planned start cost 25-35% (headless ablation, 2026-11-23).
+  The passenger pair took months of path search in the first heartbeat, and the planned bot held
+  four own lines while its bank doubled.
+- **Handed slots must be whole** (`main.nut` `FreightLines`). The panel and the re-planner write a
+  freight slot one approved setting at a time. A slot counts only when it is complete, both
+  industries exist, the producer makes the cargo and the acceptor takes it, and two reads in a row
+  agree. Until then it is never tried or marked tried. The test hook `test_freight_slots` drives
+  every case.
 - **Rail a train can always run** (`rail.nut`). No 90-degree turn anywhere (`Turns90`, because
   `pf.forbid_90_deg` is on by default). Termini with two platforms joined by a throat with path
   signals. A terminus takes the catching site with the most cargo on the axis toward the other end,
@@ -208,6 +223,7 @@ idle money should relax `load_add_min`.
 | [`PrismaticAI/fleet.nut`](../../tools/research/prismatic-ai/PrismaticAI/fleet.nut) | road, air and ship capacity from waiting cargo and the link graph; the yield gates (`RouteLoad`, `RoadPays`) and the road report |
 | [`PrismaticAI/ships.nut`](../../tools/research/prismatic-ai/PrismaticAI/ships.nut) | ship routes behind `ships_max`: candidates, dock sites, the water path check, docks, depot, ships |
 | [`PrismaticAI/roadstop.nut`](../../tools/research/prismatic-ai/PrismaticAI/roadstop.nut), [`intercity.nut`](../../tools/research/prismatic-ai/PrismaticAI/intercity.nut), [`air.nut`](../../tools/research/prismatic-ai/PrismaticAI/air.nut) | bus stops and depots, intercity roads, airports |
+| [`PrismaticAI/funnel.nut`](../../tools/research/prismatic-ai/PrismaticAI/funnel.nut) | the yearly growth funnel, one `FUNNEL` line per mode (RESEARCH-ONLY observability; [growth funnel](../growth-funnel.md)) |
 | [`install`](../../tools/research/prismatic-ai/install) | links the bot into the personal `ai/` folder; `--check` verifies it |
 | [`tools/research/mcp-rhai/src/panel_bot.rs`](../../tools/research/mcp-rhai/src/panel_bot.rs) | the panel side: planned start, settings, running bots |
 
@@ -219,6 +235,8 @@ idle money should relax `load_add_min`.
   [`research/results/`](../results/).
 - `cargo test` in `tools/research/mcp-rhai` runs the Rhai side that reads the bot's records
   (`rail_*` tests on fixtures in `main.rs`).
+- `battle.py fitness` runs the bot in short headless matches and fails one whose contestants
+  in `fitness.must_funnel` miss a yearly `FUNNEL` line ([growth funnel](../growth-funnel.md)).
 - `tools/research/prismatic-ai/install --check` exits 0 when the game loads this checkout's bot.
 - `tools/research/mcp-carryout-check` checks that proposed settings reach the running bot only
   through the gate.
