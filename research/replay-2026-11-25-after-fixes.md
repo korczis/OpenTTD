@@ -16,7 +16,10 @@ short of money on 74 of 76 heartbeats of 1953. The stages that bind are candidat
 station and path building, and a capital allocator that finds nothing to buy. Over four years the
 two codes end within 7% of each other's value on every save. Deploying master into the live game
 21647 is therefore not expected to change its course measurably. The live game was restarted from
-`final-21647-1992.sav` with master's PrismaticAI around 04:10 CET, while these replays ran.
+`final-21647-1992.sav` with master's PrismaticAI around 04:10 CET, while these replays ran. #285,
+merged later, does not end the live game's hoard either. On that save it buys nothing in two game
+years, the same as the live tree, because every line that earns already runs its `trains_max=2`
+trains.
 
 ## Setup
 
@@ -45,6 +48,7 @@ two codes end within 7% of each other's value on every save. Deploying master in
   | `final-15805-0106.sav` | 15805 with its continuation | 1964-11-09 | `38b9e44652` |
   | `autoapprove-incident-0429.sav` | 12609 | not loadable | `283332c3c0` |
   | live `autosave0.sav` of 2026-11-25 03:23 | 21647 | 1990-12-23 | `0504ddabec` |
+  | `final-21647-1992.sav` (on lundra, 2 years) | 21647, the live game's restart | 1992-03-15 | `5107e93b5d` |
 
 - **Limits.** Two game processes at most, each pair started only while the 1-minute load was
   under 24 and at least 10 GiB was free. The pairs started at loads of 17-23; in between, the
@@ -134,17 +138,42 @@ from `53cd7b467d` (the pre-fix PrismaticAI tree) to `8f35e35995` at 03:39:13 and
 runs the "master" arm, and the autosave of 03:23 is the pre-fix arm as it ran live. These replays
 predict no measurable change in its course from that deploy.
 
-#285 (merged at 05:28, after the restart) changes the capital allocator after a load: purchases
-inside rail searches now run from the first heartbeat. Neither these replays nor the live game
-include it. What
-would change it is in the funnel: producers that others already serve, stations and paths that
-fail for the few candidates left, air pairs that are never found, and the capital allocator,
-which holds tens of millions without a purchase.
+What would change it is in the funnel: producers that others already serve, stations and paths
+that fail for the few candidates left, air pairs that are never found, and the capital
+allocator, which holds tens of millions without a purchase.
+
+### #285 on the live game's own save
+
+#285 (merged at 05:28, after the restart) makes the capital allocator's purchases inside rail
+searches run from the first heartbeat after a load. The live game runs `8f35e35995`, which does
+not include it. In the live game the panel's capital watch flags hoarding: 30.6 years of income in
+the bank, reinvestment at most 10% for four quarters, `bought=0` and 42.8M idle. The hypothesis
+was that a load stops the purchases and #285 restarts them. To test it, `final-21647-1992.sav`
+(loaded at 1992-03-15) was replayed for two game years on lundra. One run used the PrismaticAI
+of origin/master `f50322d30a` (with #285), the other `8f35e35995`. Lundra's binary was
+`20261122-master-g2a6a616221`, which has the same `src/saveload` and script API as master, with
+the same `-d script=4` wrapper and the live rival tars.
+
+| PrismaticAI | Capital reports 1992Q1-1993Q4 | Bought / spent | Money 1992Q1 → 1993Q4 | Trains | Value 1994-03 | Ratio |
+|---|---|---|---|---|---|---|
+| `f50322d30a` (with #285) | 8, `idle=1` in all 8 | 0 / 0 | 33,666,399 → 35,760,553 | 11 | 36,843,280 | 0.146 |
+| `8f35e35995` (live) | 8, `idle=1` in all 8 | 0 / 0 | 33,666,399 → 35,759,906 | 11 | 36,902,919 | 0.146 |
+
+#285 changes nothing on this save. Neither code buys anything in two years, and the two runs end
+0.2% apart. The allocator's rail candidate (`capital.nut`) has to be a line that earns and runs
+under its `trains_max`. Every line that earns already has `trains_max=2` trains. At the last
+steward state of the replay with #285, lines 1, 2 and 8 run 2 of 2 trains with 545, 522 and 479
+units waiting and source ratings of 64%, 14% and 14%. Lines 3 and 4 run 2 of 2 with nothing
+waiting, and line 11 runs 1 of 2 and has no cargo. Each of the 8 quarters logs "trying air
+route 4", and no route is built. The hoard comes from the per-line train cap and from the
+missing new lines and routes, not from the load.
 
 <!-- open-finding kind=failed -->
-On both rich saves, master's capital allocator (#276, before #285) was idle in all 16 quarters. On
+On both rich saves, master's capital allocator (#276) was idle in all 16 quarters. On
 final-15805 it bought one train while money rose from 0.74M to 1.19M; on 21647 it bought nothing
-while money rose from 32.3M to 36.4M. Its fallback "trying air route" never built a route.
+while money rose from 32.3M to 36.4M. With #285, `final-21647-1992.sav` is the same: 0 purchases in
+8 quarters, because every earning line is at `trains_max=2` while 479-545 units wait at three of
+them. Its fallback "trying air route" never built a route.
 
 ## Not run
 
@@ -154,9 +183,8 @@ while money rose from 32.3M to 36.4M. Its fallback "trying air route" never buil
   save exists.
 - **10487**: no save of that game exists in `~/Documents/OpenTTD/save/`, in the live panel's
   autosaves or under `$TMPDIR`.
-- **`final-21647-1992.sav`**, the save the live game was restarted from, and a second run of
-  each code on `deploy-225.sav` were queued from 04:41 under the same limits. They never
-  started: the 1-minute load stayed between 40 and 130 until 06:25, and the queue was stopped
-  then.
-- Six-year horizons and lundra runs were not done. All runs are four years, one per code and
-  save.
+- **A second run of each code on `deploy-225.sav`.** It was queued at 04:41 under the same
+  limits and never started: the Mac's 1-minute load stayed between 40 and 130 until the queue
+  was stopped at 06:25. `final-21647-1992.sav` was run later on lundra, for two years only
+  (see above). It was not run with the pre-fix `eb0d839ce0`.
+- Six-year horizons were not done. Every run is one per code and save.
