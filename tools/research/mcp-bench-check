@@ -1,0 +1,173 @@
+#!/usr/bin/env node
+// RESEARCH-ONLY. The Rust benchmark pages checked in a real browser (research/mcp-control.md,
+// "Benchmarks"). Against a panel that serves bench records (GET /api/bench) it drives /bench and a
+// bench's page by real clicks: the regression banner of the newest record lists every regression
+// with a link to its bench; the rev links to its GitHub commit; the trend chart is drawn through
+// the one door with data; the group filter, a sort header and the text filter change the table and
+// the address, and a reload of that address restores the same view; a bench name opens its page,
+// whose history chart is drawn with one median per record that measured it; a record row selects
+// that record (?rec=); Maximize fills the viewport and puts max in the address, Escape restores
+// it, and a reload of a maximized address opens maximized; an unknown bench answers 404; at
+// 390 px the page does not scroll sideways; the console stays free of errors. Against a panel
+// with no record it checks the empty state and says the record flow was NOT RUN (start a panel with
+// MCP_BENCH_DIR=tools/research/mcp-panel/test/fixtures/bench to drive it on the fixtures).
+// Drives the installed Chrome through playwright-core (a dev dependency of tools/research/mcp-panel:
+// npm ci there), so nothing downloads a browser.
+//
+// e2e-covers: panel /bench
+//
+// Usage: tools/research/mcp-bench-check <panel-url> [--shots DIR]   (exit 0 PASS, 1 FAIL, 2 usage)
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const { chromium } = createRequire(path.join(here, 'mcp-panel', 'package.json'))('playwright-core');
+const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+const argv = process.argv.slice(2);
+const opt = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : '');
+const shots = opt('--shots');
+const base = (argv.find((a) => !a.startsWith('--') && a !== shots) || '').replace(/\/$/, '');
+if (!base) { console.error('usage: mcp-bench-check <panel-url> [--shots DIR]'); process.exit(2); }
+if (shots) fs.mkdirSync(shots, { recursive: true });
+
+const results = [];
+const check = (name, ok, detail = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); };
+const benchHref = (id) => '/bench/' + id.split('/').map(encodeURIComponent).join('/');
+const params = (page) => new URL(page.url()).searchParams;
+/** A chart box's echarts instance has a series with data, drawn at a non-zero size. */
+const drawn = (page, id) => page.waitForFunction((box) => {
+  const el = document.getElementById(box);
+  const c = el && el.offsetWidth > 0 && window.echarts && window.echarts.getInstanceByDom(el);
+  const o = c && c.getOption();
+  return o && o.series.some((s) => (s.data || []).some((d) => d !== null && d !== undefined)) ? o.series.map((s) => ({ id: s.id, n: (s.data || []).length })) : false;
+}, id, { timeout: 30000 }).then((h) => h.jsonValue()).catch(() => null);
+const tableIds = (page) => page.evaluate(() => [...document.querySelectorAll('#bench-rows tr[data-bench]')].map((r) => r.dataset.bench));
+
+let notRun = '';
+const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ['--enable-unsafe-swiftshader'] });
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error' && !/404/.test(m.text())) errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  const api = await (await page.request.get(`${base}/api/bench`)).json();
+  check('GET /api/bench answers the rust-bench/v1 listing', api.schema === 'rust-bench/v1' && Array.isArray(api.records) && api.count === api.records.length, `${api.count} record(s), ${(api.skipped || []).length} skipped`);
+  const res = await page.goto(`${base}/bench`);
+  check('/bench answers 200 in the one shell, its sidebar entry current', res.status() === 200
+    && await page.locator('#sidebar a[href="/bench"][aria-current="page"]').count() === 1, String(res.status()));
+  check('the page title is the server-side one', /^Benchmarks · /.test(await page.title()), await page.title());
+
+  if (!api.count) {
+    const empty = await page.waitForSelector('#bench-empty', { timeout: 15000 }).then(() => true).catch(() => false);
+    check('with no record the page says so and names where records come from', empty
+      && /bench-\*\.json/.test(await page.locator('#bench-empty').innerText()));
+    notRun = 'the record flow (filter, sort, history, maximize, deep links): the panel serves no bench record; start one with MCP_BENCH_DIR=tools/research/mcp-panel/test/fixtures/bench';
+    console.log(`NOT RUN ${notRun}`);
+  } else {
+    const latest = api.records.at(-1);
+    await page.waitForSelector('#bench-rows tr[data-bench]', { timeout: 30000 });
+    // The banner: every regression of the newest record, each a link to its bench.
+    const regs = latest.baseline?.regressions || [];
+    const banner = await page.evaluate(() => [...document.querySelectorAll('#bench-regressions a[href^="/bench/"]')].map((a) => a.getAttribute('href')));
+    check('the regression banner lists every regression of the newest record with its link',
+      regs.every((r) => banner.includes(benchHref(r.id))) && (regs.length > 0) === (banner.length > 0), `${regs.length} regression(s): ${banner.join(' ')}`);
+    const rev = await page.locator('#bench-record a[href*="/commit/"]').first().getAttribute('href').catch(() => '');
+    check('the rev links to its GitHub commit', rev === `https://github.com/korczis/OpenTTD/commit/${latest.rev}`, rev);
+    const dirty = await page.locator('#bench-record [data-alert="yellow"]').count();
+    check('a dirty tree is warned, a clean one is not', (dirty > 0) === !!latest.tree_dirty, `tree_dirty ${latest.tree_dirty}`);
+    const trend = await drawn(page, 'bench-trend');
+    check('the trend chart is drawn through the one door, a line per listed bench', trend && trend.length === (await tableIds(page)).length, JSON.stringify(trend)?.slice(0, 120));
+    if (shots) await page.waitForTimeout(400).then(() => page.screenshot({ path: path.join(shots, 'bench.png'), fullPage: true }));
+
+    // Group filter, by the select.
+    const groups = [...new Set(latest.benches.map((b) => b.group ?? b.id.split('/')[0]))].sort();
+    const group = groups.find((g) => latest.benches.filter((b) => (b.group ?? b.id.split('/')[0]) === g).length > 1) || groups[0];
+    await page.selectOption('#group', group);
+    const inGroup = latest.benches.filter((b) => (b.group ?? b.id.split('/')[0]) === group).map((b) => b.id).sort();
+    check(`the group filter keeps ${group}'s benches and goes into the address`, params(page).get('group') === group
+      && JSON.stringify((await tableIds(page)).slice().sort()) === JSON.stringify(inGroup), (await tableIds(page)).join(' '));
+    // Sort: the median header twice is descending.
+    await page.click('#bench-head [data-sort="median"]');
+    await page.click('#bench-head [data-sort="median"]');
+    const order = await tableIds(page);
+    const medians = order.map((id) => latest.benches.find((b) => b.id === id).median);
+    check('a header click sorts, a second reverses, and the address keeps it', params(page).get('sort') === '-median'
+      && medians.every((m, i) => i === 0 || medians[i - 1] >= m)
+      && await page.locator('#bench-head th[aria-sort="descending"] [data-sort="median"]').count() === 1, order.join(' '));
+    // Text filter.
+    const target = order[0];
+    const word = target.split('/').pop();
+    await page.fill('#q', word);
+    const filtered = await tableIds(page);
+    check('the text filter narrows the table and goes into the address', params(page).get('q') === word && filtered.includes(target)
+      && filtered.every((id) => id.toLowerCase().includes(word.toLowerCase())), filtered.join(' '));
+    // A reload of that address shows the same view.
+    const addr = page.url();
+    await page.reload();
+    await page.waitForSelector('#bench-rows tr[data-bench]', { timeout: 30000 });
+    const back = await page.evaluate(() => ({ group: document.getElementById('group').value, q: document.getElementById('q').value,
+      sort: document.querySelector('#bench-head th[aria-sort] [data-sort]')?.dataset.sort + ':' + document.querySelector('#bench-head th[aria-sort]')?.getAttribute('aria-sort') }));
+    check('a reload of the address restores group, text and sort', page.url() === addr && back.group === group && back.q === word
+      && back.sort === 'median:descending' && JSON.stringify(await tableIds(page)) === JSON.stringify(filtered), JSON.stringify(back));
+
+    // A bench name opens its page.
+    await page.click(`#bench-rows tr[data-bench="${target}"] a[href^="/bench/"]`);
+    await page.waitForURL((u) => u.pathname === benchHref(target), { timeout: 15000 }).catch(() => {});
+    const measured = api.records.filter((r) => r.benches.some((b) => b.id === target));
+    check('a bench name opens its own page, titled from the records', new URL(page.url()).pathname === benchHref(target)
+      && (await page.title()).startsWith(`${target}: median`), `${page.url()} · ${await page.title()}`);
+    const hist = await drawn(page, 'bench-history');
+    const median = hist && hist.find((s) => s.id === 'median');
+    check('its history chart has one median per record that measured it', median && median.n === measured.length, JSON.stringify(hist));
+    const rows = await page.locator('#bench-records tr').count();
+    check('a row per record, the newest selected', rows === measured.length && await page.locator('#bench-records tr[aria-current="true"]').count() === 1, `${rows} rows`);
+    if (shots) await page.waitForTimeout(400).then(() => page.screenshot({ path: path.join(shots, 'bench-one.png'), fullPage: true }));
+    // A record row selects that record.
+    const oldest = measured[0].id;
+    if (measured.length > 1) {
+      await page.click(`#bench-records a[data-rec="${oldest}"]`);
+      const sel = await page.locator('#bench-stats').innerText();
+      check('a record row selects it: the address and the stats follow', params(page).get('rec') === oldest && sel.includes(measured[0].generated_at.slice(0, 10)), params(page).get('rec') || '');
+    } else {
+      console.log('NOT RUN selecting an older record: only one record measured this bench');
+    }
+    // Maximize and Escape.
+    await page.click('#bench-history-card button:has-text("Maximize")');
+    const maxed = await page.evaluate(() => document.getElementById('bench-history-card').classList.contains('fixed'));
+    check('Maximize fills the viewport and puts max in the address', maxed && params(page).get('max') === 'bench-history', page.url());
+    await page.keyboard.press('Escape');
+    const restored = await page.evaluate(() => document.getElementById('bench-history-card').classList.contains('fixed'));
+    check('Escape restores it and clears max', !restored && !params(page).has('max'), page.url());
+    // A deep link opens maximized on its record.
+    await page.goto(`${base}${benchHref(target)}?rec=${encodeURIComponent(oldest)}&max=bench-history`);
+    await drawn(page, 'bench-history');
+    const deep = await page.evaluate((rec) => ({ fixed: document.getElementById('bench-history-card').classList.contains('fixed'),
+      current: document.querySelector('#bench-records tr[aria-current="true"] a[data-rec]')?.dataset.rec === rec }), oldest);
+    check('a deep link opens maximized on its record', deep.fixed && deep.current, JSON.stringify(deep));
+    await page.keyboard.press('Escape');
+
+    const missing = await page.goto(`${base}/bench/no/such-bench`);
+    // The page fills #page once GET /api/bench answers, after the load event goto waits for.
+    const says = await page.waitForFunction(() => /No record measured the bench/.test(document.getElementById('page')?.innerText || ''), null, { timeout: 15000 }).then(() => true).catch(() => false);
+    check('an unknown bench answers 404 and says so', missing.status() === 404 && says, String(missing.status()));
+  }
+
+  // Phone width: no sideways scroll.
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  phone.on('pageerror', (e) => errors.push(e.message));
+  await phone.goto(`${base}/bench`);
+  await phone.waitForSelector('#bench-rows tr, #bench-empty', { timeout: 30000 }).catch(() => {});
+  const wide = await phone.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  check('at 390 px /bench does not scroll sideways', wide <= 1, `${wide} px`);
+  if (shots) await phone.waitForTimeout(400).then(() => phone.screenshot({ path: path.join(shots, 'bench-phone.png'), fullPage: true }));
+  check('the console has no errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+} finally {
+  await browser.close();
+}
+const ok = results.every(Boolean);
+console.log(`mcp-bench-check: ${results.filter(Boolean).length}/${results.length} passed${notRun ? `; NOT RUN: ${notRun}` : ''}`);
+process.exit(ok ? 0 : 1);
