@@ -112,7 +112,11 @@ declared fallback 0.01.
 ### 5. Persistently poor is said, never silenced
 
 [`service_eval.rhai`](../../tools/research/mcp-panel/rhai/service_eval.rhai) runs as a panel service
-(`POST /api/services/start {"name":"service_eval"}`) and reads the route once a game month:
+(`POST /api/services/start {"name":"service_eval"}`) and reads the route once a game month. It
+prints one line every look, the heartbeat its `// stall: 600` needs, so a paused game or a slow
+month does not get it restarted (#308 fixed the same bug in the watchdog). A month counts as
+evaluated once its `eval.*` keys are written, and a failed threshold read after that is only
+printed:
 
 - `eval.<service>.<action>`: the score, its verdict and `streak`, the evaluations in a row judged
   poor. The streak advances only when new outcomes matured (`n` grew): reading the same evidence
@@ -144,14 +148,16 @@ store and is not matched. Its metrics:
 |---|---|---|
 | `quiet_days` | completed quiet spells, game days between two changes of a company's vehicle count; each company's first and still-open last spell are censored and left out | the watchdog's cold start: 1.5 x p90, within 7..365 days, after 20 spells; else `START_DAYS` 7 |
 | `share_drop` | how far a company's share of every company's value fell from one month to the next | the coverage episodes: p90 after 30 drops; else 0.01 |
-| `leader_ratio_drop` | how far a company's value as a share of the leader's fell over `$months` (gap_watch's `WINDOW`, 6) | offered to gap_watch as `derived.gap_watch.share_drop` (p75); gap_watch keeps its `SHARE_DROP` 0.05 until its owner adopts it |
+| `leader_ratio_drop` | how far a company's value as a share of the leader's fell over `$months` (gap_watch's `WINDOW`, 6) | `derived.gap_watch.share_drop` (p75), which gap_watch reads as its flag threshold; while the store holds fewer than 30 drops its value is null, and gap_watch keeps its `SHARE_DROP` 0.05 under the name "cold start" |
 
 The watchdog keeps tuning itself from its own gaps once it has seen five (unchanged); the store only
 replaces its first week, and only after 20 comparable spells (a stricter floor than five: a 90th
 percentile of five values says little about the tail). `watchdog.tuning.threshold_source` says which
-one holds: `start` (7, the store off or too thin), `store` or `this run`. The store read has its own `try`: a store that is off or answers
-something the baselines cannot read leaves the start value and never costs the round its reads. `service_eval.rhai` publishes every derived value as
-`derived.<consumer>.<name>` so each is visible with its provenance. Vehicle-count stability is a
+one holds: `start` (7, the store off or too thin), `store` or `this run`. `derive_lib`'s `baselines` never throws: a store that is off, or answers what is not a table of
+rows, gives `()`, which leaves the start value. The watchdog's store read also has its own `try`, so
+neither costs the round its reads. `service_eval.rhai` publishes the derived values its consumers
+read as `derived.<consumer>.<name>`, each visible with its provenance. The watchdog derives its
+own cold start, so none is published for it. Vehicle-count stability is a
 proxy of the watchdog's signature, which also counts vehicle types and stations, so store spells are
 at least as long as the watchdog's own; that is why its own gaps take over.
 

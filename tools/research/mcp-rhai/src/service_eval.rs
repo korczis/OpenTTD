@@ -552,14 +552,14 @@ mod tests {
         // 60 quiet days on the second look are more than the 51 the store gave: stalled.
         assert_eq!((shared["watchdog.0"]["quiet_days"].clone(), shared["watchdog.0"]["stalled"].clone()), (json!(60), json!(true)));
         assert!(printed.iter().any(|p| p.starts_with("watchdog: cold start 51 day(s), derived: 1.5 x p90")), "{printed:?}");
-        // A store whose answer breaks the baselines (they throw): the start value, said so, and
-        // round 0 still reads and records the company.
+        // A store whose answer is no table (derive_lib's baselines answer () and never throw): the
+        // start value, said so, and round 0 still reads and records the company.
         let (shared, printed) = watchdog_run(json!({"columns": 5, "rows": [[1]]}));
         let t = &shared["watchdog.tuning"];
         assert_eq!((t["threshold_days"].clone(), t["threshold_source"].clone(), t["cold_start"]["source"].clone()),
                    (json!(7), json!("start"), json!("fallback")), "{t}");
         assert_eq!((shared["watchdog.0"]["since_day"].clone(), shared["watchdog.0"]["quiet_days"].clone()), (json!(100), json!(60)));
-        assert!(printed.iter().any(|p| p.starts_with("watchdog: cold start 7 day(s), fallback: the store's baselines failed (")), "{printed:?}");
+        assert!(printed.iter().any(|p| p == "watchdog: cold start 7 day(s), fallback: the store did not answer"), "{printed:?}");
         // A store that is off: no rows, the start value.
         let (shared, _) = watchdog_run(json!({"error": "store off"}));
         assert_eq!(shared["watchdog.tuning"]["threshold_source"], "start");
@@ -567,6 +567,43 @@ mod tests {
         let out: rhai::Array = engine().eval(&format!("{functions}\n[cold_start(()).value, cold_start(()).source, threshold_from([], 40), threshold_from([10, 10, 10, 10, 10], 40),
              source_of([], cold_start(())), source_of([1, 2, 3, 4, 5], cold_start(())), source_of([], #{{ source: \"derived\" }})]")).unwrap();
         assert_eq!(out.iter().map(|x| x.to_string()).collect::<Vec<_>>(), vec!["7", "fallback", "40", "15", "start", "this run", "store"]);
+    }
+
+    /// derive_lib's baselines never throw: a store answer that is no table of rows is (), as no
+    /// answer is, so neither the watchdog's round nor service_eval's month is lost to it. A threshold
+    /// the store cannot give yet is (), so gap_watch keeps its own SHARE_DROP under that name.
+    #[test]
+    fn the_baselines_never_throw_and_an_underived_threshold_is_null() {
+        let run = |answer: Value| -> String {
+            let mut e = engine();
+            e.register_fn("api_dbNamedRun", move |_: rhai::Map| dynv(answer.clone()));
+            let out: rhai::Dynamic = e.eval("import \"derive_lib\" as dl; type_of(dl::baselines(6))").unwrap();
+            out.to_string()
+        };
+        assert_eq!(run(json!({"columns": 5, "rows": [[1]]})), "()", "columns that are no list");
+        assert_eq!(run(json!({"columns": ["metric", "n"], "rows": [["quiet_days"]]})), "()", "a row shorter than its columns");
+        assert_eq!(run(json!({"columns": ["metric"], "rows": 7})), "()", "rows that are no list");
+        assert_eq!(run(json!({"error": "store off"})), "()");
+        assert_eq!(run(baselines_answer()), "array");
+        let functions = rhai_file("service_eval.rhai").split("\nlet looks = 0;").next().unwrap().to_string();
+        let out: rhai::Array = engine().eval(&format!(r#"{functions}
+            let t = thresholds((), #{{}});
+            let g = t["derived.gap_watch.share_drop"];
+            [type_of(g.value), g.source, g.why, t.keys().len()]"#)).unwrap();
+        assert_eq!(out.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
+                   vec!["()", "fallback", "the store did not answer: gap_watch keeps its own SHARE_DROP", "2"]);
+    }
+
+    /// The share drop's window is gap_watch's WINDOW, in the route and in service_eval.rhai alike.
+    #[test]
+    fn the_share_drop_window_is_gap_watchs() {
+        let window = |file: &str, name: &str| -> i64 {
+            let text = rhai_file(file);
+            let line = text.lines().find(|l| l.starts_with(&format!("const {name} = "))).unwrap_or_else(|| panic!("{file} {name}"));
+            line.trim_end_matches(';').rsplit(' ').next().unwrap().parse().unwrap()
+        };
+        assert_eq!(window("gap_watch.rhai", "WINDOW"), GAP_WINDOW);
+        assert_eq!(window("service_eval.rhai", "GAP_WINDOW"), GAP_WINDOW);
     }
 
     fn score(service: &str, action: &str, verdict: &str, n: i64) -> Value {
@@ -621,10 +658,16 @@ mod tests {
         assert_eq!(shared["eval.poor"]["poor"], json!([]), "reset with the hold");
         assert_eq!(shared["eval.coverage"]["services"]["replan"]["covered"], 0, "the newest run's coverage: {}", shared["eval.coverage"]);
         assert_eq!(shared["derived.gap_watch.share_drop"]["value"], json!(0.012));
-        assert_eq!(shared["derived.watchdog.cold_start_days"]["value"], json!(51));
+        assert!(!shared.contains_key("derived.watchdog.cold_start_days"), "the watchdog derives its own cold start");
         assert_eq!(shared["derived.service_eval.coverage_drop"]["source"], "derived");
         assert!(printed.iter().any(|p| p.starts_with("service_eval 1951-01-05: 30 action(s); [\"replan.hold poor (1/10)\"")), "{printed:?}");
-        assert_eq!(printed.last().unwrap(), "service_eval: scores: store off");
+        assert!(printed.iter().any(|p| p == "service_eval: scores: store off"), "{printed:?}");
+        // One heartbeat a look, whether or not the month changed or the scores failed: the
+        // supervisor's `// stall: 600` is never reached while it runs (#308's bug, in the watchdog).
+        let beats: Vec<&String> = printed.iter().filter(|p| p.starts_with("service_eval: look ")).collect();
+        assert_eq!(beats.len(), 7, "{printed:?}");
+        assert_eq!(beats[1], "service_eval: look 2, game month 1951-01");
+        assert_eq!(printed.last().unwrap(), "service_eval: look 7, game month 1951-05");
         // The streak alone, pure.
         let functions = rhai_file("service_eval.rhai").split("\nlet looks = 0;").next().unwrap().to_string();
         let out: rhai::Array = engine().eval(&format!(r#"{functions}

@@ -9,18 +9,21 @@
 // holds fewer than min_n values of the metric or cannot answer at all; the answer says which.
 
 // The rows of baselines as maps (metric, n, runs, p50, p75, p90); `months` is the window of
-// leader_ratio_drop. () when the store or the panel cannot answer (no store, no panel, a test).
+// leader_ratio_drop. () when the store or the panel cannot answer (no store, no panel, a test) or
+// answers what is not a table of rows: it never throws, so no caller's round is lost to it.
 fn baselines(months) {
     let r = ();
     try { r = api_dbNamedRun(#{ name: "baselines", params: #{ months: months } }); } catch { return (); }
     if type_of(r) != "map" || "error" in r || "http_error" in r { return (); }
     let out = [];
-    let cols = r.columns ?? [];
-    for row in r.rows ?? [] {
-        let m = #{};
-        for i in 0..cols.len() { m[cols[i]] = row[i]; }
-        out.push(m);
-    }
+    try {
+        let cols = r.columns ?? [];
+        for row in r.rows ?? [] {
+            let m = #{};
+            for i in 0..cols.len() { m[cols[i]] = row[i]; }
+            out.push(m);
+        }
+    } catch { return (); }
     out
 }
 
