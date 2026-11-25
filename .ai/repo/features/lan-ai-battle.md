@@ -61,10 +61,10 @@ is not a page of the panel shell.
 
 `stable`, graded 2026-11-25 against [the levels](README.md#maturity-levels).
 
-- **shipped**: `tools/research/ai-battle/battle.py:1437:cmd_prepare`,
-  `tools/research/ai-battle/battle.py:3228:cmd_report`,
-  `tools/research/ai-battle/battle.py:3386:cmd_check` and
-  `tools/research/ai-battle/battle.py:3556:cmd_fitness`; the records
+- **shipped**: `tools/research/ai-battle/battle.py:1444:cmd_prepare`,
+  `tools/research/ai-battle/battle.py:3235:cmd_report`,
+  `tools/research/ai-battle/battle.py:3393:cmd_check` and
+  `tools/research/ai-battle/battle.py:3563:cmd_fitness`; the records
   `research/results/battle-20261119T053541-155d18ea.json` and the others of `research/results/`.
 - **tested**: `tools/research/test_ai_battle.py`, among its cases `cmd_fitness` end to end against
   a fake game binary (`tools/research/test_ai_battle.py:303:cmd_fitness`).
