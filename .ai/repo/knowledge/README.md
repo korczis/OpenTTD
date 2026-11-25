@@ -35,7 +35,7 @@ value.
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by status
     %% links: README.md?col=Status&filter=verified#records-generated | README.md?col=Status&filter=candidate#records-generated | README.md?col=Status&filter=superseded#records-generated | README.md?col=Status&filter=active#records-generated
-    "verified" : 86
+    "verified" : 87
     "candidate" : 9
     "superseded" : 3
     "active" : 2
@@ -47,7 +47,7 @@ pie showData title Documents under .ai/repo/knowledge/ by status
 pie showData title Documents under .ai/repo/knowledge/ by route
     %% links: README.md?col=Route&filter=platform#records-generated | README.md?col=Route&filter=project#records-generated | README.md?col=Route&filter=#records-generated | README.md?col=Route&filter=enforcement#records-generated | README.md?col=Route&filter=documentation#records-generated | README.md?col=Route&filter=generator#records-generated
     "platform" : 64
-    "project" : 23
+    "project" : 24
     "unknown" : 5
     "enforcement" : 3
     "documentation" : 3
@@ -60,7 +60,7 @@ pie showData title Documents under .ai/repo/knowledge/ by route
 pie showData title Documents under .ai/repo/knowledge/ by epistemics
     %% links: README.md?col=Epistemics&filter=observed#records-generated | README.md?col=Epistemics&filter=decided#records-generated | README.md?col=Epistemics&filter=inferred#records-generated | README.md?col=Epistemics&filter=#records-generated
     "observed" : 91
-    "decided" : 4
+    "decided" : 5
     "inferred" : 3
     "unknown" : 2
 ```
@@ -159,6 +159,7 @@ pie showData title Documents under .ai/repo/knowledge/ by epistemics
 | [Under the null sound driver no mixer channel is ever freed, so after eight effects every StartSound returns early](curated/the-null-sound-driver-never-frees-a-mixer-channel.md) | verified | platform | observed | When instrumenting or counting sound effects in a headless (-s null) research or regression run. |
 | [Under -v null, work queued with VideoDriver::QueueOnMainThread never runs, so an MCP screenshot writes no file](curated/the-null-video-driver-never-drains-the-main-thread-queue.md) | verified | platform | observed | Before using a capture or any queued main-thread work in a null-video (regression or headless) run. |
 | [The owner auto-answers the bot's questions with openttd.view.ask.auto, so no 'Your bot asks' dialog interrupts play](curated/the-owner-can-auto-answer-the-bots-questions.md) | verified | platform | observed | When the bot asks yes/no questions through openttd.view.ask and the owner does not want to click each red dialog. |
+| [The owner's answers of 2026-11-25: Majordomus learns this session's four lessons generically, and the live game on :8800 is left as it is](curated/the-owners-answers-of-2026-11-25-on-majordomus-and-the-live-game.md) | verified | project | decided | When a session asks whether the live game's stack may be redeployed with merged PrismaticAI fixes, or which of this repository's lessons were handed to prismatic-majordomus and on whose word. |
 | [The panel's bus carries game, company, decision, console, news, panel and plan events from one declared table; the hub's own audit and derived game events go to the hub's bus and store](curated/the-panel-bus-carries-these-event-kinds.md) | verified | project | observed | Before subscribing to a panel's or the hub's bus, its ZeroMQ socket or its DuckDB store (ADR 0033), or before a decision reads recorded history (ADR 0034): which event kinds exist (the table src/panel_events.rs declares, GET /api/bus kinds of each), who publishes each, what each carries, how often, what the plan. events carry, where the hub's events are stored, and what is not on any bus at all. |
 | [The planner predicts more profit per vehicle than the running lines earn](curated/the-planner-overpredicts-what-a-line-earns.md) | verified | project | observed | Before trusting a plan's monthly_profit or score, or when choosing params for a new plan; read the game's own calibration first. |
 | [Selecting an engine in the purchase window with a cargo filter builds, refits and sells a real vehicle on the local client](curated/the-purchase-window-cost-query-builds-a-real-vehicle.md) | verified | platform | observed | When changing BuildVehicleWindow::SelectEngine, CmdBuildVehicle's refit path, or anything a vehicle build triggers (pool, group statistics, events). |
