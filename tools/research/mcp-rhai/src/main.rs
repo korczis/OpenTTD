@@ -1452,7 +1452,9 @@ mod tests {
             let rail = predicted_monthly([two], #{}, rec);
             let own = line.call("air", 6, 7, ()); own.monthly_profit = 777.0;
             let zero = line.call("bus", 8, 9, ()); zero.monthly_profit = 0.0;
-            let mixed = predicted_monthly([line.call("freight_rail", 7, 9, 1), line.call("bus", 1, 2, ()), own, line.call("air", 4, 5, ()), zero],
+            // Another company's freight line: no price in this company's plan, so nothing, whatever its option says.
+            let theirs = line.call("freight_rail", 8, 9, 1); theirs.monthly_profit = 400.0;
+            let mixed = predicted_monthly([line.call("freight_rail", 7, 9, 1), line.call("bus", 1, 2, ()), own, line.call("air", 4, 5, ()), zero, theirs],
                                           #{ "7>9:1": 5300.4 }, rec);
             let losing = record_of(0, [v.call(0, "road", [1, 2], -500, 900)]);
             [rec.lines, rec.earned, rec.by_mode.rail.profit, rec.by_mode.road.lines,
@@ -1465,9 +1467,10 @@ mod tests {
         let v: Vec<String> = out.iter().map(|x| x.to_string()).collect();
         // Rail per vehicle: 101035 (the two-train line), 192455, 119870, 70719, 43915 over 5 earning
         // lines and 12: 8799, times the 2 vehicles the chosen option buys. Mixed: 5300 + 203 + 777 +
-        // 203 (a planner price of 0 falls to the record) with the foreign aircraft's line unpriced.
+        // 203 (a planner price of 0 falls to the record), with the foreign aircraft's line and another
+        // company's freight line unpriced.
         assert_eq!(v, vec!["8", "7", "629029", "2", "8799", "8799", "203", "()", "()",
-                           "17598", "0", "1", "0", "5", "6483", "2", "2", "1", "2", "0"]);
+                           "17598", "0", "1", "0", "5", "6483", "2", "2", "2", "2", "0"]);
     }
 
     fn strategy(script: &str) -> Vec<String> {

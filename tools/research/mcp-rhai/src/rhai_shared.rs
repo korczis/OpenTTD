@@ -788,7 +788,8 @@ mod tests {
         let r = replan_round_with(&store, live_of(UNPLANNED_10487), vehicles.clone(), "fr_from={p},fr_to=99,fr_cargo=1", json!([]), bayes_share);
         let rec = |k: &str| r.records.iter().find(|(x, _)| x == k).unwrap().1.clone();
         let zero = rec("replan.0");
-        assert_eq!(zero["record"]["by_mode"], json!({"rail": {"lines": 2, "earned": 2, "lost": 0}, "road": {"lines": 3, "earned": 0, "lost": 3}}));
+        assert_eq!(zero["record"]["by_mode"], json!({"rail": {"lines": 2, "earned": 2, "lost": 0, "profit": 71000, "earned_per_vehicle": 71000.0},
+                                                     "road": {"lines": 3, "earned": 0, "lost": 3, "profit": -600, "earned_per_vehicle": 0.0}}));
         assert_eq!((zero["record"]["earned"].clone(), zero["record"]["lines"].clone()), (json!(2), json!(5)), "pooled: 2 of 5, below the switch");
         assert_eq!((zero["model"]["judged_by"].clone(), zero["model"]["adopt"].clone()), (json!("rail"), json!(true)));
         assert_eq!(zero["model"]["by_mode"]["rail"]["earned"], json!(2));

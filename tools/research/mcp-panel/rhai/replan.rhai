@@ -31,8 +31,8 @@
 //      pert-monte-carlo then draws the months the new portfolio needs to pay back its investment:
 //      optimistic at the interval's upper end, likely at its mean, pessimistic at its lower end.
 //      The monthly profit it pays back from is the planner's price of each chosen line: its
-//      freight price in the company's plan, else the monthly profit above 0 of the option the
-//      planner chose for it (the portfolio's `monthly_profit`, a passenger pair's). A line with
+//      freight price in the company's plan (a freight line without one is another company's and
+//      counts 0), else the monthly profit above 0 of the option the planner chose for it (the portfolio's `monthly_profit`, a passenger pair's). A line with
 //      neither counts at this company's realised profit per vehicle of its earning lines of that
 //      mode a year old (last year's, over 12), times the vehicles the option buys (1 when it does
 //      not say): the profit of a line that pays, since the bayes-update above already weighs the
@@ -90,6 +90,9 @@ const TYPES = ["train", "road", "aircraft", "ship"];
 const MODE_OF_TYPE = #{ train: "rail", road: "road", aircraft: "air", ship: "water" };
 // The record's mode of a portfolio line's mode (mcp-plan's MODE_NAMES and FREIGHT_MODES).
 const MODE_OF_PLAN = #{ bus: "road", truck: "road", rail: "rail", freight_rail: "rail", air: "air", ship: "water" };
+// The freight modes: such a chosen line is this company's only when its own plan prices it (another
+// company's producer otherwise), so it is never priced from the option or the record.
+const FREIGHT_PLAN_MODES = ["truck", "freight_rail"];
 
 // The paths a plan record claims on the mesh, which refuses a claim of none: a plan changes the
 // AI settings PrismaticAI declares there.
@@ -267,8 +270,8 @@ fn realised_monthly(rec, plan_mode) {
 
 // The predicted monthly profit of exactly the lines the investment buys. Each chosen line is matched
 // to its priced entry in the company's plan (`priced`, producer>acceptor:cargo -> monthly profit);
-// one without it counts at the planner's own monthly profit of its chosen option when that is above
-// 0, else at the record's realised profit per vehicle (realised_monthly) times the vehicles its
+// a freight line without it is another company's and adds nothing; a passenger line counts at the
+// planner's own monthly profit of its chosen option when that is above 0, else at the record's realised profit per vehicle (realised_monthly) times the vehicles its
 // option buys (1 when it does not say), and one without any adds nothing. `earned` names, per mode,
 // how many earning lines a record price came from.
 fn predicted_monthly(chosen, priced, rec) {
@@ -277,6 +280,7 @@ fn predicted_monthly(chosen, priced, rec) {
         let id = |x| { let s = `${x.id ?? x}`; let p = s.split(":"); p[p.len() - 1] };
         let k = `${id.call(c.from)}>${id.call(c.to)}:${c.cargo_id ?? ""}`;
         if k in priced { out.monthly += priced[k].to_int(); out.planner += 1; continue; }
+        if global::FREIGHT_PLAN_MODES.contains(c.mode) { out.unpriced += 1; continue; }
         let own = c.monthly_profit;
         if (type_of(own) == "f64" || type_of(own) == "i64") && own > 0 { out.monthly += own.to_int(); out.planner += 1; continue; }
         let r = realised_monthly(rec, c.mode);
@@ -419,7 +423,7 @@ fn plan_round(b, p) {
     let pm = predicted_monthly(portfolio.chosen ?? [], priced, rec);
     let monthly = pm.monthly;
     print(`   plan: ${chosen.len()} line(s), investment ${portfolio.investment_k ?? 0}k, predicted ${monthly} a month` +
-          if pm.record > 0 { ` (${pm.record} line(s) without the planner's price at the record's realised profit per earning line of their mode)` } else { "" } +
+          if pm.record > 0 { ` (${pm.record} line(s) without the planner's price at the record's realised profit per vehicle of their mode's earning lines)` } else { "" } +
           if pm.unpriced > 0 { ` (${pm.unpriced} line(s) without a price count as 0)` } else { "" } +
           ` (${portfolio.solver ?? "?"}; rail lines with a route on the map: ${(portfolio.priced ?? #{}).with_route ?? "?"} of ${(portfolio.priced ?? #{}).lines ?? "?"}): ${chosen}`);
 
