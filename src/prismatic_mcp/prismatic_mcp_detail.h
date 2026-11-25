@@ -780,8 +780,11 @@ inline std::string CapabilitiesLine(const Capabilities &caps)
 struct ServerApprovalsReader {
 	nlohmann::json rows = nlohmann::json::array(); ///< the approvals of the last whole reply
 	uint64_t count = 0;                            ///< how many the server holds for the company
-	uint64_t replies = 0;                          ///< whole replies read
-	nlohmann::json page = nlohmann::json::array(); ///< the rows of the reply being read
+	uint64_t replies = 0;                          ///< whole replies read (every page of one)
+	uint64_t answers = 0;                          ///< answers read: one per page
+	uint64_t next_page = 0;                        ///< the page to ask for next, while a reply has more; else 0
+	nlohmann::json page = nlohmann::json::array(); ///< the rows of the answer being read
+	nlohmann::json pages = nlohmann::json::array(); ///< the rows of the earlier pages of the reply being read
 
 	/** Read one chat line; true when it is an "[approvals]" line (and then it is consumed here). */
 	bool Feed(std::string_view line)
@@ -795,8 +798,19 @@ struct ServerApprovalsReader {
 			return true;
 		}
 		if (j.contains("count") && j["count"].is_number_unsigned()) {
-			this->rows = std::move(this->page);
+			/* A queue longer than one answer comes a page at a time: the reply is whole at its last page. */
+			const uint64_t at = j.value("page", uint64_t{1}), of = j.value("pages", uint64_t{1});
+			if (at <= 1) this->pages = nlohmann::json::array();
+			for (auto &row : this->page) this->pages.push_back(std::move(row));
 			this->page = nlohmann::json::array();
+			this->answers++;
+			if (at < of) {
+				this->next_page = at + 1;
+				return true;
+			}
+			this->next_page = 0;
+			this->rows = std::move(this->pages);
+			this->pages = nlohmann::json::array();
 			this->count = j["count"].get<uint64_t>();
 			this->replies++;
 			return true;
