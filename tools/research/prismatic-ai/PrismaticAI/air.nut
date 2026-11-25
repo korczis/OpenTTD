@@ -58,6 +58,21 @@ function PrismaticAI::AirportType() {
 	return -1;
 }
 
+/* Whether the authority of the town an airport at `t` of `type` belongs to would take one more:
+ * within its noise budget (economy.station_noise_level), else under its two airports unless the
+ * council is permissive (station_cmd.cpp CmdBuildAirport). The game asks this only after the land
+ * is flat, so a sloped site hid the answer until it was levelled and paid for. */
+function PrismaticAI::AirportAuthorityAllows(t, type) {
+	local town = AIAirport.GetNearestTown(t, type);
+	local allowed = AITown.GetAllowedNoise(town);
+	if (allowed < 0) return true;
+	if (AIGameSettings.IsValid("economy.station_noise_level") && AIGameSettings.GetValue("economy.station_noise_level") != 0) {
+		return AIAirport.GetNoiseLevelIncrease(t, type) <= allowed;
+	}
+	local permissive = AIGameSettings.IsValid("difficulty.town_council_tolerance") && AIGameSettings.GetValue("difficulty.town_council_tolerance") == 3;
+	return permissive || allowed > 0;
+}
+
 /* Level the corners from `t` to `far` without touching the last `keep` of the company's money and
  * loan headroom. LevelTiles' test pass prices each step of a corner on the unchanged map, without
  * the neighbouring corners a moved corner drags along: on OpenTTD seed 1383023900
@@ -126,60 +141,65 @@ function PrismaticAI::BuildAirportNear(town, type, pax) {
 		 * height of its first tile and try once more, which a buildable rectangle usually allows. */
 		if (AIError.GetLastError() == AIError.ERR_FLAT_LAND_REQUIRED) {
 			/* LevelTiles levels tile corners (TileHeight is a tile's north corner, terraform_cmd.cpp
-			 * CmdLevelLand), and a w x h airport needs the corners up to x + w, y + h flat. Up to
+			 * CmdLevelLand), and a w x h airport needs the corners up to x + w, y + h level. Up to
 			 * x + w - 1, y + h - 1 the far edge stayed sloped: on OpenTTD seed 113258830 nine sites
 			 * were levelled and paid for, every one then refused for ERR_FLAT_LAND_REQUIRED, and the
 			 * company went bankrupt in 1961 without a vehicle. */
-			local far = AIMap.GetTileIndex(min(AIMap.GetMapSizeX() - 1, AIMap.GetTileX(t) + w),
-				min(AIMap.GetMapSizeY() - 1, AIMap.GetTileY(t) + h));
-			/* Only when levelling is cheap: in a battle, levelling plus two airports once left no money
-			 * for a plane, and the company sat on two empty airports for good. */
+			/* Only a site within air_level_step height steps (AIR_LEVEL_STEP, main.nut) is levelled. A
+			 * bigger step makes level-land move corners outside the site as well: on OpenTTD seed
+			 * 1787809485 the default levelled two such sites for 59120 and 152982 (estimated 31435 and
+			 * 32604), both were refused, and the company was last with value 1.
+			 * air_level_step 0: adaptive per map, any step until a levelled site was refused, then 1. */
+			local span = PrismaticAI.RectHeightRange(t, w, h);
+			local step_max = AIR_LEVEL_STEP > 0 ? AIR_LEVEL_STEP : (AIR_LEVEL_REFUSED ? 1 : 255);
+			local funds = AICompany.GetBankBalance(AICompany.COMPANY_SELF) + AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
+			/* Why this site is not levelled, first reason found; "" when it is. */
+			local why = "";
+			if (level_lost) why = "a levelled site of this search was refused already (air_level_once)";
+			else if (span > step_max) why = "its corners span " + span + " height steps (most " + step_max + ", air_level_step)";
+			else if (!PrismaticAI.AirportAuthorityAllows(t, type)) why = "the town allows no more airport noise or airports";
+			/* Level only where every corner will end level (LevelPlan): a corner shared with a house,
+			 * road or water does not move, LevelTiles still reports success, and the money is gone.
+			 * In the owner's live game company 0 so paid 24428 on 7 sites refused
+			 * ERR_FLAT_LAND_REQUIRED; on seed 15805 every such site (3) was one LevelPlan calls blocked.
+			 * A test-mode level and build cannot tell: test mode leaves the map as it is, so the
+			 * airport's test always sees the slope. */
+			local plan = (why == "") ? PrismaticAI.LevelPlan(t, w, h) : null;
+			if (plan != null && plan.start == null) why = plan.why;
 			local cost = 0;
-			{
+			if (why == "") {
+				/* Only when levelling is cheap: in a battle, levelling plus two airports once left no
+				 * money for a plane, and the company sat on two empty airports for good. */
 				local test = AITestMode();
 				local acc = AIAccounting();
-				/* A test pass that fails part-way prices only the part it got through, while the real
-				 * pass then levels that part and fails the same way: money spent, no airport. */
-				if (!AITile.LevelTiles(t, far)) cost = 1 << 30;
+				/* A test pass that fails part-way prices only the part it got through. */
+				if (!AITile.LevelTiles(plan.start, plan.far)) cost = 1 << 30;
 				else cost = acc.GetCosts();
 			}
-			local funds = AICompany.GetBankBalance(AICompany.COMPANY_SELF) + AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
 			/* The test pass underprices levelling: it does not move the corners it raises, so the real
 			 * pass cost 172055 where the test said 53413 (seed 113258830). Keep a fourfold margin. */
-			/* Only a site within air_level_step height steps (AIR_LEVEL_STEP, main.nut) is levelled. A bigger step makes level-land move corners
-			 * outside the site as well, where houses and roads stop it: on OpenTTD seed 1787809485 the
-			 * default levelled two such sites for 59120 and 152982 (estimated 31435 and 32604), both
-			 * were refused, and the company was last with value 1. */
-			local lo = 255, hi = 0;
-			for (local dx = 0; dx <= w; dx++) {
-				for (local dy = 0; dy <= h; dy++) {
-					local c = AIMap.GetTileIndex(min(AIMap.GetMapSizeX() - 1, AIMap.GetTileX(t) + dx),
-						min(AIMap.GetMapSizeY() - 1, AIMap.GetTileY(t) + dy));
-					local z = AITile.GetCornerHeight(c, AITile.CORNER_N);
-					if (z < lo) lo = z;
-					if (z > hi) hi = z;
-				}
+			if (why == "" && cost > AIR_LEVEL_MAX) why = "levelling costs " + cost + " (air_level_max " + AIR_LEVEL_MAX + ")";
+			else if (why == "" && funds - 4 * cost < keep) why = "levelling costs " + cost + ", funds " + funds + " keep " + keep + " for the airports and a plane";
+			if (why != "") {
+				AILog.Warning("PrismaticAI: airport at tile " + t + " refused: sloped, not levelled: " + why);
+				continue;
 			}
-			/* air_level_step 0: adaptive per map, any step until a levelled site was refused, then 1. */
-			local step_max = AIR_LEVEL_STEP > 0 ? AIR_LEVEL_STEP : (AIR_LEVEL_REFUSED ? 1 : 255);
-			local level_ok = !level_lost && hi - lo <= step_max && cost <= AIR_LEVEL_MAX && funds - 4 * cost >= keep;
 			local real = AIAccounting();
-			local levelled = level_ok && PrismaticAI.LevelKeeping(t, far, keep, cost, funds, real);
+			local levelled = PrismaticAI.LevelKeeping(plan.start, plan.far, keep, cost, funds, real);
+			/* What the levelling cost, before the airport adds its own price to the same count. */
+			local paid = real.GetCosts();
 			local level_err = levelled ? "" : AIError.GetLastErrorString();
 			if (levelled && AIAirport.BuildAirport(t, type, AIStation.STATION_NEW)) {
-				AILog.Info("PrismaticAI: built airport in " + AITown.GetName(town) + " at tile " + t + " after levelling it for " + real.GetCosts() + " (estimated " + cost + ")");
+				AILog.Info("PrismaticAI: built airport in " + AITown.GetName(town) + " at tile " + t + " after levelling it to height " + plan.z + " for " + paid + " (estimated " + cost + ")");
 				return t;
 			}
 			/* Say why: a test pass that succeeded leaves ERR_NONE as the last error. */
-			if (level_ok && AIR_LEVEL_ONCE == 1) level_lost = true;
-			if (level_ok) AIR_LEVEL_REFUSED = true;
-			if (level_ok) AILog.Warning("PrismaticAI: levelled tile " + t + " for " + real.GetCosts() + " (estimated " + cost + ") and the airport was still refused: " +
-				(levelled ? AIError.GetLastErrorString() : "levelling failed, " + level_err) + " (bank " + AICompany.GetBankBalance(AICompany.COMPANY_SELF) + ")");
-			if (!level_ok) {
-				AILog.Warning("PrismaticAI: airport at tile " + t + " refused: levelling costs " + cost + ", height range " + (hi - lo) +
-					" (air_level_max " + AIR_LEVEL_MAX + "; funds " + funds + ", keeping " + keep + " for the airports and a plane)");
-				continue;
-			}
+			if (AIR_LEVEL_ONCE == 1) level_lost = true;
+			AIR_LEVEL_REFUSED = true;
+			local left = PrismaticAI.RectHeightRange(t, w, h);
+			AILog.Warning("PrismaticAI: levelled tile " + t + " for " + paid + " (estimated " + cost + ") and the airport was still refused: " +
+				(levelled ? AIError.GetLastErrorString() : "levelling failed, " + level_err) + (left != 0 ? ", " + left + " height steps left uneven" : "") +
+				" (bank " + AICompany.GetBankBalance(AICompany.COMPANY_SELF) + ")");
 		}
 		local err = AIError.GetLastError();
 		/* The town allows no further station: join one of ours next to the site instead. In a battle

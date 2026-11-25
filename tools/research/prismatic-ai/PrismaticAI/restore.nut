@@ -81,6 +81,7 @@ function PrismaticAI::Save() {
 		air_ports = AIR_PORTS,
 		air_bad_towns = AIR_BAD_TOWNS,
 		failed_pairs = FAILED_PAIRS,
+		no_rail_site = PrismaticAI.NoRailSiteSave(),
 		modernize_set = MODERNIZE_SET,
 		/* rail.nut ClaimFresh: when each foreign rail station tile near a producer was first seen. */
 		claims_seen = CLAIM_SEEN,
@@ -133,7 +134,7 @@ function PrismaticAI::Restore(b) {
 	AILog.Info("PrismaticAI: restored after a restart: " + RAIL_LINES.len() + " rail lines (" + freight + " freight), " +
 		this.auto_air + " autopilot air routes, " + this.routes + " routes, " + this.freight_tried.len() + " freight lines tried, " +
 		this.own_built + " own, " + this.twins + " twins, " + this.used_towns.len() + " road towns, " + AIR_PORTS.len() +
-		" airports, " + old_claims + " foreign rail station tiles of unknown age taken as old (" + how + ")" + pair);
+		" airports, " + old_claims + " foreign rail station tiles of unknown age taken as old, " + NO_RAIL_SITE.len() + " termini without a site (" + how + ")" + pair);
 }
 
 /* `date` (AIDate) as YYYY-MM-DD. */
@@ -208,6 +209,8 @@ function PrismaticAI::RestoreFromSave(data) {
 	PrismaticAI.RestoreFill(AIR_PORTS, PrismaticAI.RestoreField(data, "air_ports", {}));
 	PrismaticAI.RestoreFill(AIR_BAD_TOWNS, PrismaticAI.RestoreField(data, "air_bad_towns", {}));
 	PrismaticAI.RestoreFill(FAILED_PAIRS, PrismaticAI.RestoreField(data, "failed_pairs", {}));
+	PrismaticAI.RestoreFill(NO_RAIL_SITE, PrismaticAI.RestoreField(data, "no_rail_site", {}));
+	PrismaticAI.NoRailSiteReindex();
 	PrismaticAI.RestoreFill(MODERNIZE_SET, PrismaticAI.RestoreField(data, "modernize_set", {}));
 	PrismaticAI.RestoreFill(CLAIM_SEEN, PrismaticAI.RestoreField(data, "claims_seen", {}));
 }

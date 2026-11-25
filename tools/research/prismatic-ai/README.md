@@ -68,6 +68,22 @@ Full rationale: [`research/rail-steward.md`](../../../research/rail-steward.md),
   (`construction.build_on_slopes`; `FitsOnFoundations`, then a test-mode build). It levels a
   site only when no orientation has one. Sites used to be flat and on one axis only, and in the
   owner's hilly 1950 settings about half of the failed own lines ended there.
+- **Land is levelled only where it will end level** (`LevelPlan`, rail.nut). The game's
+  level-land reports success when any corner moved, so a corner shared with a house, road or
+  water stayed where it was and the money was spent on a site the airport or station then
+  refused. `LevelPlan` predicts the levelling (a corner d tiles out ends within d steps of the
+  level) and the tiles it touches, and takes the cheapest of the site's four corner heights that
+  only clear land and trees take part in. Airport sites are also asked about the town's noise
+  and airport limit first (`AirportAuthorityAllows`). Rail station levelling keeps a margin
+  proportionate to its price (`RailLevelKeep`). With 2M or more to spend it levels sites of up to
+  three height steps and up to 400000 (`RailLevelStep`, `RailLevelMax`); the site search reaches
+  as far north and west as a terminus there can still catch the industry (its corner up to 3 tiles
+  plus its own length out).
+- **A terminus with no site is remembered** (`NO_RAIL_SITE`, saved): the next line to or from the
+  same place with the same platforms does not survey it again for two game years (30 days when
+  a levellable site was passed over for money), an acceptor remembered so fails before the
+  source station is built, and the own-line search passes over a producer or acceptor remembered
+  so (`NoRailSiteFor`) instead of spending a try on it.
 - **The laid line is walked** (`VerifyRailLine`) before any train is bought. A missing piece is
   laid again, and a line that stays broken gets no train.
 - **Every wagon is checked.** A wagon the game will not refit or couple (a NewGRF rule) is sold

@@ -623,13 +623,14 @@ function PrismaticAI::RailStationToJoin(origin, len) {
  * platforms (RailStationToJoin) wherever a site fits the station spread, in any orientation; only
  * when none does is a separate station built, with a warning. */
 function PrismaticAI::BuildRailStationAt(origin, other, len, cargo, site, label, platforms = 1, hand = 0) {
+	if (PrismaticAI.NoRailSiteKnown(origin, site, cargo, len, platforms, hand, label)) return null;
 	local join = PrismaticAI.RailStationToJoin(origin, len);
 	local box = (join == null) ? null : PrismaticAI.RailStationBox(join);
 	local slopes = PrismaticAI.BuildsOnSlopes();
 	local orients = PrismaticAI.StationOrientations(origin, other);
 	local hows = ["", ", on the other axis", ", on the other axis", ", its exit reversed"];
 	local surveys = [];
-	local budget = {tried = 0, probes = 0, levelled = 0};
+	local budget = {tried = 0, probes = 0, levelled = 0, blocked = 0, dear = 0, money = 0};
 	/* Joining the station already there comes first, in every orientation; a new station next. */
 	local passes = [];
 	if (join != null) foreach (k, _ in orients) passes.append([k, join]);
@@ -664,8 +665,95 @@ function PrismaticAI::BuildRailStationAt(origin, other, len, cargo, site, label,
 			(s.slope.Count() + s.near_slope.Count()) + "/" + s.level.Count();
 	}
 	AILog.Warning("PrismaticAI: no rail station site " + label + " (flat/foundation/levellable sites by orientation: " + counts +
-		"; " + budget.tried + " built and refused, " + budget.probes + " refused before building, levelling within " + RAIL_LEVEL_STEP + " height step(s))");
+		"; " + budget.tried + " built and refused, " + budget.probes + " refused before building, levelling within " + PrismaticAI.RailLevelStep() +
+		" height step(s): " + budget.levelled + " levelled, " + budget.blocked + " blocked by a tile that does not move, " +
+		budget.dear + " over " + PrismaticAI.RailLevelMax() + ", " + budget.money + " short of money)");
+	PrismaticAI.RememberNoRailSite(origin, site, cargo, len, platforms, hand, budget.money > 0 ? NO_RAIL_SITE_MONEY_DAYS : NO_RAIL_SITE_DAYS, join != null);
 	return null;
+}
+
+/* Termini that found no site (BuildRailStationAt), so the next line to or from the same place does
+ * not survey it again: NoRailSiteKey -> the date until which it is believed. Without it, on seed
+ * 4242 Cheningpool Steel Mill was surveyed 5 times in 13 game days, as the acceptor of three mines'
+ * iron ore (each after the mine's station was built, and then removed) and as the producer of
+ * steel for three factories. Keyed by the origin tile and the terminus's shape, not by the
+ * industry id (ids are reused when an industry closes), and with the platform length exact (a
+ * longer platform catches more, a shorter one fits more land). A record made while no station of
+ * ours stood there to join no longer holds once one does (RailStationToJoin): joining it opens
+ * other sites. Saved (restore.nut). */
+NO_RAIL_SITE <- {};
+/* How long a site search that found no land is believed: towns grow and land changes. Each
+ * record is {until = date, join = whether a station to join stood there, any = its
+ * NO_RAIL_SITE_ANY key}. */
+NO_RAIL_SITE_DAYS <- 730;
+/* ... and one that passed over a levellable site only for money, which comes in faster. */
+NO_RAIL_SITE_MONEY_DAYS <- 30;
+
+function PrismaticAI::NoRailSiteKey(origin, site, cargo, len, platforms, hand) {
+	return origin + "-" + site + "-" + cargo + "-" + len + "-" + platforms + "-" + hand;
+}
+
+function PrismaticAI::RememberNoRailSite(origin, site, cargo, len, platforms, hand, days, joined) {
+	local until = AIDate.GetCurrentDate() + days, any = origin + "-" + site + "-" + cargo;
+	NO_RAIL_SITE[PrismaticAI.NoRailSiteKey(origin, site, cargo, len, platforms, hand)] <- {until = until, join = joined, any = any};
+	PrismaticAI.NoRailSiteIndexAdd(any, until);
+}
+
+/* NO_RAIL_SITE by origin tile, site and cargo alone ("<tile>-<site>-<cargo>" -> the latest date a
+ * record of it holds until), for the own-line search, which does not know a line's platform length
+ * yet (BuildFreightRailRoute plans it). Rebuilt after a load (NoRailSiteReindex). */
+NO_RAIL_SITE_ANY <- {};
+
+function PrismaticAI::NoRailSiteIndexAdd(key, until) {
+	if (!NO_RAIL_SITE_ANY.rawin(key) || NO_RAIL_SITE_ANY[key] < until) NO_RAIL_SITE_ANY[key] <- until;
+}
+
+function PrismaticAI::NoRailSiteReindex() {
+	NO_RAIL_SITE_ANY.clear();
+	foreach (k, rec in NO_RAIL_SITE) {
+		if (typeof rec == "table" && ("until" in rec) && ("any" in rec)) PrismaticAI.NoRailSiteIndexAdd(rec.any, rec.until);
+	}
+}
+
+/* Whether a terminus of any shape at `origin` for `cargo` as `site` is remembered without a site:
+ * the own-line search (NextOwnFreightLine) then passes the industry over, so a failed try does not
+ * use up own_fail_pause and the next best pair is chosen. In the owner's live game of seed 21647
+ * (1992) the own plan picked five factories in a row with no buildable catching site at all
+ * (0/0/0 in every orientation), each after building and removing the farm's station. Coarser than
+ * NoRailSiteKnown (any platform length), and it expires the same way. */
+function PrismaticAI::NoRailSiteFor(origin, site, cargo) {
+	local key = origin + "-" + site + "-" + cargo;
+	if (!NO_RAIL_SITE_ANY.rawin(key)) return false;
+	if (NO_RAIL_SITE_ANY[key] > AIDate.GetCurrentDate()) return true;
+	delete NO_RAIL_SITE_ANY[key];
+	return false;
+}
+
+/* Whether the terminus asked for is remembered without a site (NO_RAIL_SITE); says so when it is.
+ * An expired record is dropped here, and a hit never extends it. */
+function PrismaticAI::NoRailSiteKnown(origin, site, cargo, len, platforms, hand, label) {
+	local key = PrismaticAI.NoRailSiteKey(origin, site, cargo, len, platforms, hand);
+	if (!NO_RAIL_SITE.rawin(key)) return false;
+	local rec = NO_RAIL_SITE[key];
+	if (typeof rec != "table" || !("until" in rec) || !("join" in rec) || rec.until <= AIDate.GetCurrentDate() ||
+			(!rec.join && PrismaticAI.RailStationToJoin(origin, len) != null)) {
+		delete NO_RAIL_SITE[key];
+		return false;
+	}
+	local until = rec.until;
+	AILog.Warning("PrismaticAI: no rail station site " + label + " (remembered until " + AIDate.GetYear(until) + "-" + AIDate.GetMonth(until) + "-" + AIDate.GetDayOfMonth(until) + ")");
+	return true;
+}
+
+/* NO_RAIL_SITE without its expired records, at most NO_RAIL_SITE_SAVE_MAX of them, for a save. */
+NO_RAIL_SITE_SAVE_MAX <- 200;
+function PrismaticAI::NoRailSiteSave() {
+	local now = AIDate.GetCurrentDate(), out = {};
+	foreach (k, rec in NO_RAIL_SITE) {
+		if (out.len() >= NO_RAIL_SITE_SAVE_MAX) break;
+		if (typeof rec == "table" && ("until" in rec) && rec.until > now) out[k] <- rec;
+	}
+	return out;
 }
 
 /* Whether the game builds rail stations and track on foundations (construction.build_on_slopes, on
@@ -713,11 +801,17 @@ function PrismaticAI::StationOrientation(along_x, forward, len, platforms, hand)
  * `flat`, `slope` (sloped, the station fits on foundations: FitsOnFoundations; empty when `slopes`
  * is off) and, when a station box `box` is given, the `near_flat` and `near_slope` ones within the
  * station spread of it, side by side first (JoinRank). Each list is sorted by the cargo caught, most
- * first. `level` holds the sloped sites whose corners span at most RAIL_LEVEL_STEP height steps,
+ * first. `level` holds the sloped sites whose corners span at most RailLevelStep() height steps,
  * lowest span first (LevelRailStationSite). */
 function PrismaticAI::StationSurvey(origin, o, cargo, site, slopes, box) {
 	local tiles = AITileList();
-	tiles.AddRectangle(AIMap.GetTileIndex(max(2, AIMap.GetTileX(origin) - 10), max(2, AIMap.GetTileY(origin) - 10)),
+	/* A site's corner is its north tile, and an industry's tiles lie south-east of its location
+	 * tile: a site north or west of it catches it (catchment radius 4) with a corner up to
+	 * 3 + o.w (3 + o.h) tiles out, which 10 did not reach for a terminus with a 4-tile throat on
+	 * that side (corner 11 out). Only that far, not further: every tile more is valuated in every
+	 * orientation, and the script's time is the game's. */
+	local nw_x = max(10, 3 + o.w), nw_y = max(10, 3 + o.h);
+	tiles.AddRectangle(AIMap.GetTileIndex(max(2, AIMap.GetTileX(origin) - nw_x), max(2, AIMap.GetTileY(origin) - nw_y)),
 		AIMap.GetTileIndex(min(AIMap.GetMapSizeX() - 3 - o.w, AIMap.GetTileX(origin) + 10), min(AIMap.GetMapSizeY() - 3 - o.h, AIMap.GetTileY(origin) + 10)));
 	tiles.Valuate(AITile.IsBuildableRectangle, o.w, o.h);
 	tiles.KeepValue(1);
@@ -731,7 +825,7 @@ function PrismaticAI::StationSurvey(origin, o, cargo, site, slopes, box) {
 	local level = AITileList();
 	level.AddList(sloped);
 	level.Valuate(PrismaticAI.RectHeightRange, o.w, o.h);
-	level.KeepBelowValue(RAIL_LEVEL_STEP + 1);
+	level.KeepBelowValue(PrismaticAI.RailLevelStep() + 1);
 	level.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
 	if (slopes) {
 		sloped.Valuate(PrismaticAI.FitsOnFoundations, o.sw, o.sh, o.offset, o.along_x);
@@ -896,40 +990,92 @@ function PrismaticAI::RailStationOn(t, g, o, len, platforms, into, what) {
  * seed 260603278 (GA g271.3, slot 3) ten of the twelve own lines found no flat site at one end, and
  * the company kept 2.1M idle for 15 years on 3 trains. Only rectangles whose corners span at most
  * RAIL_LEVEL_STEP height steps are levelled (a bigger step moves corners outside the site, where
- * houses and roads stop it), and only while the money left after a fourfold margin on the test
- * price still covers the line; at most 3 per terminus (`budget.levelled`). Returns the terminus or
- * null. */
+ * houses and roads stop it), only where no corner that moves touches a tile that refuses it
+ * (LevelPlan), and only while the money left after a fourfold margin on the test price is at least
+ * the proportionate keep (RailLevelKeep); at most 3 per terminus (`budget.levelled`). The sites
+ * passed over are counted in `budget` (`blocked`, `dear`, `money`) for the failure message and the
+ * no-site memory. Returns the terminus or null. */
 function PrismaticAI::LevelRailStationSite(s, len, platforms, label, budget) {
 	local o = s.o;
 	for (local r = s.level.Begin(); !s.level.IsEnd() && budget.levelled < 3; r = s.level.Next()) {
 		local t = o.forward ? r : r + o.throat * o.step;
 		local g = PrismaticAI.TerminusGeometry(t, len, platforms, o.step, o.side, o.out, o.lane);
 		if (g == null) continue;
-		local far = AIMap.GetTileIndex(min(AIMap.GetMapSizeX() - 1, AIMap.GetTileX(r) + o.w),
-			min(AIMap.GetMapSizeY() - 1, AIMap.GetTileY(r) + o.h));
+		local plan = PrismaticAI.LevelPlan(r, o.w, o.h);
+		if (plan.start == null) { budget.blocked++; continue; }
 		local cost = 0;
 		{
 			local test = AITestMode();
 			local acc = AIAccounting();
-			if (!AITile.LevelTiles(r, far)) cost = 1 << 30;
+			if (!AITile.LevelTiles(plan.start, plan.far)) cost = 1 << 30;
 			else cost = acc.GetCosts();
 		}
 		local funds = AICompany.GetBankBalance(AICompany.COMPANY_SELF) + AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
-		if (cost > RAIL_LEVEL_MAX || funds - 4 * cost < RAIL_LEVEL_KEEP) continue;
+		if (cost > PrismaticAI.RailLevelMax()) { budget.dear++; continue; }
+		local keep = PrismaticAI.RailLevelKeep(cost);
+		if (funds - 4 * cost < keep) {
+			budget.money++;
+			AILog.Info("PrismaticAI: rail station site " + label + " at tile " + t + " not levelled: estimated " + cost +
+				", funds " + funds + " (keeping " + keep + " after four times the estimate)");
+			continue;
+		}
 		budget.levelled++;
 		local real = AIAccounting();
-		AILog.Info("PrismaticAI: levelling rail station site " + label + " at tile " + t + " (estimated " + cost + ")");
+		AILog.Info("PrismaticAI: levelling rail station site " + label + " at tile " + t + " to height " + plan.z + " (estimated " + cost + ")");
 		AIController.Sleep(PACE);
-		if (!AITile.LevelTiles(r, far)) {
-			AILog.Warning("PrismaticAI: levelled rail station site at tile " + t + " for " + real.GetCosts() + " and it was still refused: " + AIError.GetLastErrorString());
+		local levelled = AITile.LevelTiles(plan.start, plan.far);
+		/* What the levelling cost, before the station adds its own price to the same count. */
+		local paid = real.GetCosts();
+		if (!levelled) {
+			AILog.Warning("PrismaticAI: levelled rail station site at tile " + t + " for " + paid + " and it was still refused: " + AIError.GetLastErrorString());
 			continue;
 		}
 		local made = PrismaticAI.RailStationOn(t, g, o, len, platforms, AIStation.STATION_NEW, "levelled ");
-		if (made == null) continue;
-		AILog.Info("PrismaticAI: built rail station " + label + " at tile " + t + " after levelling it for " + real.GetCosts() + ", " + platforms + " platform(s) of " + len + ", exit " + o.name + o.how);
+		if (made == null) {
+			/* The town's answer holds for every other site of this terminus: the levelling cleared
+			 * trees, and each costs the town's rating (knowledge levelling-an-airport-site-clears-
+			 * trees-and-costs-town-rating). On seed 31337 a site levelled exactly was refused so. */
+			if (AIError.GetLastError() == AIError.ERR_LOCAL_AUTHORITY_REFUSES) budget.levelled = 3;
+			local left = PrismaticAI.RectHeightRange(r, o.w, o.h);
+			if (left != 0) AILog.Warning("PrismaticAI: levelling site at tile " + t + " for " + paid + " left it uneven (" + left + " height steps)");
+			continue;
+		}
+		AILog.Info("PrismaticAI: built rail station " + label + " at tile " + t + " after levelling it for " + paid + ", " + platforms + " platform(s) of " + len + ", exit " + o.name + o.how);
 		return made;
 	}
 	return null;
+}
+
+/* What a rail station levelling estimated at `cost` must leave after four times that cost: the
+ * fixed RAIL_LEVEL_KEEP once the levelling is dear, RAIL_LEVEL_KEEP_X times the estimate below it,
+ * and never under RAIL_LEVEL_KEEP_MIN. The fixed keep alone refused every levelling below about
+ * 64000 of funds: #240 counted 6 sites levelled for 500 to 4000 refused at funds of 35000 to 64000
+ * after the source station, which then had no site at all. With 12 a cheap site is levelled while
+ * four times its price is at most a quarter of the funds; a dear one is judged as before. */
+const RAIL_LEVEL_KEEP_X = 12;
+const RAIL_LEVEL_KEEP_MIN = 15000;
+function PrismaticAI::RailLevelKeep(cost) {
+	return max(RAIL_LEVEL_KEEP_MIN, min(RAIL_LEVEL_KEEP, RAIL_LEVEL_KEEP_X * cost));
+}
+
+/* A company with RAIL_LEVEL_RICH or more to spend (bank balance and loan headroom) levels rail
+ * station sites whose corners span up to RAIL_LEVEL_STEP_RICH height steps, estimated at up to
+ * RAIL_LEVEL_MAX_RICH, or a fiftieth of its funds when that is less: in the owner's live game of
+ * seed 21647 (1992) company 0 held 34M idle and its only new line failed twice at "no rail station
+ * site at Cunnford Coal Mine", with levelling held to one height step and 40000. LevelPlan keeps
+ * the bigger levellings from paying for a site a house or road leaves uneven. */
+const RAIL_LEVEL_RICH = 2000000;
+const RAIL_LEVEL_STEP_RICH = 3;
+const RAIL_LEVEL_MAX_RICH = 400000;
+function PrismaticAI::RailLevelFunds() {
+	return AICompany.GetBankBalance(AICompany.COMPANY_SELF) + AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
+}
+function PrismaticAI::RailLevelStep() {
+	return PrismaticAI.RailLevelFunds() >= RAIL_LEVEL_RICH ? max(RAIL_LEVEL_STEP, RAIL_LEVEL_STEP_RICH) : RAIL_LEVEL_STEP;
+}
+function PrismaticAI::RailLevelMax() {
+	local funds = PrismaticAI.RailLevelFunds();
+	return funds >= RAIL_LEVEL_RICH ? max(RAIL_LEVEL_MAX, min(RAIL_LEVEL_MAX_RICH, funds / 50)) : RAIL_LEVEL_MAX;
 }
 
 /* The height span of the corners of the w x h rectangle at `t` (a valuator for AITileList). */
@@ -945,6 +1091,109 @@ function PrismaticAI::RectHeightRange(t, w, h) {
 		}
 	}
 	return hi - lo;
+}
+
+/* How far from a site levelling may move corners before LevelPlan gives the site up (tiles). */
+const LEVEL_REACH = 8;
+/* The most corner steps a levelling LevelPlan accepts: each step of each moved corner counts
+ * against the company's terraform limit (construction.terraform_frame_burst, 4096 by default), and
+ * CmdLevelLand reports success when it stops at that limit with the site half levelled. */
+const LEVEL_STEPS_MAX = 400;
+
+/* What tile `t` is, in the words of a levelling message. */
+function PrismaticAI::LevelTileKind(t) {
+	if (!AIMap.IsValidTile(t)) return "the map's edge";
+	if (AIRoad.IsRoadTile(t)) return "a road";
+	if (AIRail.IsRailTile(t)) return "a track";
+	if (AITile.IsStationTile(t)) return "a station";
+	if (AIIndustry.IsValidIndustry(AIIndustry.GetIndustryID(t))) return "an industry";
+	if (AITile.IsCoastTile(t) || AITile.IsWaterTile(t)) return "water";
+	return "a house or object";
+}
+
+/* Whether level-land may move a corner of tile `t`: clear land (farmland and rocks included) and
+ * trees only. Every other tile refuses a corner that moves under it (terraform_cmd.cpp runs each
+ * tile's terraform proc with DoCommandFlag::Auto: a house, road, track, station or industry says no;
+ * a coast is left alone to be safe), and autoslope's exceptions are not counted on. */
+function PrismaticAI::LevelTerraformable(t) {
+	return AIMap.IsValidTile(t) && AITile.IsBuildable(t) && !AIRoad.IsRoadTile(t) && !AITile.IsCoastTile(t);
+}
+
+/* What levelling the corners x0..x1, y0..y1 to height `z` does, as the game's level-land does it
+ * (CmdLevelLand steps every corner of the rectangle toward z; TerraformTileHeight drags a neighbour
+ * corner along x or y that would differ by more than one step). On a map where those neighbours
+ * differ by at most one step, a corner at distance d (steps along x plus along y) from the rectangle
+ * ends at its height clamped to z - d .. z + d, and when no corner at distance d moves, none further
+ * out does. Returns {state, steps, blocker}: state "ok" with the corner steps it takes, "blocked"
+ * with the tile that refuses (LevelTerraformable), or "unknown" (corners move beyond LEVEL_REACH
+ * tiles or next to the map's edge, or a corner height could not be read). */
+function PrismaticAI::LevelPlanAt(x0, y0, x1, y1, z) {
+	local mx = AIMap.GetMapSizeX(), my = AIMap.GetMapSizeY();
+	local steps = 0, tiles = {};
+	for (local d = 0; d <= LEVEL_REACH; d++) {
+		local moved = false;
+		for (local x = x0 - d; x <= x1 + d; x++) {
+			/* Only the ring at distance d: the whole column inside the rectangle's rows when x alone
+			 * is d away, else the two corners rem rows above and below it. */
+			local rem = d - max(0, max(x0 - x, x - x1));
+			local ys = (rem == 0) ? null : [y0 - rem, y1 + rem];
+			for (local k = 0; k < (ys == null ? y1 - y0 + 1 : 2); k++) {
+				local y = (ys == null) ? y0 + k : ys[k];
+				/* A ring is read only when the one inside it moved; next to the map's edge a corner may
+				 * not move (TerraformTileHeight) and a void one reads -1, so the answer is unknown. */
+				if (x <= 1 || y <= 1 || x >= mx - 2 || y >= my - 2) return {state = "unknown", steps = steps, blocker = null};
+				local c = AIMap.GetTileIndex(x, y);
+				local h = AITile.GetCornerHeight(c, AITile.CORNER_N);
+				if (h < 0) return {state = "unknown", steps = steps, blocker = c};
+				local to = max(z - d, min(z + d, h));
+				if (to == h) continue;
+				moved = true;
+				steps += abs(to - h);
+				for (local ax = x - 1; ax <= x; ax++) {
+					for (local ay = y - 1; ay <= y; ay++) tiles[AIMap.GetTileIndex(ax, ay)] <- true;
+				}
+			}
+		}
+		if (!moved) {
+			foreach (t, _ in tiles) {
+				if (!PrismaticAI.LevelTerraformable(t)) return {state = "blocked", steps = steps, blocker = t};
+			}
+			return {state = steps > LEVEL_STEPS_MAX ? "unknown" : "ok", steps = steps, blocker = null};
+		}
+	}
+	return {state = "unknown", steps = steps, blocker = null};
+}
+
+/* How to level the w x h site at tile `t` so that every corner of it ends level. AITile.LevelTiles
+ * levels a rectangle to the height of its start corner, so each of the site's four outer corners is
+ * a candidate, and the one whose levelling no tile refuses (LevelPlanAt) with the fewest corner
+ * steps is taken. Without this, a corner shared with a house or road stayed where it was while
+ * LevelTiles reported success (CmdLevelLand succeeds when any step did) and the money was spent: on
+ * seed 15805 three airport sites were levelled for 8266, 1377 and 6489 and refused
+ * ERR_FLAT_LAND_REQUIRED, each beside a house, road or water this finds. Returns {start, far, z,
+ * steps, why}: `start` and `far` are the corners to pass to LevelTiles, or null with `why` when no
+ * candidate works. */
+function PrismaticAI::LevelPlan(t, w, h) {
+	local x0 = AIMap.GetTileX(t), y0 = AIMap.GetTileY(t), x1 = x0 + w, y1 = y0 + h;
+	local best = {start = null, far = null, z = -1, steps = 0, why = ""};
+	if (x1 >= AIMap.GetMapSizeX() || y1 >= AIMap.GetMapSizeY()) {
+		best.why = "the site reaches the map's edge";
+		return best;
+	}
+	foreach (c in [[x0, y0, x1, y1], [x1, y0, x0, y1], [x0, y1, x1, y0], [x1, y1, x0, y0]]) {
+		local start = AIMap.GetTileIndex(c[0], c[1]);
+		local z = AITile.GetCornerHeight(start, AITile.CORNER_N);
+		local p = PrismaticAI.LevelPlanAt(x0, y0, x1, y1, z);
+		if (p.state == "ok") {
+			if (best.start == null || p.steps < best.steps) {
+				best = {start = start, far = AIMap.GetTileIndex(c[2], c[3]), z = z, steps = p.steps, why = ""};
+			}
+		} else if (best.start == null && best.why == "") {
+			best.why = (p.state == "blocked") ? "levelling would move a corner of " + PrismaticAI.LevelTileKind(p.blocker) +
+				" at tile " + p.blocker : "levelling would move corners more than " + LEVEL_REACH + " tiles out, by the map's edge or more than " + LEVEL_STEPS_MAX + " steps";
+		}
+	}
+	return best;
 }
 
 /* What a terminus whose site starts at `r` catches with its platforms (sw x sh tiles, `offset` from
@@ -1824,6 +2073,8 @@ function PrismaticAI::BuildFreightRailRoute(p, q, cargo, shape) {
 	local platforms = double ? 2 : shape.platforms;
 	local plan = PrismaticAI.PlatformPlan(cargo, supply, dist, platforms, shape.len, shape.wagons);
 	AILog.Info("PrismaticAI: rail plan " + label + ": " + plan.why + (double ? ", double track" : ""));
+	/* An acceptor remembered without a site fails here, before the source station is built and removed. */
+	if (PrismaticAI.NoRailSiteKnown(ql, "accept", cargo, plan.len, platforms, double ? -1 : 0, "at " + AIIndustry.GetName(q))) return 0;
 	local sa = PrismaticAI.BuildRailStationAt(pl, ql, plan.len, cargo, "produce", "at " + AIIndustry.GetName(p), platforms, double ? 1 : 0);
 	if (sa == null) return 0;
 	/* Two companies that chose one producer in the same days both pass the pre-check: in the fitness
@@ -1895,7 +2146,7 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 	local near = rich ? RICH_MIN_TILES : 100, far = rich ? RICH_MAX_TILES : 260;
 	/* Why nothing was found, said once a game year (NO_OWN_LINE_YEAR): without it a bot that found
 	 * no candidate went silent, as company 0 of the owner's live game (seed 15805) did for years. */
-	local why = {producers = 0, ours = 0, claimed = 0, released = 0, small = 0, served = 0, no_acceptor = 0, tried = 0};
+	local why = {producers = 0, ours = 0, claimed = 0, released = 0, small = 0, served = 0, no_acceptor = 0, tried = 0, no_site = 0};
 	PrismaticAI.ForgetGoneClaims();
 	foreach (p, _ in AIIndustryList()) {
 		if (AIIndustry.IsBuiltOnWater(p)) continue;
@@ -1909,6 +2160,7 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 			if (!AICargo.IsFreight(c)) continue;
 			local prod = AIIndustry.GetLastMonthProduction(p, c);
 			if (prod < 40) { why.small++; continue; }
+			if (PrismaticAI.NoRailSiteFor(AIIndustry.GetLocation(p), "produce", c)) { why.no_site++; continue; }
 			if (AIIndustry.GetLastMonthTransported(p, c) > 0) {
 				if (!rich) { why.served++; continue; }
 				local served = AIIndustry.GetLastMonthTransportedPercentage(p, c);
@@ -1922,6 +2174,7 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 			if (accs.IsEmpty()) why.no_acceptor++;
 			foreach (q, dist in accs) {
 				if (tried.rawin(p + "-" + q + "-" + c)) { why.tried++; continue; }
+				if (PrismaticAI.NoRailSiteFor(AIIndustry.GetLocation(q), "accept", c)) { why.no_site++; continue; }
 				local days = (dist / tiles_a_day).tointeger() + 1;
 				local income = AICargo.GetCargoIncome(c, dist, days);
 				/* Multi-source (rail_feed): the unserved producers of the same cargo a station at p
@@ -1943,7 +2196,8 @@ function PrismaticAI::NextOwnFreightLine(tried, feed = 0, rich = false) {
 			" ours, " + why.claimed + " claimed by another company's rail station, " + why.released +
 			" with only another company's rail station that no longer claims it, cargoes: " + why.small +
 			" under 40 a month, " + why.served + " transported by others" + (rich ? " (rich: past RICH_SERVED_BELOW)" : "") +
-			", " + why.no_acceptor + " with no acceptor " + near + "-" + far + " tiles away, " + why.tried + " pairs tried");
+			", " + why.no_acceptor + " with no acceptor " + near + "-" + far + " tiles away, " + why.tried + " pairs tried, " +
+			why.no_site + " passed over for an end remembered without a station site");
 	}
 	return best;
 }
