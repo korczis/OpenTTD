@@ -236,9 +236,21 @@ try {
     .waitFor({ timeout: 10000 }).then(() => true).catch(() => false) && !(await autoOn()));
   await owner.locator('#owner-secret').fill(secret);
   await owner.locator('#owner-signin-form button[type="submit"]').click();
-  check('the right secret signs in and the switch goes on', await until(async () => (await box.count()) === 0 && autoOn()));
-  const cookie = (await fresh.cookies(base)).find((c) => c.name === `mcp_owner_${panelPort}`);
-  check('the sign-in cookie is HttpOnly, SameSite=Strict and outlives the browser session', !!cookie && cookie.httpOnly && cookie.sameSite === 'Strict' && cookie.expires > Date.now() / 1000 + 300 * 86400);
+  check('the right secret signs in and the switch goes on', await until(async () => (await box.count()) === 0 && (await autoOn())));
+  // The cookie itself, waited for (bounded): the browser may apply the sign-in's Set-Cookie a moment
+  // after the box closes. It outlives the browser session (a persistent cookie, not a session one)
+  // for the panel's OWNER_COOKIE_MAX_AGE, 12 hours: between 11 and 13 hours from now.
+  const cookieOf = async () => (await fresh.cookies(base)).find((c) => c.name === `mcp_owner_${panelPort}`);
+  const now = () => Date.now() / 1000;
+  const kept = (c) => !!c && c.httpOnly === true && c.sameSite === 'Strict' && c.expires > now() + 11 * 3600 && c.expires < now() + 13 * 3600;
+  let cookie;
+  await until(async () => kept(cookie = await cookieOf()), 10000);
+  check('the sign-in cookie is HttpOnly, SameSite=Strict and outlives the browser session', kept(cookie),
+    cookie ? `httpOnly ${cookie.httpOnly}, sameSite ${cookie.sameSite}, ${((cookie.expires - now()) / 3600).toFixed(1)} h` : 'no cookie');
+  // Negative control: the same test refuses a cookie a script could read, one that dies within the
+  // hour, a session cookie (expires -1), one another site may send, and none at all.
+  check('the cookie test refuses a readable, short-lived, session or Lax cookie, and a missing one', !!cookie && !kept({ ...cookie, httpOnly: false })
+    && !kept({ ...cookie, expires: now() + 3600 }) && !kept({ ...cookie, expires: -1 }) && !kept({ ...cookie, sameSite: 'Lax' }) && !kept(undefined));
   const toggleWithoutBox = async (want) => {
     await owner.locator('label:has(#auto)').click();
     const asked = await box.waitFor({ timeout: 2000 }).then(() => true).catch(() => false);
@@ -309,7 +321,7 @@ async function bulkPhase(page, secret, earlier) {
   const added = await post('/api/approvers', { add: 2 }, owner);
   check('POST /api/approvers registers the owner\'s client, with the owner secret', added.status === 200 && (await added.json()).output.some((l) => /is an approver now/.test(l)));
   check('and answers 422 for a client that is not connected', (await post('/api/approvers', { add: 404 }, owner)).status === 422);
-  await post('/api/console', { command: 'fake seed bulk' });
+  await post('/api/console', { command: 'fake seed bulk' }, owner);
   check('the stand-in now holds the list\'s queue and keeps rules', await until(async () => {
     const d = (await get('/api/resources/approvals')).data || {};
     return Array.isArray(d.rules) && (d.approvals || []).some((a) => a.id === 22);
@@ -444,10 +456,10 @@ async function bulkPhase(page, secret, earlier) {
   await page.locator('#approvals-deny-bulk').click();
   check('Deny all denies every row the filter shows', await toast('green', 'Denied 1 of 1') && (await state(22)).state === 'denied');
   // A bulk decision over a row the server consumed meanwhile: the failure is named.
-  await post('/api/console', { command: "fake add openttd.cmd.BuildRoad {'company':4,'tile':9}" });
+  await post('/api/console', { command: "fake add openttd.cmd.BuildRoad {'company':4,'tile':9}" }, owner);
   await L('[data-approve="23"]').waitFor({ timeout: 10000 });
   await page.route('**/api/approvals', (r) => r.abort());
-  await post('/api/console', { command: 'fake consume 23' });
+  await post('/api/console', { command: 'fake consume 23' }, owner);
   await page.locator('#approvals-approve-bulk').click();
   await confirm.locator('[data-confirm="yes"]').click();
   check('a row consumed meanwhile is named in a red toast', await toast('red', '#23: 409'));
@@ -456,7 +468,7 @@ async function bulkPhase(page, secret, earlier) {
 
   // Standing rules.
   for (const [tool, args] of [['openttd.ai.set_setting', "{'company':3,'name':'max_ships','value':5}"], ['openttd.ai.set_setting', "{'company':3,'name':'max_trains','value':6}"],
-    ['openttd.cmd.BuildRoad', "{'company':3,'tile':5}"]]) await post('/api/console', { command: `fake add ${tool} ${args}` });
+    ['openttd.cmd.BuildRoad', "{'company':3,'tile':5}"]]) await post('/api/console', { command: `fake add ${tool} ${args}` }, owner);
   await page.mouse.move(1, 1);
   await L('[data-always="26"]').waitFor({ timeout: 10000 });
   await page.waitForTimeout(650);
@@ -494,7 +506,7 @@ async function bulkPhase(page, secret, earlier) {
   await page.locator('#rule-use-match').uncheck();
   await ed.locator('button[type="submit"]').click();
   check('always deny without a matcher denies the row', await toast('green', 'Rule #2: always deny openttd.cmd.BuildRoad') && await settled(async () => (await state(26)).state === 'denied'));
-  await post('/api/console', { command: "fake add openttd.cmd.BuildRoad {'company':1,'tile':1}" });
+  await post('/api/console', { command: "fake add openttd.cmd.BuildRoad {'company':1,'tile':1}" }, owner);
   check('a new request the deny rule takes never waits', await settled(async () => (await state(27)).state === 'denied' && (await state(27)).matched_rule?.id === 2));
   await L('[data-always="16"]').click();
   check('an owner-only row offers no allow rule', await ed.locator('input[value="allow"]').isDisabled() && await ed.locator('input[value="deny"]').isChecked());
@@ -507,7 +519,7 @@ async function bulkPhase(page, secret, earlier) {
   await page.keyboard.press('Escape');
   check('Escape closes it too', await ed.count() === 0);
   // An allow rule over every AI tool: the owner-only row records the match and still waits for the console.
-  await post('/api/console', { command: "fake add openttd.ai.set_setting {'company':1,'name':'x','value':1}" });
+  await post('/api/console', { command: "fake add openttd.ai.set_setting {'company':1,'name':'x','value':1}" }, owner);
   await page.mouse.move(1, 1);
   await L('[data-always="28"]').waitFor({ timeout: 10000 });
   await page.waitForTimeout(650);
@@ -522,7 +534,7 @@ async function bulkPhase(page, secret, earlier) {
   check('narrowed, it would decide only #28 (never the owner-only #16)', await settled(async () => (await page.locator('#rule-dryrun').textContent()) === 'Would decide 1 waiting approval now: #28'));
   await ed.locator('button[type="submit"]').click();
   check('an allow rule never decides the owner-only row', await toast('green', 'Rule #3: always allow openttd.ai.* where {"company":1}') && await settled(async () => (await state(28)).state === 'consumed')
-    && (await state(16)).state === 'pending' && await settled(async () => (await L('tr[data-row="16"]').textContent()).includes('rule #3 allow (console decides)')));
+    && (await state(16)).state === 'pending' && await settled(async () => (await L('tr[data-row="16"]').textContent()).includes('rule #3 allow, held: you decide it')));
   await page.locator('#approvals-rules [data-rule-remove="2"]').click();
   check('Remove asks first, naming the rule', await confirm.filter({ hasText: 'Remove rule #2 (always deny openttd.cmd.BuildRoad)?' }).count() === 1);
   await confirm.locator('[data-confirm="no"]').click();
@@ -536,7 +548,7 @@ async function bulkPhase(page, secret, earlier) {
   // and a moment (600 ms) before it is clicked, since a row that just moved takes no click.
   const add = async (tool, args) => {
     await page.mouse.move(1, 1);
-    await post('/api/console', { command: `fake add ${tool} ${args}` });
+    await post('/api/console', { command: `fake add ${tool} ${args}` }, owner);
     const id = Math.max(...(((await get('/api/resources/approvals')).data || {}).approvals || []).map((a) => a.id));
     await L(`[data-approve="${id}"]`).waitFor({ timeout: 10000 });
     await page.waitForTimeout(650);
@@ -573,14 +585,14 @@ async function bulkPhase(page, secret, earlier) {
   check('a double click on Yes approves one row', await settled(async () => (await state(q[2])).state === 'consumed') && await pending(q[3]) && await pending(q[4]));
   // While the pointer is over the list, a refresh never moves its rows; leaving applies it.
   await L(`tr[data-row="${q[3]}"] td:nth-child(3)`).hover();
-  await post('/api/console', { command: "fake add openttd.game.set_pause {'pause':true,'frozen':1}" });
+  await post('/api/console', { command: "fake add openttd.game.set_pause {'pause':true,'frozen':1}" }, owner);
   const frozenId = Math.max(...(((await get('/api/resources/approvals')).data || {}).approvals || []).map((a) => a.id));
   await page.waitForTimeout(2500);
   check('a new request does not move the rows while the pointer is over the list', await L(`tr[data-row="${frozenId}"]`).count() === 0);
   await page.mouse.move(1, 1);
   check('leaving the list draws it', await L(`tr[data-row="${frozenId}"]`).waitFor({ timeout: 10000 }).then(() => true).catch(() => false));
   // A row inserted above the others, then clicked at once: the click is not taken; 600 ms later it is.
-  await post('/api/console', { command: "fake insert openttd.game.set_pause {'pause':false,'inserted':1}" });
+  await post('/api/console', { command: "fake insert openttd.game.set_pause {'pause':false,'inserted':1}" }, owner);
   const insId = Math.max(...(((await get('/api/resources/approvals')).data || {}).approvals || []).map((a) => a.id));
   await page.waitForFunction((id) => document.querySelector('#pending tr[data-row]')?.dataset.row === String(id), insId, { polling: 'raf', timeout: 10000 });
   const ins = await L(`[data-approve="${insId}"]`).boundingBox();
@@ -597,7 +609,7 @@ async function bulkPhase(page, secret, earlier) {
   // and after the sign-in box, Yes answers 200.
   runs.push(...await page.coverage.stopJSCoverage());
   for (const [host, how, i] of [['127.0.0.1', 'box', 0], ['localhost', 'launcher', 1], ['localhost', 'box', 2]]) {
-    await post('/api/console', { command: `fake add openttd.game.set_pause {'pause':${i % 2 === 0}}` });
+    await post('/api/console', { command: `fake add openttd.game.set_pause {'pause':${i % 2 === 0}}` }, owner);
     const id = Math.max(...(((await get('/api/resources/approvals')).data || {}).approvals || []).map((a) => a.id));
     const ctx = await page.context().browser().newContext({ viewport: { width: 1440, height: 1000 } });
     const tab = await ctx.newPage();

@@ -11,3 +11,6 @@
 [approval-core] {"decided":[],"error":"","nonce":"r6","ok":true,"refused":[],"rejected":[],"rule_id":1,"skipped":[]}
 [approval-core] {"decided":[],"error":"","nonce":"r7","ok":true,"refused":[{"error":"no approval #999","id":999}],"rejected":[],"rule_id":0,"skipped":[]}
 [approval-core] {"decided":[],"error":"usage","nonce":"r8","ok":false,"refused":[],"rejected":[],"rule_id":0,"skipped":[]}
+# From #270's Catch2 case "The result line names why each id was refused, rejected or skipped"
+# (src/tests/test_prismatic_mcp.cpp, PrismaticMCP::ResultLine "n1"): all four kinds with reasons.
+[approval-core] {"decided":[7],"error":"","nonce":"n1","ok":true,"refused":[{"error":"approval #8 is not pending","id":8}],"rejected":[{"error":"the pause command was refused","id":9}],"rule_id":4,"skipped":[{"error":"expired","id":10}]}

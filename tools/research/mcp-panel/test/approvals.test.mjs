@@ -88,7 +88,7 @@ test('a row: Yes and No in the decide column, an owner-only one sent to the cons
   assert.match(A.rowHtml(queue[4]), /expired/);
   const matched = A.rowHtml({ ...queue[0], matched_rule: { id: 2, effect: 'deny', decides: true } });
   assert.match(matched, /rule #2 deny/);
-  assert.match(A.rowHtml({ ...queue[3], matched_rule: { id: 3, effect: 'allow', decides: false } }), /rule #3 allow \(console decides\)/);
+  assert.match(A.rowHtml({ ...queue[3], matched_rule: { id: 3, effect: 'allow', decides: false } }), /rule #3 allow, held: you decide it/);
   assert.match(A.rowHtml(queue[0], { rules: false }), /data-always="1"[^>]*disabled/);
 });
 

@@ -265,7 +265,9 @@ export function rowHtml(a, { picked = false, current = false, rules = true } = {
     : a.expired ? badge('expired', 'gray')
       : `<span class="flex gap-2"><button type="button" data-approve="${a.id}" data-id="${a.id}" data-role="yes" class="${BIG_YES}" aria-label="Approve #${a.id}" title="Approve #${a.id} (y, a, Enter)">Yes</button><button type="button" data-deny="${a.id}" data-id="${a.id}" data-role="no" class="${BIG_NO}" aria-label="Deny #${a.id}" title="Deny #${a.id} (n, d)">No</button></span>`;
   const m = a.matched_rule;
-  const rule = m ? ` ${badge(`rule #${m.id} ${m.effect}${m.decides === false ? ' (console decides)' : ''}`, m.effect === 'deny' ? 'red' : 'green')}` : '';
+  // A rule that applies but does not decide (an owner-only tool, an unattended rule with no
+  // registered approver for the company) holds the approval for the owner, as the game's window says.
+  const rule = m ? ` ${badge(`rule #${m.id} ${m.effect}${m.decides === false ? ', held: you decide it' : ''}`, m.decides === false ? 'yellow' : m.effect === 'deny' ? 'red' : 'green')}` : '';
   return `<tr data-row="${a.id}" tabindex="${current ? 0 : -1}" aria-selected="${picked}" class="align-top bg-white border-b dark:bg-gray-800 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary-500${current ? ' bg-primary-50 dark:bg-gray-700' : ''}${a.expired ? ' opacity-60' : ''}">
       <td class="w-10 px-3 py-2"><input type="checkbox" data-select="${a.id}" data-id="${a.id}" data-role="pick" ${picked ? 'checked' : ''} ${ok ? '' : 'disabled'} class="${UI.check}" aria-label="Select #${a.id}"></td>
       <td class="${DECIDE}">${decide}</td>
