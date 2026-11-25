@@ -1,0 +1,88 @@
+{
+  "schema": "rust-bench/v1",
+  "id": "bench-20261121T101500-cc33dd44",
+  "generated_at": "2026-11-21T11:15:00+01:00",
+  "rev": "2222222222222222222222222222222222222222",
+  "tree_dirty": false,
+  "host": {
+    "name": "fixture-host",
+    "os": "macos",
+    "cpus": 18
+  },
+  "toolchain": "rustc 1.91.0 (fixture)",
+  "profile": "bench",
+  "crate": "tools/research/mcp-rhai",
+  "benches": [
+    {
+      "id": "planner/plan_fixture",
+      "group": "planner",
+      "name": "plan_fixture",
+      "unit": "ns",
+      "mean": 96.9,
+      "median": 95.0,
+      "stddev": 2.4,
+      "min": 88.0,
+      "max": 104.0,
+      "samples": 100,
+      "throughput": null
+    },
+    {
+      "id": "planner/route_search",
+      "group": "planner",
+      "name": "route_search",
+      "unit": "ns",
+      "mean": 44982.0,
+      "median": 44100.0,
+      "stddev": 790.0,
+      "min": 42800.0,
+      "max": 47100.0,
+      "samples": 100,
+      "throughput": null
+    },
+    {
+      "id": "rhai/eval_small",
+      "group": "rhai",
+      "name": "eval_small",
+      "unit": "ns",
+      "mean": 3253.8,
+      "median": 3190.0,
+      "stddev": 88.0,
+      "min": 3040.0,
+      "max": 3550.0,
+      "samples": 100,
+      "throughput": null
+    },
+    {
+      "id": "rhai/compile_library",
+      "group": "rhai",
+      "name": "compile_library",
+      "unit": "ns",
+      "mean": 4569600.0,
+      "median": 4480000.0,
+      "stddev": 58000.0,
+      "min": 4390000.0,
+      "max": 4700000.0,
+      "samples": 20,
+      "throughput": null
+    },
+    {
+      "id": "store/sample_rows",
+      "group": "store",
+      "name": "sample_rows",
+      "unit": "ns",
+      "mean": 828.2,
+      "median": 812.0,
+      "stddev": 14.0,
+      "min": 790.0,
+      "max": 870.0,
+      "samples": 100,
+      "throughput": {
+        "elements": 64
+      }
+    }
+  ],
+  "baseline": {
+    "id": "bench-20261120T101500-aa11bb22",
+    "regressions": []
+  }
+}
