@@ -214,7 +214,12 @@ try {
   // the sign-in's answer set the cookie read next (the check failed on master about half the time).
   check('the right secret signs in and the switch goes on', await until(async () => (await box.count()) === 0 && await autoOn()));
   const cookie = (await fresh.cookies(base)).find((c) => c.name === `mcp_owner_${panelPort}`);
-  check('the sign-in cookie is HttpOnly, SameSite=Strict and outlives the browser session', !!cookie && cookie.httpOnly && cookie.sameSite === 'Strict' && cookie.expires > Date.now() / 1000 + 300 * 86400);
+  // The cookie lasts OWNER_COOKIE_MAX_AGE (mcp-rhai/src/panel.rs: 12 hours, the owner's decision of
+  // 2026-11-23), so it outlives the browser session and ends within a minute of that from now.
+  const maxAge = 12 * 3600;
+  const left = cookie ? cookie.expires - Date.now() / 1000 : -1;
+  check('the sign-in cookie is HttpOnly, SameSite=Strict and lasts the 12 hours the panel gives it', !!cookie && cookie.httpOnly && cookie.sameSite === 'Strict'
+    && Math.abs(left - maxAge) < 60, cookie ? `httpOnly ${cookie.httpOnly}, sameSite ${cookie.sameSite}, ${Math.round(left)} s left` : 'no cookie');
   const toggleWithoutBox = async (want) => {
     await owner.locator('label:has(#auto)').click();
     const asked = await box.waitFor({ timeout: 2000 }).then(() => true).catch(() => false);
