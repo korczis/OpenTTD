@@ -310,7 +310,10 @@ The first editions showed two failures. The battle now catches both by itself.
   `fitness.must_be_healthy`. The null
   driver is deterministic, so the verdict is stable. `tools/gate.sh change` runs it whenever
   `tools/research/prismatic-ai` or `tools/research/ai-battle` changes. Without an arena cache it
-  says NOT RUN.
+  says NOT RUN. It also fails on a failure regime of a healthy PrismaticAI
+  (`regime:no_expansion`, `regime:widening_gap`), judged against the non-PrismaticAI contestants
+  of the same match, and prints every regime of every contestant
+  ([failure regimes](../failure-regimes.md)).
 - **Self-monitoring while the battle runs.** The orchestrator attaches `anomalies` to every
   contestant of every match, live:
   - `fleet_drop:<peak>-><now>`: the fleet fell below `anomaly_rules.fleet_keep` of a peak of at
@@ -651,6 +654,21 @@ turn one map into a verdict on the neighbours of the configuration that played i
 radius, and the seed only adds matches. The battle brain (`tools/research/battle-brain`, an Axon
 ensemble) does not train on live rows yet. Its label is a value share relative to the default
 PrismaticAI on the same seed, and a live game has no such pair.
+
+## Config evolution
+
+`battle.py evolve` turns a detected gap into a measured settings proposal
+([config-evolution-loop.md](../config-evolution-loop.md)). It has three triggers: a lost live game
+(`live_entries` above), the gap watch's `gap.<company>`, or the strategy review's
+`review.<company>.month`. It attributes the gap to transport modes from the referee's fleet and
+profit per mode. It derives candidates from the GA's genes of those modes and of capital, directed
+by their recorded correlation with the ratio to AAAHogEx; the live veto and the live seed apply.
+It plays them in paired null-driver matches against battle.json `evolve.field` and confirms the
+best one on fresh seeds. The result is a record under `<cache>/evolve/` and, with `--propose`, the
+blackboard key `evolve.proposal.<company>`. It applies and approves nothing. It is bounded by
+`evolve.budget` and `max_minutes`, stopped by `STOP` or `PAUSED`, and runs one at a time under
+`<cache>/evolve/lock`. `ablate` rows now carry `standings`: every company's value, fleet and
+profit per mode.
 
 ## Double track
 

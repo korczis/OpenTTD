@@ -1,0 +1,25 @@
+id: I0283
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "replan's MIN_PAYS and HORIZON_MONTHS are declared owner policy, published beside the realised payback distribution of the game's own lines"
+slug: replan-policy-beside-realised-payback
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: openttd-51 (replan.rhai), with M's outcome data. Keep MIN_PAYS and HORIZON_MONTHS as the owner's risk policy, declared and versioned in replan.<company>; beside them publish the realised payback distribution of the game's own lines, failed and unfinished investments kept as censored observations, so the owner sees what the policy admits and refuses."
+why: "Typed constants decide every replan verdict, and nobody sees what they admit or refuse."
+scope:
+- "tools/research/mcp-panel/rhai/replan.rhai"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0276
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "the record carries the policy values with their version and the realised payback distribution with n and the censored count (script test)"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

@@ -48,6 +48,7 @@ and OpenMSX for sound and music), and `PrismaticAI` in `~/Documents/OpenTTD/ai/`
 | MCP catalogue | `resources/list` and `tools/list`; click a resource to read it |
 | Scripts (`/scripts`, `/scripts/<name>`) | The Rhai library as a workspace: every script with its header comment, imports and importers; an editor with Rhai highlighting, line numbers, an outline and a live parse check; Save (only text that parses), Run once (streamed), and Start/Stop as a service whose log streams and which reloads within a second when its file or a library it imports changes ([`research/rail-steward.md`](rail-steward.md), `src/panel_scripts.rs`) |
 | Towns (`/towns`) | The [town-authority model](mechanisms/town-authority.md) derived from the engine sources (likes and dislikes, gates with removal thresholds by tolerance, town actions, links, relations, each rule with its source `path:line`) and, with a game connected, the live towns with one company's rating, band and `town_lib.rhai` advice; a company selector kept in the address (`src/panel_town.rs`, `tools/research/mcp-towns-check`) |
+| Benchmarks (`/bench`, `/bench/<group>/<name>`) | The Rust benchmark records of `research/results/bench-*.json` (`rust-bench/v1`): the newest record's regressions as a banner, its rev linked to its commit, host and toolchain, every bench in a table filtered by group and text and sorted by any column, each bench's median across the records, and a page per bench with its history and min-max band; every filter, sort, record and maximized chart in the address ([below](#rust-benchmarks-records-history-regressions), `src/panel_bench.rs`, `tools/research/mcp-bench-check`) |
 | Developer console (`~`) | OpenTTD console commands, `/mcp <method> [json]`, `/read <uri>`, `/pause`, `/resume`, `/approve <id>`, `/auto on/off`, `/rhai <script>` (every line streamed as the script prints it), `/tail [kinds]` and `/untail` (the live event feed). Output is highlighted by content: errors, warnings, passes, events, debug lines, and JSON pretty-printed with coloured keys and values |
 
 Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
@@ -57,6 +58,7 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `GET /api/status` | | server and MCP up, pending approvals, auto-approve, events |
 | `GET /api/overview` | | state, companies, decisions |
 | `GET /api/catalogue` | | `initialize`, `resources/list`, `tools/list` |
+| `GET /api/bench[?id=<record>]` | | every benchmark record oldest first with `latest_id`, `count` and the `skipped` files with their reason, or one record |
 | `GET /api/resource?uri=<uri>` | | one resource's payload |
 | `POST /api/rpc` | `{"method", "params"}` | raw MCP JSON-RPC with the panel's token |
 | `POST /api/console` | `{"command"}` | one OpenTTD console line and its output. A line that reads (`companies`, `setting <name>`, `prismatic_mcp status`) or chats (`say`, `echo`, `prismatic_mcp deny <id>`) is open to anyone; every other line changes the game and needs the owner secret or the stack's run token, else 401 `needs: owner_or_token` (`console_authority`) |
@@ -184,6 +186,7 @@ game. What no such check drives is treated as not built.
 | `tools/research/e2e-coverage --run --panel <url> --hub <url>` | Runs every declaring check against the live stack, each against the instance it covers, and fails if any fails or could not run |
 | `tools/research/mcp-pages-check <panel-url> [--hub <url>]` | `/ui`, `/tools`, a `/resource/` page, `/docs`, the hub's `/docs`: content, shell, no page error, no sideways scroll at 390 px |
 | `tools/research/mcp-scripts-check <panel-url>` | The Scripts page through its controls: highlighting, a typed parse error, a refused Save, a new script, a service and its hot reload, Run once |
+| `tools/research/mcp-bench-check <panel-url> [--shots DIR]` | `/bench` and a bench's page through their controls: the regression banner, the rev's commit link, group filter, sort and text filter in the address and restored by a reload, a bench's history chart, a record selected by its row, Maximize and Escape, a maximized deep link, a 404 for an unknown bench, no sideways scroll at 390 px. A panel with no record gets the empty state checked and the record flow reported NOT RUN |
 | `tools/research/real-game-check <panel-url>` | Whether a stack is ready for a real game against people ([`real-game.md`](real-game.md)) |
 
 The first run (2026-11-18) found two defects that every unit test had missed:
@@ -285,6 +288,38 @@ runs one duel at a time.
 `mcp-route-check` never posts `/api/duel`, because it starts something and needs no input.
 `mcp-overview-check` checks the pages in a browser: every run is charted, a bar leads to its run, and
 the run's chart follows the measure in the address.
+
+### Rust benchmarks: records, history, regressions
+
+`/bench` shows the Rust performance benchmark records the harness writes to
+`research/results/bench-*.json` (schema `rust-bench/v1`). `GET /api/bench` (`src/panel_bench.rs`)
+reads every one of them, checks each against the schema, and answers them oldest first by
+`generated_at`, with `latest_id` and `count`. A file that is not a valid record is not dropped
+silently: it is listed under `skipped` with its reason, and the page shows that list.
+`GET /api/bench?id=<record>` answers one record. `repo_url` is the repository's web page, derived
+from its `origin` remote (null for a remote off GitHub); a rev links to its commit there, and is
+plain text without one. The route is a row of the panel's table, so
+OpenAPI, Swagger UI, the hub and Rhai derive it. `MCP_BENCH_DIR` points the panel at another
+directory; the browser check uses it for the fixtures in `tools/research/mcp-panel/test/fixtures/bench`.
+
+The page shows the newest record, or the one `?rec=` names:
+
+- a red banner with every regression its `baseline` lists, each linked to its bench;
+- the rev, linked to its GitHub commit, with the host, the toolchain, the profile, the crate and the
+  baseline record; a dirty tree is a warning, because its numbers are not of that commit alone;
+- a table of every bench: median in its own unit (ns, µs, ms, s), ± stddev, samples, and the change
+  against the newest earlier record of the same host and crate (another machine's numbers are no
+  change of this one's). The group, a text filter and the sorted column are in the address
+  (`group`, `q`, `sort`);
+- every listed bench's median across the records as a multiple of its first, so a bench of
+  nanoseconds and one of milliseconds share an axis. A line leads to its bench.
+
+`/bench/<group>/<name>` is one bench across every record that measured it. Its title comes from
+the records. It shows the median with the band from min to max, a red triangle on every record
+whose baseline names it a regression, a row per record (rev linked, a dirty tree marked), the
+selected record's provenance, and the other benches of its group. A click on a point or a row
+selects that record (`rec`). Both charts go through the one door and maximize (`max`, Escape
+restores). An unknown bench answers 404.
 
 ### A page per tool and resource
 
