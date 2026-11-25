@@ -87,7 +87,13 @@ pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &
     if o.calibrate || o.outcome {
         let mut cands: Vec<Value> = out["pairs"].as_array().cloned().unwrap_or_default();
         cands.extend(out["freight"].as_array().cloned().unwrap_or_default());
-        out["calibration"] = crate::calibrate::calibrate(&read("vehicles")?, &read("stations")?, &cands, crate::calibrate::REACH_TILES);
+        // Asked for itself, a failed read fails the run as before; asked only for the outcome, which
+        // proposes and never decides, it is recorded and the plan stands.
+        match (read("vehicles"), read("stations")) {
+            (Ok(v), Ok(st)) => out["calibration"] = crate::calibrate::calibrate(&v, &st, &cands, crate::calibrate::REACH_TILES),
+            (Err(e), _) | (_, Err(e)) if !o.calibrate => out["calibration"] = json!({"error": format!("not calibrated: {e}")}),
+            (Err(e), _) | (_, Err(e)) => return Err(e),
+        }
     }
     // track N: the N best rail lines of each list priced on the real map by AlgoGlyph's
     // track-planning (src/linecost.rs) instead of distance x tile cost, before the portfolio.
@@ -122,16 +128,20 @@ pub fn run(read: &dyn Fn(&str) -> Result<Value, String>, o: &Options, kernels: &
     candidates.sort_by(|a, b| b["score"].as_f64().unwrap_or(0.0).total_cmp(&a["score"].as_f64().unwrap_or(0.0)));
     out["portfolio"] = crate::cargo::portfolio(&candidates, out["params"]["budget"].as_f64(), kernels);
     // outcome: per company, does the plan match what the game pays (src/outcome.rs)? Proposes only.
+    // A failed read of the vehicles costs the assessment only, never the plan: the bot is not
+    // started unplanned for a feature that only proposes.
     if o.outcome {
-        let vehicles = read("vehicles")?;
-        let companies = read("companies").unwrap_or(Value::Null);
-        let assessed: serde_json::Map<String, Value> = o.plan_for.iter().flatten()
-            .map(|c| (c.to_string(), crate::outcome::assess(&out, &vehicles, &companies, *c, kernels))).collect();
-        out["outcome"] = if o.plan_for.as_ref().map_or(true, Vec::is_empty) {
-            json!({"why": "no company to assess: --for names none (a company not started yet has no outcomes)"})
-        } else {
-            Value::Object(assessed)
+        let outcome = match read("vehicles") {
+            _ if o.plan_for.as_ref().map_or(true, Vec::is_empty) =>
+                json!({"why": "no company to assess: --for names none (a company not started yet has no outcomes)"}),
+            Err(e) => json!({"why": format!("no outcome assessed: openttd://vehicles: {e}")}),
+            Ok(vehicles) => {
+                let companies = read("companies").unwrap_or(Value::Null);
+                Value::Object(o.plan_for.iter().flatten()
+                    .map(|c| (c.to_string(), crate::outcome::assess(&out, &vehicles, &companies, *c, kernels))).collect())
+            }
         };
+        out["outcome"] = outcome;
     }
     if o.invest_inputs { return Ok(crate::invest::input(&out, &engines, &towns).unwrap_or(Value::Null)); }
     if o.invest { out["investment"] = crate::invest::decide(&out, &engines, &towns, kernels); }
@@ -183,5 +193,15 @@ mod tests {
         names.sort();
         assert_eq!(names, ["Mine A", "Mine B"]);
         assert_eq!(all["claims"]["left_out"], json!([]));
+
+        // The outcome only proposes: openttd://vehicles failing (this test has none) costs the
+        // calibration and the assessment, never the plan. Calibration asked for itself still fails.
+        let outcome = super::Options { outcome: true, ..opts(Some(vec![0])) };
+        let out = super::run(&read, &outcome, &kernels).unwrap();
+        assert_eq!(from(&out), ["Mine B"], "the plan stands");
+        assert_eq!(out["calibration"]["error"], json!("not calibrated: vehicles: not in this test"));
+        assert_eq!(out["outcome"]["why"], json!("no outcome assessed: openttd://vehicles: vehicles: not in this test"));
+        let calibrate = super::Options { calibrate: true, ..opts(Some(vec![0])) };
+        assert_eq!(super::run(&read, &calibrate, &kernels).unwrap_err(), "vehicles: not in this test");
     }
 }

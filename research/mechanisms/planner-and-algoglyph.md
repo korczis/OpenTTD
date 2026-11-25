@@ -247,6 +247,10 @@ its bot, and `POST /api/bots/planned`, which plans also under `--no-plan-bot` an
 gets its key. With neither a planned start nor the replan service running, nothing writes it, and
 a company of another AI or of a person gets no key. A reader treats a missing or stale key (`game`)
 as "not assessed", never as "consistent".
+A failed read of `openttd://vehicles` or `openttd://stations` costs only the assessment
+(`outcome.why`) and its calibration (`calibration.error`), never the plan: before, it failed the
+planner, and the bot started unplanned (openttd-51's review of #305). Calibration asked for by
+itself (`--calibrate`) still fails on such a read.
 
 The value of `outcome.<company>` is a contract: a gap watcher, the strategy review (ADR 0042),
 a digest and the bot's self-evaluation read it. A field is added, never renamed or removed:
