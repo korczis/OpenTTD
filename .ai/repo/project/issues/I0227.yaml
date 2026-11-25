@@ -57,4 +57,25 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
-updated_at: '2026-11-22'
+updated_at: 2026-11-25T05:20:09Z
+started_at: 2026-11-25T04:02:08Z
+started_event: sha256:53a1e5a22e348794c4c289082108c76b70ebfe15b3c20d8b6505a0ec1329b5a9
+verified_at: 2026-11-25T04:02:48Z
+verified_event: sha256:2b40955222672690b14558adddde76ca1ea26d44b5215ccdd3da38b47506e9b3
+completed_at: 2026-11-25T04:04:02Z
+completed_event: sha256:faaf19187f6d6297222d5a917a0ac6ea1ef0d43d156bcd5e23a826357e26c30d
+evidence:
+  - covers: "validation_run"
+    type: ci
+    command: "tools/research/algoglyph-pin check; python3 -B -m unittest tools/research/test_algoglyph_pin.py; Research Rust CI (cargo test --release: battlebrain, mcp-plan, mcp-intent, mcp-panel)"
+    result: "Delivered by PR #192 (feature/algoglyph-submodule, merge 5233db039f, 2026-11-22T19:48Z); its CI passed (Research Rust tests, Check and build). Its body points to a verification comment that was never posted, so this evidence is re-derived. On origin/master eed5cb5fc5 on 2026-11-25: algoglyph-pin check 'pinned at 1b8e009059c2, record current'; test_algoglyph_pin 13 tests OK (install, check, bump and status against scratch repositories); Research Rust run 45538823227 success, incl. algoglyph-pin check and the native tests hub::algoglyph::native::tests::{a_native_kernel_answers_in_process_as_the_crate_runs, a_malformed_input_is_refused_with_the_field_named, the_catalogue_is_the_runners_answer_then_every_native, the_pin_record_names_the_gitlink_and_the_kernels} and battlebrain_contract::tests::a_native_rust_entry_is_discovered_and_never_chosen; mcp-panel 425 passed, 0 failed. NOT RUN locally: the cargo tests and tools/gate.sh change (Mac under its 35 GiB disk floor)."
+    artifact: "https://github.com/korczis/OpenTTD/actions/runs/45538823227"
+    commit: eed5cb5fc51439b56924840ff6a6a5fef8753a4f
+    recorded_at: 2026-11-25T04:03:28Z
+  - covers: "validation_run"
+    type: test
+    command: "cargo test --release --offline --no-default-features --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-rhai --bin mcp-hub --bin battlebrain --bin mcp-kernel-feed (lundra, ~/ow-records at ac35aa193a, submodule by algoglyph-pin install --no-npm)"
+    result: "The issue's declared cargo validation, run 2026-11-25T04:42-04:44Z: battlebrain 81, mcp-hub 65, mcp-kernel-feed 37, mcp-rhai 87 passed, 0 failed, exit 0. tools/gate.sh change on the same tree passed algoglyph-pin check and algoglyph-contracts --check, then FAILED at refs check on a citation unrelated to this issue (PR #290's knowledge record, a file only on open PR #282)."
+    artifact: "lundra:~/ow-records.log"
+    commit: ac35aa193ab61a2e4f52c516fd18163f2d83a07e
+    recorded_at: 2026-11-25T05:20:09Z

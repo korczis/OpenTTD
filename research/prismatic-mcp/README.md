@@ -131,7 +131,7 @@ base set's palette (no sprite of its own). Its dropdown is one table,
 
 <!-- ingame-menu:begin -->
 
-Derived from `ITEMS` in `src/prismatic_mcp/prismatic_mcp_menu.cpp` by `tools/research/prismatic-mcp-menu`: 14 items, 4 submenus. The top level lists the items without a submenu and one row per submenu; a submenu opens in place of the list, with `< Back`.
+Derived from `ITEMS` in `src/prismatic_mcp/prismatic_mcp_menu.cpp` by `tools/research/prismatic-mcp-menu`: 15 items, 4 submenus. The top level lists the items without a submenu and one row per submenu; a submenu opens in place of the list, with `< Back`.
 
 | Where | Item | Action | Target |
 |---|---|---|---|
@@ -149,11 +149,12 @@ Derived from `ITEMS` in `src/prismatic_mcp/prismatic_mcp_menu.cpp` by `tools/res
 | Hub and API > | World view | `browse` | `/viz` |
 | Hub and API > | API (Swagger) | `browse` | `/docs` |
 | Hub and API > | GraphQL schema | `browse` | `/graphql/schema` |
+| Hub and API > | Open approvals in the browser | `browse` | `panel:/#approvals` |
 
 | Action | What a click does |
 |---|---|
 | `ask` | asks for a sentence; it becomes a request of kind `ask` |
-| `browse` | opens the hub page (base `$PRISMATIC_HUB_URL`, else `http://127.0.0.1:8790`) |
+| `browse` | opens the hub page (base `$PRISMATIC_HUB_URL`, else the panel's), or for a `panel:` target the panel's (base `$PRISMATIC_PANEL_URL`, else `http://127.0.0.1:8800`) |
 | `console` | runs the console command and shows the console |
 | `request` | queues a request of that kind for the tile under the main view's centre |
 | `toggle` | calls the MCP tool with the boolean it flips, shown checked |
