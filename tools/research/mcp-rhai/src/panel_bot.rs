@@ -956,12 +956,31 @@ pub fn bot_settings_event(p: &mut Planned, extra_text: &str, portfolio_seq: Opti
 /// with mcp-plan when the panel plans its bot; no settings without a planner or a portfolio.
 pub fn planned_air(g: &Arc<Game>) -> Settings {
     if !g.args.plan_bot {
-        return Settings::default();
+        // Unplanned (--no-plan-bot): no portfolio, but the run's own settings still start the bot.
+        // Without this, PRISMATIC_BOT_SETTINGS reached only a planned bot, and the owner's unplanned
+        // co-play bot of 2026-11-23 started on the defaults (max_routes 4) instead of its evaluated
+        // settings. A malformed list is refused whole and said, as for a planned start.
+        let extra = std::env::var("PRISMATIC_BOT_SETTINGS").unwrap_or_default();
+        return unplanned_settings(&extra, &mut |text| g.event("ai", &text));
     }
     // With AlgoGlyph present the best rail lines are priced on the real map (track-planning) before
     // the portfolio is chosen, so the bot builds what pays on this terrain; as many lines of each list
     // as the bot takes freight lines (at most two per producer, linecost.rs).
     planned(g, MAX_FREIGHT_LINES).map(|p| p.settings).unwrap_or_default()
+}
+
+/// The settings an unplanned bot starts with: the run's extra settings (PRISMATIC_BOT_SETTINGS), in
+/// order (a later name wins), each said through `say`; none, and the refusal said, for a malformed list.
+pub fn unplanned_settings(extra: &str, say: &mut dyn FnMut(String)) -> Settings {
+    let mut s = Settings::default();
+    match extra_settings(extra) {
+        Ok(list) => for (k, v) in list {
+            say(format!("bot setting from the run (unplanned): {k}={v}"));
+            s.set(&k, json!(v));
+        },
+        Err(e) => say(format!("bot settings from the run refused: {e}")),
+    }
+    s
 }
 
 /// Plan the bot: ask mcp-plan for its portfolio (pricing the `track` best rail lines on the map when
@@ -1218,6 +1237,21 @@ mod tests {
         assert!(crate::rhai_shared::valid_key(&format!("{OUTCOME_KEY}.{company}")));
         assert!(outcome_records(&json!({"outcome": {"why": "no company"}}), None, &game).is_empty());
         assert!(outcome_records(&json!({}), None, &game).is_empty());
+    }
+
+    /// An unplanned bot starts with the run's settings, a later name winning, and a malformed list
+    /// is refused whole and said.
+    #[test]
+    fn an_unplanned_bot_starts_with_the_runs_settings() {
+        let mut said = Vec::new();
+        let s = unplanned_settings("aggressiveness=80,max_routes=16,max_routes=30, line_budget=30000", &mut |t| said.push(t));
+        assert_eq!(s.0, vec![("aggressiveness".to_string(), json!(80)), ("max_routes".to_string(), json!(30)), ("line_budget".to_string(), json!(30000))]);
+        assert_eq!(said.len(), 4, "{said:?}");
+        assert!(said[2].starts_with("bot setting from the run (unplanned): max_routes=30"), "{said:?}");
+        let mut said = Vec::new();
+        assert!(unplanned_settings("max_routes=lots", &mut |t| said.push(t)).0.is_empty());
+        assert!(said[0].starts_with("bot settings from the run refused: max_routes"), "{said:?}");
+        assert!(unplanned_settings("", &mut |_| panic!("nothing to say")).0.is_empty());
     }
 
     #[test]
