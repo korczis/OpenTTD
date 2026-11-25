@@ -1,0 +1,95 @@
+{
+  "schema": "rust-bench/v1",
+  "id": "bench-20261122T231500-ab12cd34",
+  "generated_at": "2026-11-22T23:15:00+00:00",
+  "rev": "3333333333333333333333333333333333333333",
+  "tree_dirty": true,
+  "host": {
+    "name": "fixture-host",
+    "os": "macos",
+    "cpus": 18
+  },
+  "toolchain": "rustc 1.91.0 (fixture)",
+  "profile": "bench",
+  "crate": "tools/research/mcp-rhai",
+  "benches": [
+    {
+      "id": "planner/plan_fixture",
+      "group": "planner",
+      "name": "plan_fixture",
+      "unit": "ns",
+      "mean": 122.5,
+      "median": 120.1,
+      "stddev": 3.2,
+      "min": 110.0,
+      "max": 140.0,
+      "samples": 100,
+      "throughput": null
+    },
+    {
+      "id": "planner/route_search",
+      "group": "planner",
+      "name": "route_search",
+      "unit": "ns",
+      "mean": 44676.0,
+      "median": 43800.0,
+      "stddev": 760.0,
+      "min": 42500.0,
+      "max": 46900.0,
+      "samples": 100,
+      "throughput": null
+    },
+    {
+      "id": "rhai/eval_small",
+      "group": "rhai",
+      "name": "eval_small",
+      "unit": "ns",
+      "mean": 3304.8,
+      "median": 3240.0,
+      "stddev": 91.0,
+      "min": 3070.0,
+      "max": 3610.0,
+      "samples": 100,
+      "throughput": null
+    },
+    {
+      "id": "rhai/compile_library",
+      "group": "rhai",
+      "name": "compile_library",
+      "unit": "ns",
+      "mean": 4559400.0,
+      "median": 4470000.0,
+      "stddev": 60000.0,
+      "min": 4380000.0,
+      "max": 4690000.0,
+      "samples": 20,
+      "throughput": null
+    },
+    {
+      "id": "store/sample_rows",
+      "group": "store",
+      "name": "sample_rows",
+      "unit": "ns",
+      "mean": 821.1,
+      "median": 805.0,
+      "stddev": 13.0,
+      "min": 788.0,
+      "max": 861.0,
+      "samples": 100,
+      "throughput": {
+        "elements": 64
+      }
+    }
+  ],
+  "baseline": {
+    "id": "bench-20261121T101500-cc33dd44",
+    "regressions": [
+      {
+        "id": "planner/plan_fixture",
+        "median": 120.1,
+        "baseline_median": 95.0,
+        "ratio": 1.264
+      }
+    ]
+  }
+}
