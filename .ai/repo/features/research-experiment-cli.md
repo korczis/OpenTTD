@@ -38,5 +38,5 @@ longer featured, because its tests run only by hand.
 - **tested**: `tools/research/test/research_test.sh` (assertion suite, `tools/research/test/research_test.sh:16:assert_eq`).
 - **missing**: `gated`. No gate tier or CI job runs `tools/research/test/research_test.sh`; it is
   run by hand (`.ai/repo/workflows/upstream-sync.md:73:research_test`). A step of
-  `tools/gate.sh:627:cmd_change` that runs it would promote it.
+  `tools/gate.sh:628:cmd_change` that runs it would promote it.
 - **documented**: `research/tooling.md`.

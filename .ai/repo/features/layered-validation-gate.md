@@ -33,7 +33,7 @@ base graphics set its regression cases need on macOS.
 `draft`, graded 2026-11-25 against [the levels](README.md#maturity-levels); demoted from `stable`, and no
 longer featured, because nothing tests the gate itself.
 
-- **shipped**: the tiers, among them `tools/gate.sh:627:cmd_change`, and the fail-closed exit
+- **shipped**: the tiers, among them `tools/gate.sh:628:cmd_change`, and the fail-closed exit
   taxonomy (`tools/gate.sh:12:EXIT_PARTIAL`, `tools/gate.sh:237:worst`).
 - **missing**: `tested` and `gated`. No test runs a tier of `tools/gate.sh` or its `worst` and
   PARTIAL exit, and no CI job runs the gate. A scratch-repository `test_*.py` that drives a tier

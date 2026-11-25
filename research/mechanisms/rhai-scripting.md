@@ -70,6 +70,7 @@ The scripts in the library today:
 | [`build_audit.rhai`](../../tools/research/mcp-panel/rhai/build_audit.rhai) | once a game month judges every company's construction (depots without an exit, duplicate depots and stations, drive-through against bay stops) and keeps it in the shared key `audit.<company>` and the store's view `build_audit`; one chat line for a new defect of the owner's company ([Hub](../mcp-hub.md#no-duplicate-buildings)) |
 | [`replan.rhai`](../../tools/research/mcp-panel/rhai/replan.rhai) | re-plans the running bot every game month: trend, competition, the planner's portfolio, a modelled switch, approval-gated changes ([Planner and AlgoGlyph](planner-and-algoglyph.md#replanning-while-the-game-runs)) |
 | [`watchdog.rhai`](../../tools/research/mcp-panel/rhai/watchdog.rhai) | finds a company that has built or bought nothing for longer than a threshold tuned from the game's own data, and says what holds it ([The progress watchdog](#the-progress-watchdog)) |
+| [`service_eval.rhai`](../../tools/research/mcp-panel/rhai/service_eval.rhai), [`derive_lib.rhai`](../../tools/research/mcp-panel/rhai/derive_lib.rhai) | judges every service once a game month by what followed its actions (`GET /api/services/scores`), keeps `eval.<service>.<action>` and `eval.poor`, says a persistently poor one in its log, never disables it; thresholds from the store with a declared fallback ([Service self-evaluation](service-self-evaluation.md)) |
 | [`gap_watch.rhai`](../../tools/research/mcp-panel/rhai/gap_watch.rhai) | once a game month judges every PrismaticAI company against the leader (share of its value, idle cash, unused credit, plans that do not land, collateral damage) from replan's and watchdog's keys, the store and the bus; tells the owner, and, only with the owner's switch, files one owner-only `openttd.ai.set_settings` ([The leader-gap watch](#the-leader-gap-watch)) |
 | [`capital_watch.rhai`](../../tools/research/mcp-panel/rhai/capital_watch.rhai) | once a game month measures every company's reinvestment, idle capital and fleet growth against its leader, and keeps it in the shared key `capital.<company>`; read-only ([The capital watch](#the-capital-watch)) |
 
@@ -87,9 +88,12 @@ waited. [`watchdog.rhai`](../../tools/research/mcp-panel/rhai/watchdog.rhai) run
   (`openttd://companies` `fleet`, `openttd://stations` `owner`). The game days since the last change
   (`game_tick` / 74) are its quiet time.
 - **The threshold is derived from the game's own data.** Every quiet time that ends, for any
-  company, is kept on the blackboard (`watchdog.tuning.gaps`, the last 64). The threshold starts at
-  7 game days (the owner: "zacneme treba tyden"). Once there are 5 quiet times, it is 1.5 times their
-  90th percentile, kept within 7 to 365 days. On the live game it went from 7 to 21 days after ten
+  company, is kept on the blackboard (`watchdog.tuning.gaps`, the last 64). The threshold starts
+  from the store: 1.5 times the 90th percentile of the quiet spells of earlier runs once there are 20
+  (`derive_lib.rhai`, kept as `watchdog.tuning.cold_start` with its source), else at the declared
+  fallback of 7 game days (the owner: "zacneme treba tyden"). Once there are 5 quiet times of its
+  own, it is 1.5 times their 90th percentile, kept within 7 to 365 days
+  ([Service self-evaluation](service-self-evaluation.md#derived-thresholds)). On the live game it went from 7 to 21 days after ten
   quiet times.
 - **A stalled company is told why**, from what the panel reports:
   - the approvals pending for it (`status().pending`),

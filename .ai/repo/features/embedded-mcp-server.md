@@ -66,7 +66,7 @@ repeats it.
   `src/tests/test_prismatic_mcp.cpp:1049:TEST_CASE` (submit, approve, execute once, refuse replay,
   changed arguments and another tool), with the other `[prismatic_mcp]` cases of
   `src/tests/test_prismatic_mcp.cpp`.
-- **gated**: the research tier `tools/gate.sh:715:cmd_research` runs them
+- **gated**: the research tier `tools/gate.sh:716:cmd_research` runs them
   (`tools/gate.sh:750:openttd_test`) when the server is built; `tools/gate.sh change` names that tier
   for a change to research-gated code.
 - **documented**: `research/prismatic-mcp/README.md`.

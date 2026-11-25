@@ -37,10 +37,10 @@ separate evidence.
   `src/console_cmds.cpp:1780:ConResearchStatus` inside its guard
   (`src/console_cmds.cpp:1770:OTTD_RESEARCH_INSTRUMENTATION`).
 - **tested**: the gate's checks of both halves of the headline: a research build carries
-  `research_status` (`tools/gate.sh:739:research_status`), a default build carries no string naming
-  research (`tools/gate.sh:561:default_build_free_of_research`), and every source line naming
-  research is inside a guard (`tools/gate.sh:499:research_code_is_guarded`).
-- **gated**: `tools/gate.sh change` runs the second and third (`tools/gate.sh:666:research_code_is_guarded`,
-  `tools/gate.sh:700:default_build_free_of_research`); the research tier
-  (`tools/gate.sh:715:cmd_research`) runs the first.
+  `research_status` (`tools/gate.sh:740:research_status`), a default build carries no string naming
+  research (`tools/gate.sh:562:default_build_free_of_research`), and every source line naming
+  research is inside a guard (`tools/gate.sh:500:research_code_is_guarded`).
+- **gated**: `tools/gate.sh change` runs the second and third (`tools/gate.sh:667:research_code_is_guarded`,
+  `tools/gate.sh:701:default_build_free_of_research`); the research tier
+  (`tools/gate.sh:716:cmd_research`) runs the first.
 - **documented**: `research/tooling.md`.
