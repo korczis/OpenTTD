@@ -80,6 +80,8 @@ mod http_stub;
 mod panel_town;
 #[path = "../panel_strategy.rs"]
 mod panel_strategy;
+#[path = "../panel_digest.rs"]
+mod panel_digest;
 // The planner, in process for the strategist (src/panel_strategy.rs, src/plan_pipeline.rs): the same
 // modules mcp-plan links, of which the panel uses only what a planner run reaches.
 #[path = "../plan_pipeline.rs"]

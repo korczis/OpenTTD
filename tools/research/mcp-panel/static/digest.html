@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Digest · OpenTTD MCP</title>
+  <meta name="description" content="How the strategy is doing, what it changes and what waits for you">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 antialiased" data-page="digest" data-description="The digest service (rhai/digest.rhai) reports, every game week, month and quarter, how your AI's company stands against the leader, what failed or was skipped, what the system proposed and why, and what waits for your approval with its countdown and default verdict; it escalates when the strategy is failing. Read-only.">
+  <script src="/static/shell.js"></script>
+
+  <main class="pb-16">
+    <section id="head" data-nav="Level and alerts" class="scroll-mt-20"></section>
+    <section id="standing" data-nav="Standing" class="scroll-mt-20"></section>
+    <section id="share" data-nav="Share of the leader" class="scroll-mt-20"></section>
+    <section id="types" data-nav="Profit per vehicle type" class="scroll-mt-20"></section>
+    <section id="failed" data-nav="Failed or skipped" class="scroll-mt-20"></section>
+    <section id="changes" data-nav="Changes and approvals" class="scroll-mt-20"></section>
+    <section id="history" data-nav="History" class="scroll-mt-20"></section>
+  </main>
+
+  <script src="/vendor/flowbite.min.js"></script>
+  <script src="/vendor/echarts.min.js"></script>
+  <script type="module" src="/static/digest.js"></script>
+</body>
+</html>
