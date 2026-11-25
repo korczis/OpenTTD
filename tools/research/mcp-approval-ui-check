@@ -237,22 +237,23 @@ try {
   await owner.locator('#owner-secret').fill(secret);
   await owner.locator('#owner-signin-form button[type="submit"]').click();
   // autoOn() is awaited: an unawaited Promise is truthy, so the wait ended when the box closed, before
-  // the sign-in's answer set the cookie read next.
+  // the sign-in's answer set the cookie read next (the check failed on master about half the time).
   check('the right secret signs in and the switch goes on', await until(async () => (await box.count()) === 0 && (await autoOn())));
   // The cookie itself, waited for (bounded): the browser may apply the sign-in's Set-Cookie a moment
-  // after the box closes. It outlives the browser session (a persistent cookie, not a session one)
-  // for the panel's OWNER_COOKIE_MAX_AGE, 12 hours: between 11 and 13 hours from now.
+  // after the box closes. It lasts OWNER_COOKIE_MAX_AGE (mcp-rhai/src/panel.rs: 12 hours, the owner's
+  // decision of 2026-11-23), so it outlives the browser session and ends within a minute of that from now.
+  const maxAge = 12 * 3600;
   const cookieOf = async () => (await fresh.cookies(base)).find((c) => c.name === `mcp_owner_${panelPort}`);
-  const now = () => Date.now() / 1000;
-  const kept = (c) => !!c && c.httpOnly === true && c.sameSite === 'Strict' && c.expires > now() + 11 * 3600 && c.expires < now() + 13 * 3600;
+  const left = (c) => (c ? c.expires - Date.now() / 1000 : -1);
+  const kept = (c) => !!c && c.httpOnly === true && c.sameSite === 'Strict' && Math.abs(left(c) - maxAge) < 60;
   let cookie;
   await until(async () => kept(cookie = await cookieOf()), 10000);
-  check('the sign-in cookie is HttpOnly, SameSite=Strict and outlives the browser session', kept(cookie),
-    cookie ? `httpOnly ${cookie.httpOnly}, sameSite ${cookie.sameSite}, ${((cookie.expires - now()) / 3600).toFixed(1)} h` : 'no cookie');
+  check('the sign-in cookie is HttpOnly, SameSite=Strict and lasts the 12 hours the panel gives it', kept(cookie),
+    cookie ? `httpOnly ${cookie.httpOnly}, sameSite ${cookie.sameSite}, ${Math.round(left(cookie))} s left` : 'no cookie');
   // Negative control: the same test refuses a cookie a script could read, one that dies within the
   // hour, a session cookie (expires -1), one another site may send, and none at all.
   check('the cookie test refuses a readable, short-lived, session or Lax cookie, and a missing one', !!cookie && !kept({ ...cookie, httpOnly: false })
-    && !kept({ ...cookie, expires: now() + 3600 }) && !kept({ ...cookie, expires: -1 }) && !kept({ ...cookie, sameSite: 'Lax' }) && !kept(undefined));
+    && !kept({ ...cookie, expires: Date.now() / 1000 + 3600 }) && !kept({ ...cookie, expires: -1 }) && !kept({ ...cookie, sameSite: 'Lax' }) && !kept(undefined));
   const toggleWithoutBox = async (want) => {
     await owner.locator('label:has(#auto)').click();
     const asked = await box.waitFor({ timeout: 2000 }).then(() => true).catch(() => false);
