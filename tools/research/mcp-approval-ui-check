@@ -105,7 +105,16 @@ try {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.coverage.startJSCoverage({ resetOnNavigation: false });
-  await page.goto(`${base}/?owner=${encodeURIComponent(secret)}`, { waitUntil: 'load' });
+  // The owner's browser signs in through a one-time link (POST /api/owner/once): it redirects to the
+  // page without the query, and serves once; ?owner= redirects the same way.
+  const link = await (await fetch(base + '/api/owner/once', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, 'X-Panel-Owner': secret }, body: '{}' })).json();
+  check('the run token or nobody makes no sign-in link', (await post('/api/owner/once', {})).status === 401);
+  const signedIn = await page.goto(link.url, { waitUntil: 'load' });
+  check('a one-time link signs the browser in and leaves no query in the address', signedIn.ok() && page.url() === base + '/'
+    && (await context.cookies()).some((c) => c.name.startsWith('mcp_owner_')), page.url());
+  check('a one-time link serves once', (await fetch(link.url, { redirect: 'manual' })).status === 401);
+  const bySecret = await fetch(`${base}/?owner=${encodeURIComponent(secret)}`, { redirect: 'manual' });
+  check('?owner= redirects (303) to the page without the secret', bySecret.status === 303 && bySecret.headers.get('location') === '/');
   await page.goto(base + '/', { waitUntil: 'load' });
   await page.locator('#pending [data-deny="7"]').waitFor({ timeout: 15000 });
   check('each pending approval has its Approve and its Deny', (await page.locator('#pending [data-approve]').count()) === 7
@@ -120,9 +129,12 @@ try {
   });
   await page.reload({ waitUntil: 'load' });
   await page.locator('#pending [data-deny="7"]').waitFor({ timeout: 15000 });
-  await post('/api/console', { command: 'fake consume 4' });
-  await post('/api/console', { command: 'fake drop 5' });
-  await post('/api/console', { command: 'fake ignore 7' });
+  // The stand-in's console lines change its queue, so they need the owner's authority (the console's allowlist).
+  const owned = (p, body) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, 'X-Panel-Owner': secret }, body: JSON.stringify(body) });
+  check('a console line that changes the game is refused without a credential', (await post('/api/console', { command: 'fake consume 4' })).status === 401);
+  await owned('/api/console', { command: 'fake consume 4' });
+  await owned('/api/console', { command: 'fake drop 5' });
+  await owned('/api/console', { command: 'fake ignore 7' });
   check('the stand-in changed its queue under the page', await until(async () => {
     const q = await queue();
     return q.some((a) => a.id === 4 && a.state === 'consumed') && !q.some((a) => a.id === 5);
@@ -198,9 +210,16 @@ try {
     .waitFor({ timeout: 10000 }).then(() => true).catch(() => false) && !(await autoOn()));
   await owner.locator('#owner-secret').fill(secret);
   await owner.locator('#owner-signin-form button[type="submit"]').click();
-  check('the right secret signs in and the switch goes on', await until(async () => (await box.count()) === 0 && autoOn()));
+  // autoOn() is awaited: an unawaited Promise is truthy, so the wait ended when the box closed, before
+  // the sign-in's answer set the cookie read next (the check failed on master about half the time).
+  check('the right secret signs in and the switch goes on', await until(async () => (await box.count()) === 0 && await autoOn()));
   const cookie = (await fresh.cookies(base)).find((c) => c.name === `mcp_owner_${panelPort}`);
-  check('the sign-in cookie is HttpOnly, SameSite=Strict and outlives the browser session', !!cookie && cookie.httpOnly && cookie.sameSite === 'Strict' && cookie.expires > Date.now() / 1000 + 300 * 86400);
+  // The cookie lasts OWNER_COOKIE_MAX_AGE (mcp-rhai/src/panel.rs: 12 hours, the owner's decision of
+  // 2026-11-23), so it outlives the browser session and ends within a minute of that from now.
+  const maxAge = 12 * 3600;
+  const left = cookie ? cookie.expires - Date.now() / 1000 : -1;
+  check('the sign-in cookie is HttpOnly, SameSite=Strict and lasts the 12 hours the panel gives it', !!cookie && cookie.httpOnly && cookie.sameSite === 'Strict'
+    && Math.abs(left - maxAge) < 60, cookie ? `httpOnly ${cookie.httpOnly}, sameSite ${cookie.sameSite}, ${Math.round(left)} s left` : 'no cookie');
   const toggleWithoutBox = async (want) => {
     await owner.locator('label:has(#auto)').click();
     const asked = await box.waitFor({ timeout: 2000 }).then(() => true).catch(() => false);

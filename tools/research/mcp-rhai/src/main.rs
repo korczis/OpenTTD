@@ -1371,9 +1371,17 @@ mod tests {
         });
         let t = said.clone();
         e.register_fn("con_say", move |text: &str| { t.lock().unwrap().push(text.to_string()); });
+        let printed = Arc::new(Mutex::new(Vec::<String>::new()));
+        let p = printed.clone();
+        e.on_print(move |s| p.lock().unwrap().push(s.to_string()));
         let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mcp-panel/rhai/watchdog.rhai")).unwrap();
         e.run(&script).unwrap();
 
+        // A line every round: the heartbeat its `// stall:` declaration needs, and what it found.
+        let printed = printed.lock().unwrap();
+        assert_eq!(printed.len(), 6, "the start line and one per round: {printed:?}");
+        assert_eq!(printed[1], "watchdog 1951-01-01: threshold 7 day(s), stalled: none");
+        assert_eq!(printed[5], "watchdog 1951-01-05: threshold 7 day(s), stalled: Owner Co (40 d)");
         assert_eq!(*looks.lock().unwrap(), 4, "five rounds, a sleep between each");
         let shared = shared.lock().unwrap();
         let w0 = &shared["watchdog.0"];

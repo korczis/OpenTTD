@@ -31,4 +31,18 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
-updated_at: '2026-11-22'
+updated_at: 2026-11-25T03:58:58Z
+started_at: 2026-11-25T03:57:42Z
+started_event: sha256:33f67b470cf84da7072cff49d394a8748e21833e69247478b7f781c174eb2373
+verified_at: 2026-11-25T03:58:11Z
+verified_event: sha256:337b9d58fdb5830b3d96cc7e6e1e5034007b9ef325967bd049e377e65ed0a357
+completed_at: 2026-11-25T03:58:58Z
+completed_event: sha256:7fc6fbe3db37a610cc18f5fb5948e12c03d96edf8ebba8ba7b85a6be168b1456
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "tools/knowledge/refs check --pathspec research/capability-matrix.md --strict-lines; tools/knowledge/refs check; tools/surfaces/surfaces check"
+    result: "Delivered by PR #102 (doc/capability-matrix, merge 85ac8714c1, 2026-11-22T20:17Z); the matrix's dead citations were fixed by PR #226 (fix/capability-matrix-refs, 6d1eda39e1) and 636c55f83b. PR #102 validation: test_refs 22 tests PASS, matrix refs 140 references 0 failures, a refuse proof (two corrupted citations fail surfaces check with finding capability-matrix-refs). Re-run on origin/master eed5cb5fc5 on 2026-11-25: matrix refs --strict-lines 142 references 0 failures; refs check 3343 references in 205 records 0 failures; surfaces check 909 documents 0 findings; README.md links the matrix (README.md:1364, :1634). NOT RUN: tools/gate.sh change (Mac under its 35 GiB disk floor)."
+    artifact: "https://github.com/korczis/OpenTTD/pull/102"
+    commit: eed5cb5fc51439b56924840ff6a6a5fef8753a4f
+    recorded_at: 2026-11-25T03:58:39Z

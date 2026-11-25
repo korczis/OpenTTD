@@ -30,7 +30,7 @@ themselves stay hand-written.
 pie showData title Decisions by status
     %% links: README.md?col=Status&filter=accepted#index | README.md?col=Status&filter=proposed#index | README.md?col=Status&filter=superseded#index
     "accepted" : 36
-    "proposed" : 2
+    "proposed" : 3
     "superseded" : 1
 ```
 <!-- surfaces:end ai-adrs -->
@@ -76,5 +76,6 @@ pie showData title Decisions by status
 | [adr-0037](0037-battlebrain-in-this-fork-is-the-one-authority-for-the-freigh.md) | accepted | Battlebrain in this fork is the one authority for the freight-line decision; planner and AlgoGlyph only produce candidates, the executor only applies |
 | [adr-0038](0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md) | accepted | One approval core on the game server: a plan is approved as a whole and executes on approval, and every channel (web, console, game command, chat) is an adapter to it |
 | [adr-0039](0039-algoglyph-is-a-git-submodule-pinned-at-one-commit-and-its-ru.md) | proposed | AlgoGlyph is a git submodule pinned at one commit, and its Rust kernels run in-process as native-rust catalogue entries |
+| [adr-0041](0041-bulk-consent-and-standing-approval-rules.md) | proposed | The owner's bulk consent and standing approval rules: approve or deny all over a filter, and always-allow or always-deny rules of a tool glob and a JSON matcher, applied in the one approval core |
 | [adr-0042](0042-a-strategy-review-cycle-runs-on-the-game-s-month-quarter-and.md) | proposed | A strategy review cycle runs on the game's month, quarter and week, judges every company against the leader from recorded data, and turns a lasting gap into a replan request, an approval-gated plan, labelled learning rows and an owner digest |
 <!-- surfaces:end ai-adrs -->

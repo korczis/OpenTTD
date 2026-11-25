@@ -56,6 +56,7 @@
 #include "prismatic_mcp/prismatic_mcp_registry.h"
 #include "prismatic_mcp/prismatic_mcp_console.h"
 #include "prismatic_mcp/prismatic_mcp_menu.h"
+#include "prismatic_mcp/prismatic_mcp_panel.h"
 #include "prismatic_mcp/prismatic_mcp_ui.h"
 #include "prismatic_mcp/prismatic_mcp_detail.h"
 #include "3rdparty/nlohmann/json.hpp"
@@ -1956,10 +1957,27 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 {
 	if (argv.size() < 2) {
 		IConsolePrint(CC_HELP, "RESEARCH-ONLY/UNSTABLE: control the embedded loopback MCP server.");
-		IConsolePrint(CC_HELP, "Usage: 'prismatic_mcp <status|start [port] [token-file]|stop|endpoint|token|rotate|approvals|approve <id> [<id> ...]|deny <id> [<id> ...]|deny all|approvers [add <client id>|remove <key>]|approval_deadline [<game days> [keep|approve]]|decisions [n]>'.");
-		IConsolePrint(CC_HELP, "One line settles several decisions. 'deny all' is allowed because a denial enacts nothing; an approval executes, so you name every id you approve.");
+		IConsolePrint(CC_HELP, "Usage: 'prismatic_mcp <status|start [port] [token-file]|stop|endpoint|token|rotate|approvals|approve <id> [<id> ...]|deny <id> [<id> ...]|approve all [<tool-glob> [<json-matcher>]]|deny all [<tool-glob> [<json-matcher>]]|rules|rule allow|deny <tool-glob> [<json-matcher>] [--persist]|rule remove <id>|approvers [add <client id>|remove <key>]|approval_deadline [<game days> [keep|approve]]|decisions [n]>'.");
+		IConsolePrint(CC_HELP, "One line settles several decisions. A tool glob takes * and ?; a matcher is JSON over the arguments, e.g. {'company': 1, 'name': 'max_*', '$.params[*]': '*'} (ADR 0041).");
 		return true;
 	}
+
+	/* '--nonce <n>' anywhere: the caller (the panel's owner routes) gets one machine-readable line,
+	 * '[approval-core] {"nonce", "ok", "decided", "refused", "skipped", "rule_id", "error"}', for the
+	 * approval and rule commands, and reads only that (ADR 0041). */
+	std::string nonce;
+	std::vector<std::string_view> kept;
+	for (size_t i = 0; i < argv.size(); i++) {
+		if (argv[i] == "--nonce" && i + 1 < argv.size()) {
+			nonce = argv[++i];
+			continue;
+		}
+		kept.push_back(argv[i]);
+	}
+	argv = std::span<std::string_view>(kept);
+	auto result = [&nonce](const PrismaticMCP::BulkOutcome &out, std::string_view error) {
+		if (!nonce.empty()) IConsolePrint(CC_INFO, "{}", PrismaticMCP::ResultLine(nonce, out, error));
+	};
 
 	std::string_view sub = argv[1];
 	if (sub == "status") {
@@ -2040,6 +2058,10 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 	 * channel from inside the game (ADR 0038), and its answer comes back as a private message. An id
 	 * this game's own MCP server holds pending stays local, so a local approval is never mistaken
 	 * for the server's of the same number. One id per line, as the server accepts it. */
+	if ((sub == "rule" || sub == "rules") && _networking && !_network_server) {
+		IConsolePrint(CC_ERROR, "Standing rules live on the game server, with its queue: make them at the server's console or through the panel. This client's own MCP server holds none of the server's approvals.");
+		return true;
+	}
 	if ((sub == "approvals" || sub == "approve" || sub == "deny") && _networking && !_network_server) {
 		std::vector<std::string> lines;
 		if (sub == "approvals") {
@@ -2051,9 +2073,19 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 				IConsolePrint(CC_ERROR, "Refused: this client's input is armed for MCP tools (PRISMATIC_MCP_INPUT=1), so an approval cannot come from it. Approve in the panel, or from a client that is not armed.");
 				return true;
 			}
-			for (size_t i = 2; i < argv.size(); i++) {
+			/* 'approve all' and 'deny all' over the server's queue as this client last heard it (the
+			 * control window's quiet refresh), sent one id per line as the server takes them. */
+			if (argv.size() >= 3 && argv[2] == "all") {
+				PrismaticMCP::Rules::Spec spec = PrismaticMCP::Rules::ParseSpec(std::span<const std::string_view>(argv).subspan(3));
+				if (!spec.error.empty()) { IConsolePrint(CC_ERROR, "{}", spec.error); return true; }
+				for (uint64_t id : PrismaticMCP::Panel::Selected(PrismaticMCP::Panel::Snapshot(), spec)) lines.push_back(fmt::format("!{} {}", sub, id));
+				if (lines.empty()) IConsolePrint(CC_WARNING, "Nothing the server last listed for this company matches; 'prismatic_mcp approvals' asks it again.");
+			}
+			for (size_t i = 2; i < argv.size() && argv[2] != "all"; i++) {
 				/* 'local:<id>' is this game's own MCP server's approval; a bare id is the server's. */
 				std::string_view arg = argv[i];
+				if (arg == "--via") { i++; continue; } // the window's channel; the server records its chat client
+
 				if (arg.starts_with("local:")) {
 					auto id = ParseInteger<uint64_t>(arg.substr(6));
 					std::string message = id.has_value() ? std::string() : fmt::format("not an approval id: '{}'", arg);
@@ -2078,9 +2110,56 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 	/* An armed process (PRISMATIC_MCP_INPUT=1) takes keystrokes from scripts: its console neither
 	 * approves nor changes who may (ADR 0038). A denial, which only withdraws, stays open. */
 	/* A standing 'approve' verdict for the deadline is consent given in advance: refused here like 'approve'. */
-	bool standing_approval = sub == "approval_deadline" && argv.size() >= 4 && argv[3] == "approve";
+	/* So is an allow rule: a standing approval of whatever it matches (ADR 0041). */
+	/* And so is removing a deny rule: deny wins over allow, so without it an allow rule may decide
+	 * what it held back. */
+	auto removes_deny = [&argv]() {
+		if (argv.size() < 4 || argv[2] != "remove") return false;
+		auto rid = ParseInteger<uint64_t>(argv[3]);
+		for (const auto &r : PrismaticMCP::ApprovalRules()) {
+			if (rid.has_value() && r.id == *rid) return r.effect == PrismaticMCP::Rules::Effect::Deny;
+		}
+		return false;
+	};
+	bool standing_approval = (sub == "approval_deadline" && argv.size() >= 4 && argv[3] == "approve")
+		|| (sub == "rule" && argv.size() >= 3 && (argv[2] == "allow" || removes_deny()));
 	if ((PrismaticMCP::UI::InputArmed() || PrismaticMCP::UI::InjectingInput()) && (sub == "approve" || standing_approval || (sub == "approvers" && argv.size() >= 3))) {
-		IConsolePrint(CC_ERROR, "Refused: this input may come from a script (the process is armed for MCP tools, PRISMATIC_MCP_INPUT=1, or a UI tool is injecting it), so the console does not approve or change approvers. Use the panel or an unarmed console.");
+		IConsolePrint(CC_ERROR, "Refused: this input may come from a script (the process is armed for MCP tools, PRISMATIC_MCP_INPUT=1, or a UI tool is injecting it), so the console does not approve, make an allow rule, remove a deny rule or change approvers. Use the panel or an unarmed console.");
+		result({}, "refused: injected or armed input");
+		return true;
+	}
+	/* The owner's standing rules (ADR 0041): listed with their hits, made, removed. */
+	if (sub == "rules" || (sub == "rule" && argv.size() < 3)) {
+		auto rules = PrismaticMCP::ApprovalRules();
+		if (rules.empty()) IConsolePrint(CC_INFO, "No standing rules: every approval waits for you. 'prismatic_mcp rule allow|deny <tool-glob> [<json-matcher>] [--persist]' makes one.");
+		for (const auto &r : rules) {
+			IConsolePrint(r.effect == PrismaticMCP::Rules::Effect::Allow ? CC_WARNING : CC_INFO, "{} -- hits={} via={} at={}{}",
+				PrismaticMCP::Rules::Describe(r), r.hits, r.created_via, r.created_at, r.persisted ? " persisted" : "");
+		}
+		return true;
+	}
+	if (sub == "rule") {
+		std::string_view verb = argv[2];
+		if (verb == "remove") {
+			auto rid = argv.size() >= 4 ? ParseInteger<uint64_t>(argv[3]) : std::nullopt;
+			std::string message = rid.has_value() ? std::string() : "Usage: prismatic_mcp rule remove <id> ('prismatic_mcp rules' lists them)";
+			bool ok = rid.has_value() && PrismaticMCP::RemoveApprovalRule(*rid, message);
+			IConsolePrint(ok ? CC_INFO : CC_ERROR, "{}", message);
+			PrismaticMCP::BulkOutcome removed;
+			removed.rule_id = rid.value_or(0);
+			result(removed, ok ? std::string_view{} : std::string_view{message});
+			return true;
+		}
+		if ((verb != "allow" && verb != "deny") || argv.size() < 4) {
+			IConsolePrint(CC_ERROR, "Usage: prismatic_mcp rule allow|deny <tool-glob> [<json-matcher>] [--persist] [--force] | prismatic_mcp rule remove <id>");
+			result({}, "usage");
+			return true;
+		}
+		PrismaticMCP::Rules::Spec spec = PrismaticMCP::Rules::ParseSpec(std::span<const std::string_view>(argv).subspan(3));
+		auto out = PrismaticMCP::AddApprovalRule(verb == "allow" ? PrismaticMCP::Rules::Effect::Allow : PrismaticMCP::Rules::Effect::Deny, spec);
+		for (size_t i = 0; i < out.lines.size(); i++) IConsolePrint(!out.ok ? CC_ERROR : i == 0 ? CC_WARNING : CC_INFO, "{}", out.lines[i]);
+		if (out.ok) IConsolePrint(CC_INFO, "It decided {} waiting approval(s) at once, {} refused, {} skipped; 'prismatic_mcp rule remove {}' ends it.", out.decided, out.refused, out.skipped, out.rule_id);
+		result(out, out.ok || out.lines.empty() ? std::string_view{} : std::string_view{out.lines.front()});
 		return true;
 	}
 	if (sub == "approvers" && (_network_server || !_networking)) {
@@ -2138,50 +2217,51 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 	 * ("plan vybuduj nejlukrativnejsi trat") is answered with three gated settings and so three
 	 * pending approvals: 'prismatic_mcp approve 7 8 9' is the one line that used to be three.
 	 *
-	 * Deliberately asymmetric, and this is the point of the command:
-	 *  - 'approve' takes NAMED ids only. There is no 'approve all' and must not be: approving a
-	 *    whole queue consents to decisions the operator never read, and when that queue holds
-	 *    proposals from several different plans, applying all of them leaves whatever wrote last
-	 *    in place -- a railway line nobody chose. Consent stays per decision; each id is still
-	 *    passed one at a time to PrismaticMCP::ApproveById, nothing here auto-approves anything.
-	 *  - 'deny all' exists because a denial cannot execute anything. It only clears the queue,
-	 *    which is what makes the operator's next named approval predictable.
+	 * 'approve all [<tool-glob> [<json-matcher>]]' and 'deny all ...' settle what the filter
+	 * selects, the owner's bulk consent (the owner's order of 2026-11-23, ADR 0041): this console is
+	 * the owner's (an armed or injected one approves nothing, above). Approving skips expired
+	 * approvals and, for the panel (--via panel), owner-only ones; each id still goes through
+	 * PrismaticMCP::ApproveById on its own, recorded with the filter as its channel.
 	 * Every id acted on is printed with its tool and its canonical arguments, so the console log
 	 * records exactly what was consented to (or refused), not just a count.
 	 */
 	if (sub == "approve" || sub == "deny") {
 		bool approving = (sub == "approve");
 		if (argv.size() < 3) {
-			IConsolePrint(CC_ERROR, "Usage: prismatic_mcp {} <id> [<id> ...]{}", sub, approving ? "" : " | prismatic_mcp deny all");
-			if (approving) IConsolePrint(CC_HELP, "There is no 'approve all': you approve the decisions you name. 'prismatic_mcp approvals' lists them.");
+			IConsolePrint(CC_ERROR, "Usage: prismatic_mcp {} <id> [<id> ...] | prismatic_mcp {} all [<tool-glob> [<json-matcher>]]", sub, sub);
+			result({}, "usage");
+			return true;
+		}
+		if (argv[2] == "all") {
+			PrismaticMCP::Rules::Spec spec = PrismaticMCP::Rules::ParseSpec(std::span<const std::string_view>(argv).subspan(3));
+			auto out = PrismaticMCP::DecideAll(approving, spec);
+			if (out.ok && out.lines.empty()) IConsolePrint(CC_WARNING, "Nothing is waiting that matches {}{}.", spec.tool, spec.match.is_null() ? "" : " " + spec.match.dump());
+			for (const auto &line : out.lines) IConsolePrint(out.ok ? CC_INFO : CC_ERROR, "{}", line);
+			if (out.ok) IConsolePrint(out.refused == 0 ? CC_INFO : CC_WARNING, "{} {}, {} refused, {} skipped.", out.decided, approving ? "approved" : "denied", out.refused, out.skipped);
+			result(out, out.ok || out.lines.empty() ? std::string_view{} : std::string_view{out.lines.front()});
 			return true;
 		}
 
-		/* Build the work list: either the ids the operator named, or -- for 'deny all' -- every
-		 * decision still pending, read from the server rather than parsed out of its prose. */
+		/* The ids the operator named; '--via window|panel' names the channel that asks. */
 		std::vector<PrismaticMCP::PendingApprovalInfo> pending = PrismaticMCP::PendingApprovals();
 		std::vector<PrismaticMCP::PendingApprovalInfo> work;
-		if (argv.size() == 3 && argv[2] == "all") {
-			if (approving) {
-				IConsolePrint(CC_ERROR, "Refused: 'approve all' does not exist. Name each id you approve: 'prismatic_mcp approve <id> [<id> ...]'.");
-				IConsolePrint(CC_HELP, "A denial enacts nothing, so 'prismatic_mcp deny all' is allowed; an approval executes, so it is never given in bulk.");
-				return true;
-			}
-			work = pending;
-			if (work.empty()) {
-				IConsolePrint(CC_WARNING, "Nothing is waiting: no decision is pending.");
-				return true;
-			}
-		} else {
+		std::string via = "console";
+		{
 			for (size_t i = 2; i < argv.size(); i++) {
+				if (argv[i] == "--via" && i + 1 < argv.size() && PrismaticMCP::Rules::KnownVia(argv[i + 1])) {
+					via = argv[++i];
+					continue;
+				}
 				auto pid = ParseInteger(argv[i]);
 				if (!pid.has_value()) {
 					IConsolePrint(CC_ERROR, "Invalid approval id '{}'; nothing was {}.", argv[i], approving ? "approved" : "denied");
+					result({}, fmt::format("invalid approval id '{}'", argv[i]));
 					return true;
 				}
 				/* What this id would do, so the log shows it; an id that is not pending has
 				 * nothing to show and the per-id message below says why it was refused. */
-				PrismaticMCP::PendingApprovalInfo info{(uint64_t)*pid, {}, {}, false};
+				PrismaticMCP::PendingApprovalInfo info{};
+				info.id = (uint64_t)*pid;
 				for (const auto &p : pending) {
 					if (p.id == info.id) { info = p; break; }
 				}
@@ -2189,13 +2269,21 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 			}
 		}
 
-		int done = 0;
-		int refused = 0;
+		PrismaticMCP::BulkOutcome tally;
 		for (const auto &item : work) {
 			std::string msg;
-			bool ok = approving ? PrismaticMCP::ApproveById(item.id, msg)
-			                    : PrismaticMCP::DenyById(item.id, msg);
-			if (ok) done++; else refused++;
+			bool ok = false;
+			const bool was_pending = PrismaticMCP::HoldsPending(item.id);
+			std::string hold = approving ? PrismaticMCP::UnattendedHoldOf(item.id, via) : std::string{};
+			if (approving && !PrismaticMCP::Rules::MayDecide(PrismaticMCP::Rules::Effect::Allow, via, item.tool)) {
+				msg = fmt::format("refused: {} is the owner's alone, approved only at the game's console", item.tool);
+			} else if (!hold.empty()) {
+				msg = "refused: " + hold; // the auto channel decides unattended (#264's condition)
+			} else {
+				ok = approving ? PrismaticMCP::ApproveById(item.id, msg, via)
+				               : PrismaticMCP::DenyById(item.id, msg, via == "console" ? std::string_view{} : std::string_view{via});
+			}
+			PrismaticMCP::Tally(tally, item.id, was_pending, ok, msg);
 			if (item.tool.empty()) {
 				IConsolePrint(ok ? CC_INFO : CC_ERROR, "#{}: {}", item.id, msg);
 			} else {
@@ -2204,8 +2292,9 @@ static bool ConPrismaticMcp(std::span<std::string_view> argv)
 					item.tool, item.canonical_args, item.expired ? " (EXPIRED)" : "");
 			}
 		}
-		IConsolePrint(refused == 0 ? CC_INFO : CC_WARNING, "{} {}, {} refused.", done,
-			approving ? "approved" : "denied", refused);
+		IConsolePrint(tally.refused == 0 ? CC_INFO : CC_WARNING, "{} {}, {} refused.", tally.decided,
+			approving ? "approved" : "denied", tally.refused);
+		result(tally, {});
 		return true;
 	}
 	if (sub == "decisions") {

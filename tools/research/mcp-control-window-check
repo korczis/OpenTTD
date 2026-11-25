@@ -1,0 +1,229 @@
+#!/usr/bin/env node
+// RESEARCH-ONLY. The Prismatic control window end to end (ADR 0041), in a real game process it starts
+// itself: a new game in the null video driver, its own MCP server armed for input
+// (PRISMATIC_MCP_INPUT=1), paused at start with the approval deadline off, so nothing settles on its own.
+// Every click and key goes through the game's own input path (openttd.ui.press, openttd.input.*),
+// which is injected input. So the check proves two sides:
+//
+// - What injected input may do, it does through the window's real widgets and rows: one click on a
+//   row's Deny withdraws that approval; the keyboard denies the selected row (D), and the next waiting
+//   row is selected by itself, so a second D denies it. The tool selector, Hide expired, Check shown
+//   and Check none change what the window shows and what its bulk buttons say. Deny all denies the
+//   rows shown. "Always deny" from a row's Always... menu makes a deny rule that decides the
+//   waiting approvals at once, and the rule's Remove ends it.
+// - What injected input must never do, it refuses: a row's Approve click, the A key, Approve all
+//   (no confirmation opens) and "Always allow" leave every approval waiting and make no rule.
+//
+// What this check cannot run: an approval or an allow rule given by the owner's own hand, and Approve
+// all's confirmation (the query naming the count). Injected input is refused by design, and nothing
+// here moves the real mouse; those paths are covered by the unit tests of src/tests/test_prismatic_mcp.cpp.
+//
+// It covers the game's own window, not a web page, so it declares no e2e-covers line: the web UI rule
+// (project.web-ui-is-covered-end-to-end, tools/research/e2e-coverage) counts browser checks only.
+//
+// Usage: tools/research/mcp-control-window-check --bin <openttd>   (a research build with the MCP server)
+// Exit 0 when every check passes, 1 otherwise, 2 on bad usage, 3 (NOT RUN) without a base set.
+// tools/gate.sh research runs it after ctest.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+import { spawn } from 'node:child_process';
+
+const argv = process.argv.slice(2);
+const opt = (n) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] || '' : '');
+const bin = opt('--bin');
+if (!bin || !fs.existsSync(bin)) { console.error('usage: mcp-control-window-check --bin <openttd>'); process.exit(2); }
+const baseset = path.join(os.homedir(), 'Documents', 'OpenTTD', 'baseset');
+if (!fs.existsSync(baseset)) { console.log(`NOT RUN mcp-control-window-check: no base set at ${baseset} (research/baseset-prerequisite-macos.md)`); process.exit(3); }
+
+const results = [];
+const check = (name, ok, detail = '') => { results.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const waitFor = async (pred, ms = 30000) => { for (let t = 0; t < ms; t += 250) { if (await pred().catch(() => false)) return true; await sleep(250); } return false; };
+
+const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-control-window-check-'));
+const pd = path.join(home, 'Documents', 'OpenTTD');
+fs.mkdirSync(path.join(pd, 'scripts'), { recursive: true });
+fs.symlinkSync(path.join(os.homedir(), 'Documents', 'OpenTTD', 'baseset'), path.join(pd, 'baseset'));
+const tokenFile = path.join(home, 'token.json');
+const port = await new Promise((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+fs.writeFileSync(path.join(pd, 'scripts', 'autoexec.scr'), `prismatic_mcp start ${port} ${tokenFile}\n`);
+// The null driver runs ticks as fast as it can: paused, nothing expires or settles meanwhile.
+fs.writeFileSync(path.join(pd, 'scripts', 'game_start.scr'), 'prismatic_mcp approval_deadline 0\npause\n');
+const cfg = path.join(pd, 'check.cfg');
+fs.writeFileSync(cfg, '[gui]\nautosave = off\n');
+const child = spawn(bin, ['-v', 'null:ticks=2000000000', '-s', 'null', '-m', 'null', '-c', cfg, '-g', '-G', '1'],
+  { env: { ...process.env, HOME: home, PRISMATIC_MCP_INPUT: '1' }, stdio: 'ignore' });
+
+let cred = null;
+const rpc = async (method, params) => {
+  const r = await fetch(cred.endpoint, { method: 'POST', headers: { Authorization: `Bearer ${cred.agent_token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }).then((x) => x.json());
+  if (r.error) throw new Error(JSON.stringify(r.error));
+  return r.result;
+};
+const tool = async (name, args = {}) => JSON.parse((await rpc('tools/call', { name, arguments: args })).content[0].text);
+const control = () => tool('openttd.ui.control');
+const waiting = async () => (await control()).approvals.map((a) => a.id);
+const CLASS = { class: 109 }; // WindowClass::PrismaticControl
+const win = async () => ((await tool('openttd.ui.windows', { widgets: true, ...CLASS })).windows || [])[0];
+const widget = async (text) => ((await win())?.widgets || []).find((w) => (w.text || '').startsWith(text));
+const press = (text) => tool('openttd.ui.press', { window: CLASS, widget: { text } });
+const key = (keycode) => tool('openttd.input.key', { keycode });
+const click = async (x, y) => {
+  await tool('openttd.input.pointer', { x, y });
+  await tool('openttd.input.button', { state: 'down' });
+  return tool('openttd.input.button', { state: 'up' });
+};
+const ask = async (pause) => (await tool('openttd.game.set_pause', { pause })).approval_id;
+// The window reads the queue again every second: wait until its caption counts what waits, so that
+// a sweep clicks rows that are drawn, never the switches below them.
+// Rows that moved by themselves hold the decisive clicks for 400 ms (RECENTLY): a click waits it out.
+const shows = async (n) => {
+  const ok = await waitFor(async () => ((await win())?.caption || '').includes(n === 0 ? 'control' : `${n} waiting`), 5000);
+  await sleep(600);
+  return ok;
+};
+const caption = async () => (await win())?.caption || '';
+// The approval rows' buttons sit at the right end of the list (WID_PC_LIST, index 5), the same x on
+// every row: Always... rightmost, Deny left of it, Approve left of that, each about 64 pixels wide at
+// the default interface scale (ButtonWidth, AlwaysWidth). The check aims at the middle of each column
+// and finds a row by what a click there does. A sweep steps 6 pixels, more than OpenTTD's double
+// click distance (MAX_OFFSET_DOUBLE_CLICK), so no click of it is the second of a double click.
+const list = async () => (await win()).widgets.find((w) => w.index === 5).rect;
+const columns = (r) => ({ always: r.x + r.w - 8, deny: r.x + r.w - 3 - 64 - 32, approve: r.x + r.w - 3 - 64 - 64 - 32 });
+const dropdownOpen = async () => (await tool('openttd.ui.windows', {})).windows.some((w) => Array.isArray(w.items));
+
+try {
+  check('the game comes up with its MCP server', await waitFor(async () => fs.existsSync(tokenFile) && fs.statSync(tokenFile).size > 0, 60000));
+  cred = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
+  check('the game is paused at start', await waitFor(async () => {
+    const st = JSON.parse((await rpc('resources/read', { uri: 'openttd://game/state' })).contents[0].text);
+    return st.game_mode === 'normal' && st.data.paused;
+  }, 60000));
+
+  const a = await ask(true);
+  const b = await ask(false);
+  check('two approvals wait', (await waiting()).join() === [a, b].join(), `#${a} #${b}`);
+  const menu = JSON.parse((await rpc('resources/read', { uri: 'openttd://ui/menu' })).contents[0].text);
+  const items = menu.items || (menu.data || {}).items || [];
+  await tool('openttd.ui.menu.run', { index: items.find((i) => i.label.startsWith('Prismatic control')).index });
+  check('the control window opens, its caption counting what waits', ((await win())?.caption || '').includes('2 waiting'), (await win())?.caption);
+  check('Approve all and Deny all name the rows shown', (await widget('Approve all'))?.text === 'Approve all (2)' && (await widget('Deny all'))?.text === 'Deny all (2)');
+
+  // Selectors.
+  await press('Check shown');
+  check('Check shown checks every row: the bulk buttons say selected', (await widget('Deny selected'))?.text === 'Deny selected (2)');
+  await press('Check none');
+  check('Check none unchecks them', (await widget('Deny all'))?.text === 'Deny all (2)');
+  // The selector's items are the waiting approvals' tools after "All tools" (-1), by value.
+  await tool('openttd.ui.press', { window: CLASS, widget: { text: 'Tool: all' } });
+  await tool('openttd.ui.choose', { result: 0 });
+  check('the tool selector shows one tool', await waitFor(async () => (await widget('Tool:'))?.text === 'Tool: game.set_pause', 5000), (await widget('Tool:'))?.text);
+  await tool('openttd.ui.press', { window: CLASS, widget: { text: 'Tool: game.set_pause' } });
+  await tool('openttd.ui.choose', { result: -1 });
+  check('All tools shows every tool again', await waitFor(async () => (await widget('Tool:'))?.text === 'Tool: all', 5000));
+  await press('Hide expired');
+  check('Hide expired is a toggle', (await widget('Hide expired'))?.lowered === true);
+  await press('Hide expired');
+
+  // What injected input must never do.
+  const opened = (await press('Approve all')).opened || [];
+  check('Approve all refuses injected input: no confirmation opens, nothing is approved', opened.length === 0 && (await waiting()).length === 2);
+  await key(65); // A
+  await key(89); // Y
+  check('the A and Y keys refuse injected input', (await waiting()).length === 2);
+
+  // One click on a row's Deny, found by sweeping the Deny column top down.
+  const r = await list();
+  const col = columns(r);
+  let rowY = null;
+  for (let y = r.y + 3; y < r.y + r.h - 3 && rowY === null; y += 6) {
+    await click(col.deny, y);
+    if ((await waiting()).length === 1) rowY = y;
+  }
+  check('one click on a row\'s Deny withdraws that approval, and only it', rowY !== null && (await waiting()).join() === String(b), `left #${(await waiting()).join()}`);
+  // The next row moved up under the cursor: Approve at the same height, a click to its left.
+  await sleep(650); // the rows moved up after the decision (RECENTLY), and a click this close in time and place would be a double click
+  if (rowY !== null) await click(col.approve, rowY);
+  check('a click on a row\'s Approve refuses injected input', (await waiting()).join() === String(b));
+
+  // The keyboard: D denies the selected row and the next one is selected by itself.
+  const c = await ask(true);
+  check('a new approval appears in the window', (await waiting()).length === 2 && await shows(2), await caption());
+  await press('Check none'); // a click in the window arms its keys
+  await key(68); // D
+  await key(68); // at once again: a held key's repeat, which decides nothing (KeyTaken)
+  check('a repeated D decides one row only', (await waiting()).length === 1);
+  await sleep(700); // a second press, after the key rested (KEY_QUIET)
+  await key(68); // D: the next row, selected after the first decision
+  check('D, D denies two rows in turn without the mouse', (await waiting()).length === 0, `c=#${c}`);
+
+  // A double click on a row's Deny decides that row only: its second click lands on the row that
+  // moved up under it, and OpenTTD sends it as click_count 2.
+  await ask(true);
+  await ask(false);
+  await shows(2);
+  if (rowY !== null) {
+    await click(col.deny, rowY);
+    await click(col.deny, rowY);
+  }
+  check('a double click on a row\'s Deny decides one row only', rowY !== null && (await waiting()).length === 1, `left ${(await waiting()).join()}`);
+
+  // Deny all over the rows shown.
+  await ask(true);
+  await ask(false);
+  await shows(2);
+  await press('Deny all');
+  check('Deny all denies every row shown', (await waiting()).length === 0);
+  // Always deny from a row's Always... menu: a rule that decides the waiting approvals at once.
+  const d = await ask(true);
+  const e = await ask(false);
+  await shows(2);
+  const r2 = await list();
+  let dropdown = false;
+  for (let y = r2.y + 3; y < r2.y + r2.h - 3 && !dropdown; y += 6) {
+    await click(columns(r2).always, y);
+    dropdown = await dropdownOpen();
+  }
+  check('Always... opens a menu on the row', dropdown);
+  if (dropdown) await tool('openttd.ui.choose', { result: 0 }); // AI_ALLOW_TOOL
+  await sleep(500); // a dropdown's choice arrives a few frames after the click on it
+  const confirm = (await tool('openttd.ui.windows', {})).windows.some((w) => /^Always allow/.test(w.caption || ''));
+  check('Always allow refuses injected input: no rule is made, no confirmation opens', !confirm && (await control()).rules.length === 0 && (await waiting()).length === 2);
+  await waitFor(async () => !(await dropdownOpen()), 3000);
+  dropdown = false;
+  for (let y = r2.y + 3; y < r2.y + r2.h - 3 && !dropdown; y += 6) {
+    await click(columns(r2).always, y);
+    dropdown = await dropdownOpen();
+  }
+  if (dropdown) await tool('openttd.ui.choose', { result: 2 }); // AI_DENY_TOOL
+  await waitFor(async () => (await control()).rules.length > 0, 3000); // the choice arrives a few frames later
+  const rules = (await control()).rules;
+  check('Always deny makes a deny rule from the window, which withdraws both at once', rules.length === 1 && rules[0].effect === 'deny'
+    && rules[0].created_via === 'window' && rules[0].hits === 2 && (await waiting()).length === 0, JSON.stringify(rules[0] || {}));
+  check('a new request it matches is denied as it is created', (await tool('openttd.game.set_pause', { pause: true })).status === 'denied', `d=#${d} e=#${e}`);
+  // The rule's Remove sits at the Always... column of its row. Removing a deny rule lets an allow
+  // rule decide what it held back, so injected input may not, and no confirmation opens either.
+  await waitFor(async () => (await caption()).includes('1 standing rule'), 5000);
+  await sleep(600);
+  let asked = false;
+  for (let y = r2.y + 3; y < r2.y + r2.h - 3; y += 6) {
+    await click(columns(r2).always, y);
+    asked = asked || (await tool('openttd.ui.windows', {})).windows.some((w) => /^Remove rule/.test(w.caption || ''));
+  }
+  check('Remove of a deny rule refuses injected input: the rule stays, no confirmation opens', (await control()).rules.length === 1 && !asked);
+
+  const trace = (await control()).decisions;
+  check('the window\'s denials leave no executed decision behind', trace.length === 0, trace.join(' | '));
+} catch (err) {
+  check('the check ran to its end', false, String(err));
+} finally {
+  child.kill('SIGTERM');
+  await sleep(500);
+  fs.rmSync(home, { recursive: true, force: true });
+}
+const failed = results.filter((x) => !x).length;
+console.log(`${failed ? 'FAIL' : 'PASS'} mcp-control-window-check: ${results.length - failed}/${results.length}`);
+process.exit(failed ? 1 : 0);

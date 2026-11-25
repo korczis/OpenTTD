@@ -15,6 +15,9 @@ observations:
   - id: battle-records-cannot-explain
     statement: "Added 2026-11-22 from an external review re-checked at origin/master ac8bc71d06: battle.py:1182 and :2590 run matches with -d script=1, the referee's REF Q line (main.nut:44) has no loan, max_loan (battle.py:1094) and vehicle limits are not recorded, replays were 0 of 4 identical on another arena with different builds, mcp-ab returns rows[0] (I0118-I0124)"
     source: file:tools/research/ai-battle/battle.py
+  - id: battle-records-partly-explain
+    statement: "Re-observed 2026-11-25 at origin/master eed5cb5fc5 after PRs #244, #269, #274, #284: the referee's REF Q line carries loan= with its header documenting it (tools/research/ai-battle/referee/BattleReferee/main.nut:6,12-14,128), parse_log reads it, a line without it reads 0, and the battle store keeps it (battle.py:1476-1477,1803,1818); but match-record standings carry neither money nor loan and the rendered record shows only value (battle.py:2475-2477, 2559-2660), and no maximum loan is emitted. GA fitness now runs at -d script=3 (battle.py:3097) while tournament matches still run at script=1 (battle.py:1460), and no per-company compressed decision log is linked from a record. No effective_settings block exists; replays record versions but count identical across differing builds (battle.py:1741-1742), README still reports 0/4 identical; mcp-ab still returned rows[0] at eed5cb5fc5 (tools/research/mcp-ab:119); PR #296, merged after, binds it to the tested company (I0122, ACTIVE). The AAAHogEx gap analysis (research/analysis-2026-11-23-why-prismatic-loses.md, PR #269) ranks root causes RC-a..RC-e with PrismaticAI path:line citations, but its AAAHogEx citations use an undefined hog: prefix with no version, its figures cite SQL on events with no committed query or output, and its remedies name PRs, not issues (I0118-I0124)"
+    source: file:tools/research/ai-battle/battle.py
 conditions:
   - criterion: instrumentation-is-contained
     state: unknown
@@ -26,7 +29,7 @@ conditions:
     observations: [research-debug-runs, cli-suite-not-rerun]
   - criterion: a-battle-explains-itself
     state: missing
-    because: "no decision log, no loan, no effective settings in a battle record, and replays do not reproduce; milestone every-battle-match-explains-itself owns the fix"
-    observations: [battle-records-cannot-explain]
+    because: "milestone every-battle-match-explains-itself owns the fix; re-observed 2026-11-25: none of I0118-I0124 is done; I0119 (loan parsed and stored, not in the record or render), I0118 (fitness only at level 3, no stored logs), I0121 (versions recorded, not enforced) and I0123 (analysis without committed queries or issue links) are partly met"
+    observations: [battle-records-cannot-explain, battle-records-partly-explain]
 risks:
   - "The stdin start-up race can lose the research_status line under load"

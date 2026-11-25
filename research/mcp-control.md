@@ -48,6 +48,7 @@ and OpenMSX for sound and music), and `PrismaticAI` in `~/Documents/OpenTTD/ai/`
 | MCP catalogue | `resources/list` and `tools/list`; click a resource to read it |
 | Scripts (`/scripts`, `/scripts/<name>`) | The Rhai library as a workspace: every script with its header comment, imports and importers; an editor with Rhai highlighting, line numbers, an outline and a live parse check; Save (only text that parses), Run once (streamed), and Start/Stop as a service whose log streams and which reloads within a second when its file or a library it imports changes ([`research/rail-steward.md`](rail-steward.md), `src/panel_scripts.rs`) |
 | Towns (`/towns`) | The [town-authority model](mechanisms/town-authority.md) derived from the engine sources (likes and dislikes, gates with removal thresholds by tolerance, town actions, links, relations, each rule with its source `path:line`) and, with a game connected, the live towns with one company's rating, band and `town_lib.rhai` advice; a company selector kept in the address (`src/panel_town.rs`, `tools/research/mcp-towns-check`) |
+| Benchmarks (`/bench`, `/bench/<group>/<name>`) | The Rust benchmark records of `research/results/bench-*.json` (`rust-bench/v1`): the newest record's regressions as a banner, its rev linked to its commit, host and toolchain, every bench in a table filtered by group and text and sorted by any column, each bench's median across the records, and a page per bench with its history and min-max band; every filter, sort, record and maximized chart in the address ([below](#rust-benchmarks-records-history-regressions), `src/panel_bench.rs`, `tools/research/mcp-bench-check`) |
 | Developer console (`~`) | OpenTTD console commands, `/mcp <method> [json]`, `/read <uri>`, `/pause`, `/resume`, `/approve <id>`, `/auto on/off`, `/rhai <script>` (every line streamed as the script prints it), `/tail [kinds]` and `/untail` (the live event feed). Output is highlighted by content: errors, warnings, passes, events, debug lines, and JSON pretty-printed with coloured keys and values |
 
 Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
@@ -57,9 +58,10 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `GET /api/status` | | server and MCP up, pending approvals, auto-approve, events |
 | `GET /api/overview` | | state, companies, decisions |
 | `GET /api/catalogue` | | `initialize`, `resources/list`, `tools/list` |
+| `GET /api/bench[?id=<record>]` | | every benchmark record oldest first with `latest_id`, `count` and the `skipped` files with their reason, or one record |
 | `GET /api/resource?uri=<uri>` | | one resource's payload |
 | `POST /api/rpc` | `{"method", "params"}` | raw MCP JSON-RPC with the panel's token |
-| `POST /api/console` | `{"command"}` | one OpenTTD console line and its output |
+| `POST /api/console` | `{"command"}` | one OpenTTD console line and its output. A line that reads (`companies`, `setting <name>`, `prismatic_mcp status`) or chats (`say`, `echo`, `prismatic_mcp deny <id>`) is open to anyone; every other line changes the game and needs the owner secret or the stack's run token, else 401 `needs: owner_or_token` (`console_authority`) |
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
 | `POST /api/approve` | `{"id"}` | the owner's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it, 504 when no decision came |
 | `POST /api/deny` | `{"id"}` | withdraw a pending decision through the same core (`prismatic_mcp deny <id>`): it enacts nothing, so no owner secret is needed. 200 with the approval now `denied`, 404 for one the server does not hold, 409 for one not pending, 504 when the server did not mark it denied. The home page's Deny button calls it |
@@ -67,7 +69,7 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/auto-approve` | `{"on": bool}` | `on: true` needs the owner secret (401 without it); `on: false` is open to anyone |
 | `POST /api/owner/login` | `{"secret"}` | the owner signs this browser in: the secret (from its file, see [the owner secret](#approval-is-bound-to-the-owner)) sets the HttpOnly cookie `mcp_owner_<port>` and answers 204; a wrong one 401 after a delay, five within a minute 429 |
 | `POST /api/owner/logout` | | clears that cookie; 204 |
-| `POST /api/rhai` | `{"script"}` | a Rhai script's output |
+| `POST /api/rhai` | `{"script"}` | a Rhai script's output; the script has its caller's authority and no more: the stack's run token for the owner or the stack, none otherwise (its console lines then read and chat only) |
 | `POST /api/rhai/stream` | `{"script"}` | the same, streamed line by line (SSE `out`, `err`, `exit`) |
 | `GET /api/scripts`, `GET /api/script?name=` | | the library ($MCP_RHAI_PATH, else `tools/research/mcp-panel/rhai`), one script with its parse verdict |
 | `POST /api/script/check`, `POST /api/script/save` | `{"text"}`, `{"name", "text"}` | the parser's error with line and column; save only what parses (422 otherwise) |
@@ -184,6 +186,7 @@ game. What no such check drives is treated as not built.
 | `tools/research/e2e-coverage --run --panel <url> --hub <url>` | Runs every declaring check against the live stack, each against the instance it covers, and fails if any fails or could not run |
 | `tools/research/mcp-pages-check <panel-url> [--hub <url>]` | `/ui`, `/tools`, a `/resource/` page, `/docs`, the hub's `/docs`: content, shell, no page error, no sideways scroll at 390 px |
 | `tools/research/mcp-scripts-check <panel-url>` | The Scripts page through its controls: highlighting, a typed parse error, a refused Save, a new script, a service and its hot reload, Run once |
+| `tools/research/mcp-bench-check <panel-url> [--shots DIR]` | `/bench` and a bench's page through their controls: the regression banner, the rev's commit link, group filter, sort and text filter in the address and restored by a reload, a bench's history chart, a record selected by its row, Maximize and Escape, a maximized deep link, a 404 for an unknown bench, no sideways scroll at 390 px. A panel with no record gets the empty state checked and the record flow reported NOT RUN |
 | `tools/research/real-game-check <panel-url>` | Whether a stack is ready for a real game against people ([`real-game.md`](real-game.md)) |
 
 The first run (2026-11-18) found two defects that every unit test had missed:
@@ -285,6 +288,38 @@ runs one duel at a time.
 `mcp-route-check` never posts `/api/duel`, because it starts something and needs no input.
 `mcp-overview-check` checks the pages in a browser: every run is charted, a bar leads to its run, and
 the run's chart follows the measure in the address.
+
+### Rust benchmarks: records, history, regressions
+
+`/bench` shows the Rust performance benchmark records the harness writes to
+`research/results/bench-*.json` (schema `rust-bench/v1`). `GET /api/bench` (`src/panel_bench.rs`)
+reads every one of them, checks each against the schema, and answers them oldest first by
+`generated_at`, with `latest_id` and `count`. A file that is not a valid record is not dropped
+silently: it is listed under `skipped` with its reason, and the page shows that list.
+`GET /api/bench?id=<record>` answers one record. `repo_url` is the repository's web page, derived
+from its `origin` remote (null for a remote off GitHub); a rev links to its commit there, and is
+plain text without one. The route is a row of the panel's table, so
+OpenAPI, Swagger UI, the hub and Rhai derive it. `MCP_BENCH_DIR` points the panel at another
+directory; the browser check uses it for the fixtures in `tools/research/mcp-panel/test/fixtures/bench`.
+
+The page shows the newest record, or the one `?rec=` names:
+
+- a red banner with every regression its `baseline` lists, each linked to its bench;
+- the rev, linked to its GitHub commit, with the host, the toolchain, the profile, the crate and the
+  baseline record; a dirty tree is a warning, because its numbers are not of that commit alone;
+- a table of every bench: median in its own unit (ns, µs, ms, s), ± stddev, samples, and the change
+  against the newest earlier record of the same host and crate (another machine's numbers are no
+  change of this one's). The group, a text filter and the sorted column are in the address
+  (`group`, `q`, `sort`);
+- every listed bench's median across the records as a multiple of its first, so a bench of
+  nanoseconds and one of milliseconds share an axis. A line leads to its bench.
+
+`/bench/<group>/<name>` is one bench across every record that measured it. Its title comes from
+the records. It shows the median with the band from min to max, a red triangle on every record
+whose baseline names it a regression, a row per record (rev linked, a dirty tree marked), the
+selected record's provenance, and the other benches of its group. A click on a point or a row
+selects that record (`rec`). Both charts go through the one door and maximize (`max`, Escape
+restores). An unknown bench answers 404.
 
 ### A page per tool and resource
 
@@ -1447,6 +1482,12 @@ only the decisions of the sentence you just typed. `deny all` is kept for the op
 denial cannot execute anything, it only clears the queue, and a cleared queue is what makes the next
 named approval predictable. Approval is named; denial may be wholesale.
 
+*Amended 2026-11-23 (ADR 0041):* the owner ordered approve all, deny all and standing
+"always allow / always deny" rules. They exist now as the owner's own acts over a filter that the
+owner writes (a tool glob and a JSON matcher), never as a walk of the whole queue by a loop. Every
+id is still approved on its own and printed, and every decision a rule makes names the rule; see
+[the approval gate](mechanisms/approval-gate.md#standing-rules-and-bulk-consent).
+
 `mcp-intent-check` proves the four sentences themselves, driven through `POST /api/console`
 against a **dedicated server** — the `_network_dedicated` branch of `ConPlan`, not the branch the
 owner's own windowed client takes, which is covered separately by `mcp-ask-check`: that each one
@@ -1671,12 +1712,17 @@ pending request (red-team residual risk 3). Approval is now bound to the owner i
     makes the shell's one API client (`static/shell.js` `api`) open the "Owner sign-in" box instead
     of a raw error. It names the secret's file (the answer's `secret_file`) and asks for the secret
     in a password field. `POST /api/owner/login {secret}` sets the HttpOnly, `SameSite=Strict`
-    cookie `mcp_owner_<port>`, kept a year, and answers 204; the refused request is then sent once
+    cookie `mcp_owner_<port>`, kept 12 hours (`OWNER_COOKIE_MAX_AGE`), and answers 204; the refused request is then sent once
     more. A wrong secret answers 401 after a second's delay and says nothing of its length or
     prefix; five wrong ones within a minute answer 429 for the rest of it (`owner_login`).
     `POST /api/owner/logout` clears the cookie. Cancel (or Escape) leaves the refusal shown.
-  - A launcher may still open the page once as `http://127.0.0.1:<port>/?owner=<secret>` (mcp-e2e
-    reads the secret from its file and does): the answer sets the same cookie.
+  - **A launcher opens the page through a one-time link.** `POST /api/owner/once` (the owner
+    secret's alone) answers `{once, url}`; `GET /?once=<nonce>` sets the same cookie once within 60 s
+    and answers 303 to the page without the query, and a spent or unknown nonce answers 401
+    (`owner_once`, `spend_once`). Spending it is a `governance.changed` `owner_session` via
+    `GET ?once=`. mcp-e2e asks for one with the secret on curl's stdin and opens it
+    (`open_owner_page`), so the secret is in no URL, history or process list. `?owner=<secret>`
+    still sets the cookie and also answers 303 to the page without the query.
   - When `/dev/urandom` cannot be read the panel has no secret, and approval happens only at the
     console (fails closed).
 - **Every change of who may decide what is on the bus** as one `governance.changed` event
@@ -1699,6 +1745,15 @@ pending request (red-team residual risk 3). Approval is now bound to the owner i
   it too. The run token names a caller as the stack's own (`credential: token`, `role: run`) and
   opens no owner's route: approving, auto-approve on and the approvers stay the owner secret's.
   `mcp-duel` holds the token of the stack it drives through `$MCP_E2E_RUN_TOKEN_FILE`.
+- **Changing the game needs a credential** (the owner's decision of 2026-11-23: an allowlist).
+  `POST /api/console` sends a line that reads or chats for anyone, and any other line only for the
+  owner (secret) or the stack (run token); a script sent through `POST /api/rhai` or
+  `/api/rhai/stream` holds the run token only when its caller may change the game. `POST
+  /api/start-ai` without a credential asks the owner: it goes to the game's approval-gated
+  `openttd.ai.start`, whose countdown and default verdict then decide, and a game without that tool
+  starts nothing. `start_bot` has no console fallback any more. `POST /api/view/attach` (which
+  window is the owner's view) needs the owner or the stack. `OWNER_ROUTES` names the routes only the
+  owner secret opens, the run token included.
 - **The owner client's key is the owner's alone.** A client's personal directory
   (`$TMP/client-home`) holds its `secrets.cfg`, the key that makes the owner's client an approver:
   mcp-e2e starts every client under `umask 077`, closes the directory to 0700 and the file to 0600
@@ -1722,7 +1777,7 @@ What this does not stop, measured honestly:
   `ClientNetworkGameSocketHandler::SendChat` refuses the line. Its console refuses `approve` and
   changes to approvers, and so does any input a UI tool injects (`InjectingInput()`). The owner's
   armed co-play client therefore approves through the panel or from an unarmed client.
-- **The page URL with `?owner=` lands in the browser's history.**
+- **A page opened as `?owner=<secret>` by hand still sends the secret in one request**, though the 303 keeps it out of the address bar; the one-time link sends none.
 - **A console approval executes at once** (ADR 0038): an owner-only request approved at the
   game's console runs then, with no caller resubmitting it.
 

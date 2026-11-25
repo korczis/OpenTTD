@@ -313,14 +313,28 @@ register_owner_approver() {
 # The owner's browser signs in by opening the panel with the owner secret once (the cookie it sets
 # is what Approve and auto-approve check). The secret is read from the owner's own 0600 file, which
 # mcp-panel keeps stable across restarts, and never printed; without the file the plain URL opens.
+# The owner's browser signs in through a one-time link (POST /api/owner/once with the secret on
+# curl's stdin): `?once=<nonce>` sets the cookie once within a minute and redirects to the page
+# without the query, so the secret is in no URL, browser history or process list. Without the file
+# (or a panel that makes no link) the plain URL opens.
+open_owner_page() {
+  local url="$1" file="$2" once=""
+  if [[ -r "$file" && -s "$file" ]]; then
+    once="$(printf 'X-Panel-Owner: %s\n' "$(tr -d '[:space:]' < "$file")" \
+      | curl -s -X POST -H @- -H 'Content-Type: application/json' -d '{}' "$url/api/owner/once" \
+      | jq -r '.once // empty' 2>/dev/null || true)"
+  fi
+  if [[ -n "$once" ]]; then
+    "${OPEN_CMD:-open}" "$url/?once=$once"
+    echo "==> the panel opened in your browser, signed in as the owner (a one-time link; the secret stays in $file)"
+  else
+    "${OPEN_CMD:-open}" "$url"
+  fi
+}
+
 OWNER_SECRET_FILE="${PRISMATIC_PANEL_OWNER_SECRET_FILE:-$HOME/.config/prismatic/panel-owner-secret}"
 if [[ "$BROWSER" == 1 ]]; then
-  if [[ -r "$OWNER_SECRET_FILE" && -s "$OWNER_SECRET_FILE" ]]; then
-    open "$URL/?owner=$(tr -d '[:space:]' < "$OWNER_SECRET_FILE")"
-    echo "==> the panel opened in your browser, signed in as the owner (secret from $OWNER_SECRET_FILE)"
-  else
-    open "$URL"
-  fi
+  open_owner_page "$URL" "$OWNER_SECRET_FILE"
 fi
 
 if [[ "$GUI" == 1 ]]; then

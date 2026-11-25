@@ -38,16 +38,17 @@ def function_source(name):
 
 def run(script, env=None):
     """`script` in bash after the four functions, with `env` added."""
-    lib = "".join(function_source(n) for n in ("make_run_token", "stack_post", "seal_client_home", "open_client_secrets"))
+    lib = "".join(function_source(n) for n in ("make_run_token", "stack_post", "seal_client_home", "open_client_secrets", "open_owner_page"))
     return subprocess.run(["bash", "-c", "set -euo pipefail\n" + lib + script], capture_output=True, text=True,
                           env={**os.environ, **(env or {})}, timeout=60)
 
 
 class FakePanel(http.server.ThreadingHTTPServer):
-    """Answers every POST with {"ok": true} and keeps what it got."""
+    """Answers every POST with `answer` ({"ok": true}) and keeps what it got."""
 
-    def __init__(self):
+    def __init__(self, answer=None):
         self.requests = []
+        self.answer = answer or {"ok": True}
         super().__init__(("127.0.0.1", 0), Handler)
 
 
@@ -55,7 +56,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
         self.server.requests.append({"path": self.path, "headers": dict(self.headers), "body": body})
-        data = json.dumps({"ok": True}).encode()
+        data = json.dumps(self.server.answer).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
@@ -159,6 +160,50 @@ class Wiring(unittest.TestCase):
         duel = DUEL.read_text()
         self.assertIn('export MCP_E2E_RUN_TOKEN_FILE="$TMP/run-token"', duel)
         self.assertTrue(all("-H @-" in l for l in duel.splitlines() if "curl -s -X POST" in l))
+
+
+class OwnerPage(unittest.TestCase):
+    """open_owner_page: the owner's browser opens through a one-time link, never with the secret."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.opened = self.dir / "opened"
+        self.opener = self.dir / "open"
+        self.opener.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" >> "{self.opened}"\n')
+        os.chmod(self.opener, 0o700)
+        self.secret = self.dir / "secret"
+        self.secret.write_text("s3cr3t-0wner\n")
+        os.chmod(self.secret, 0o600)
+
+    def open_with(self, answer, secret_file):
+        panel = FakePanel(answer)
+        threading.Thread(target=panel.serve_forever, daemon=True).start()
+        try:
+            url = f"http://127.0.0.1:{panel.server_address[1]}"
+            out = run(f'open_owner_page "{url}" "{secret_file}"\n', {"OPEN_CMD": str(self.opener)})
+        finally:
+            panel.shutdown()
+            panel.server_close()
+        return url, out, panel.requests, self.opened.read_text().strip() if self.opened.exists() else ""
+
+    def test_the_page_opens_through_a_one_time_link_and_the_secret_goes_only_in_the_header(self):
+        url, out, reqs, opened = self.open_with({"once": "n0nce123"}, self.secret)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(opened, f"{url}/?once=n0nce123")
+        [req] = reqs
+        self.assertEqual((req["path"], req["headers"].get("X-Panel-Owner")), ("/api/owner/once", "s3cr3t-0wner"))
+        self.assertNotIn("s3cr3t", opened + out.stdout + out.stderr)
+
+    def test_without_the_secret_file_or_a_link_the_plain_page_opens(self):
+        url, out, reqs, opened = self.open_with({"once": "x"}, self.dir / "none")
+        self.assertEqual((opened, reqs), (url, []), "no file: nothing asked, the plain URL")
+        self.opened.unlink()
+        url, out, reqs, opened = self.open_with({"error": "refused"}, self.secret)
+        self.assertEqual(opened, url, "a panel that makes no link: the plain URL")
+        self.assertNotIn("s3cr3t", opened + out.stdout + out.stderr)
+
+    def test_the_script_never_puts_the_secret_into_a_url(self):
+        self.assertNotIn('?owner=$(', SCRIPT.read_text())
 
 
 if __name__ == "__main__":

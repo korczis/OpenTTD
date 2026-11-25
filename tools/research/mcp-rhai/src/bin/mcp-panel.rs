@@ -50,6 +50,8 @@ mod panel_mesh;
 mod panel_events;
 #[path = "../panel_results.rs"]
 mod panel_results;
+#[path = "../panel_bench.rs"]
+mod panel_bench;
 #[path = "../panel_scripts.rs"]
 mod panel_scripts;
 #[path = "../rhai_catalogue.rs"]

@@ -6086,3 +6086,5 @@ STR_BADGE_FILTER_ANY_LABEL                                      :Any {STRING}
 # Only code inside a research guard may name them: tools/gate.sh change (research_code_is_guarded) refuses anything else.
 STR_PRISMATIC_MCP_TOOLBAR_TOOLTIP                               :{BLACK}Prismatic: the MCP server, the hub, the World view, the API, and asking the planner in plain language
 STR_PRISMATIC_MCP_ASK_CAPTION                                   :{WHITE}Ask the planner (for example: najdi nejbližší les + pilu)
+STR_PRISMATIC_MCP_RULE_ALLOW_CAPTION                            :{WHITE}Always allow: <tool glob> [<JSON matcher>] [--persist]
+STR_PRISMATIC_MCP_RULE_DENY_CAPTION                             :{WHITE}Always deny: <tool glob> [<JSON matcher>] [--persist]

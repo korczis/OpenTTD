@@ -36,14 +36,14 @@ unknown attribute, a follow-up that names no issue, or a closing marker with no 
 ```mermaid
 pie showData title Open findings by kind
     %% links: open-findings.md?col=Kind&filter=blocked#findings | open-findings.md?col=Kind&filter=out-of-scope#findings | open-findings.md?col=Kind&filter=not-run#findings | open-findings.md?col=Kind&filter=partial#findings | open-findings.md?col=Kind&filter=staged#findings | open-findings.md?col=Kind&filter=unreviewed#findings | open-findings.md?col=Kind&filter=failed#findings | open-findings.md?col=Kind&filter=handoff#findings
-    "blocked" : 84
-    "out-of-scope" : 40
-    "not-run" : 21
+    "blocked" : 81
+    "out-of-scope" : 58
+    "not-run" : 29
     "partial" : 17
     "staged" : 16
     "unreviewed" : 9
-    "failed" : 7
-    "handoff" : 1
+    "failed" : 8
+    "handoff" : 4
 ```
 <!-- surfaces:end open-findings -->
 
@@ -52,21 +52,18 @@ pie showData title Open findings by kind
 <!-- surfaces:begin open-findings -->
 | Kind | Count | Meaning |
 |---|---|---|
-| blocked | 84 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
-| out-of-scope | 40 | A finished issue left this out (its non_scope) and no open issue names it |
-| failed | 7 | A run or check the records say failed |
-| not-run | 21 | A validation the records say did not run |
+| blocked | 81 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
+| out-of-scope | 58 | A finished issue left this out (its non_scope) and no open issue names it |
+| failed | 8 | A run or check the records say failed |
+| not-run | 29 | A validation the records say did not run |
 | partial | 17 | A capability or run the records say is only partly there |
 | staged | 16 | Designed and written down, not implemented |
-| handoff | 1 | A change asked of another repository; nothing in this one can close it |
+| handoff | 4 | A change asked of another repository; nothing in this one can close it |
 | unreviewed | 9 | A knowledge record still awaiting its review |
 | drift | 0 | An issue's stamps contradict its delivered work (live only: majordomus plan drift) |
 
 | Kind | Finding | Evidence | Follow-up | Label |
 |---|---|---|---|---|
-| blocked | No tracked text claims a shipped MCP capability is absent or planned: the server header and research/mcp-control.md describe today's code — waits on I0110 (active) | [I0111](../.ai/repo/project/issues/I0111.yaml):17 | [I0110](../.ai/repo/project/issues/I0110.yaml) | DERIVED |
-| blocked | One capability matrix states, per capability, its owner, code path, live input, fallback, tests and end-to-end status, labelled OBSERVED/DERIVED/INFERRED, and a check keeps it honest — waits on I0111 (open) | [I0114](../.ai/repo/project/issues/I0114.yaml):20 | [I0111](../.ai/repo/project/issues/I0111.yaml) | DERIVED |
-| blocked | The research/prismatic-mcp contributor catalogue takes each document's title and kind from the document itself; nothing is written by hand — waits on I0111 (open) | [I0115](../.ai/repo/project/issues/I0115.yaml):18 | [I0111](../.ai/repo/project/issues/I0111.yaml) | DERIVED |
 | blocked | The battle referee's REF Q sample carries every company's loan and maximum loan, and the battle record and charts use them — waits on I0118 (open) | [I0119](../.ai/repo/project/issues/I0119.yaml):19 | [I0118](../.ai/repo/project/issues/I0118.yaml) | DERIVED |
 | blocked | A battle record states the game settings the match really ran under, read back from the game: max_loan, vehicle-slot limits, difficulty and the build id — waits on I0119 (open) | [I0120](../.ai/repo/project/issues/I0120.yaml):18 | [I0119](../.ai/repo/project/issues/I0119.yaml) | DERIVED |
 | blocked | Cross-arena replays run on the original's game build and reproduce it, or the record names the divergence with a desync log — waits on I0120 (open) | [I0121](../.ai/repo/project/issues/I0121.yaml):18 | [I0120](../.ai/repo/project/issues/I0120.yaml) | DERIVED |
@@ -185,11 +182,30 @@ pie showData title Open findings by kind
 | out-of-scope | Any change in prismatic-platform or algoglyph | [I0097](../.ai/repo/project/issues/I0097.yaml):18 | none — needs an issue | DERIVED |
 | out-of-scope | Any change in algoglyph or prismatic-platform (the AlgoGlyph-side gap is a written proposal only) | [I0098](../.ai/repo/project/issues/I0098.yaml):16 | none — needs an issue | DERIVED |
 | out-of-scope | Routing the planner's own kernel calls (cargo.rs, linecost.rs, mcp-plan.rs) through the matcher | [I0098](../.ai/repo/project/issues/I0098.yaml):17 | none — needs an issue | DERIVED |
+| out-of-scope | Changing which tools exist or how approval works | [I0110](../.ai/repo/project/issues/I0110.yaml):17 | none — needs an issue | DERIVED |
+| out-of-scope | Any savegame field (rule: no savegame field for an agent channel) | [I0110](../.ai/repo/project/issues/I0110.yaml):18 | none — needs an issue | DERIVED |
+| out-of-scope | Behaviour changes; this issue edits comments and documentation only | [I0111](../.ai/repo/project/issues/I0111.yaml):15 | none — needs an issue | DERIVED |
+| out-of-scope | Changing what any feature does | [I0112](../.ai/repo/project/issues/I0112.yaml):13 | none — needs an issue | DERIVED |
+| out-of-scope | Generated regions between majordomus:begin/end markers (edit the policy or templates instead) | [I0112](../.ai/repo/project/issues/I0112.yaml):14 | none — needs an issue | DERIVED |
+| out-of-scope | Implementing missing capabilities; a missing one is a row with status NOT RUN or OPEN and the issue that owns it | [I0114](../.ai/repo/project/issues/I0114.yaml):18 | none — needs an issue | DERIVED |
+| out-of-scope | The C++ tool openttd.ai.set_settings (its own branch, feature/mcp-ai-set-settings-atomic) | [I0117](../.ai/repo/project/issues/I0117.yaml):18 | none — needs an issue | DERIVED |
+| out-of-scope | The live pull on :8800 | [I0117](../.ai/repo/project/issues/I0117.yaml):19 | none — needs an issue | DERIVED |
 | out-of-scope | Any change in algoglyph or prismatic-platform | [I0221](../.ai/repo/project/issues/I0221.yaml):24 | none — needs an issue | DERIVED |
 | out-of-scope | How the AlgoGlyph checkout is located, the flow serve and the catalogue discovery of the hub (feature/algoglyph-submodule) | [I0221](../.ai/repo/project/issues/I0221.yaml):25 | none — needs an issue | DERIVED |
 | out-of-scope | Kernel calls outside the planner: the hub's algoglyph. methods, the Rhai rail steward, mcp-human, the action plan and the kernel feed | [I0221](../.ai/repo/project/issues/I0221.yaml):26 | none — needs an issue | DERIVED |
-| failed | -G 15805 with the live-like match settings does not regenerate live game 15805's map: none of its towns appears in the headless log (2026-11-24, lundra, 20261122-master-g2a6a616221). The planned arm is a fixed slot set, not the live plan, and the start of 15805 cannot be… | [research/ai-battle/README.md](ai-battle/README.md):712 | none — needs an issue | OBSERVED |
-| failed | On the 15805 save, master's PrismaticAI runs 3 trains instead of 1. Its value after four years is 151k against the old code's 309k, and 0.029 of AAAHogEx, under the live ratio of 0.050. More lines do not yet mean more value on this map. | [research/ai-battle/README.md](ai-battle/README.md):735 | none — needs an issue | OBSERVED |
+| out-of-scope | Opening an issue for each finding that has none; the page names them, the owner decides which deserve one | [I0226](../.ai/repo/project/issues/I0226.yaml):21 | none — needs an issue | DERIVED |
+| out-of-scope | Rewriting the non_scope entries of other issues to name a follow-up | [I0226](../.ai/repo/project/issues/I0226.yaml):22 | none — needs an issue | DERIVED |
+| out-of-scope | The Majordomus side of the generator (a separate proposal carries it into prismatic-majordomus) | [I0226](../.ai/repo/project/issues/I0226.yaml):23 | none — needs an issue | DERIVED |
+| out-of-scope | Any commit in algoglyph or prismatic-platform: the submodule is pinned at an upstream commit and never modified | [I0227](../.ai/repo/project/issues/I0227.yaml):35 | none — needs an issue | DERIVED |
+| out-of-scope | Routing the planner's own kernel calls (cargo.rs, linecost.rs, invest.rs, bin/mcp-plan.rs) through the matcher (feature/planner-kernels-by-capability) | [I0227](../.ai/repo/project/issues/I0227.yaml):36 | none — needs an issue | DERIVED |
+| out-of-scope | battlebrain.rs, panel_decision.rs, authority_boundaries.rs (fix/battlebrain-executor-round2) | [I0227](../.ai/repo/project/issues/I0227.yaml):37 | none — needs an issue | DERIVED |
+| out-of-scope | mcp-human's own AlgoGlyph client, which reads MCP_ALGOGLYPH_DIR as mcp-e2e sets it | [I0227](../.ai/repo/project/issues/I0227.yaml):38 | none — needs an issue | DERIVED |
+| out-of-scope | Any change in algoglyph or prismatic-platform | [I0228](../.ai/repo/project/issues/I0228.yaml):19 | none — needs an issue | DERIVED |
+| out-of-scope | Pinning AlgoGlyph as a submodule (feature/algoglyph-submodule) | [I0228](../.ai/repo/project/issues/I0228.yaml):20 | none — needs an issue | DERIVED |
+| out-of-scope | Routing the planner's kernel calls through the matcher (feature/planner-kernels-by-capability) | [I0228](../.ai/repo/project/issues/I0228.yaml):21 | none — needs an issue | DERIVED |
+| failed | the gate is FAIL on master for that unrelated reason, not PASS. | [I0110](../.ai/repo/project/issues/I0110.yaml):52 | none — needs an issue | OBSERVED |
+| failed | -G 15805 with the live-like match settings does not regenerate live game 15805's map: none of its towns appears in the headless log (2026-11-24, lundra, 20261122-master-g2a6a616221). The planned arm is a fixed slot set, not the live plan, and the start of 15805 cannot be… | [research/ai-battle/README.md](ai-battle/README.md):782 | none — needs an issue | OBSERVED |
+| failed | On the 15805 save, master's PrismaticAI runs 3 trains instead of 1. Its value after four years is 151k against the old code's 309k, and 0.029 of AAAHogEx, under the live ratio of 0.050. More lines do not yet mean more value on this map. | [research/ai-battle/README.md](ai-battle/README.md):805 | none — needs an issue | OBSERVED |
 | failed | On seed 4242 the self-steward lineup hoards after the change (hoards:1964-04..1966-01:716618->1549902@60v), where it did not before. Producers that rivals claimed are no longer candidates, and the bot has no other sink for the money. The gate's seed passes. The sink that is… | [research/incident-2026-11-22-sibling-industries.md](incident-2026-11-22-sibling-industries.md):221 | none — needs an issue | OBSERVED |
 | failed | A line whose track is finished but whose locomotive is refused for money is left on the map with no train, and the bot forgets it: BuildTrain returns -1 and the line never enters RAIL_LINES. In this game that happened to two lines with 303 rail pieces and 11 bridges. #234's… | [research/incident-2026-11-23-live-game-15805.md](incident-2026-11-23-live-game-15805.md):204 | none — needs an issue | OBSERVED |
 | failed | A line that is given up leaves its stations and track behind. Ten of company 0's 12 rail stations have no train. Two of those lines (Wruntwood, Wetston) have no train because of the finding above. The other three (Flardingham - Dretford, Ponninghall - Harnwell, Sunfingburg Farm… | [research/incident-2026-11-23-live-game-15805.md](incident-2026-11-23-live-game-15805.md):211 | none — needs an issue | OBSERVED |
@@ -203,8 +219,16 @@ pie showData title Open findings by kind
 | not-run | NOT RUN: decision-contract.example.json against the edited schema with a JSON Schema validator (none installed); | [I0095](../.ai/repo/project/issues/I0095.yaml):48 | none — needs an issue | OBSERVED |
 | not-run | NOT RUN: any live decision (shadow only); | [I0096](../.ai/repo/project/issues/I0096.yaml):49 | none — needs an issue | OBSERVED |
 | not-run | NOT RUN: a live pull (needs the owner's approval and p1's go-ahead); | [I0097](../.ai/repo/project/issues/I0097.yaml):46 | none — needs an issue | OBSERVED |
-| not-run | NOT RUN: the OpenTTD build of tools/gate.sh change, because the Mac is under the 35 GiB disk floor (31 GiB free after freeing 8.6 GB of my merged build outputs); | [I0117](../.ai/repo/project/issues/I0117.yaml):43 | [I0117](../.ai/repo/project/issues/I0117.yaml) | OBSERVED |
+| not-run | NOT RUN: tools/gate.sh change (Mac under its 35 GiB disk floor, then and now). | [I0110](../.ai/repo/project/issues/I0110.yaml):45 | none — needs an issue | OBSERVED |
+| not-run | NOT RUN: tools/gate.sh change (Mac under its 35 GiB disk floor). | [I0114](../.ai/repo/project/issues/I0114.yaml):45 | none — needs an issue | OBSERVED |
+| not-run | NOT RUN: the OpenTTD build of tools/gate.sh change, because the Mac is under the 35 GiB disk floor (31 GiB free after freeing 8.6 GB of my merged build outputs); | [I0117](../.ai/repo/project/issues/I0117.yaml):45 | none — needs an issue | OBSERVED |
+| not-run | NOT RUN: tools/gate.sh change (Mac under its 35 GiB disk floor; | [I0117](../.ai/repo/project/issues/I0117.yaml):52 | none — needs an issue | OBSERVED |
 | not-run | NOT RUN: tools/research/mcp-panel-check (needs a live panel built from master; | [I0220](../.ai/repo/project/issues/I0220.yaml):41 | [I0220](../.ai/repo/project/issues/I0220.yaml) | OBSERVED |
+| not-run | NOT RUN: tools/gate.sh change (Mac under its 35 GiB disk floor). | [I0226](../.ai/repo/project/issues/I0226.yaml):52 | none — needs an issue | OBSERVED |
+| not-run | NOT RUN locally: the cargo tests and tools/gate.sh change (Mac under its 35 GiB disk floor). | [I0227](../.ai/repo/project/issues/I0227.yaml):71 | none — needs an issue | OBSERVED |
+| not-run | NOT RUN on master: --bin algoglyph-contracts (CI has no AlgoGlyph checkout for its source-equality test; | [I0228](../.ai/repo/project/issues/I0228.yaml):47 | none — needs an issue | OBSERVED |
+| not-run | echo: Prismatic echoes observed_digest in GET /api/openttd/decision: NOT RUN | [research/agent-loop.md](agent-loop.md):79 | none — needs an issue | OBSERVED |
+| not-run | companies: the bridge's GET /companies carries a tick and a digest: NOT RUN | [research/agent-loop.md](agent-loop.md):81 | none — needs an issue | OBSERVED |
 | not-run | The money effect of the planned-mode trap and of the broken decide-to-act loop was not measured: no paired replay from held starts was run. This and the other items below were not verified, or could not be: | [research/analysis-2026-11-23-why-prismatic-loses.md](analysis-2026-11-23-why-prismatic-loses.md):490 | none — needs an issue | OBSERVED |
 | not-run | C2 correctness, per pair (H1): NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):267 | none — needs an issue | OBSERVED |
 | not-run | C3 performance: NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):268 | none — needs an issue | OBSERVED |
@@ -249,6 +273,9 @@ pie showData title Open findings by kind
 | staged | prompts/list / prompts/get: STAGED | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):26 | none — needs an issue | OBSERVED |
 | staged | logging notifications: STAGED | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):27 | none — needs an issue | OBSERVED |
 | staged | progress / cancellation: STAGED | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):28 | none — needs an issue | OBSERVED |
+| handoff | prismatic-platform: echo observed_digest, the digest of the companies it read from OPENTTD_BRIDGE_URL, in the answer of GET /api/openttd/decision (OpenttdController#decision); this fork's panel already checks an echo (tools/research/mcp-rhai/src/panel_decision.rs freshness). | [research/agent-loop.md](agent-loop.md):85 | none — needs an issue | OBSERVED |
+| handoff | openttd-prismatic-bridge: merge feature/operator-approval (09afefa: the bridge approves nothing itself, a waiting setting is answered pending, POST /decision/resume applies it once the operator approved it in the game) into main. | [research/agent-loop.md](agent-loop.md):91 | none — needs an issue | OBSERVED |
+| handoff | openttd-prismatic-bridge: carry the game tick and a digest of the companies' identities on GET /companies, as this fork's panel records them (tools/research/mcp-rhai/src/panel_decision.rs observe, identity_digest). | [research/agent-loop.md](agent-loop.md):96 | none — needs an issue | OBSERVED |
 | handoff | So Battlebrain keeps an adapter registry (ADAPTERS in tools/research/mcp-rhai/src/battlebrain_contract.rs). For one kernel id, an adapter states the capability it satisfies, how each requirement field maps to the kernel's input and output, with the conversion, whether the… | [research/battlebrain/algoglyph-contract-proposal.md](battlebrain/algoglyph-contract-proposal.md):24 | none — needs an issue | OBSERVED |
 | unreviewed | candidate: Resource reads of a running game span ticks; a planner capture is at one tick only through openttd.resources.read_many | [.ai/repo/knowledge/candidates/a-planner-capture-is-coherent-only-through-read-many.md](../.ai/repo/knowledge/candidates/a-planner-capture-is-coherent-only-through-read-many.md):8 | none — needs an issue | OBSERVED |
 | unreviewed | candidate: AlgoGlyph's track-planning kernel answers found, unreachable or budget, never ok; only found prices a line | [.ai/repo/knowledge/candidates/algoglyph-track-planning-answers-found-unreachable-or-budget.md](../.ai/repo/knowledge/candidates/algoglyph-track-planning-answers-found-unreachable-or-budget.md):8 | none — needs an issue | OBSERVED |

@@ -310,7 +310,10 @@ The first editions showed two failures. The battle now catches both by itself.
   `fitness.must_be_healthy`. The null
   driver is deterministic, so the verdict is stable. `tools/gate.sh change` runs it whenever
   `tools/research/prismatic-ai` or `tools/research/ai-battle` changes. Without an arena cache it
-  says NOT RUN.
+  says NOT RUN. It also fails on a failure regime of a healthy PrismaticAI
+  (`regime:no_expansion`, `regime:widening_gap`), judged against the non-PrismaticAI contestants
+  of the same match, and prints every regime of every contestant
+  ([failure regimes](../failure-regimes.md)).
 - **Self-monitoring while the battle runs.** The orchestrator attaches `anomalies` to every
   contestant of every match, live:
   - `fleet_drop:<peak>-><now>`: the fleet fell below `anomaly_rules.fleet_keep` of a peak of at
@@ -600,6 +603,73 @@ needs held start pairs (rule `project.a-tuning-claim-needs-held-start-pairs`), n
 - **Defaults.** A tuned variant is a candidate. It becomes a default only through held-start duel
   pairs (rule `project.a-tuning-claim-needs-held-start-pairs`).
 
+## Live outcomes
+
+The arena is not the owner's game: its maps, opponents and length differ. The GA's best arena
+variant (g347.3) was started live and came last of four PrismaticAI configurations in game 2927.
+So live games feed back into the tuning. There are three steps, and each reads only tracked files:
+
+1. **Record.** `battle.py live-export --game-seed <seed> --panel <url>` reads one game from the
+   panel's DuckDB store, read-only. It sends SELECTs through `/api/db/query`, or with `--db <copy>`
+   it reads a copy of the store through the duckdb CLI, never the live file. It writes
+   `research/results/live-<seed>-<run_ms>.json` (schema `ai-live-outcome/v1`). The record has:
+   - the game's runs (a `--load` under a new run seed is followed while company 0 keeps its name);
+   - the planner's revision;
+   - each company's AI, its start settings, and the setting changes requested for it, each with the
+     date the approval server enacted it (`decision.recorded`, succeeded) or null;
+   - each company's value, money, loan and fleet at every year end;
+   - each company's last mode mix (the watchdog's train, road, ship and aircraft counts);
+   - the outcome;
+   - a SHA-256 of the store rows it was made from.
+
+   The map's own settings (`fr*_`, `line*_`, `rail_a/b`, `air_a/b`) are left out because they name
+   industries, not a strategy. `check` refuses a record whose outcome is not derived from its series.
+2. **Judge.** Each PrismaticAI company is judged on one configuration. Its end is the last year end
+   before its first applied setting change. A game that mixed configurations proves none of them,
+   but a request that was never enacted (unanswered, expired or denied) changed nothing. In game
+   15805, replan's `rail_after=7` of 1952-05-08 was never enacted, so that game is judged at 1953-12
+   and not at 1951-12. The end is at most `tuning.live.horizon_years` game years in and at least
+   `min_years`. The PrismaticAI companies of one game are compared at the earliest of their ends.
+   When one game has several, a configuration worth less than `paired_margin` times the game's best
+   has lost. A configuration alone in its game has lost to the rival itself when it is worth less
+   than `loss_ratio` times the reference AI (`reference`, AAAHogEx).
+3. **Act.** A variant whose genes are within a lost configuration's radius is never the GA's elite
+   or a parent again, and the orchestrator logs a `TUNING ... vetoed` event for it. The radius is
+   `veto_genes` differing genes for a paired loss and `loss_veto_genes` for a loss to the reference.
+   The best configuration of a paired live comparison joins the next generation as child
+   `g<n>.live` if it did not lose and no variant has had its genes yet: live play suggests it, and
+   the arena measures it. `battle.py live-settings` derives the next live start,
+   `research/results/live-start.json`. It chooses only a configuration with live evidence: the one
+   a live game judged and found not lost with the best ratio to the reference, unless another
+   game's loss vetoes it. The newest battle record's PrismaticAI configurations are listed beside it
+   with their arena ratio and their veto, but none is chosen on arena evidence alone. When nothing
+   qualifies, `settings` is null and `live-settings` exits 10, so a start never falls back to
+   info.nut's defaults unseen. `render` (and so `surfaces sync`) keeps the file current, and `check`
+   refuses it when it is stale. A live start sets `PRISMATIC_BOT_SETTINGS` from
+   `jq -r .settings research/results/live-start.json`, and does not start when it is null.
+
+There is no score term. With a handful of live games, a kernel prior over the gene space would
+turn one map into a verdict on the neighbours of the configuration that played it (a codex review,
+2026-11-23, kept with `majordomus reasoning record`). The veto reaches only a lost configuration's
+radius, and the seed only adds matches. The battle brain (`tools/research/battle-brain`, an Axon
+ensemble) does not train on live rows yet. Its label is a value share relative to the default
+PrismaticAI on the same seed, and a live game has no such pair.
+
+## Config evolution
+
+`battle.py evolve` turns a detected gap into a measured settings proposal
+([config-evolution-loop.md](../config-evolution-loop.md)). It has three triggers: a lost live game
+(`live_entries` above), the gap watch's `gap.<company>`, or the strategy review's
+`review.<company>.month`. It attributes the gap to transport modes from the referee's fleet and
+profit per mode. It derives candidates from the GA's genes of those modes and of capital, directed
+by their recorded correlation with the ratio to AAAHogEx; the live veto and the live seed apply.
+It plays them in paired null-driver matches against battle.json `evolve.field` and confirms the
+best one on fresh seeds. The result is a record under `<cache>/evolve/` and, with `--propose`, the
+blackboard key `evolve.proposal.<company>`. It applies and approves nothing. It is bounded by
+`evolve.budget` and `max_minutes`, stopped by `STOP` or `PAUSED`, and runs one at a time under
+`<cache>/evolve/lock`. `ablate` rows now carry `standings`: every company's value, fleet and
+profit per mode.
+
 ## Double track
 
 AAAHogEx's rail scales by double track; PrismaticAI's single-track line holds two trains. The
@@ -816,6 +886,8 @@ The dashboard has these features:
 | `~/ttd-battle/results/<edition>/matches/<id>.json` | each match: arena, build, seed, lineup, quarterly series, standings |
 | `research/results/battle-*.json` / `.md` | the tracked records; the `.md` (tables and charts) is derived from the `.json` by `render` |
 | `research/results/ablation-*.json` / `.md` | the tracked ablations (`ablate --write`); the `.md` (table and charts) is derived from the `.json` by `render` |
+| `research/results/live-*.json` | the tracked live game records (`live-export`), one per game |
+| `research/results/live-start.json` | the next live start's settings and their evidence, derived by `render` (`live-settings`) |
 
 Removing `~/ttd-battle` on every machine removes everything the battle wrote outside this
 repository.

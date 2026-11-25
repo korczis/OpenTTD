@@ -399,6 +399,19 @@ so:
 
 `tools/research/test_surfaces_diagrams.py` pins what the detector flags and what it leaves alone.
 
+## Feature maturity
+
+`check` also judges the feature records of the layer's `features` section against the levels
+`[features]` in `surfaces.toml` declares. A record's `status` must be a declared level. Its
+`## Maturity` section must carry one `- **label**:` line for each label the level `requires`, and
+no label the level neither requires nor `allows`. Each line must cite at least one thing the
+repository resolves: a tracked path in a code span (`path`, `path/`, `path:line:Symbol`), an issue
+record (`I0123`) or `PR #123`. Each failure is a finding of kind `feature`. The meaning of the
+levels lives in the document `definition` names (here `.ai/repo/features/README.md`, "Maturity
+levels"). The `feature-maturity-refs` generator proves each cited symbol and anchored line with
+`tools/knowledge/refs`. Without a `[features]` table nothing is judged.
+`tools/surfaces/test_maturity.py` pins the rules and runs the check on a scratch repository.
+
 ## In CI
 
 `.github/workflows/surfaces.yml` runs `check`, `site`, `diagrams-check` and `wiki` on every push
@@ -423,6 +436,7 @@ The project rule `project.published-surfaces-are-derived` states the contract.
 | `surfaces` | Entry point. Creates the virtual environment, then runs `surfaces.py` |
 | `surfaces.py` | The generator: discovery, rendering, regions, check |
 | `findings.py` | The open findings: their sources, read through `[findings]` in `surfaces.toml` |
+| `maturity.py` | Feature maturity: each feature record's status and its `## Maturity` evidence, read through `[features]` in `surfaces.toml` |
 | `assets/input.css`, `assets/app.js` | The site's stylesheet source and client script (Mermaid theme, ECharts builders, maximize) |
 | `diagrams-check` | Every Mermaid diagram of a built site renders, in Chrome |
 | `pages-check` | Every declared page of a built site works, in Chrome, with its own scenario |

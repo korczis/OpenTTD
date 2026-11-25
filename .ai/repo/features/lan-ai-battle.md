@@ -6,7 +6,7 @@ title: LAN AI battle between company AIs on every reachable machine
 short_title: AI battle
 headline: Every SSH-reachable machine runs headless free-for-all matches between PrismaticAI and BaNaNaS AIs, the leaderboard is a derived record, and a browser dashboard shows the run live.
 summary: tools/research/ai-battle/battle.py discovers arenas on the local /24, exports PrismaticAI and a read-only referee Game Script from a commit, schedules null-driver matches onto every arena without end, replays some on another arena to measure cross-machine determinism, and writes research/results/battle-*.json from which the README leaderboard is derived.
-status: draft
+status: stable
 weight: 45
 areas: [agent-integration]
 audiences: [prismatic-integrator]
@@ -51,5 +51,24 @@ elitism, crossover and mutation, one record and one edition per generation, at `
 It does not hand the panel's planner lines to PrismaticAI. The bot plays alone, so a battle
 result is not a held-start duel and does not justify changing a default (rule
 `project.a-tuning-claim-needs-held-start-pairs`). It does not build OpenTTD on an arena; a machine
-without a binary is listed and skipped. It compares nothing across editions or match parameters.
-The dashboard is not a page of the panel shell.
+without a binary is listed and skipped. It does not compare one edition with another. `ablate`,
+by contrast, runs the working tree's PrismaticAI in several settings variants on one seed and
+records the standings under `research/results/ablation-*`. Why each company won or lost is not
+yet part of every match record (milestone `every-battle-match-explains-itself`, I0118-I0124). The dashboard
+is not a page of the panel shell.
+
+## Maturity
+
+`stable`, graded 2026-11-25 against [the levels](README.md#maturity-levels).
+
+- **shipped**: `tools/research/ai-battle/battle.py:1444:cmd_prepare`,
+  `tools/research/ai-battle/battle.py:3235:cmd_report`,
+  `tools/research/ai-battle/battle.py:3393:cmd_check` and
+  `tools/research/ai-battle/battle.py:3563:cmd_fitness`; the records
+  `research/results/battle-20261119T053541-155d18ea.json` and the others of `research/results/`.
+- **tested**: `tools/research/test_ai_battle.py`, among its cases `cmd_fitness` end to end against
+  a fake game binary (`tools/research/test_ai_battle.py:303:cmd_fitness`).
+- **gated**: `tools/gate.sh change` runs `battle.py check` (`tools/gate.sh:638:check`) and every
+  `test_*.py` under line tracing (`tools/gate.sh:681:changed`), and so does CI
+  (`.github/workflows/surfaces.yml:89:changed`).
+- **documented**: `research/ai-battle/README.md`.
