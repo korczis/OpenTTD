@@ -45,7 +45,8 @@ class PrismaticAI extends AIController {
 	routes = 0;
 	air_done = ""; /* the planner air pair ("a-b") already tried */
 	rail_done = ""; /* the planner rail pair ("a-b") already tried */
-	pair_due_since = -1; /* the date the planner rail pair first was due (PairDue; not saved) */
+	pair_due_since = -1; /* the date the planner rail pair first was due (PairDue; saved, restore.nut) */
+	pair_due_key = ""; /* the pair ("a-b") pair_due_since is for */
 	freight_tried = null; /* the planner freight lines ("from-to-cargo") already tried, a table */
 	own_built = 0; /* freight lines the bot planned itself and built (own_lines caps them) */
 	own_failed = 0; /* own freight lines in a row that were not built (OWN_FAIL_PAUSE) */
@@ -436,7 +437,7 @@ function PrismaticAI::Behaviour() {
  * (+10.6%, -2.5%, -21.2%, +2.1%; research/results ablation-20261124T1739* to T1820*). On seed
  * 31337 the pair, tried once its bound ran out (heartbeat 1951-04 to 1952-08), still cost 21%;
  * without the bound it was never built there, and two of four seeds never built it at all. The
- * wait is not saved: a load starts it again. */
+ * wait is saved (restore.nut): a load keeps it, a restore from the map starts it again. */
 const PAIR_WAIT_DAYS = 730;
 
 function PrismaticAI::PairDue(b) {
@@ -444,7 +445,12 @@ function PrismaticAI::PairDue(b) {
 	local tried = 0;
 	foreach (line in b.freight) if (this.freight_tried.rawin(line.from + "-" + line.to + "-" + line.cargo)) tried++;
 	if (tried < min(b.rail_after, b.freight.len() + FREIGHT_SLOTS_WAITING)) return false;
-	if (this.pair_due_since < 0) this.pair_due_since = AIDate.GetCurrentDate();
+	/* A pair the settings changed to waits from when it is due, not from when the last one was. */
+	local key = b.rail_a + "-" + b.rail_b;
+	if (this.pair_due_since < 0 || this.pair_due_key != key) {
+		this.pair_due_since = AIDate.GetCurrentDate();
+		this.pair_due_key = key;
+	}
 	return true;
 }
 
@@ -632,6 +638,10 @@ function PrismaticAI::Start() {
 		 * names a company after its first station's town, so this waits for that name. */
 		if (!disclosed && AIController.GetSetting("disclose_name") == 1) disclosed = PrismaticAI.DiscloseName();
 		this.steward_on = b.self_steward == 1;
+		/* The rounds inside this heartbeat's rail searches buy with these settings (capital.nut
+		 * AllocateCapitalInside). Set only by AllocateCapital at the heartbeat's end, it was null
+		 * through the first heartbeat after a start or a load, so no round bought anything there. */
+		CAPITAL.b = b;
 		local afloat = PrismaticAI.QuarterRunningCost();
 		if (PrismaticAI.StayAfloat(afloat)) this.rescued_at = AIDate.GetCurrentDate();
 		local frozen = this.BuildFrozen(afloat);

@@ -16,7 +16,8 @@ Commands:
   discover   find the SSH-reachable machines on the local /24 and write the local hosts file
   fetch      download the BaNaNaS contestants and the live-like rivals into the cache (throwaway
              loopback -D server); says which live rival's version the download lacks
-  prepare    assemble the arena bundle: base set, AIs, PrismaticAI and referee at a clean commit
+  prepare    assemble the arena bundle: base set, AIs, PrismaticAI and referee at a clean commit;
+             --referee-only swaps in just the repository's referee (run does it on start)
   probe      show which hosts are usable now (state, build, load, disk; paused and busy hosts)
   run        schedule matches forever and serve the dashboard (SIGTERM / Ctrl-C stops; STOP holds it)
   status     print the current edition's leaderboard
@@ -1420,6 +1421,9 @@ def edition_of(cfg: dict) -> str:
     return hashlib.sha256((arena_digest(cfg["cache"]) + rules).encode()).hexdigest()[:16]
 
 
+REFEREE_TAR = "BattleReferee.tar"
+
+
 def export_tree(path: str, rev: str, dest_tar: Path) -> None:
     """`git archive` a repository directory with its parents stripped: <basename>/... in the tar."""
     raw = subprocess.run(["git", "-C", str(REPO), "archive", "--format=tar", rev, path],
@@ -1458,20 +1462,73 @@ def cmd_prepare(cfg: dict, allow_dirty: bool) -> None:
         sys.exit(f"refusing: uncommitted changes under the exported paths:\n{dirty}\n"
                  "commit them, or pass --allow-dirty for a run whose records `check` refuses")
     rev = git("rev-parse", p.get("rev", "HEAD"))
+    # The referee follows the repository (battle.json referee.rev, default HEAD), not PrismaticAI's
+    # pin: a bot pinned to an old commit is still refereed by the current fields (loan=, REF S/T).
+    ref_rev = git("rev-parse", ref.get("rev", "HEAD"))
     export_tree(p["path"], rev, arena / "ai" / "PrismaticAI.tar")
     if dirty:  # --allow-dirty: the referee as it is on disk, and the edition marked dirty
         subprocess.run(["cp", "-R", str(REPO / ref["path"]), str(arena / "game")], check=True)
     else:
-        export_tree(ref["path"], rev, arena / "game" / "BattleReferee.tar")
+        export_tree(ref["path"], ref_rev, arena / "game" / REFEREE_TAR)
 
     (arena / "PROVENANCE.json").write_text(json.dumps({
         "prismatic_path": p["path"], "referee_path": ref["path"], "rev": rev,
-        "dirty": bool(dirty), "baseset": cfg["baseset"].name,
+        "referee_rev": ref_rev, "dirty": bool(dirty), "baseset": cfg["baseset"].name,
         "ais": sorted(str(t.relative_to(arena / "ai")) for t in (arena / "ai").rglob("*.tar")),
         "prepared_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }, indent=2) + "\n")
     log(f"arena prepared: rev {rev[:10]}{' (DIRTY)' if dirty else ''}, "
         f"edition {edition_of(cfg)}")
+
+
+def tar_files(path: Path) -> dict[str, bytes]:
+    """The regular files of a tar by name: two tars with the same files hold the same script."""
+    with tarfile.open(path) as t:
+        return {m.name: t.extractfile(m).read() for m in t.getmembers() if m.isfile()}
+
+
+def refresh_referee(cfg: dict) -> str | None:
+    """Bring a prepared arena's referee to the repository's (battle.json referee.rev, default HEAD)
+    and leave the rest of the bundle as it is: PrismaticAI, the AIs and `rev` keep their commit.
+    The new tar is written beside the old one and renamed over it, so a match that is running
+    keeps the file it opened and only matches that start afterwards read the new one. Returns what
+    changed, or None when the arena already had that referee (same files, so the edition stays).
+    Raises RuntimeError when there is no prepared arena or the referee has uncommitted changes."""
+    arena = cfg["cache"] / "arena"
+    prov_file, ref = arena / "PROVENANCE.json", cfg["referee"]
+    if not prov_file.is_file():
+        raise RuntimeError(f"no prepared arena at {arena} (battle.py prepare)")
+    prov = json.loads(prov_file.read_text())
+    if prov.get("dirty") or git("status", "--porcelain", "--", ref["path"]):
+        raise RuntimeError(f"the referee at {ref['path']} or the arena is uncommitted (dirty); "
+                           "commit it and run prepare")
+    rev = git("rev-parse", ref.get("rev", "HEAD"))
+    dest = arena / "game" / REFEREE_TAR
+    tmp = dest.with_name(REFEREE_TAR + ".new")   # no .tar suffix: OpenTTD never scans it
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    export_tree(ref["path"], rev, tmp)
+    if dest.is_file() and tar_files(dest) == tar_files(tmp):
+        tmp.unlink()
+        return None
+    os.replace(tmp, dest)
+    old = prov.get("referee_rev", prov.get("rev", ""))
+    prov.update(referee_rev=rev, referee_prepared_at=dt.datetime.now(dt.timezone.utc)
+                .isoformat(timespec="seconds"))
+    prov_file.write_text(json.dumps(prov, indent=2) + "\n")
+    return f"arena referee {old[:10] or '?'} -> {rev[:10]}, edition {edition_of(cfg)}"
+
+
+def follow_referee(cfg: dict) -> None:
+    """`run` starts on the repository's referee (battle.json referee.follow, default true): an
+    arena prepared before a referee change would otherwise keep logging the old fields for good."""
+    if not cfg["referee"].get("follow", True):
+        return
+    try:
+        changed = refresh_referee(cfg)
+    except (RuntimeError, subprocess.CalledProcessError) as exc:
+        log(f"referee not followed: {exc}")
+        return
+    log(changed or "arena referee is the repository's")
 
 
 def cmd_fetch(cfg: dict) -> None:
@@ -2881,7 +2938,8 @@ def build_record(cfg: dict, orch: Orchestrator) -> dict:
         "generated_at": now.isoformat(timespec="seconds"),
         "edition": orch.digest,
         "provenance": {k: orch.provenance[k] for k in
-                       ("prismatic_path", "referee_path", "rev", "dirty", "baseset", "ais")},
+                       ("prismatic_path", "referee_path", "rev", "referee_rev", "dirty", "baseset",
+                        "ais") if k in orch.provenance},
         "match_cfg": cfg["match"],
         "contestants": [{"key": c["key"], "ai": c["ai"], "settings": c.get("settings", "")}
                         for c in orch.contestants],
@@ -3018,6 +3076,14 @@ def render_charts(rec: dict) -> str:
     return "\n".join(out + [CHARTS_END])
 
 
+def code_at(p: dict) -> str:
+    """Which commit PrismaticAI and the referee came from (one commit unless the referee followed
+    the repository on its own: prepare --referee-only, run)."""
+    if p.get("referee_rev", p["rev"]) == p["rev"]:
+        return f"PrismaticAI and referee at `{p['rev']}`"
+    return f"PrismaticAI at `{p['rev']}`, referee at `{p['referee_rev']}`"
+
+
 def render_md(rec: dict, charts: bool = True) -> str:
     p, mc = rec["provenance"], rec["match_cfg"]
     done = [m for m in rec["matches"] if m["status"] == "done" and not m["replica_of"]]
@@ -3027,7 +3093,7 @@ def render_md(rec: dict, charts: bool = True) -> str:
         f"# {rec['id']}", "",
         f"Derived from `{rec['id']}.json` by `tools/research/ai-battle/battle.py report`; "
         "do not edit.", "",
-        f"- Edition `{rec['edition']}`: PrismaticAI and referee at `{p['rev']}`"
+        f"- Edition `{rec['edition']}`: {code_at(p)}"
         f"{' (DIRTY)' if p['dirty'] else ''}, base set `{p['baseset']}`",
         f"- {mc['years']}-year free-for-all from {mc['start_year']}, map "
         f"{2 ** mc['map_x']}x{2 ** mc['map_y']} {mc['landscape']}, breakdowns "
@@ -3141,8 +3207,9 @@ def validate_record(rec: dict, name: str) -> list[str]:
     p = rec["provenance"]
     if p.get("dirty") is not False:
         errs.append(f"{name}: edition built from uncommitted PrismaticAI/referee (prepare --allow-dirty)")
-    if not re.fullmatch(r"[0-9a-f]{40}", str(p.get("rev", ""))):
-        errs.append(f"{name}: provenance.rev is not a full commit hash")
+    for k in ("rev", "referee_rev") if "referee_rev" in p else ("rev",):
+        if not re.fullmatch(r"[0-9a-f]{40}", str(p.get(k, ""))):
+            errs.append(f"{name}: provenance.{k} is not a full commit hash")
     keys = {c["key"] for c in rec["contestants"]}
     for m in rec["matches"]:
         missing = [k for k in REQUIRED_MATCH if k not in m]
@@ -4377,6 +4444,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--allow-dirty", action="store_true",
                     help="prepare: export uncommitted PrismaticAI/referee (records are refused)")
+    ap.add_argument("--referee-only", action="store_true",
+                    help="prepare: replace only the arena's referee with the repository's "
+                         "(battle.json referee.rev, default HEAD); PrismaticAI and the AIs stay")
     ap.add_argument("--check", action="store_true", help="report: only check, write nothing")
     ap.add_argument("--seed", type=int, help="ablate: the map seed (default 930967890; with "
                                                    "--live-like the live game's, battle.json live_like.seed)")
@@ -4433,6 +4503,12 @@ def main(argv: list[str] | None = None) -> int:
         cmd_discover(cfg)
     elif a.command == "fetch":
         cmd_fetch(cfg)
+    elif a.command == "prepare" and a.referee_only:
+        try:
+            log(refresh_referee(cfg) or "arena referee is already the repository's")
+        except RuntimeError as exc:
+            log(f"refusing: {exc}")
+            return 10
     elif a.command == "prepare":
         cmd_prepare(cfg, a.allow_dirty)
     elif a.command == "probe":
@@ -4444,6 +4520,7 @@ def main(argv: list[str] | None = None) -> int:
             if h.res.get("unparsed"):
                 print(f"{'':10} probe figures not understood: {'; '.join(h.res['unparsed'])}")
     elif a.command == "run":
+        follow_referee(cfg)
         Orchestrator(cfg).run(a.port)
     elif a.command == "status":
         cmd_status(cfg)
