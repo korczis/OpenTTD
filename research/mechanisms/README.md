@@ -38,6 +38,8 @@ flowchart TB
   STRAT["Strategist and blackboard"] -->|"runs in the panel, reads the game"| PANEL
   STRAT -->|"the planner in process"| PLAN
   STRAT -->|"records, announce, peer plans"| MAJ
+  DIG["Strategy digest"] -->|"runs as a Rhai service"| RHAI
+  DIG -->|"digests, alerts"| MAJ
 ```
 
 ## The pages
@@ -52,6 +54,7 @@ flowchart TB
 | [Rhai scripting](rhai-scripting.md) | Scripts that drive a game, with functions derived from the live panel, run and hot-reloaded from the Scripts page |
 | [Planner and AlgoGlyph](planner-and-algoglyph.md) | Route candidates priced from the game's formulas, a portfolio within a budget, AlgoGlyph kernels for the hard parts |
 | [Strategist and blackboard](strategist-and-blackboard.md) | A panel thread that keeps the long-term plan current and posts it, with town warnings and tuning proposals, on a blackboard scripts and pages share |
+| [Strategy digest](strategy-digest.md) | A Rhai service that tells the owner every game week, month and quarter how the strategy is doing, what it changes and what waits for approval, and escalates when it fails |
 | [PrismaticAI](prismatic-ai.md) | The owner's company AI, steered by its settings, building rail lines a train can always run |
 | [Rail steward and monitor](rail-steward-and-monitor.md) | Rhai services that set each rail line's target and report what is wrong to the board |
 | [Duels](duels.md) | The planned bot against an unplanned one on the same map, from a held start, recorded as evidence |

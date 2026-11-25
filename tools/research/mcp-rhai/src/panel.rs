@@ -3140,6 +3140,9 @@ pub fn routes() -> Vec<Route> {
           None, crate::panel_strategy::h_strategy),
         r("POST", "/api/strategy/run", "strategyRun", "Run one strategist cycle now (also with PRISMATIC_STRATEGIST=0): with wait: true the answer is the cycle's record (parts, durations, errors, the plan.strategy event's sequence number), else 202 and the cycle runs in the background; 409 without a game", false,
           s(json!({"wait": {"type": "boolean"}}), &[]), crate::panel_strategy::h_strategy_run),
+        // The strategy digest (src/panel_digest.rs, tools/research/mcp-panel/rhai/digest.rhai).
+        r("GET", "/api/digest", "digest", "The strategy digest the digest service keeps for every running company of the AI: one company's latest digest (?company=, else the owner's, else the first) with its rank, share of the leader's value and its trend, profit per vehicle type against the leader's, money, what failed or was skipped, what the system proposed and why, the approvals waiting with their countdown and default verdict, and its alerts; its week, month and quarter histories; every company with a digest; every active alert; and the service's heartbeat (alive, or stale after stale_after_s). Read-only", false,
+          None, crate::panel_digest::h_digest),
         r("GET", "/api/blackboard", "blackboard", "The panel's blackboard, the shared working state of this instance: one key (?key=, 404 when absent) or every key under ?prefix=, each with its value, writer (by), revision, wall time (written_at), game date and its last values (history; ?history=0 leaves them out). strategy.* is the strategist's, mesh.* what it read from the Majordomus mesh. In the panel's memory: a restarted panel starts empty", false,
           None, crate::panel_strategy::h_blackboard),
         r("POST", "/api/blackboard", "blackboardWrite", "Write a blackboard key for scripts, pages and services to share ({key, value, by?}); the reserved strategy.* and mesh.* keys are refused (403). Published as a blackboard.write event", false,
@@ -4023,7 +4026,8 @@ mod tests {
         // And Deny beside Approve (POST /api/deny; ADR 0038), and the owner's sign-in and sign-out
         // (POST /api/owner/login, /api/owner/logout).
         // And the in-game approvers (POST /api/approvers), and the one-time sign-in link (POST /api/owner/once).
-        assert_eq!(rs.len(), 87);
+        // And the strategy digest (GET /api/digest; panel_digest.rs).
+        assert_eq!(rs.len(), 88);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -4038,7 +4042,7 @@ mod tests {
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
             "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
             "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh",
-            "/api/strategy", "/api/strategy/run", "/api/blackboard", "/api/battle/contestants", "/api/bench"].contains(&r.path)));
+            "/api/strategy", "/api/strategy/run", "/api/blackboard", "/api/battle/contestants", "/api/bench", "/api/digest"].contains(&r.path)));
     }
 
     /// A store with two runs of one instance: the older run's days must not feed the books.

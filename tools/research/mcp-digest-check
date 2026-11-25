@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+// RESEARCH-ONLY. The Digest page checked in a real browser (research/mechanisms/strategy-digest.md):
+// /digest draws the level and the alerts of the digest GET /api/digest answers, a tab per company
+// with a digest, the standing tiles with the rank the answer gives, both charts through ECharts
+// (canvas drawn), a row per waiting approval with its countdown and default verdict, and the
+// history and who changed governance; the share chart maximizes with its button, leaves with Escape, and the maximized view is
+// a link (?max=share-chart opens it maximized); the history's period is kept in the address; the
+// sidebar links the page; the console stays free of errors. Drives the installed Chrome through
+// playwright-core (a dev dependency of tools/research/mcp-panel: npm ci there).
+//
+// e2e-covers: panel /digest
+//
+// Usage: tools/research/mcp-digest-check <panel-url> [--start] [--shots <dir>]
+//   <panel-url>  required, never defaulted: e.g. http://127.0.0.1:<your disposable panel's port>
+//   --start      start the digest service (POST /api/services/start) and wait up to 180 s for its
+//                first digest; without it the panel must already have one
+//   --shots dir  save a screenshot of the page and of the maximized chart there
+// Exit 0 PASS, 1 FAIL, 2 bad usage.
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(path.join(here, 'mcp-panel', 'package.json'));
+const { chromium } = require('playwright-core');
+const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+const args = process.argv.slice(2);
+const base = (args.find((a) => /^https?:\/\//.test(a)) || '').replace(/\/$/, '');
+const start = args.includes('--start');
+const shots = args.includes('--shots') ? args[args.indexOf('--shots') + 1] : '';
+if (!base) { console.error('usage: mcp-digest-check <panel-url> [--start] [--shots <dir>]'); process.exit(2); }
+const checks = [];
+const check = (name, ok, detail = '') => { checks.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); };
+const json = async (p, body) => (await fetch(base + p, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+
+if (start) {
+  const s = await json('/api/services/start', { name: 'digest' });
+  console.log(`digest service: ${JSON.stringify(s).slice(0, 160)}`);
+}
+let answer = await json('/api/digest');
+for (let i = 0; i < 90 && !answer.digest; i++) {
+  await new Promise((r) => setTimeout(r, 2000));
+  answer = await json('/api/digest');
+}
+check('GET /api/digest answers a digest', !!answer.digest, answer.digest ? `${answer.digest.name} ${answer.digest.label} ${answer.digest.level}` : JSON.stringify(answer.heartbeat));
+if (!answer.digest) process.exit(1);
+
+const browser = await chromium.launch({ executablePath: CHROME, headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error' && !/404/.test(m.text())) errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(e.message));
+
+  const res = await page.goto(`${base}/digest?company=${answer.company}`);
+  check('/digest answers 200 with its title', res && res.status() === 200 && /Digest/.test(await page.title()), await page.title());
+  const drawn = await page.waitForFunction(() => document.querySelector('#head [data-company]') && document.querySelector('#share-chart canvas')
+    && document.querySelector('#types-chart canvas'), null, { timeout: 30000 }).then(() => true).catch(() => false);
+  check('the head card and both charts draw within 30 s', drawn);
+  const d = answer.digest;
+  const facts = await page.evaluate(() => {
+    const t = (sel) => document.querySelector(sel)?.innerText || '';
+    const canvas = document.querySelector('#share-chart canvas');
+    return {
+      head: t('#head'), tabs: document.querySelectorAll('#head [data-company]').length,
+      alerts: [...document.querySelectorAll('#head [data-alert]')].map((x) => x.dataset.alert),
+      rank: t('[data-tile="Rank"]'), approvals: document.querySelectorAll('#changes [data-approval]').length,
+      changes: t('#changes'), history: document.querySelectorAll('#history tbody tr').length,
+      canvas: canvas ? [canvas.width, canvas.height] : [0, 0],
+      nav: document.querySelectorAll('aside a[href="/digest"]').length,
+      governance: t('#failed'),
+    };
+  });
+  // The game runs on: a digest written between the read above and the page's own read is the other one.
+  const after = (await json(`/api/digest?company=${answer.company}`)).digest || d;
+  const named = (x) => facts.head.includes(x.name) && facts.head.includes(x.label) && facts.head.includes(x.level);
+  check('the head names the company, its label and level', named(d) || named(after), `${after.name} ${after.label} ${after.level}`);
+  check('a tab per company with a digest', facts.tabs === answer.companies.length, `${facts.tabs}/${answer.companies.length}`);
+  check('every alert of the digest is shown', JSON.stringify(facts.alerts) === JSON.stringify((d.alerts || []).map((a) => a.key)), facts.alerts.join(' '));
+  check('the rank tile is the rank the answer gives', !d.standing || facts.rank === `${d.standing.rank} of ${d.standing.of}`, facts.rank);
+  check('a row per waiting approval, with its countdown and verdict', facts.approvals === (d.approvals?.items || []).length
+    && (d.approvals.items || []).every((x) => facts.changes.includes(`#${x.id}`) && (x.verdict == null || facts.changes.includes(x.verdict))), `${facts.approvals}`);
+  check('who changed governance is listed, one line per change of the period', /Who changed governance/.test(facts.governance)
+    && (d.governance || []).every((g) => facts.governance.includes(`${g.setting ?? g.kind} ${g.from} -> ${g.to}`)), `${(d.governance || []).length} change(s)`);
+  check('the share chart draws a canvas of non-zero size', facts.canvas[0] > 0 && facts.canvas[1] > 0, facts.canvas.join('x'));
+  if (shots) { fs.mkdirSync(shots, { recursive: true }); await page.screenshot({ path: path.join(shots, 'digest.png'), fullPage: true }); }
+
+  await page.click('#share-chart-card [data-toolbar] button');
+  const maxed = await page.evaluate(() => [document.getElementById('share-chart-card').classList.contains('fixed'), new URL(location.href).searchParams.get('max')]);
+  check('Maximize puts the share chart over the viewport and in the address', maxed[0] && maxed[1] === 'share-chart', maxed.join(' '));
+  if (shots) await page.screenshot({ path: path.join(shots, 'digest-max.png') });
+  await page.keyboard.press('Escape');
+  const left = await page.evaluate(() => [document.getElementById('share-chart-card').classList.contains('fixed'), new URL(location.href).searchParams.get('max')]);
+  check('Escape restores it and clears the address', !left[0] && left[1] === null, left.join(' '));
+
+  await page.selectOption('#h-period', 'quarter');
+  check('the history period is kept in the address', new URL(page.url()).searchParams.get('period') === 'quarter', page.url());
+
+  await page.goto(`${base}/digest?company=${answer.company}&max=share-chart&period=week`);
+  const deep = await page.waitForFunction(() => document.getElementById('share-chart-card')?.classList.contains('fixed')
+    && document.getElementById('h-period')?.value === 'week', null, { timeout: 30000 }).then(() => true).catch(() => false);
+  check('a deep link opens the chart maximized and the history at its period', deep);
+  check('the sidebar links the page', facts.nav > 0);
+  check('the console has no errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+} finally {
+  await browser.close();
+}
+process.exit(checks.every(Boolean) ? 0 : 1);

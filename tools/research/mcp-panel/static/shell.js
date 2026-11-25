@@ -33,6 +33,7 @@
     { key: 'scripts', href: '/scripts', label: 'Scripts: Rhai editor and services', title: 'Scripts', icon: 'M8 9l-3 3 3 3m8-6 3 3-3 3M14 5l-4 14' },
     { key: 'towns', href: '/towns', label: 'Towns: authority model and advice', title: 'Towns', icon: 'M3 21h18M5 21V10l4-3 4 3v11m4 0V6l3-2 3 2v15' },
     { key: 'strategy', href: '/strategy', label: 'Strategy: strategist and blackboard', title: 'Strategy', icon: 'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9 2 2 4-4' },
+    { key: 'digest', href: '/digest', label: 'Digest: how the strategy is doing', title: 'Digest', icon: 'M9 17v-6m4 6V7m4 10v-3M5 21h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
     { key: 'realworld', href: '/realworld', label: 'Real world: places as maps', title: 'Real world', icon: 'M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12zm0-9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z' },
     { key: 'docs', href: '/docs', label: 'API (OpenAPI, Swagger UI)', title: 'API', icon: 'M10 20l4-16M6 16l-4-4 4-4m12 0 4 4-4 4' },
   ];
