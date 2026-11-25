@@ -793,9 +793,9 @@ from the code. The right-hand column says what was counted.
 | **24** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
 | **71** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **70** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **71** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
-| **24** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
+| **27** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **40** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **224** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **101** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
@@ -804,9 +804,9 @@ from the code. The right-hand column says what was counted.
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 70
+    "research tools and checks (tools/research/, shell and Python)" : 71
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 13
-    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 24
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 27
 ```
 <!-- surfaces:end facts -->
 
@@ -1365,6 +1365,7 @@ itself (generated):
 | [Battle post-mortem](research/battle-postmortem.md) | RESEARCH-ONLY. After each round of the LAN AI battle, the post-mortem answers where each contestant loses, and PrismaticAI above all. battle.py already writes a post-mortem per match into its machine store.... |
 | [Capability matrix: what every capability runs on today](research/capability-matrix.md) | RESEARCH-ONLY. One row per capability of this fork: who owns it, the code that does it (cited as path:line:Symbol), what it reads from a live game, what happens when that input or its engine is missing, where its... |
 | [Config evolution: from a lost game to a tested settings proposal](research/config-evolution-loop.md) | RESEARCH-ONLY. battle.py evolve closes the loop from "PrismaticAI falls behind" to a settings change that was tested before anyone was asked to approve it. A trigger (the gap watch, the strategy review, or a live... |
+| [Control loops audit: why nothing reacted while we fell behind](research/control-loops-audit.md) | RESEARCH-ONLY. A read-only audit of the owner's live game of 2026-11-22/23 (panel :8800, server :3979, MCP :8731), made on 2026-11-23. Company 0 (company 1 in the game) runs PrismaticAI; company 1 runs AAAHogEx, the... |
 | [Co-play: the owner and the bot in one company](research/coplay.md) | RESEARCH-ONLY, UNSTABLE. A server-side join policy behind OPTION_RESEARCH_INSTRUMENTATION. Default off. |
 | [Design note: the owner's companies settle their approvals by a countdown](research/design-approval-countdown-owner-companies.md) | RESEARCH-ONLY. Status: revision 2, not implemented. It went to review before any code, under the owner's order of 2026-11-23 to consult other models and peers first. Peer session openttd-36 reviewed it. A three-pass... |
 | [Duel evidence audit and a frozen duel set](research/duel-evidence-audit.md) | RESEARCH-ONLY. What the recorded duels (research/results/duel-.json) hold constant and what they let vary, and one set of duels run with every input frozen and named. Tool: tools/research/mcp-duel; scoreboard:... |
@@ -1389,6 +1390,7 @@ itself (generated):
 | [A real game: a real opponent, over the real internet](research/real-game.md) | RESEARCH-ONLY. The owner's goal (2026-11-18): play a real game, over the real internet, against a real opponent. This page covers: |
 | [Real-world scenarios: a place as an OpenTTD map](research/real-world-scenario.md) | A place name becomes a playable OpenTTD map: resolved to explicit candidates, acquired from lawful open data into a versioned snapshot, compiled offline into a heightmap, towns, industries and an economy whose every... |
 | [Replay 2026-11-25: live saves before and after the PrismaticAI fixes](research/replay-2026-11-25-after-fixes.md) | Verification note (openttd-36, agent "replay"). Copies of the owner's live saves were loaded headless with battle.py replay (#274), once with master's PrismaticAI and once with the pre-fix eb0d839ce0, for four game... |
+| [Review 2026-11-25: how the merged PrismaticAI fixes interact](research/review-2026-11-25-prismatic-fix-integration.md) | RESEARCH-ONLY. Six PrismaticAI pull requests were merged within about a day by different agents. Each was tested mostly on its own: #271 (handed fr slots counted only when whole and stable), |
 | [The Rhai IDE: edit, run, debug and inspect scripts in the panel](research/rhai-ide.md) | RESEARCH-ONLY. Milestone rhai-is-a-live-ide (issues I0088 to I0093). This page states what the panel's Scripts page is meant to become and what is built so far. The status table below is the only place a part is... |
 | [Rust performance benchmarks](research/rust-bench.md) | How fast the Rust host runs the hot paths of the panel and the planner, measured by criterion benchmarks in tools/research/mcp-rhai/benches/hot_paths.rs, recorded as rust-bench/v1 JSON under results/ by... |
 | [Research-mode tooling](research/tooling.md) | This document is the detailed reference for tools/research/research, the canonical entry point that turns the policy in AGENTS.md §"Research-mode access to internals" and this directory's README.md into runnable,... |

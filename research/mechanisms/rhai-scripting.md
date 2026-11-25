@@ -70,6 +70,8 @@ The scripts in the library today:
 | [`build_audit.rhai`](../../tools/research/mcp-panel/rhai/build_audit.rhai) | once a game month judges every company's construction (depots without an exit, duplicate depots and stations, drive-through against bay stops) and keeps it in the shared key `audit.<company>` and the store's view `build_audit`; one chat line for a new defect of the owner's company ([Hub](../mcp-hub.md#no-duplicate-buildings)) |
 | [`replan.rhai`](../../tools/research/mcp-panel/rhai/replan.rhai) | re-plans the running bot every game month: trend, competition, the planner's portfolio, a modelled switch, approval-gated changes ([Planner and AlgoGlyph](planner-and-algoglyph.md#replanning-while-the-game-runs)) |
 | [`watchdog.rhai`](../../tools/research/mcp-panel/rhai/watchdog.rhai) | finds a company that has built or bought nothing for longer than a threshold tuned from the game's own data, and says what holds it ([The progress watchdog](#the-progress-watchdog)) |
+| [`service_eval.rhai`](../../tools/research/mcp-panel/rhai/service_eval.rhai), [`derive_lib.rhai`](../../tools/research/mcp-panel/rhai/derive_lib.rhai) | judges every service once a game month by what followed its actions (`GET /api/services/scores`), keeps `eval.<service>.<action>` and `eval.poor`, says a persistently poor one in its log, never disables it; thresholds from the store with a declared fallback ([Service self-evaluation](service-self-evaluation.md)) |
+| [`gap_watch.rhai`](../../tools/research/mcp-panel/rhai/gap_watch.rhai) | once a game month judges every PrismaticAI company against the leader (share of its value, idle cash, unused credit, plans that do not land, collateral damage) from replan's and watchdog's keys, the store and the bus; tells the owner, and, only with the owner's switch, files one owner-only `openttd.ai.set_settings` ([The leader-gap watch](#the-leader-gap-watch)) |
 | [`capital_watch.rhai`](../../tools/research/mcp-panel/rhai/capital_watch.rhai) | once a game month measures every company's reinvestment, idle capital and fleet growth against its leader, and keeps it in the shared key `capital.<company>`; read-only ([The capital watch](#the-capital-watch)) |
 
 Usage and the built-in list in full: [`../mcp-control.md`](../mcp-control.md) ("Rhai"), and the
@@ -86,9 +88,12 @@ waited. [`watchdog.rhai`](../../tools/research/mcp-panel/rhai/watchdog.rhai) run
   (`openttd://companies` `fleet`, `openttd://stations` `owner`). The game days since the last change
   (`game_tick` / 74) are its quiet time.
 - **The threshold is derived from the game's own data.** Every quiet time that ends, for any
-  company, is kept on the blackboard (`watchdog.tuning.gaps`, the last 64). The threshold starts at
-  7 game days (the owner: "zacneme treba tyden"). Once there are 5 quiet times, it is 1.5 times their
-  90th percentile, kept within 7 to 365 days. On the live game it went from 7 to 21 days after ten
+  company, is kept on the blackboard (`watchdog.tuning.gaps`, the last 64). The threshold starts
+  from the store: 1.5 times the 90th percentile of the quiet spells of earlier runs once there are 20
+  (`derive_lib.rhai`, kept as `watchdog.tuning.cold_start` with its source), else at the declared
+  fallback of 7 game days (the owner: "zacneme treba tyden"). Once there are 5 quiet times of its
+  own, it is 1.5 times their 90th percentile, kept within 7 to 365 days
+  ([Service self-evaluation](service-self-evaluation.md#derived-thresholds)). On the live game it went from 7 to 21 days after ten
   quiet times.
 - **A stalled company is told why**, from what the panel reports:
   - the approvals pending for it (`status().pending`),
@@ -103,6 +108,53 @@ waited. [`watchdog.rhai`](../../tools/research/mcp-panel/rhai/watchdog.rhai) run
 - **It changes nothing in the game.** A waiting approval is settled by the server's deadline
   ([Approval gate](approval-gate.md)), never here. The file's first line, `// stall: 180`, tells the
   panel's supervisor how long the service may stay quiet before it is restarted.
+
+### The leader-gap watch
+
+replan and watchdog measure, and nothing reacted to what they found: in the owner's game of
+2026-11-22, our share of the leader's value fell, the bot repaid its whole loan while the leader kept
+290k borrowed, and our aircraft were capped at two routes while the leader earned most of its lead
+with aircraft ([control-loops audit](../control-loops-audit.md)).
+[`gap_watch.rhai`](../../tools/research/mcp-panel/rhai/gap_watch.rhai) closes that loop as a panel
+service (`POST /api/services/start {"name":"gap_watch"}`). It re-runs no analysis another service
+does:
+
+- **It reads** `replan.<company>` (our value, the competitors' values, the leader per transport
+  type), `watchdog.<company>` (the stall), the store's named query `company_samples` (each month's
+  value, money, loan and vehicles of us and of the leader), and the panel bus after a cursor
+  (`game.month` events mark the months, since `/api/events` envelopes carry no game date; the
+  bot's own lines about refused, failed or removed builds, levelling paid for nothing, loan repaid,
+  producers held by others; the approvals filed for the company and the decisions executed). It
+  reads no game resource on its own cadence; `openttd://approvals` only when it files a proposal.
+- **Once a game month** it sets flags, each with its reason: `losing_ground`, `idle_capital` (cash
+  above the reserve), `unused_credit` (loan below the highest seen while the leader borrows),
+  `stalled`, `plans_not_landing`, `collateral`, `replan_silent` and `unknown` (missing inputs are
+  never "on track"). The share-drop threshold is the shared key `derived.gap_watch.share_drop`
+  when it holds a value in 0..1, else `SHARE_DROP` (0.05) as the cold start;
+  `gap.<company>.thresholds` names the one used. It keeps how many months in a row each flag
+  held, and after a restart it
+  skips the months the replayed bus shows that it judged already.
+- **It judges every company of the panel's AI** (`status().ai`) and writes `gap.<company>` for
+  each. It tells and proposes only for the owner's company (`ttd::owner_company()`), because the
+  owner decides only for the owner's own or co-play company (R9). In an arena the other PrismaticAI
+  companies belong to rivals: they get no chat, news or proposal, and `gap.<company>.held` says
+  why (review by openttd-51 of #261).
+- **It acts through the existing channels only:** the blackboard key `gap.<company>` (on the bus
+  and in the store); one console line and one news item when a flag has held two months or the
+  level rises; and, only when the panel runs with `GAP_WATCH_PROPOSE=1` (the owner's switch), one
+  `openttd.ai.set_settings` approval carrying every lever. That tool is owner-only: its approval is
+  typed at the game's console. The deadline policy that settles it is read from
+  `openttd://approvals`, never assumed.
+- **A lever** restores a setting the bot declares toward its declared default (`invest_borrow` to
+  1), within its declared range, after its flag held three months, and only where the competition
+  shows the leader ahead in that transport type and ours earning. `air_grow_money` moves only from
+  0, and air levers wait while levelling was paid for nothing. It never names a freight-line slot
+  (rule `project.decision-authority-boundaries`, B2).
+- **Bounded and stoppable:** one proposal pending at most, none while another `set_settings` for
+  the company or a `set_setting` on a lever waits, three months between proposals, none again after
+  the same one went unapplied twice. The shared keys `gap_watch.pause` and `gap_watch.stop` pause
+  or end it for anyone; `gap_watch.owner` says who runs it; `// stall: 300` and one printed line a
+  look keep the supervisor from restarting it.
 
 ### The capital watch
 
@@ -177,7 +229,9 @@ with its leader on the same terms.
   `advice_lib.rhai` and `director_lib.rhai` on fixtures (`rail_*`, `advice_*`, the director), run
   `build_audit.rhai` against fakes of the panel's reads, shared memory and chat (`build_audit_*`),
   run `watchdog.rhai` against a scripted panel (a stall found, said once with its reasons, the
-  threshold tuned) and its pure functions (`watchdog_*`); `capital_watch_tests.rs` runs
+  threshold tuned) and its pure functions (`watchdog_*`), run `gap_watch.rhai` against a scripted
+  panel month by month (`gap_watch_tests.rs`: flags, one bounded proposal and its outcome, the
+  switch, pause, stop, unknown inputs, a replayed bus, no approval path); `capital_watch_tests.rs` runs
   `capital_watch.rhai` against a scripted panel with no tool, setting or chat function: game
   12609's reinvestment collapse, flagged from its second quarter under the floor and said once a
   quarter; game 10487's hoard; derived and out-of-range thresholds; a restart; the store off; and

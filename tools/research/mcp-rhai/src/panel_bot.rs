@@ -523,9 +523,21 @@ fn end(v: &Value) -> Value {
 /// A planner candidate as the events carry it.
 fn line_of(c: &Value) -> Value {
     let empty = json!({});
-    json!({"kind": c.get("kind"), "mode": c.get("mode"), "cargo": c.get("cargo"), "cargo_id": c.get("cargo_id"),
+    let mut l = json!({"kind": c.get("kind"), "mode": c.get("mode"), "cargo": c.get("cargo"), "cargo_id": c.get("cargo_id"),
            "from": end(get_or(c, "producer", get_or(c, "a", &empty))), "to": end(get_or(c, "acceptor", get_or(c, "b", &empty))),
-           "distance": c.get("distance"), "score": c.get("score")})
+           "distance": c.get("distance"), "score": c.get("score")});
+    // The planner's monthly profit of the option it chose (its mode's, and its cargo's when the option
+    // names one), and the vehicles that option buys, when it gave them: replan.rhai pays a passenger
+    // pair back from them, as no freight price names that line.
+    let chosen = c["options"].as_array().into_iter().flatten()
+        .find(|o| o["mode"] == c["mode"] && (o["cargo_id"].is_null() || o["cargo_id"] == c["cargo_id"]));
+    if let Some(m) = chosen.and_then(|o| o["monthly_profit"].as_f64()) {
+        l["monthly_profit"] = json!(m);
+    }
+    if let Some(n) = chosen.and_then(|o| o["vehicles"]["count"].as_f64()) {
+        l["vehicles"] = json!(n);
+    }
+    l
 }
 
 /// Settings as a JSON object and as the `start_ai` argument they make.
@@ -1415,6 +1427,21 @@ mod tests {
                "params": {"budget": 300000, "cost_weight": 1}, "reads": [{"uri": "openttd://towns", "ok": true}]})
     }
 
+    /// A chosen line keeps the monthly profit and the vehicles of the option it chose: the one of its
+    /// mode and, where the option names one, of its cargo; nothing where the planner gave none.
+    #[test]
+    fn a_chosen_line_keeps_its_options_profit_and_vehicles() {
+        let c = json!({"mode": "freight_rail", "cargo_id": 2, "options": [
+            {"mode": "bus", "monthly_profit": 9},
+            {"mode": "freight_rail", "cargo_id": 1, "monthly_profit": 100, "vehicles": {"count": 9.0}},
+            {"mode": "freight_rail", "cargo_id": 2, "monthly_profit": 250.0, "vehicles": {"count": 3.0}}]});
+        let l = line_of(&c);
+        assert_eq!((l["monthly_profit"].clone(), l["vehicles"].clone()), (json!(250.0), json!(3.0)));
+        let bus = line_of(&json!({"mode": "bus", "options": [{"mode": "bus", "monthly_profit": -4.0}]}));
+        assert_eq!((bus["monthly_profit"].clone(), bus.get("vehicles")), (json!(-4.0), None), "a loss is kept; replan reads it as unpriced");
+        assert!(line_of(&json!({"mode": "air", "options": [{"mode": "rail", "monthly_profit": 5}]})).get("monthly_profit").is_none());
+    }
+
     #[test]
     fn the_plan_events_of_settings_from_plan_carry_the_choice_as_data() {
         let out = answer();
@@ -1425,7 +1452,7 @@ mod tests {
                 {"kind": "passengers", "mode": "rail", "cargo": null, "cargo_id": null, "from": {"id": 1, "name": "T1"},
                  "to": {"id": 2, "name": "B"}, "distance": null, "score": 9.0},
                 {"kind": "freight", "mode": "freight_rail", "cargo": "Coal", "cargo_id": 1, "from": {"id": "industry:7", "name": "Mine"},
-                 "to": {"id": "industry:99", "name": "Plant"}, "distance": 40, "score": 8.0}]}));
+                 "to": {"id": "industry:99", "name": "Plant"}, "distance": 40, "score": 8.0, "monthly_profit": 500.0}]}));
         let request = json!({"budget": 300000, "params": {"budget": 300000}, "limit": 40, "track": 16});
         let off = calibration(&Scope::Off, &json!({"seed": 3, "map": null}), |_| panic!("calibration off reads no store"));
         let e = portfolio_event(&out, &p, request.clone(), json!({"exe": "mcp-plan"}), &off);

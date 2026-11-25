@@ -67,7 +67,9 @@ flowchart LR
   | `plan_decisions` | every `plan.*` decision with its choice and version |
   | `kind_month` | how many events of each kind each game month raised |
   | `build_audit` | each company's construction audit of each game month: depots by type and whether a vehicle can drive out, duplicate depots and stations, drive-through and bay stops, defects and new defects (from `build_audit.rhai`'s `audit.<company>` writes) |
-  | `schema_doc` | the store describing itself: every table, view and column with its comment |
+  | `service_actions` | every action a panel service took (a replan proposal or hold, a watchdog stall alert, a build_audit defect flag, a rail_monitor advice flag, a gap_watch alert), derived from its shared-memory writes, with the company's state the month before and the expected effect ([Service self-evaluation](service-self-evaluation.md)) |
+| `service_eval` | every evaluation `service_eval.rhai` wrote (`eval.<service>.<action>`): verdict, counts, posterior, poor streak |
+| `schema_doc` | the store describing itself: every table, view and column with its comment |
 
 - **The store documents itself.** Every table file comments its table and each column next to
   its definition, and every view file comments its view and each column the view has. DuckDB 1.5

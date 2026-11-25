@@ -455,6 +455,157 @@ experiment:
   closer, but it runs one match a seed and only the unplanned path.
 - **Not covered:** depth (trains per line), which waits for a later 10-year run.
 
+## 8. After the fixes: held-start pairs
+
+Six PrismaticAI fixes merged after this analysis, without the held-start pairs that rule
+`project.a-tuning-claim-needs-held-start-pairs` asks for: #271 (`fr_` slot guard), #272 (growth
+funnel logging), #277 (claims-clean), #279 (floors under a plan, pair waits), #280 (steward
+cadence, JudgeAge) and #276 (capital allocator, merged under an owner-approved fitness exception).
+This section records those pairs (openttd-36, 2026-11-25).
+
+**Setup.**
+
+- **Arena.** `battle.py ablate --live-like` (#274): 1950, 256x256, temperate, reduced breakdowns,
+  `script_max_opcode_till_suspend` 250000, PrismaticAI in slot 0 against the seven live rivals at
+  their live versions. Both arms ran, `unplanned` and `planned` (battle.json `live_like.arms`),
+  for 10 game years to 1960-01, on seeds 15805, 2927, 4242 and 31337.
+- **Trees.**
+  - The baseline is `eb0d839ce0`, the commit live game 21647 started from.
+  - The fixed tree is master `8f35e35995`. Its PrismaticAI tree is the same object as at
+    `42e3d37ae7` (`a416fe3e04`), so it is the bot of `42e3d37ae7`.
+  - `git diff eb0d839ce0 42e3d37ae7 -- src/` is empty. Both trees ran one binary, built at
+    `53cd7b467d`, whose `src/` is the same as both.
+- **Harness.** Both trees ran master's `battle.py`, `battle.json` and BattleReferee. They also
+  shared one private arena: the seven rival tars and libraries of `~/Documents/OpenTTD/ai`, and
+  OpenGFX 8.0. Only PrismaticAI differs between the two arms of a pair.
+- **Held start.** A headless `ablate` is deterministic for a given tree, binary and seed: the
+  match starts at tick 0, with no wall clock and no approvals. That makes it the headless form of
+  the held start. The pairs differ only in the bot.
+- **Load governor.** The 1-minute load was mostly above 24, so the runner SIGSTOPped the games
+  above it and resumed them below 22. The null driver counts ticks, so a pause does not change
+  the result.
+- **Timeout.** `ablate`'s 1800 s `communicate` timeout was lifted for these runs only, because a
+  paused match outlives it. The change was not committed.
+- **The planned arm off 15805.** The planned arm's `fr_*` ids name industries of seed 15805's
+  map, which this match does not regenerate (see
+  [the live-like arena](ai-battle/README.md#the-live-like-arena-and-the-15805-replay)). On every
+  seed it is therefore a fixed slot set naming arbitrary industries, the same in both trees.
+
+**Records.** Each `ablate` writes one record with both arms:
+
+| Seed | Baseline `eb0d839ce0` | Master |
+|---|---|---|
+| 15805 | [ablation-20261125T092209-seed15805](results/ablation-20261125T092209-seed15805.md) | [ablation-20261125T025837-seed15805](results/ablation-20261125T025837-seed15805.md) |
+| 2927 | [ablation-20261125T102535-seed2927](results/ablation-20261125T102535-seed2927.md) | [ablation-20261125T095621-seed2927](results/ablation-20261125T095621-seed2927.md) |
+| 4242 | [ablation-20261125T121043-seed4242](results/ablation-20261125T121043-seed4242.md) | [ablation-20261125T111726-seed4242](results/ablation-20261125T111726-seed4242.md) |
+| 31337 | [ablation-20261125T124527-seed31337](results/ablation-20261125T124527-seed31337.md) | [ablation-20261125T123153-seed31337](results/ablation-20261125T123153-seed31337.md) |
+
+**Where the numbers come from.** All of them come from the runs' `-d script=4` logs (scratch,
+not kept):
+
+- Value and rail trains are the last `REF Q` sample (1960-01). The rank is among the 8
+  companies. The ratio is PrismaticAI's value over AAAHogEx's (company 1).
+- Open lines are the `state=open` lines of the bot's last `rail line N: label=...` dump
+  (`P/lines.nut`). On master this equals FUNNEL `lines` in all 8 runs.
+- Trains per line is rail trains divided by open lines.
+- "Most lost" is `battle.py funnel_most_lost` of master's last FUNNEL rail row, for 1959. The
+  baseline has no FUNNEL, because it predates #272.
+
+| Seed | Arm | Tree | Value | Rank | Rail trains | Open lines | Trains/line | AAAHogEx | Ratio | FUNNEL most lost (1959) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 15805 | unplanned | base | 1,695,263 | 2/8 | 10 | 7 | 1.43 | 18,119,788 | 0.094 | (no FUNNEL) |
+| 15805 | unplanned | master | 1,672,695 | 2/8 | 11 | 5 | 2.20 | 16,098,440 | 0.104 | discovery served 28/42 |
+| 15805 | planned | base | 1,093,652 | 2/8 | 8 | 4 | 2.00 | 13,127,277 | 0.083 | (no FUNNEL) |
+| 15805 | planned | master | 1,501,066 | 2/8 | 18 | 9 | 2.00 | 18,044,458 | 0.083 | discovery served 25/43, build stations 3/3, run paying 1/9 |
+| 2927 | unplanned | base | 4,905,754 | 2/8 | 23 | 11 | 2.09 | 16,299,596 | 0.301 | (no FUNNEL) |
+| 2927 | unplanned | master | 5,348,189 | 2/8 | 47 | 14 | 3.36 | 17,926,041 | 0.298 | discovery served 35/56, build stations 2/2, run paying 1/14 |
+| 2927 | planned | base | 2,376,819 | 2/8 | 13 | 7 | 1.86 | 23,686,876 | 0.100 | (no FUNNEL) |
+| 2927 | planned | master | 2,452,521 | 2/8 | 29 | 14 | 2.07 | 19,525,450 | 0.126 | discovery served 40/55, build stations 5/5, run paying 3/14 |
+| 4242 | unplanned | base | 3,143,918 | 2/8 | 19 | 9 | 2.11 | 20,218,593 | 0.155 | (no FUNNEL) |
+| 4242 | unplanned | master | 1,196,978 | 4/8 | 16 | 6 | 2.67 | 23,079,790 | 0.052 | discovery served 45/56, build lay 1/1, run paying 3/6 |
+| 4242 | planned | base | 2,310,998 | 2/8 | 10 | 6 | 1.67 | 21,128,423 | 0.109 | (no FUNNEL) |
+| 4242 | planned | master | 1,767,480 | 3/8 | 15 | 7 | 2.14 | 26,308,550 | 0.067 | discovery served 39/56, build path 4/4, run paying 3/7 |
+| 31337 | unplanned | base | 4,291,757 | 2/8 | 22 | 11 | 2.00 | 11,589,201 | 0.370 | (no FUNNEL) |
+| 31337 | unplanned | master | 4,223,784 | 2/8 | 29 | 13 | 2.23 | 14,941,668 | 0.283 | discovery served 30/51, build path 2/2, run paying 3/13 |
+| 31337 | planned | base | 2,095,865 | 2/8 | 11 | 6 | 1.83 | 15,874,165 | 0.132 | (no FUNNEL) |
+| 31337 | planned | master | 2,286,892 | 2/8 | 22 | 12 | 1.83 | 17,360,841 | 0.132 | discovery served 42/51, run paying 2/12 |
+
+The rank says little. AAAHogEx is first in all 16 runs. The other six rivals stay small: none
+ends above 2.7M, and CivilAI ends at a value of 1 in 6 of the 16. PrismaticAI is second in 14 of
+the 16 runs.
+
+**The paired change, master against the baseline.** The rival spread is AAAHogEx's own change
+between the two runs of a pair. AAAHogEx is the same AI in both, so the spread is how far a
+change in PrismaticAI alone moves the rest of the game.
+
+| Seed | Arm | Value | Ratio to AAAHogEx | AAAHogEx (rival spread) | Rail trains | Trains/line |
+|---|---|---|---|---|---|---|
+| 15805 | unplanned | −1.3% | +11.1% | −11.2% | 10 → 11 | 1.43 → 2.20 |
+| 2927 | unplanned | +9.0% | −0.9% | +10.0% | 23 → 47 | 2.09 → 3.36 |
+| 4242 | unplanned | −61.9% | −66.6% | +14.2% | 19 → 16 | 2.11 → 2.67 |
+| 31337 | unplanned | −1.6% | −23.7% | +28.9% | 22 → 29 | 2.00 → 2.23 |
+| 15805 | planned | +37.3% | −0.1% | +37.5% | 8 → 18 | 2.00 → 2.00 |
+| 2927 | planned | +3.2% | +25.2% | −17.6% | 13 → 29 | 1.86 → 2.07 |
+| 4242 | planned | −23.5% | −38.6% | +24.5% | 10 → 15 | 1.67 → 2.14 |
+| 31337 | planned | +9.1% | −0.2% | +9.4% | 11 → 22 | 1.83 → 1.83 |
+
+Geometric means over the four seeds (D):
+
+- **Unplanned.**
+  - Value −20.3%. Without 4242 it is +1.9%.
+  - Ratio to AAAHogEx −27.2%.
+  - Master's value is higher on 1 of 4 seeds.
+  - Rail trains +25.7%; AAAHogEx's trains moved −18.6% to +55.0% across the four pairs.
+  - Open lines −8.0%.
+- **Planned.**
+  - Value +4.3%.
+  - Ratio to AAAHogEx −6.4%.
+  - Master's value is higher on 3 of 4 seeds.
+  - Rail trains +97.0%, higher on 4 of 4 seeds. AAAHogEx's trains moved −23.4% to +4.8% in the
+    same pairs.
+  - Open lines +80.0%.
+
+**Against the noise.** Prior notes put two behaviour-identical trees ±13 to 20% apart on one
+seed. Here the rival spread runs from 9% to 38%.
+
+- **Value.** Seven of the eight value changes are inside the spread of their own pair; seed 4242
+  unplanned, at −61.9%, is the exception. The value claim is therefore inconclusive (rule
+  `project.never-report-unrun-validation-as-pass`).
+- **The planned arm's rail fleet.** It rose by 50% to 125% on every seed, more than the rival
+  moved in any planned pair (−23% to +5%). This fits #279 (floors under a plan), which keeps
+  building own lines while a plan is set.
+- **The unplanned arm's rail fleet.** Mixed: trains fell on 4242 and rose on the other three.
+- **The gap to AAAHogEx.** It does not close in either arm. The best master ratio is 0.298
+  (2927, unplanned), against 0.370 for the baseline on 31337.
+- **Seed 4242, unplanned.** It is worse beyond the spread. Master is behind from 1951:
+  - 1951-10: 31k value and 2 trains, against 138k and 4 for the baseline.
+  - Master kept the 300k loan to 1955 and borrowed back to 300k in 1958. The baseline was
+    debt-free from 1954.
+  - At the end, 1959-10, master had 1.21M and 56 vehicles, the baseline 3.11M and 104.
+  - Not diagnosed. The candidates are the early line choice and the capital allocator's
+    borrowing (#276, `invest_borrow=1` in the arm).
+- **FUNNEL (master, 1959).**
+  - In all 8 runs, the stage that loses the largest share is discovery `served`: 25 to 45 of 42
+    to 56 producers.
+  - Building loses next. Every station try failed in 2927 (2/2 and 5/5) and in the 15805 planned
+    arm (3/3), and every path try failed in 4242 planned (4/4) and 31337 unplanned (2/2).
+  - Discovery is still the stage that stops growth after the fixes (RC-a).
+
+**Verdict: inconclusive.** The fixes double the planned arm's rail fleet and lines, beyond the
+noise. Its value moved +4.3%, inside it. The unplanned arm is not better, and on one seed of four
+it is worse beyond the noise. No default should change on these pairs, and no claim that the
+fixes close the gap to AAAHogEx holds on them.
+
+**Not run.**
+
+- More than four seeds.
+- A second run of the same tree on the same seed. It would be byte-identical, as `ablate` is
+  deterministic, so the noise was read from the rival spread instead.
+- Live or panel duels with `PRISMATIC_START_PAUSED=2`.
+- A planned arm whose plan was made on each map.
+- A per-fix ablation: the six fixes were measured together.
+- Horizons other than 10 years.
+
 ## Corrected claims
 
 Pass 2 refuted or corrected the claims in the left column, from pass 1 and from peers. Do not reuse

@@ -11,9 +11,15 @@
 //      sold or removed something); the game days since the last change are its quiet time.
 //   2. The threshold, derived and self-tuned: the quiet times between changes this watchdog has
 //      seen, over every company, kept on the blackboard (watchdog.tuning). Until it has seen
-//      MIN_GAPS of them the threshold is START_DAYS (owner, 2026-11-22: "zacneme treba tyden");
-//      then it is FACTOR times their 90th percentile, kept within MIN_DAYS..MAX_DAYS. A company
-//      quiet longer than the threshold is stalled.
+//      MIN_GAPS of them the threshold is the cold start: FACTOR times the 90th percentile of the
+//      quiet spells the panel's store recorded in earlier runs (derive_lib.rhai, named query
+//      baselines quiet_days: days between two changes of a company's vehicle count, a proxy of the
+//      signature here), once the store holds STORE_MIN_SPELLS of them; else START_DAYS, the declared
+//      fallback (owner, 2026-11-22: "zacneme treba tyden"). After MIN_GAPS it is FACTOR times the
+//      90th percentile of its own gaps. Always within MIN_DAYS..MAX_DAYS. watchdog.tuning keeps
+//      threshold_source (start, store or this run) and the cold start with its provenance
+//      (cold_start). The store's runs are comparable ones only: no loaded continuation, a lineup of
+//      about this game's size (baselines.sql). A company quiet longer than the threshold is stalled.
 //   3. A stalled company gets a diagnosis from what holds it, each read, none guessed: the
 //      approvals pending for it (status().pending), replan's hold (replan.<company>.held on the
 //      blackboard), its money against the bot's line_budget setting, and every panel service the
@@ -29,6 +35,7 @@
 // declares to the panel's supervisor how long it may stay quiet before it is restarted.
 // WATCHDOG_ROUNDS stops it after that many rounds (0 or unset: never).
 
+import "derive_lib" as dl;
 import "ttd" as ttd;
 
 const ROUND_S = 20;
@@ -38,6 +45,10 @@ const MIN_DAYS = 7;
 const MAX_DAYS = 365;
 const FACTOR = 1.5;
 const MIN_GAPS = 5;
+// Completed quiet spells the store must hold before its percentile replaces START_DAYS, and how
+// many rounds pass between two reads of it.
+const STORE_MIN_SPELLS = 20;
+const STORE_EVERY_ROUNDS = 90;
 const KEEP_GAPS = 64;
 // Ticks per game day (TimerGameTick::DAY_TICKS).
 const DAY_TICKS = 74;
@@ -56,10 +67,12 @@ fn signature(fleet, stations) {
     `train ${fleet.train ?? 0} road ${fleet.road ?? 0} ship ${fleet.ship ?? 0} aircraft ${fleet.aircraft ?? 0} stations ${stations}`
 }
 
-// The threshold from the quiet times seen so far (game days): START_DAYS until MIN_GAPS of them,
-// then FACTOR times their 90th percentile within MIN_DAYS..MAX_DAYS.
-fn threshold_of(gaps) {
-    if gaps.len() < global::MIN_GAPS { return global::START_DAYS; }
+// The threshold from the quiet times seen so far (game days): `start` (the cold start) until
+// MIN_GAPS of them, then FACTOR times their 90th percentile within MIN_DAYS..MAX_DAYS.
+fn threshold_of(gaps) { threshold_from(gaps, global::START_DAYS) }
+
+fn threshold_from(gaps, start) {
+    if gaps.len() < global::MIN_GAPS { return start; }
     let sorted = gaps;
     sorted.sort();
     let at = ((sorted.len() - 1) * 9) / 10;
@@ -84,6 +97,22 @@ fn reasons(company, pending, replan, money, line_budget, services) {
     }
     if out.is_empty() { out.push("nothing that holds it is visible; the bot itself chose to build nothing"); }
     out
+}
+
+// The cold-start threshold from the store's baselines rows (() when it did not answer): FACTOR
+// times the p90 of the earlier runs' quiet spells, whole days within MIN_DAYS..MAX_DAYS, else
+// START_DAYS; the map derive_lib answers, its value a whole number of days.
+fn cold_start(rows) {
+    let c = dl::pick(rows, "quiet_days", "p90", global::FACTOR, global::START_DAYS, global::STORE_MIN_SPELLS,
+                     global::MIN_DAYS, global::MAX_DAYS);
+    if type_of(c.value) == "f64" { c.value = c.value.ceiling().to_int(); }
+    c
+}
+
+// Where the threshold comes from, pure: "this run" once its own gaps decide, else "store" when the
+// cold start was derived, else "start" (START_DAYS).
+fn source_of(gaps, cold) {
+    if gaps.len() >= global::MIN_GAPS { "this run" } else if cold.source == "derived" { "store" } else { "start" }
 }
 
 // One company's round, pure: its previous key (() at first), its signature now, the day now and the
@@ -113,14 +142,26 @@ fn setting_of(bot, name) {
 }
 
 let looks = 0;
+let cold = #{ value: START_DAYS };
 print(`watchdog: a look every ${ROUND_S} s; a company with no progress for longer than the threshold is stalled`);
 loop {
+    // The store's cold start in its own try: a store that is off, or a host without the store's
+    // function, leaves START_DAYS (threshold_source "start") and never costs the round its reads.
+    if looks % STORE_EVERY_ROUNDS == 0 {
+        try {
+            cold = cold_start(dl::baselines(6));
+        } catch (err) {
+            cold = cold_start(());
+            cold.why = `the store's baselines failed (${err}): the declared fallback ${START_DAYS}`;
+        }
+        print(`watchdog: cold start ${cold.value} day(s), ${cold.source}: ${cold.why}`);
+    }
     try {
         let state = read("openttd://game/state");
         let day = state.game_tick / DAY_TICKS;
         let tuning = shared_get("watchdog.tuning") ?? #{ gaps: [] };
         let gaps = tuning.gaps ?? [];
-        let threshold = threshold_of(gaps);
+        let threshold = threshold_from(gaps, cold.value);
         let stations = read("openttd://stations").data.stations ?? [];
         let pending = status().pending ?? [];
         let services = [];
@@ -152,7 +193,8 @@ loop {
             shared_set(key, v);
         }
         if gaps.len() > KEEP_GAPS { gaps = gaps.extract(gaps.len() - KEEP_GAPS); }
-        shared_set("watchdog.tuning", #{ gaps: gaps, threshold_days: threshold_of(gaps), date: state.game_date });
+        shared_set("watchdog.tuning", #{ gaps: gaps, threshold_days: threshold_from(gaps, cold.value), date: state.game_date,
+                                         threshold_source: source_of(gaps, cold), cold_start: cold });
         // One line a round: what it found, and the heartbeat the panel's supervisor reads. A service
         // that declares `// stall:` and prints nothing for that long is restarted; this one printed
         // only on errors and was restarted 7 times in 1.9 game years (seed 10487, 2026-11-23).

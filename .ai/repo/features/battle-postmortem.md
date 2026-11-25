@@ -54,5 +54,5 @@ The post-mortem is the diagnosis when that rule fails.
   binary's `check` proves each committed `.md` is what its `.json` derives.
 - **gated**: CI's Research Rust tests run `cargo test --bin battle-postmortem`
   (`.github/workflows/research-rust.yml:191:battle-postmortem`) on every pull request that touches
-  the crate, and `tools/gate.sh change` runs its `check` (`tools/gate.sh:662:battle`).
+  the crate, and `tools/gate.sh change` runs its `check` (`tools/gate.sh:663:battle`).
 - **documented**: `research/battle-postmortem.md`.

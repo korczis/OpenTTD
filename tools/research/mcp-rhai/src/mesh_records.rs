@@ -109,8 +109,14 @@ impl Client {
             return Err(Error::Config("the query is a map of filters".into()));
         }
         let path = if params.is_empty() { "/api/v1/mesh/records".to_string() } else { format!("/api/v1/mesh/records?{}", params.join("&")) };
-        let v = self.call("GET", &path, None)?;
+        let mut v = self.call("GET", &path, None)?;
         check_list(&v)?;
+        // A script reads the documented shape: an answer that leaves conflicts or ignored out has none.
+        if v["active"] == json!(true) {
+            for f in ["conflicts", "ignored"] {
+                if v.get(f).map_or(true, Value::is_null) { v[f] = json!([]); }
+            }
+        }
         Ok(v)
     }
 
@@ -158,8 +164,12 @@ pub fn check_list(v: &Value) -> Result<(), Error> {
         None => bad("no active field"),
         Some(false) => if v.get("reason").is_some_and(Value::is_string) { Ok(()) } else { bad("inactive without a reason") },
         Some(true) => {
-            for f in ["records", "conflicts", "ignored"] {
-                if !v.get(f).is_some_and(Value::is_array) { return bad(&format!("{f} is not a list")); }
+            // MeshRecordList (Majordomus 1.2.0 OpenAPI) requires active, digest and records;
+            // conflicts and ignored are optional, and a list wherever they are present. Only what
+            // a script reads is checked: a stricter client refused every answer of 1.2.0.
+            if !v.get("records").is_some_and(Value::is_array) { return bad("records is not a list"); }
+            for f in ["conflicts", "ignored"] {
+                if v.get(f).is_some_and(|x| !x.is_null() && !x.is_array()) { return bad(&format!("{f} is not a list")); }
             }
             let rec_ok = |r: &Value| ["key", "author", "kind", "task"].iter().all(|f| r.get(*f).is_some_and(Value::is_string)) && r.get("revision").is_some_and(Value::is_u64);
             if v["records"].as_array().is_some_and(|rs| rs.iter().all(rec_ok)) { Ok(()) } else { bad("a record lacks key, author, kind, task or revision") }
@@ -275,7 +285,10 @@ mod tests {
     fn an_inactive_mesh_is_passed_through_and_a_malformed_list_is_invalid() {
         let (base, _) = fixture(vec![("GET /api/v1/mesh/records", 200, r#"{"active": false, "reason": "no mesh here"}"#)]);
         assert_eq!(client(&base).records(&Value::Null).unwrap()["reason"], "no mesh here");
-        for bad in [json!({}), json!({"active": false}), json!({"active": true, "records": [], "conflicts": []}),
+        assert_eq!(check_list(&json!({"active": true, "records": [], "conflicts": []})), Ok(()), "ignored is optional");
+        for bad in [json!({}), json!({"active": false}),
+                    json!({"active": true, "digest": "d", "records": {}}),
+                    json!({"active": true, "digest": "d", "records": [], "conflicts": "none"}),
                     json!({"active": true, "records": [{"key": "k"}], "conflicts": [], "ignored": []})] {
             assert!(matches!(check_list(&bad), Err(Error::Invalid(_))), "{bad}");
         }
@@ -311,6 +324,20 @@ mod tests {
         assert!(matches!(client(&b4).write(json!({"kind": "observation", "task": "t", "scope": [], "title": "x"})),
                          Err(Error::Refused { code, .. }) if code == "out_of_scope"));
         assert!(!seen4.lock().unwrap().iter().any(|t| t.starts_with("POST /api/v1/mesh/claims ")));
+    }
+
+    #[test]
+    fn an_answer_without_conflicts_or_ignored_is_read_with_both_empty() {
+        // Majordomus 1.2.0's GET /api/v1/mesh/records, as the live server answered on 2026-11-25:
+        // active, digest and records only (MeshRecordList requires just those three).
+        const BARE: &str = r#"{"active": true, "digest": "d", "records": [{"key": "s1/r1", "author": "s1/board-p1", "kind": "decision",
+            "task": "I0094", "scope": [], "status": "open", "title": "t", "revision": 1, "evidence": "asserted"}]}"#;
+        let (base, _) = fixture(vec![("GET /api/v1/mesh/records", 200, BARE)]);
+        let v = client(&base).records(&Value::Null).unwrap();
+        assert_eq!((v["records"][0]["key"].clone(), v["conflicts"].clone(), v["ignored"].clone()), (json!("s1/r1"), json!([]), json!([])));
+        // Lists the server sends are kept as they came.
+        let (b2, _) = fixture(vec![("GET /api/v1/mesh/records", 200, LIST)]);
+        assert_eq!(client(&b2).records(&Value::Null).unwrap()["records"][0]["revision"], 2);
     }
 
     #[test]

@@ -527,7 +527,7 @@ mod tests {
                                       {"id": 6, "name": "P6", "ai": "PrismaticAI", "settings": live},
                                       {"id": 7, "name": "P7", "ai": "PrismaticAI", "settings": live}]});
         e.register_fn("api_bots", move || dynamic(bots.clone()));
-        let line = |p: i64| json!({"mode": "freight_rail", "cargo": "Coal", "cargo_id": 1,
+        let line = |p: i64| json!({"kind": "freight", "mode": "freight_rail", "cargo": "Coal", "cargo_id": 1,
                                    "from": {"id": format!("industry:{p}"), "name": format!("Mine {p}")}, "to": {"id": "industry:99", "name": "Plant"}});
         let entry = |c: f64, p: i64| json!({"company": c, "start_ai": start.replace("{p}", &p.to_string()),
                                             "freight": [{"from": p, "to": 99, "cargo_id": 1, "monthly_profit": 5000.0}]});
@@ -788,7 +788,8 @@ mod tests {
         let r = replan_round_with(&store, live_of(UNPLANNED_10487), vehicles.clone(), "fr_from={p},fr_to=99,fr_cargo=1", json!([]), bayes_share);
         let rec = |k: &str| r.records.iter().find(|(x, _)| x == k).unwrap().1.clone();
         let zero = rec("replan.0");
-        assert_eq!(zero["record"]["by_mode"], json!({"rail": {"lines": 2, "earned": 2, "lost": 0}, "road": {"lines": 3, "earned": 0, "lost": 3}}));
+        assert_eq!(zero["record"]["by_mode"], json!({"rail": {"lines": 2, "earned": 2, "lost": 0, "profit": 71000, "earned_per_vehicle": 71000.0},
+                                                     "road": {"lines": 3, "earned": 0, "lost": 3, "profit": -600, "earned_per_vehicle": 0.0}}));
         assert_eq!((zero["record"]["earned"].clone(), zero["record"]["lines"].clone()), (json!(2), json!(5)), "pooled: 2 of 5, below the switch");
         assert_eq!((zero["model"]["judged_by"].clone(), zero["model"]["adopt"].clone()), (json!("rail"), json!(true)));
         assert_eq!(zero["model"]["by_mode"]["rail"]["earned"], json!(2));

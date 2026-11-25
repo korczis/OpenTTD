@@ -3814,6 +3814,7 @@ pub fn routes() -> Vec<Route> {
           s(json!({"name": st()}), &["name"]), crate::panel_scripts::h_service_start),
         r("POST", "/api/services/stop", "serviceStop", "Stop a service at its next operation; its log stays readable", false,
           s(json!({"name": st()}), &["name"]), crate::panel_scripts::h_service_stop),
+        r("GET", "/api/services/scores", "serviceScores", "The services judged by what followed their actions (src/service_eval.rs, research/mechanisms/service-self-evaluation.md): per service and action the outcomes the horizon later (?horizon= game months, default 3; ?scope=run for the newest run with an action), a detector by its resolution and the others by the company's share of the field against its own pre-action trend, a Jeffreys posterior and the verdict (insufficient, poor, unclear, helps); the coverage of deterioration episodes derived from the samples (threshold derived from the store, declared fallback); the baselines; the eval.* keys service_eval.rhai keeps. Associative, never causal; it changes nothing", false, None, crate::service_eval::h_scores),
         r("GET", "/api/services/log", "serviceLog", "A service's printed lines after ?since=<seq> (?name=): [{seq, text}], whether it runs, the last sequence number", false, None, crate::panel_scripts::h_service_log),
     ]
 }
@@ -3888,6 +3889,7 @@ fn query_params(path: &str) -> &'static [(&'static str, bool)] {
         // The script workspace (panel_scripts.rs): one script, and a service's lines after a seq.
         "/api/script" => &[("name", true)],
         "/api/services/log" => &[("name", true), ("since", false)],
+        "/api/services/scores" => &[("horizon", false), ("scope", false)],
         "/api/rhai/shared" => &[("key", false), ("prefix", false)],
         "/api/rhai/debug" => &[("id", false)],
         "/api/evidence" => &[("q", true), ("k", false)],
@@ -4645,8 +4647,8 @@ mod tests {
         // and standing rules (GET /api/approvals; POST /api/approve/many, /api/deny/many,
         // /api/approve/all, /api/deny/all, /api/rules, /api/rules/remove).
         // And the in-game approvers (POST /api/approvers), and the one-time sign-in link (POST /api/owner/once).
-        // And the Rust benchmark records (GET /api/bench).
-        assert_eq!(rs.len(), 94);
+        // And the Rust benchmark records (GET /api/bench), and the service scores (GET /api/services/scores).
+        assert_eq!(rs.len(), 95);
         for (m, p) in [("GET", "/api/status"), ("POST", "/api/console"), ("POST", "/api/rhai"), ("GET", "/api/news"), ("POST", "/api/news"),
                        ("GET", "/api/content"), ("POST", "/api/content/download"),
                        ("GET", "/api/ask"), ("POST", "/api/ask"), ("POST", "/api/instances/call"), ("GET", "/api/ui/classes"),
@@ -4659,7 +4661,7 @@ mod tests {
             "/api/content", "/api/content/download", "/api/overview/history", "/api/results", "/api/result", "/api/duel", "/api/scoreboard", "/api/calibration",
             "/api/bus", "/api/bus/publish", "/api/db/tables", "/api/db/query", "/api/db/named",
             "/api/scripts", "/api/script", "/api/script/check", "/api/script/save",
-            "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
+            "/api/services", "/api/services/start", "/api/services/stop", "/api/services/log", "/api/services/scores", "/api/rhai/functions", "/api/rhai/shared", "/api/rhai/shared/delete", "/api/rhai/debug", "/api/rhai/debug/command", "/api/bridge/observation", "/api/evidence",
             "/api/realworld", "/api/realworld/scenario", "/api/realworld/compile", "/api/town/model", "/api/town/live", "/api/mesh",
             "/api/strategy", "/api/strategy/run", "/api/blackboard", "/api/battle/contestants", "/api/bench"].contains(&r.path)));
     }

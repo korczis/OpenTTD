@@ -72,6 +72,8 @@ mod panel_realworld;
 mod panel_mesh_page;
 #[path = "../panel_store.rs"]
 mod panel_store;
+#[path = "../service_eval.rs"]
+mod service_eval;
 #[path = "../store_sql.rs"]
 #[allow(dead_code)] // battle-postmortem's files are embedded with the store's
 mod store_sql;
