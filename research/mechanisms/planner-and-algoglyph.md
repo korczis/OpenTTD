@@ -205,6 +205,13 @@ more than the model's own lines scored the same way (196,456). The verdict was `
 bus mode. Company 1 earned 1.54 times ours per aircraft. Air stays out of the outcome plan because
 its option is six aircraft and two airports for about 195k, scored over a 24-month payback.
 
+When it is written: whenever the planned-bot path runs. That is the bot start when the stack plans
+its bot, and `POST /api/bots/planned`, which plans also under `--no-plan-bot` and which every
+`replan.rhai` round calls. Each running company of the panel's AI (`--ai`, PrismaticAI by default)
+gets its key. With neither a planned start nor the replan service running, nothing writes it, and
+a company of another AI or of a person gets no key. A reader treats a missing or stale key (`game`)
+as "not assessed", never as "consistent".
+
 The value of `outcome.<company>` is a contract: a gap watcher, the strategy review (ADR 0042),
 a digest and the bot's self-evaluation read it. A field is added, never renamed or removed:
 
