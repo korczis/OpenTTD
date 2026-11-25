@@ -460,15 +460,24 @@ fn derive(e: &mut Engine, panel: &Panel) -> (Vec<String>, Vec<String>) {
             None => to_dyn(v),
         }
     };
-    if let Ok(cat) = panel.get("/api/catalogue").and_then(from_dyn) {
-        for t in cat.pointer("/tools/result/tools").and_then(Value::as_array).into_iter().flatten() {
-            let Some(name) = t.get("name").and_then(Value::as_str) else { continue };
-            let (p1, n1) = (panel.clone(), name.to_string());
-            e.register_fn(ident(name), move |args: Map| -> R<Dynamic> { call(&p1, &n1, from_dyn(Dynamic::from_map(args))?) });
-            let (p0, n0) = (panel.clone(), name.to_string());
-            e.register_fn(ident(name), move || -> R<Dynamic> { call(&p0, &n0, json!({})) });
-            tools.push(ident(name));
-        }
+    // A game the panel runs may not answer yet (a service started right after the panel came up):
+    // wait for it rather than run without its functions. No game: nothing to wait for.
+    let wait = match panel.get("/api/status").and_then(from_dyn) {
+        Ok(Value::Object(st)) if st.get("server_running").and_then(Value::as_bool) == Some(true) => derive_wait(),
+        _ => Duration::ZERO,
+    };
+    let names = until_listed("the game's MCP tools", wait, || {
+        panel.get("/api/catalogue").and_then(from_dyn).ok().map(|cat: Value| {
+            cat.pointer("/tools/result/tools").and_then(Value::as_array).into_iter().flatten()
+                .filter_map(|t| t.get("name").and_then(Value::as_str).map(str::to_string)).collect()
+        }).unwrap_or_default()
+    });
+    for name in names {
+        let (p1, n1) = (panel.clone(), name.clone());
+        e.register_fn(ident(&name), move |args: Map| -> R<Dynamic> { call(&p1, &n1, from_dyn(Dynamic::from_map(args))?) });
+        let (p0, n0) = (panel.clone(), name.clone());
+        e.register_fn(ident(&name), move || -> R<Dynamic> { call(&p0, &n0, json!({})) });
+        tools.push(ident(&name));
     }
     // One function per operation of the panel's own OpenAPI document (api_<operationId>): every
     // route the panel declares, and every route it derives from the catalogue, is callable here.
@@ -495,21 +504,48 @@ fn derive(e: &mut Engine, panel: &Panel) -> (Vec<String>, Vec<String>) {
         }
     }
     let mut commands = Vec::new();
-    if let Ok(out) = panel.post("/api/console", json!({"command": "list_cmds", "wait": 1.0})).and_then(from_dyn) {
-        for line in out.get("output").and_then(Value::as_array).into_iter().flatten() {
-            let Some(cmd) = line.as_str().map(str::trim) else { continue };
-            if cmd.is_empty() || !cmd.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
-                continue;
-            }
-            let fname = format!("con_{}", ident(cmd));
-            let (p0, c0) = (panel.clone(), cmd.to_string());
-            e.register_fn(fname.clone(), move || -> R<Dynamic> { console_lines(&p0, &c0) });
-            let (p1, c1) = (panel.clone(), cmd.to_string());
-            e.register_fn(fname.clone(), move |args: &str| -> R<Dynamic> { console_lines(&p1, &format!("{c1} {args}")) });
-            commands.push(fname);
-        }
+    let cmds = until_listed("the game's console commands", wait, || {
+        panel.post("/api/console", json!({"command": "list_cmds", "wait": 1.0})).and_then(from_dyn).ok().map(|out: Value| {
+            out.get("output").and_then(Value::as_array).into_iter().flatten()
+                .filter_map(|l| l.as_str().map(str::trim))
+                .filter(|c| !c.is_empty() && c.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+                .map(str::to_string).collect()
+        }).unwrap_or_default()
+    });
+    for cmd in cmds {
+        let fname = format!("con_{}", ident(&cmd));
+        let (p0, c0) = (panel.clone(), cmd.clone());
+        e.register_fn(fname.clone(), move || -> R<Dynamic> { console_lines(&p0, &c0) });
+        let (p1, c1) = (panel.clone(), cmd.clone());
+        e.register_fn(fname.clone(), move |args: &str| -> R<Dynamic> { console_lines(&p1, &format!("{c1} {args}")) });
+        commands.push(fname);
     }
     (tools, commands)
+}
+
+/// How long derive() waits for a running game to answer (its MCP tools, list_cmds) before the
+/// script starts without those functions: $PRISMATIC_RHAI_DERIVE_WAIT_S, default 60 s. A service
+/// the panel started right after it came up used to run with no con_* at all ("Function not
+/// found" on con_say until it was restarted).
+fn derive_wait() -> Duration {
+    Duration::from_secs(std::env::var("PRISMATIC_RHAI_DERIVE_WAIT_S").ok().and_then(|v| v.parse().ok()).unwrap_or(60))
+}
+
+/// `fetch` again every 2 s until it lists something or `wait` has passed; the last list (empty
+/// when nothing answered, said on stderr, since the script then lacks `what`).
+fn until_listed<T>(what: &str, wait: Duration, mut fetch: impl FnMut() -> Vec<T>) -> Vec<T> {
+    let start = std::time::Instant::now();
+    loop {
+        let got = fetch();
+        let left = wait.saturating_sub(start.elapsed());
+        if !got.is_empty() || left.is_zero() {
+            if got.is_empty() && !wait.is_zero() {
+                eprintln!("mcp-rhai: {what}: none listed within {} s; the script runs without them", wait.as_secs());
+            }
+            return got;
+        }
+        std::thread::sleep(left.min(Duration::from_secs(2)));
+    }
 }
 
 fn console_lines(panel: &Panel, command: &str) -> R<Dynamic> {
@@ -1229,6 +1265,8 @@ mod tests {
                 "openttd://depots" => super::to_dyn(w["depots"].clone()),
                 "openttd://map/ways" => super::to_dyn(w["ways"].clone()),
                 "openttd://map" => super::to_dyn(w["map"].clone()),
+                // The owner co-plays company 0 as the registered approver (ttd::owner_company()).
+                "openttd://approvals" => super::to_dyn(json!({"data": {"approver_companies": [{"company": 0, "client_id": 2}]}})),
                 other => Err(format!("unexpected read {other}").into()),
             }
         });
@@ -1346,6 +1384,7 @@ mod tests {
             match uri {
                 "openttd://game/state" => super::to_dyn(json!({"game_tick": tick, "game_date": format!("1951-01-{:02}", n + 1)})),
                 "openttd://stations" => super::to_dyn(json!({"data": {"stations": [{"owner": 0}, {"owner": 0}, {"owner": 1}]}})),
+                "openttd://approvals" => super::to_dyn(json!({"data": {"approver_companies": [{"company": 0, "client_id": 2}]}})),
                 "openttd://companies" => super::to_dyn(json!({"data": {"companies": [
                     {"id": 0, "name": "Owner Co", "money": 9000, "fleet": {"train": 1, "road": 25, "ship": 0, "aircraft": 6}},
                     {"id": 1, "name": "Rival", "money": 90000, "fleet": {"train": 0, "road": 10 + n, "ship": 0, "aircraft": 0}}]}})),
@@ -1403,6 +1442,59 @@ mod tests {
         let said = said.lock().unwrap();
         assert_eq!(said.len(), 1, "the owner's company is told once per stall: {said:?}");
         assert!(said[0].starts_with("\"[watchdog] Owner Co: nothing built or bought for 10 game day(s) (threshold 7): 1 approval(s) wait"), "{}", said[0]);
+    }
+
+    /// derive()'s wait for a game that does not answer yet: it asks again until something is
+    /// listed, gives up after the wait with what it last got, and never waits without a game.
+    #[test]
+    fn until_listed_asks_again_until_the_game_answers_and_gives_up_after_the_wait() {
+        use std::time::Duration;
+        let mut n = 0;
+        let got = super::until_listed("x", Duration::from_secs(30), || { n += 1; if n < 3 { vec![] } else { vec!["con_say"] } });
+        assert_eq!((got, n), (vec!["con_say"], 3), "the third answer lists it");
+        let mut m = 0;
+        let start = std::time::Instant::now();
+        let none: Vec<&str> = super::until_listed("x", Duration::from_millis(300), || { m += 1; vec![] });
+        assert!(none.is_empty() && m >= 2 && start.elapsed() < Duration::from_secs(2), "asked {m} times, then gave up");
+        let mut k = 0;
+        let _: Vec<&str> = super::until_listed("x", Duration::ZERO, || { k += 1; vec![] });
+        assert_eq!(k, 1, "no game: asked once");
+    }
+
+    /// ttd::owner_company(), the one source of the owner's company every service asks: the
+    /// $OWNER_COMPANY override, else where a registered approver plays (openttd://approvals), else
+    /// the first company the panel's AI runs, else (); a failed source is skipped, never fatal, and
+    /// a script-defined function reaches it through the global import.
+    #[test]
+    fn owner_company_is_derived_from_the_override_the_approver_seat_or_the_panel_ai() {
+        use serde_json::{json, Value};
+        use std::sync::{Arc, Mutex};
+        let case = |over: &str, approvals: Option<Value>, ai: &str, running: Value| -> rhai::Dynamic {
+            let mut e = lib_engine();
+            let over = over.to_string();
+            e.register_fn("env", move |name: &str| -> String { if name == "OWNER_COMPANY" { over.clone() } else { String::new() } });
+            let a = Arc::new(Mutex::new(approvals));
+            e.register_fn("read", move |uri: &str| -> super::R<rhai::Dynamic> {
+                match (uri, a.lock().unwrap().clone()) {
+                    ("openttd://approvals", Some(v)) => super::to_dyn(v),
+                    _ => Err(format!("unexpected read {uri}").into()),
+                }
+            });
+            let ai = ai.to_string();
+            e.register_fn("status", move || -> super::R<rhai::Dynamic> { super::to_dyn(json!({"ai": ai.clone()})) });
+            let r = Arc::new(Mutex::new(running));
+            e.register_fn("api_bots", move || -> super::R<rhai::Dynamic> { super::to_dyn(json!({"running": r.lock().unwrap().clone()})) });
+            e.eval::<rhai::Dynamic>("import \"ttd\" as ttd; fn owner() { ttd::owner_company() } owner()").unwrap()
+        };
+        let seat = |c: Value| Some(json!({"data": {"approver_companies": [{"company": c, "client_id": 2}, {"company": 6, "client_id": 3}]}}));
+        let bots = json!([{"id": 4, "ai": "AAAHogEx"}, {"id": 2.0, "ai": "PrismaticAI"}]);
+        assert_eq!(case("5", seat(json!(1)), "PrismaticAI", bots.clone()).as_int().unwrap(), 5, "the override wins");
+        assert_eq!(case("", seat(json!(1)), "PrismaticAI", bots.clone()).as_int().unwrap(), 1, "then the approver's seat, the first one");
+        assert_eq!(case("", seat(json!(3.0)), "", json!([])).as_int().unwrap(), 3, "a float id is an integer");
+        assert_eq!(case("", Some(json!({"data": {"approver_companies": []}})), "PrismaticAI", bots.clone()).as_int().unwrap(), 2,
+                   "no approver plays: the panel's AI, not another bot");
+        assert_eq!(case("", None, "", bots.clone()).as_int().unwrap(), 4, "approvals unreadable, no AI named: the first running bot");
+        assert!(case("", None, "PrismaticAI", json!([])).is_unit(), "nothing known: ()");
     }
 
     /// The threshold follows the data: the start value until MIN_GAPS quiet times, then 1.5 times

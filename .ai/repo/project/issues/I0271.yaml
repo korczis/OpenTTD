@@ -1,0 +1,27 @@
+id: I0271
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "replan's competition block decomposes the gap per vehicle type into a volume term and a yield term, against the leader and the median"
+slug: gap-decomposition-by-type
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: openttd-51 (replan.rhai); read by J (gap_watch) and O (digest). Add to competition(): the leader's and the median company's vehicle count per type, the type's total profit, volume = (n_leader - n_ours) * p_leader, yield = n_ours * (p_leader - p_ours), each term's share of the gap, and young when most of a type's fleet is younger than a year (profit counted at its age, never extrapolated)."
+why: "competition() carries only profit per vehicle a year old, so 'we run few aircraft' and 'we run fewer trains that earn more' cannot be told apart."
+scope:
+- "tools/research/mcp-panel/rhai/replan.rhai"
+- "research/mechanisms/planner-and-algoglyph.md"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0270
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "on a fixture shaped like game 12609 the aircraft volume term is the largest share of the gap and the rail yield term is negative (script test)"
+- "a type we do not run appears with its whole gap as volume; a young type is marked and raises no alarm"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'

@@ -5,7 +5,7 @@
    are rows of CHARTS, keep their parameters in the address and maximize (Escape restores). */
 
 import {
-  ecInit, maximizable, PALETTE, UI, CLS, $, esc, api, whole, compact, INK, AXIS as axis, patchAddress, badge as tag,
+  ecInit, maximizable, chartCard, PALETTE, UI, CLS, $, esc, api, whole, compact, INK, AXIS as axis, patchAddress, badge as tag,
 } from './components.js';
 
 const echarts = globalThis.echarts;
@@ -91,15 +91,6 @@ export function duelOption(series, { metric = 'value' } = {}) {
 }
 
 /* ---- the pages ------------------------------------------------------------------------------- */
-function chartCard(id, title, note, label, height = 'h-72 sm:h-80 lg:h-96') {
-  return `<div id="${id}-card" data-maximize="${id}" data-chart="${id}" class="${CLS.card} flex flex-col">
-    <div class="${UI.cardHead} mb-3">
-      <div class="${UI.cardHeadTitle}"><h2 class="${UI.cardTitle}">${esc(title)}</h2><p class="mt-2 ${UI.cardSub}">${esc(note)}</p></div>
-      <div data-toolbar class="flex flex-wrap items-center gap-2"></div>
-    </div>
-    <div id="${id}" role="img" aria-label="${esc(label)}" class="w-full ${height} grow"></div></div>`;
-}
-
 function arm(id, draw) {
   const box = $(id + '-card');
   box.querySelector('[data-toolbar]').append(maximizable(box, id, { getState, setState, onResize: () => draw() }));
