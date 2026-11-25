@@ -163,7 +163,7 @@ the days of 1950-52. The countdown makes a plan reach the bot. It does not close
    `/api/auto-approve` ("no owner secret"), and chat was the only working channel.
 
 **An open conflict in correction 2, to be settled by review before code.** The panel treats
-`openttd.ai.set_settings` as owner-only (`OWNER_ONLY_TOOLS`, `tools/research/mcp-rhai/src/panel.rs:540`).
+`openttd.ai.set_settings` as owner-only (`OWNER_ONLY_TOOLS`, `tools/research/mcp-rhai/src/panel.rs:566:OWNER_ONLY_TOOLS`).
 `POST /api/approve` refuses it with 403, so it is approved only at the server's console, and it is
 the channel of a Battlebrain live decision (rule `project.decision-authority-boundaries`, B2: who may
 name an `fr_*` slot). Filing re-plans through it would take them out of the chat and panel channels
