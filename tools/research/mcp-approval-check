@@ -14,6 +14,11 @@
 //    status "refused" with its reason, never by pushing one out.
 // 3. Every approval the check left pending is denied again (`prismatic_mcp deny <id>` through POST
 //    /api/console), so the stack is left as it was found.
+// 5. Plans settle all or none (ADR 0038, research/mechanisms/approval-gate.md "Plans"), on three
+//    editable settings of one running AI. A manual change of a setting a pending plan holds is
+//    refused, and the plan keeps every row. A newer plan withdraws every row of the older one. With
+//    the owner secret, approving one row of a plan executes all of its rows. NOT RUN when no AI has
+//    three editable integer settings.
 //
 // Approving needs the panel's owner secret, which mcp-panel keeps in a 0600 file it names when
 // it starts ($PRISMATIC_PANEL_OWNER_SECRET_FILE, else ~/.config/prismatic/panel-owner-secret). Give
@@ -144,6 +149,48 @@ try {
   // 3. Withdraw them again; a denial enacts nothing, so /api/console takes it without the secret.
   for (const id of mine) await post('/api/console', { command: `prismatic_mcp deny ${id}` });
   check('denied again, the queue holds none of them', await waitFor(async () => !(await queue()).some((a) => mine.includes(a.id) && a.state === 'pending')));
+
+  // 5. Plans settle all or none (detail::PlanSupersedes, ApprovePlan), on three editable settings
+  //    of one running AI. Plan P1 holds s1 and s2: a manual change of s1 is refused and P1 keeps
+  //    both rows; plan P2 for s3 alone withdraws both of P1's rows; with the owner secret,
+  //    approving one row of plan P3 (s1, s2) executes both. What is left pending is denied again.
+  const bot = running.map((c) => ({ c, keys: asks.filter(([t, a]) => t === 'openttd.ai.set_setting' && a.company === c.company).map(([, a]) => a) }))
+    .find((b) => b.keys.length >= 3);
+  if (!bot) {
+    console.log('NOT RUN plans: no running AI has three editable integer settings');
+  } else {
+    const [s1, s2, s3] = bot.keys;
+    const stamp = Date.now();
+    const ask = async (args, plan) => (await post('/api/tools/openttd.ai.set_setting', plan ? { ...args, plan } : args)).body;
+    const rows = async (plan) => (await queue()).filter((a) => a.plan === plan);
+    const p1 = `check-p1-${stamp}`;
+    const r1 = [await ask(s1, p1), await ask(s2, p1)];
+    const p1rows = await rows(p1);
+    check('plan P1: both rows wait, filed under its id', r1.every((r) => r.status === 'pending_approval') && p1rows.length === 2 && p1rows.every((a) => a.state === 'pending'), r1.map((r) => r.status).join(', '));
+    const manual = await ask(s1);
+    check('a manual change of a setting the pending plan holds is refused', manual.status === 'refused' && /pending plan/.test(manual.error || ''), manual.error || manual.status);
+    check('and the plan keeps both rows pending (no half plan)', (await rows(p1)).filter((a) => a.state === 'pending').length === 2);
+    const p2 = `check-p2-${stamp}`;
+    const r2 = await ask(s3, p2);
+    const after = await rows(p1);
+    check('a newer plan withdraws every row of the older one, its other keys too', r2.status === 'pending_approval' && after.length === 2 && after.every((a) => a.state === 'superseded' && a.superseded_by === r2.approval_id), after.map((a) => `#${a.id} ${a.state}`).join(', '));
+    const plans = [p1, p2];
+    if (!secret) {
+      console.log('NOT RUN approving a plan executes every row: no owner secret (--owner or PANEL_OWNER_SECRET)');
+    } else {
+      const p3 = `check-p3-${stamp}`;
+      plans.push(p3);
+      const r3 = [await ask(s1, p3), await ask(s2, p3)];
+      const p2gone = (await rows(p2)).every((a) => a.state !== 'pending');
+      const approved = await post('/api/approve', { id: r3[0].approval_id });
+      const value = async (name) => ((((await get('/api/resources/ai')).data || {}).companies || []).find((c) => c.company === bot.c.company)?.settings || []).find((st) => st.name === name)?.value;
+      const settled = await waitFor(async () => (await rows(p3)).every((a) => a.state === 'consumed'));
+      const values = [await value(s1.name), await value(s2.name)];
+      check('approving one row of a plan executes the whole plan', approved.status === 200 && settled && values[0] === s1.value && values[1] === s2.value && p2gone,
+        `${s1.name}=${values[0]} ${s2.name}=${values[1]}, P2 withdrawn: ${p2gone}`);
+    }
+    for (const a of await queue()) if (plans.includes(a.plan) && a.state === 'pending') await post('/api/console', { command: `prismatic_mcp deny ${a.id}` });
+  }
 } finally {
   await browser.close();
 }

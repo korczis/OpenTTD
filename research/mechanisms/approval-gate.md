@@ -104,6 +104,13 @@ growth stopped for 17 months. Now `openttd.ai.set_setting` takes an optional `pl
 - **Filing.** `build_plan.rhai` files each re-plan under one id (`plan_id`: company, event sequence,
   game tick) through `POST /api/bots/setting {plan}`. `openttd://approvals` shows each row's `plan`.
 
+Proof: `src/tests/test_prismatic_mcp.cpp` holds the decision table, and part 5 of
+`tools/research/mcp-approval-check` holds it against a running server. On three settings of one
+running AI it files plan P1 (two rows). A manual change of one of them is refused, and both rows stay
+pending. Plan P2 then withdraws both of P1's rows. With the owner secret, approving one row of plan
+P3 executes both, and the game reads both new values. On 2026-11-25 this passed 19/19 against a
+disposable stack (`mcp-e2e --no-gui` on free ports, the panel's own owner secret file).
+
 The design and its review are in `research/design-approval-countdown-owner-companies.md`
 (branch `doc/auto-approve-owner-answer`, PR #254).
 
