@@ -79,9 +79,19 @@ class SharedProducers(unittest.TestCase):
                           "dbg: REF S date=1961-1 ind=x owners= name=broken"])
         got = battle.parse_shared(text)
         self.assertEqual(sorted(got), [7, 9])
-        self.assertEqual(got[7], {"name": "Gundhead Coal Mine", "owners": {0, 1, 2}, "first": "1960-04"})
+        self.assertEqual(got[7], {"name": "Gundhead Coal Mine", "owners": {0, 1, 2}, "first": "1960-04",
+                                  "cargoes": {None: {"owners": {0, 1, 2}, "first": "1960-04"}}})
         self.assertEqual(got[9]["owners"], {1, 3})
         self.assertEqual(battle.parse_shared("no referee here"), {})
+
+    def test_parse_keeps_each_cargo_apart(self):
+        # Since 2026-11-23 the referee names the cargo: one line per producer and cargo.
+        text = "\n".join([shared(1965, 4, 7, "0,2", "Punthill Farm").replace(" owners=", " cargo=6 owners="),
+                          shared(1965, 7, 7, "1,2", "Punthill Farm").replace(" owners=", " cargo=4 owners=")])
+        got = battle.parse_shared(text)[7]
+        self.assertEqual(got["owners"], {0, 1, 2})
+        self.assertEqual(got["cargoes"], {6: {"owners": {0, 2}, "first": "1965-04"},
+                                          4: {"owners": {1, 2}, "first": "1965-07"}})
 
     def lineup(self):
         return [{"ai": "PrismaticAI", "key": "P a"}, {"ai": "PrismaticAI", "key": "P b"},
@@ -97,6 +107,30 @@ class SharedProducers(unittest.TestCase):
         m.update(status="done", errors={}, series={"P a": [], "P b": [], "AAAHogEx": []})
         self.assertIn("shared_producer:Coal Mine (industry 7, from 1960-04): P a + P b",
                       battle.fitness_verdict(m, fit))
+
+    def test_two_prismatic_companies_on_different_cargoes_of_one_farm_do_not_fail(self):
+        # Livestock for one, grain for the other: nothing of the farm's output is split.
+        farm = {"name": "Farm", "owners": {0, 1}, "first": "1965-04",
+                "cargoes": {4: {"owners": {0, 2}, "first": "1965-04"}, 6: {"owners": {1, 2}, "first": "1965-04"}}}
+        self.assertEqual(battle.sibling_producers({"lineup": self.lineup(), "shared": {7: farm}}), [])
+        farm["cargoes"][6]["owners"] = {0, 1}
+        self.assertEqual(battle.sibling_producers({"lineup": self.lineup(), "shared": {7: farm}}),
+                         ["shared_producer:Farm (industry 7, cargo 6, from 1965-04): P a + P b"])
+
+    def test_the_fitness_config_plays_the_claim_race(self):
+        # Two PrismaticAI companies, the lower one held back by test_claim_race, so the higher one
+        # builds and checks its source station first and only the second claim check (rail.nut
+        # ClaimBlocks) settles the race; shared_producer judges it like every lineup.
+        cfg = json.loads((Path(battle.__file__).parent / "battle.json").read_text())
+        race = [lu for lu in cfg["fitness"]["lineups"]
+                if any(c.get("label") == "PrismaticAI claim race A" for c in lu)]
+        self.assertEqual(len(race), 1)
+        ours = [c for c in race[0] if c["ai"] == "PrismaticAI"]
+        self.assertEqual([c["label"] for c in ours], ["PrismaticAI claim race A", "PrismaticAI claim race B"])
+        self.assertIn("test_claim_race=", ours[0]["settings"])
+        self.assertNotIn("test_claim_race=", ours[1]["settings"])
+        # Otherwise the same bot, so both choose the same producer first.
+        self.assertEqual(ours[0]["settings"].replace(",test_claim_race=20", ""), ours[1]["settings"])
 
 
 def trainless(y, mo, cid, rail, ids):
@@ -1682,6 +1716,27 @@ class Replay(unittest.TestCase):
         conf.write_text(json.dumps({"cache": str(tmp), "results": str(tmp), "hosts_file": str(tmp / "h"),
                                     "baseset": str(tmp / "b"), "prismatic": {"path": "x"}, "match": MC}))
         return str(conf)
+
+
+class SiblingMark(unittest.TestCase):
+    """rail.nut IsSibling knows a sibling PrismaticAI company by the auto-renew settings main.nut sets
+    at every start; when one side changes and the other does not, siblings stop recognising each
+    other and build second lines beside each other's (research/incident-2026-11-22-sibling-industries.md)."""
+
+    def test_the_mark_rail_nut_reads_is_the_one_main_nut_sets(self):
+        import re
+        src = Path(battle.__file__).parent.parent / "prismatic-ai" / "PrismaticAI"
+        main = (src / "main.nut").read_text()
+        rail = (src / "rail.nut").read_text()
+        self.assertIn("AICompany.SetAutoRenewStatus(true);", main)
+        months = re.search(r"AICompany\.SetAutoRenewMonths\((-?\d+)\);", main)
+        money = re.search(r"AICompany\.SetAutoRenewMoney\((\d+)\);", main)
+        self.assertIsNotNone(months)
+        self.assertIsNotNone(money)
+        self.assertIn(f"const SIBLING_RENEW_MONTHS = {months.group(1)};", rail)
+        self.assertIn(f"const SIBLING_RENEW_MONEY = {money.group(1)};", rail)
+        # Not the game's defaults (company_settings.ini: 6 months, 100000), or every company would match.
+        self.assertNotEqual((int(months.group(1)), int(money.group(1))), (6, 100000))
 
 
 if __name__ == "__main__":

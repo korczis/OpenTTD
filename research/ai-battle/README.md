@@ -326,10 +326,12 @@ The first editions showed two failures. The battle now catches both by itself.
   The same check flagged CivilAI crashing (thousands of Squirrel errors in one match).
 - **Two PrismaticAI companies on one map (2026-11-22).** The fitness check's fifth lineup plays
   `PrismaticAI sibling A` and `PrismaticAI sibling B` against AAAHogEx and LuDiAI AfterFix. The
-  referee prints a `REF S date=<y>-<m> ind=<id> owners=<cid>,... name=<industry>` line for every
-  producer whose output rail stations of two or more companies pick up. `battle.py fitness` prints
-  each such producer and fails with `shared_producer:<industry> (industry <id>, from <quarter>):
-  <key> + <key>` when two of the owners are PrismaticAI. Four PrismaticAI companies of the owner's
+  referee prints a `REF S date=<y>-<m> ind=<id> cargo=<cargo id> owners=<cid>,... name=<industry>`
+  line for every producer and cargo that rail stations of two or more companies pick up (since
+  2026-11-23 per cargo: two companies taking a farm's grain and its livestock split nothing).
+  `battle.py fitness` prints each such producer and fails with `shared_producer:<industry>
+  (industry <id>, cargo <cargo id>, from <quarter>): <key> + <key>` when two owners of one cargo are
+  PrismaticAI. Four PrismaticAI companies of the owner's
   live game had stalled on exactly this
   ([incident 2026-11-22](../incident-2026-11-22-sibling-industries.md)).
 - **Rail stations without a train (2026-11-23).** Each quarter the referee prints
@@ -347,6 +349,13 @@ The first editions showed two failures. The battle now catches both by itself.
   the fitness seed master failed `trainless_stations` in all five PrismaticAI lineups, with 1 to 6
   stations kept a year
   ([incident 2026-11-23](../incident-2026-11-23-trainless-lines.md)).
+- **The claim race (2026-11-23).** The seventh lineup, `PrismaticAI claim race A` and
+  `PrismaticAI claim race B` against AAAHogEx and LuDiAI AfterFix, is the sibling lineup with
+  `test_claim_race=20` on company 0. Both choose the same mine first. Company 0 waits 20 days after
+  its claim check, so company 1 builds and checks its source station first. Only the second claim
+  check (`ClaimBlocks` in `rail.nut`, after the destination station) can then settle the race. The
+  lineup is judged by `shared_producer` like every other one. With that check removed, it fails
+  ([incident 2026-11-22](../incident-2026-11-22-sibling-industries.md)).
 
 - **The growth funnel (2026-11-24).** Each PrismaticAI logs one
   `FUNNEL year=<y> mode=<mode> <stage>=<n> ...` line per mode once a game year
