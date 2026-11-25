@@ -63,6 +63,7 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
 | `POST /api/approve` | `{"id"}` | the owner's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it, 504 when no decision came |
 | `POST /api/deny` | `{"id"}` | withdraw a pending decision through the same core (`prismatic_mcp deny <id>`): it enacts nothing, so no owner secret is needed. 200 with the approval now `denied`, 404 for one the server does not hold, 409 for one not pending, 504 when the server did not mark it denied. The home page's Deny button calls it |
+| `POST /api/approvers` | `{"add": <client id>}`, `{"remove": "<key prefix>"}` or `{}` | the owner says who may approve from inside the game (`prismatic_mcp approvers add\|remove`, or the list); owner secret, else 401; 422 when the game printed a refusal. `/api/console` refuses every `approvers` line |
 | `POST /api/auto-approve` | `{"on": bool}` | `on: true` needs the owner secret (401 without it); `on: false` is open to anyone |
 | `POST /api/owner/login` | `{"secret"}` | the owner signs this browser in: the secret (from its file, see [the owner secret](#approval-is-bound-to-the-owner)) sets the HttpOnly cookie `mcp_owner_<port>` and answers 204; a wrong one 401 after a delay, five within a minute 429 |
 | `POST /api/owner/logout` | | clears that cookie; 204 |
@@ -1616,6 +1617,11 @@ because each of them runs lines the panel cannot read first. The panel splits a 
 character, so a newline inside a value (an AI's settings, a content query) cannot add a second
 command. Approvals go through `POST /api/approve` with the owner secret, or through the game's own
 console. Withdrawing your own request (`deny`) is still allowed. `mcp-panel-check` tests both cases.
+The same refusal covers who may approve in the game (`approvers`, now `POST /api/approvers` with the
+owner secret), the approval core's standing rules (`rule`, `rules`), its channel and result markers
+(`--via`, `--nonce`: the core trusts a stdin line without `--via` as the console's own) and `deny
+all`, in every spelling `console_word` accepts; Rhai's `console()` goes through `/api/console`, so
+it is refused the same.
 
 ### The panel's Approve and Deny, in Chrome
 
@@ -1673,6 +1679,31 @@ pending request (red-team residual risk 3). Approval is now bound to the owner i
     reads the secret from its file and does): the answer sets the same cookie.
   - When `/dev/urandom` cannot be read the panel has no secret, and approval happens only at the
     console (fails closed).
+- **Every change of who may decide what is on the bus** as one `governance.changed` event
+  (`panel.rs` `Game::governance`, read by the digest's "Who changed governance"): `{setting, from,
+  to, via, credential, origin, user_agent, peer, game_date, game_tick}`. `setting` is
+  `auto_approve` (`POST /api/auto-approve`, or `--auto-approve` at start), `owner_session` (sign-in
+  and sign-out), `approvers` (`POST /api/approvers` `{add}` or `{remove}`) or `approval_deadline`
+  (a `prismatic_mcp approval_deadline` line sent through `POST /api/console`, or
+  `$PRISMATIC_MCP_APPROVAL_DEADLINE` at start). `credential` says which credential the request
+  carried, never the credential: `owner-cookie` (the page's cookie), `token` (the secret in
+  `X-Panel-Owner`, or the run token) or `none` (nothing, a wrong secret, or the panel's own start),
+  and `role` whose it is: `owner`, `run` or `none`. `peer` is the address the panel saw the request
+  come from; a client's own `X-Panel-Peer` header is dropped.
+- **The stack's own processes carry a run token**, never the owner secret. mcp-e2e writes a fresh
+  one per run into a 0600 file (`make_run_token`), hands its path to the panel
+  (`--run-token-file`) and to every helper (`mcp-rhai --panel-token-file`), and sends it itself
+  (`stack_post`, on curl's stdin) in `X-Panel-Token`: on no command line, in no log, in no
+  environment. A file its group or others may read stops the panel at start. Without the flag the
+  panel makes one for the scripts it runs in process (`run_token_for`), so its own services carry
+  it too. The run token names a caller as the stack's own (`credential: token`, `role: run`) and
+  opens no owner's route: approving, auto-approve on and the approvers stay the owner secret's.
+  `mcp-duel` holds the token of the stack it drives through `$MCP_E2E_RUN_TOKEN_FILE`.
+- **The owner client's key is the owner's alone.** A client's personal directory
+  (`$TMP/client-home`) holds its `secrets.cfg`, the key that makes the owner's client an approver:
+  mcp-e2e starts every client under `umask 077`, closes the directory to 0700 and the file to 0600
+  (`seal_client_home`), and says so when a `secrets.cfg` is still readable beyond the owner
+  (`open_client_secrets`).
 - **Scripts never approve.** The Rhai `approve(id)` and `auto_approve(true)` raise an error that
   names the console command. They hold no secret, so `POST /api/rhai` cannot approve through them.
 
