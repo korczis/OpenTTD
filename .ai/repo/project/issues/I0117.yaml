@@ -33,9 +33,11 @@ evidence_required:
 created_at: '2026-11-22'
 started_at: 2026-11-22T12:35:07Z
 started_event: sha256:c691d57a3796842dd759e9f5c07dcfe1418dbed139fb3cdd90de8d74855d3e02
-updated_at: 2026-11-22T12:35:37Z
+updated_at: 2026-11-25T04:08:39Z
 verified_at: 2026-11-22T12:35:22Z
 verified_event: sha256:f851e72a60be64f1a7480e256f0949b055d18e736891f4b3234129f65b344512
+completed_at: 2026-11-25T04:08:39Z
+completed_event: sha256:0db0884e8b8b71919d2a5e5768a8eea3d1d98d273cb4d5c32e92b56b67359085
 evidence:
   - covers: "validation_run"
     type: test
@@ -44,3 +46,10 @@ evidence:
     artifact: "feature/battlebrain-executor-binding"
     commit: 69b92b1e1b0bae810a54679881acd9fa7dab1942
     recorded_at: 2026-11-22T12:35:37Z
+  - covers: "validation_run"
+    type: ci
+    command: "Research Rust CI: cargo test --release (battlebrain, mcp-plan, mcp-intent, mcp-panel); git grep -n no_atomic_apply -- tools/"
+    result: "Closes the gap PR #215 left I0117 in VERIFY for (criterion 2's no_atomic_apply refusal had no test). Implementation merged in PR #61 (d4501a821a) and round 2 PR #86 (e9d06f748f). PR #83 (93ada4822c, merge 514e3154ec) added the case panel_decision.rs:1093: a game offering only openttd.ai.set_setting is refused 409 no_atomic_apply, in panel_decision::tests::a_live_decision_is_applied_under_one_expiring_approval_or_refused_with_its_reason. On origin/master eed5cb5fc5, Research Rust run 45538823227 success: that test ok, mcp-panel 425 passed 0 failed, battlebrain 81 passed 0 failed. Criteria 1 and 3 were met by named unit tests (PR #215). NOT RUN: tools/gate.sh change (Mac under its 35 GiB disk floor; the change touches no C++)."
+    artifact: "https://github.com/korczis/OpenTTD/actions/runs/45538823227"
+    commit: eed5cb5fc51439b56924840ff6a6a5fef8753a4f
+    recorded_at: 2026-11-25T04:08:05Z

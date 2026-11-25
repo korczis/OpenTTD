@@ -67,8 +67,11 @@ openttd-36's diagnostic for `fix/prismatic-restore-own-built` counts 5 such prod
   rule needs the money to double within 8 quarters to at least 500k, and the live game only got
   there in 1962. The check runs only on the gate's seed and is never applied to the live game.
 - The panel's replan (`replan.rhai`) kept proposing new lines. Its 199 `openttd.ai.set_setting`
-  calls for company 0 (1952-05-07 to 1962-12-04, `panel.mcp` events) all logged `pending
-  approval`, and none was approved. Nothing reminds anyone of approvals that wait for years.
+  calls for company 0 (1952-05-07 to 1962-12-04, `panel.mcp` events) logged `pending approval`, and
+  none was approved. They did not wait for years. The server cleared 29 of them at the 1952-10-23
+  load ("a new or loaded world"), and its deadline retired the other 170 about 60 wall seconds
+  after filing. A stale panel list kept replan holding as if they were still pending. See
+  [the 2026-11-23 analysis](analysis-2026-11-23-why-prismatic-loses.md) (RC-c).
 
 **4. The evidence the bot was tuned on could not show it.** The duel records pit PrismaticAI
 against PrismaticAI, and the battle matches ran on maps where the first locomotive was
@@ -233,8 +236,10 @@ no list of the pieces they laid before `BuildRailAlong` gave up, so removing it 
 first.
 
 <!-- open-finding kind=staged -->
-Re-plans that wait for approval are not surfaced. 199 `set_setting` calls for company 0 stayed
-pending from 1952 to 1962, and the plan the bot runs is still that of 1950-02-08. Whether the
+Re-plans that wait for approval are not surfaced. None of the 199 `set_setting` calls for company 0
+(1952 to 1962) was approved: 29 were cleared at a load and 170 retired by the deadline within about
+a minute ([analysis](analysis-2026-11-23-why-prismatic-loses.md)). The plan the bot runs is still
+that of 1950-02-08. Whether the
 co-play company's re-plans are approved by the panel or by the owner is the owner's decision.
 
 <!-- open-finding kind=partial -->

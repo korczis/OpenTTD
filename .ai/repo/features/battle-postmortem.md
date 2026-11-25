@@ -35,9 +35,24 @@ The proposals are the self-tuning input. The battle's owner accepts one by addin
 contestant, which makes a new edition. When a proposal equals a contestant that already exists,
 the cause is the bot's behaviour, not its settings.
 
-## Boundaries
+## What it does not do
 
 It reads and proposes only. It opens the store read-only, never edits `battle.json` or the bot,
 and makes no claim about defaults (rule `project.a-tuning-claim-needs-held-start-pairs`).
 `battle.py check` enforces that PrismaticAI is never last (rule `project.prismatic-ai-is-never-last`).
 The post-mortem is the diagnosis when that rule fails.
+
+## Maturity
+
+`draft`, graded 2026-11-25 against [the levels](README.md#maturity-levels).
+
+- **shipped**: the causes `tools/research/mcp-rhai/src/postmortem.rs:133:stalls_small` and the
+  binary `tools/research/mcp-rhai/src/bin/battle-postmortem.rs:403:main`; a record,
+  `research/results/postmortem-155d18ea50071e72.json`.
+- **tested**: twelve unit tests in `tools/research/mcp-rhai/src/postmortem.rs`, among them
+  `tools/research/mcp-rhai/src/postmortem.rs:693:a_stalled_bot_is_last_and_stalls_small`.
+- **missing**: `gated`. No gate tier or CI job runs `cargo test --bin battle-postmortem`; the gate
+  runs only the binary's `check` (`tools/gate.sh:662:battle`), which proves each committed `.md` is
+  what its `.json` derives. Adding `--bin battle-postmortem` to CI's Research Rust tests
+  (`.github/workflows/research-rust.yml:190:bin`) would promote it.
+- **documented**: `research/battle-postmortem.md`.

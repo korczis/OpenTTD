@@ -155,6 +155,7 @@ B=tools/research/ai-battle/battle.py
 python3 $B discover   # scan the local /24 for SSH, probe each machine, write ~/ttd-battle/hosts.json
 python3 $B fetch      # BaNaNaS contestants into ~/ttd-battle/content (loopback-only -D server)
 python3 $B prepare    # arena bundle from HEAD; refuses uncommitted PrismaticAI or referee
+python3 $B prepare --referee-only   # only the referee, to the repository's (run does it on start)
 python3 $B probe      # which arenas are usable now
 python3 $B run        # tournament + dashboard on http://127.0.0.1:8765/ (SIGTERM / Ctrl-C stops)
 python3 $B status     # leaderboard and replays of the current edition
@@ -164,6 +165,9 @@ python3 $B check      # every record valid, every derived file current (exit 10 
 python3 $B fitness    # the working tree's PrismaticAI in one short local match (gate, on change)
 python3 $B ablate --variant "base=..." --variant "x=setting=v" --years 10 --seed S --write
                       # one deterministic local match per settings variant, recorded in research/results
+python3 $B ablate --live-like   # the live world's arms (unplanned, planned) on seed 15805
+python3 $B replay [--rev R] [--save F] [--years N] [--binary B] [--log-dir D]
+                      # a live save loaded headless with this tree's (or R's) PrismaticAI, judged
 python3 $B reap       # stop running matches of older editions on every arena (run does it on start)
 ```
 
@@ -205,9 +209,26 @@ across editions. A new PrismaticAI commit, AI version, referee, contestant, sett
 parameter is a new edition.
 
 `prepare` exports PrismaticAI (`tools/research/prismatic-ai/PrismaticAI`) and the referee with
-`git archive` at one commit. It strips the parent directories, so each tar has its script folder
-at the top. The commit is written into `PROVENANCE.json`. `--allow-dirty` exports the working
-tree instead and marks the edition dirty. `check` refuses every record from a dirty edition.
+`git archive`. It strips the parent directories, so each tar has its script folder at the top.
+PrismaticAI comes from `prismatic.rev` and the referee from `referee.rev` in `battle.json`, both
+`HEAD` by default. `PROVENANCE.json` records the first as `rev` and the second as `referee_rev`,
+and a record page names both when they differ. `--allow-dirty` exports the working tree instead
+and marks the edition dirty. `check` refuses every record from a dirty edition.
+
+**The arena follows the repository's referee (2026-11-25).** The arena prepared on 2026-11-21
+kept a referee that logged no `loan=`, so none of the arena's match logs had it.
+The referee gains fields over time (`loan=`, `REF S`, `REF T`) without changing the score, so it
+follows the repository on its own. `prepare --referee-only`
+(`tools/research/ai-battle/battle.py:1079:refresh_referee`) exports the
+referee at `referee.rev` and leaves PrismaticAI, the AIs and `rev` as they are. It writes the new
+tar beside the old one and renames it over the old one, so a running match keeps the file it
+opened. It then records `referee_rev` and `referee_prepared_at`. When the files are unchanged it
+does nothing, so the edition stays the same. `run` does the same on start
+(`tools/research/ai-battle/battle.py:1110:follow_referee`;
+`referee.follow: false` turns it off). A different referee is a new edition, like any other
+change to the bundle. An arena host gets the new tar on the orchestrator's next sync of the
+arena. The orchestrator therefore needs a checkout that has this change, and then a restart of
+`run`.
 
 ## How a match runs
 
@@ -323,10 +344,12 @@ The first editions showed two failures. The battle now catches both by itself.
   The same check flagged CivilAI crashing (thousands of Squirrel errors in one match).
 - **Two PrismaticAI companies on one map (2026-11-22).** The fitness check's fifth lineup plays
   `PrismaticAI sibling A` and `PrismaticAI sibling B` against AAAHogEx and LuDiAI AfterFix. The
-  referee prints a `REF S date=<y>-<m> ind=<id> owners=<cid>,... name=<industry>` line for every
-  producer whose output rail stations of two or more companies pick up. `battle.py fitness` prints
-  each such producer and fails with `shared_producer:<industry> (industry <id>, from <quarter>):
-  <key> + <key>` when two of the owners are PrismaticAI. Four PrismaticAI companies of the owner's
+  referee prints a `REF S date=<y>-<m> ind=<id> cargo=<cargo id> owners=<cid>,... name=<industry>`
+  line for every producer and cargo that rail stations of two or more companies pick up (since
+  2026-11-23 per cargo: two companies taking a farm's grain and its livestock split nothing).
+  `battle.py fitness` prints each such producer and fails with `shared_producer:<industry>
+  (industry <id>, cargo <cargo id>, from <quarter>): <key> + <key>` when two owners of one cargo are
+  PrismaticAI. Four PrismaticAI companies of the owner's
   live game had stalled on exactly this
   ([incident 2026-11-22](../incident-2026-11-22-sibling-industries.md)).
 - **Rail stations without a train (2026-11-23).** Each quarter the referee prints
@@ -344,6 +367,21 @@ The first editions showed two failures. The battle now catches both by itself.
   the fitness seed master failed `trainless_stations` in all five PrismaticAI lineups, with 1 to 6
   stations kept a year
   ([incident 2026-11-23](../incident-2026-11-23-trainless-lines.md)).
+- **The claim race (2026-11-23).** The seventh lineup, `PrismaticAI claim race A` and
+  `PrismaticAI claim race B` against AAAHogEx and LuDiAI AfterFix, is the sibling lineup with
+  `test_claim_race=20` on company 0. Both choose the same mine first. Company 0 waits 20 days after
+  its claim check, so company 1 builds and checks its source station first. Only the second claim
+  check (`ClaimBlocks` in `rail.nut`, after the destination station) can then settle the race. The
+  lineup is judged by `shared_producer` like every other one. With that check removed, it fails
+  ([incident 2026-11-22](../incident-2026-11-22-sibling-industries.md)).
+
+- **The growth funnel (2026-11-24).** Each PrismaticAI logs one
+  `FUNNEL year=<y> mode=<mode> <stage>=<n> ...` line per mode once a game year
+  (`PrismaticAI/funnel.nut`, [growth funnel](../growth-funnel.md)). `battle.py fitness` prints each
+  of them with `most lost:`, the stage of each population (discovery, build, run) that lost the
+  largest share, and the post-mortem of an arena match carries each mode's last line
+  (`parse_funnel`). It fails with `no_funnel: no FUNNEL rail line for <years>` for a contestant
+  in `fitness.must_funnel` whose rail line is missing for a year the match played whole.
 
 **A planned bot that hoards (2026-11-22).** In the owner's live co-play game, company 0 was a
 planned PrismaticAI (`b.planned` in `main.nut`: the panel had set its rail pair). It kept 35-37
@@ -562,6 +600,58 @@ needs held start pairs (rule `project.a-tuning-claim-needs-held-start-pairs`), n
 - **Defaults.** A tuned variant is a candidate. It becomes a default only through held-start duel
   pairs (rule `project.a-tuning-claim-needs-held-start-pairs`).
 
+## Live outcomes
+
+The arena is not the owner's game: its maps, opponents and length differ. The GA's best arena
+variant (g347.3) was started live and came last of four PrismaticAI configurations in game 2927.
+So live games feed back into the tuning. There are three steps, and each reads only tracked files:
+
+1. **Record.** `battle.py live-export --game-seed <seed> --panel <url>` reads one game from the
+   panel's DuckDB store, read-only. It sends SELECTs through `/api/db/query`, or with `--db <copy>`
+   it reads a copy of the store through the duckdb CLI, never the live file. It writes
+   `research/results/live-<seed>-<run_ms>.json` (schema `ai-live-outcome/v1`). The record has:
+   - the game's runs (a `--load` under a new run seed is followed while company 0 keeps its name);
+   - the planner's revision;
+   - each company's AI, its start settings, and the setting changes requested for it, each with the
+     date the approval server enacted it (`decision.recorded`, succeeded) or null;
+   - each company's value, money, loan and fleet at every year end;
+   - each company's last mode mix (the watchdog's train, road, ship and aircraft counts);
+   - the outcome;
+   - a SHA-256 of the store rows it was made from.
+
+   The map's own settings (`fr*_`, `line*_`, `rail_a/b`, `air_a/b`) are left out because they name
+   industries, not a strategy. `check` refuses a record whose outcome is not derived from its series.
+2. **Judge.** Each PrismaticAI company is judged on one configuration. Its end is the last year end
+   before its first applied setting change. A game that mixed configurations proves none of them,
+   but a request that was never enacted (unanswered, expired or denied) changed nothing. In game
+   15805, replan's `rail_after=7` of 1952-05-08 was never enacted, so that game is judged at 1953-12
+   and not at 1951-12. The end is at most `tuning.live.horizon_years` game years in and at least
+   `min_years`. The PrismaticAI companies of one game are compared at the earliest of their ends.
+   When one game has several, a configuration worth less than `paired_margin` times the game's best
+   has lost. A configuration alone in its game has lost to the rival itself when it is worth less
+   than `loss_ratio` times the reference AI (`reference`, AAAHogEx).
+3. **Act.** A variant whose genes are within a lost configuration's radius is never the GA's elite
+   or a parent again, and the orchestrator logs a `TUNING ... vetoed` event for it. The radius is
+   `veto_genes` differing genes for a paired loss and `loss_veto_genes` for a loss to the reference.
+   The best configuration of a paired live comparison joins the next generation as child
+   `g<n>.live` if it did not lose and no variant has had its genes yet: live play suggests it, and
+   the arena measures it. `battle.py live-settings` derives the next live start,
+   `research/results/live-start.json`. It chooses only a configuration with live evidence: the one
+   a live game judged and found not lost with the best ratio to the reference, unless another
+   game's loss vetoes it. The newest battle record's PrismaticAI configurations are listed beside it
+   with their arena ratio and their veto, but none is chosen on arena evidence alone. When nothing
+   qualifies, `settings` is null and `live-settings` exits 10, so a start never falls back to
+   info.nut's defaults unseen. `render` (and so `surfaces sync`) keeps the file current, and `check`
+   refuses it when it is stale. A live start sets `PRISMATIC_BOT_SETTINGS` from
+   `jq -r .settings research/results/live-start.json`, and does not start when it is null.
+
+There is no score term. With a handful of live games, a kernel prior over the gene space would
+turn one map into a verdict on the neighbours of the configuration that played it (a codex review,
+2026-11-23, kept with `majordomus reasoning record`). The veto reaches only a lost configuration's
+radius, and the seed only adds matches. The battle brain (`tools/research/battle-brain`, an Axon
+ensemble) does not train on live rows yet. Its label is a value share relative to the default
+PrismaticAI on the same seed, and a live game has no such pair.
+
 ## Double track
 
 AAAHogEx's rail scales by double track; PrismaticAI's single-track line holds two trains. The
@@ -591,6 +681,114 @@ when one is last by final value on its seed. It runs one match per PrismaticAI
 configuration (default, self-steward, solo-max, planned), in parallel, each against AAAHogEx,
 LuDiAI AfterFix and AdmiralAI.
 
+## The live-like arena and the 15805 replay
+
+The arena's world is not the owner's live game: the arena starts in 1960 with four rivals and an
+unplanned bot; live games start in 1950 with seven rivals, and the bot is sometimes planned. In
+live game 15805, PrismaticAI ran one train from 1950-04 to 1958-06. In 5,927 arena matches, it had
+at most one train at year 10 in 0.2% of them
+([incident](../incident-2026-11-23-live-game-15805.md)). Two additions bring the live world into
+the battle.
+
+**`live_like` in `battle.json`** declares the live world once:
+
+- Match settings: 1950, 256x256, temperate, reduced breakdowns. These are the engine's defaults,
+  and the live stack keeps them: its `openttd.cfg`
+  (`tools/research/mcp-rhai/src/panel.rs:start`, `Panel::start`) sets no world setting.
+- The script budget: `script_max_opcode_till_suspend = 250000`, the panel's `SCRIPT_OPCODES`.
+  The engine default is 10000. `battle_cfg_text` writes it only for a match that sets
+  `script_opcodes`, so the arena's editions keep their configuration.
+- The seven rivals with the versions the live game runs: AAAHogEx 115, LuDiAI AfterFix v27,
+  CivilAI 37, AdmiralAI 25, NoCAB 2.1.4, DictatorAI 183, SimpleAI 14. They were read on
+  2026-11-24 from `GET /api/bots` `running` and `~/Documents/OpenTTD/ai`.
+- PrismaticAI in company slot 0, as live.
+- Seed 15805, the live game's seed.
+- Two arms. `unplanned` is game 15805's genome without planner slots. `planned` is the settings
+  its planner started the bot with on 1950-02-08 (store event `bot.settings`), with its `fr_*`
+  and `rail_*` slots.
+
+Seed 15805 does not give game 15805's map here. In the live-like match, none of the live map's
+towns appears (no Lenhill City, Minnbridge, Flardingham or Dontford in the log). The planned arm
+is therefore a fixed slot set: its ids name other industries and towns on this map, and it is not
+the live plan. Why the same seed gives another map is not known yet. Candidates are a setting the
+live server sets, or the difference between a dedicated server and the null driver. A paired run
+of the planned bot needs a plan made on each map it plays.
+
+`fetch` also downloads the live rivals and names any version it lacks. `ablate --live-like`
+plays the arms through the ordinary `ablate` path: same seed, same field, PrismaticAI's slot.
+`--variant` and `--seed` replace the arms and the seed. It warns when the arena's tars are not
+the live versions.
+
+`ablate --live-like` on lundra, 2026-11-24, gave the following on seed 15805 at 1956-01, after six
+years. All eight companies played. Each arm is one match on one seed, so this is no comparison
+between the arms.
+
+| Arm | PrismaticAI value | Trains | AAAHogEx value | Trains | Ratio |
+|---|---|---|---|---|---|
+| `unplanned` | 1,183,752 | 15 | 4,217,785 | 60 | 0.281 |
+| `planned` | 1,107,319 | 8 | 3,136,655 | 63 | 0.353 |
+
+AAAHogEx grows about as fast as it did live (4.34M at the end of 1955). PrismaticAI does not
+repeat its live failure here: live it was worth 238k at the end of 1955, a ratio of 0.055. A fresh
+live-like start with the same genome therefore does not reproduce game 15805. Several things
+differ from the live game: the map, the approvals, the reloads and the deploys. The save replay
+below is what reproduces the failure.
+
+**`replay`** loads a copy of a live save headless. It uses a scratch HOME, the null drivers, the
+working tree's PrismaticAI (or the one at `--rev`) and the arena's rival tars, and runs for
+`years` game years. The live save is never written. A loaded save keeps its own Game Script, and
+the live game runs none, so the referee cannot report. The console reports instead.
+`game_start.scr` opens a console log (`script`), prints `getdate` and `companies`, and schedules
+`monthly.scr` with `schedule on-next-calendar-month`. `monthly.scr` prints them again and
+schedules itself. The result is one report a month, with every company's money, loan, value and
+train, road, air and ship counts.
+
+An lzma save is unpacked to an uncompressed one (tag `OTTX` to `OTTN`, the same chunks), because a
+binary built without liblzma, such as lundra's, cannot load it. A replay is invalid, and fails, in
+two cases:
+
+- an AI the save names is not available, so the game loads a random one in its place;
+- it reports fewer months than its years.
+
+`battle.json` `replay` judges company 0. It fails when, after `years` (4), any of these holds:
+
+- the bot has fewer than `min_trains` (2) trains;
+- it ran at most one train in every month of the last `one_train_years` (3);
+- its value is under `min_leader_ratio` (0.05) of the best other company.
+
+The thresholds come from the live record. Live, the bot had one train from 1950-04 to 1958-06,
+and at the end of 1956 it was worth 317k against AAAHogEx's 6,302k, a ratio of 0.050. The save
+is game 15805's earliest, `deploy-225.sav`, written at the load of 1952-10-23 that deployed #225.
+The gate does not run `replay`: the save exists only on the owner's machine.
+
+<!-- open-finding kind=failed -->
+`-G 15805` with the live-like match settings does not regenerate live game 15805's map: none of
+its towns appears in the headless log (2026-11-24, lundra, `20261122-master-g2a6a616221`). The
+planned arm is a fixed slot set, not the live plan, and the start of 15805 cannot be replayed from
+its seed. Only its saves can be replayed.
+
+Measured on lundra, 2026-11-24. The binary was `20261122-master-g2a6a616221` (dedicated, without
+liblzma). The rivals were exactly the live versions. Each run took about 380 s.
+
+| PrismaticAI | Trains (end of 1953, 1954, 1955, 1956-10) | Value at 1956-10 | Leader (AAAHogEx) | Ratio | Verdict |
+|---|---|---|---|---|---|
+| `ff03ebb639` (#225, what ran live after that load) | 1, 1, 1, 1 | 309,015 | 5,765,661 (86 trains) | 0.054 | **FAIL**: 1 train at the end; at most one train from 1953-11 to 1956-10 |
+| master `eb0d839ce0` | 2, 2, 3, 3 | 151,321 | 5,172,451 (80 trains) | 0.029 | **FAIL**: value 0.029 of the leader |
+
+The old code reproduces the live failure headless. It ran one train for the whole replay, and its
+value is within 3% of the live one at the same horizon (309k vs 317k at the end of 1956). The
+replay therefore fails on the code path that failed live.
+
+Master no longer runs one train. It equips two more lines by 1955, but it ends worth half as much
+as the old code: 151k against 309k, 0.029 of the leader. The train clauses pass and the value
+clause fails. On this save, master's extra lines cost more than they return within four years.
+That is an open finding, not a pass.
+
+<!-- open-finding kind=failed -->
+On the 15805 save, master's PrismaticAI runs 3 trains instead of 1. Its value after four years is
+151k against the old code's 309k, and 0.029 of AAAHogEx, under the live ratio of 0.050. More lines
+do not yet mean more value on this map.
+
 ## Where we lose: post-mortems, store, throughput
 
 - **Telemetry.** The referee (v3) adds these fields to each company's quarterly line:
@@ -609,7 +807,10 @@ LuDiAI AfterFix and AdmiralAI.
 - **Store.** Everything is written to `~/ttd-battle/results/battle.sqlite`:
   - tables `matches` (with the lineup as `{key, ai, settings}`), `samples`, `standings`,
     `postmortems`, `host_perf` and `events`,
-  - column names are only ever added, never renamed,
+  - column names are only ever added, never renamed, and a store made before a column existed gets
+    it added when it opens; its older rows read NULL there ("not recorded"). The sample's `loan`
+    was added on 2026-11-25: before that the store dropped it, so stored `money` from earlier
+    matches cannot be judged net of the loan,
   - DuckDB reads it with `ATTACH '<file>' (TYPE sqlite)`,
   - `GET /api/query?sql=` runs one read-only `SELECT`/`WITH` on it.
 - **Throughput.** `host_perf` and `/api/perf` give game years per wall-clock minute per arena.
@@ -667,6 +868,8 @@ The dashboard has these features:
 | `~/ttd-battle/results/<edition>/matches/<id>.json` | each match: arena, build, seed, lineup, quarterly series, standings |
 | `research/results/battle-*.json` / `.md` | the tracked records; the `.md` (tables and charts) is derived from the `.json` by `render` |
 | `research/results/ablation-*.json` / `.md` | the tracked ablations (`ablate --write`); the `.md` (table and charts) is derived from the `.json` by `render` |
+| `research/results/live-*.json` | the tracked live game records (`live-export`), one per game |
+| `research/results/live-start.json` | the next live start's settings and their evidence, derived by `render` (`live-settings`) |
 
 Removing `~/ttd-battle` on every machine removes everything the battle wrote outside this
 repository.
