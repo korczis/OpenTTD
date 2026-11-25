@@ -38,12 +38,12 @@ pie showData title Open findings by kind
     %% links: open-findings.md?col=Kind&filter=blocked#findings | open-findings.md?col=Kind&filter=out-of-scope#findings | open-findings.md?col=Kind&filter=not-run#findings | open-findings.md?col=Kind&filter=partial#findings | open-findings.md?col=Kind&filter=staged#findings | open-findings.md?col=Kind&filter=unreviewed#findings | open-findings.md?col=Kind&filter=failed#findings | open-findings.md?col=Kind&filter=handoff#findings
     "blocked" : 71
     "out-of-scope" : 40
-    "not-run" : 21
+    "not-run" : 23
     "partial" : 17
     "staged" : 16
     "unreviewed" : 9
     "failed" : 7
-    "handoff" : 1
+    "handoff" : 4
 ```
 <!-- surfaces:end open-findings -->
 
@@ -55,10 +55,10 @@ pie showData title Open findings by kind
 | blocked | 71 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
 | out-of-scope | 40 | A finished issue left this out (its non_scope) and no open issue names it |
 | failed | 7 | A run or check the records say failed |
-| not-run | 21 | A validation the records say did not run |
+| not-run | 23 | A validation the records say did not run |
 | partial | 17 | A capability or run the records say is only partly there |
 | staged | 16 | Designed and written down, not implemented |
-| handoff | 1 | A change asked of another repository; nothing in this one can close it |
+| handoff | 4 | A change asked of another repository; nothing in this one can close it |
 | unreviewed | 9 | A knowledge record still awaiting its review |
 | drift | 0 | An issue's stamps contradict its delivered work (live only: majordomus plan drift) |
 
@@ -192,6 +192,8 @@ pie showData title Open findings by kind
 | not-run | NOT RUN: a live pull (needs the owner's approval and p1's go-ahead); | [I0097](../.ai/repo/project/issues/I0097.yaml):46 | none — needs an issue | OBSERVED |
 | not-run | NOT RUN: the OpenTTD build of tools/gate.sh change, because the Mac is under the 35 GiB disk floor (31 GiB free after freeing 8.6 GB of my merged build outputs); | [I0117](../.ai/repo/project/issues/I0117.yaml):43 | [I0117](../.ai/repo/project/issues/I0117.yaml) | OBSERVED |
 | not-run | NOT RUN: tools/research/mcp-panel-check (needs a live panel built from master; | [I0220](../.ai/repo/project/issues/I0220.yaml):41 | [I0220](../.ai/repo/project/issues/I0220.yaml) | OBSERVED |
+| not-run | echo: Prismatic echoes observed_digest in GET /api/openttd/decision: NOT RUN | [research/agent-loop.md](agent-loop.md):79 | none — needs an issue | OBSERVED |
+| not-run | companies: the bridge's GET /companies carries a tick and a digest: NOT RUN | [research/agent-loop.md](agent-loop.md):81 | none — needs an issue | OBSERVED |
 | not-run | The money effect of the planned-mode trap and of the broken decide-to-act loop was not measured: no paired replay from held starts was run. This and the other items below were not verified, or could not be: | [research/analysis-2026-11-23-why-prismatic-loses.md](analysis-2026-11-23-why-prismatic-loses.md):490 | none — needs an issue | OBSERVED |
 | not-run | C2 correctness, per pair (H1): NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):267 | none — needs an issue | OBSERVED |
 | not-run | C3 performance: NOT RUN (owner's one-game order) | [research/battlebrain/experiment-freight-margin.md](battlebrain/experiment-freight-margin.md):268 | none — needs an issue | OBSERVED |
@@ -236,6 +238,9 @@ pie showData title Open findings by kind
 | staged | prompts/list / prompts/get: STAGED | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):26 | none — needs an issue | OBSERVED |
 | staged | logging notifications: STAGED | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):27 | none — needs an issue | OBSERVED |
 | staged | progress / cancellation: STAGED | [research/prismatic-mcp/spec-compliance-matrix.md](prismatic-mcp/spec-compliance-matrix.md):28 | none — needs an issue | OBSERVED |
+| handoff | prismatic-platform: echo observed_digest, the digest of the companies it read from OPENTTD_BRIDGE_URL, in the answer of GET /api/openttd/decision (OpenttdController#decision); this fork's panel already checks an echo (tools/research/mcp-rhai/src/panel_decision.rs freshness). | [research/agent-loop.md](agent-loop.md):85 | none — needs an issue | OBSERVED |
+| handoff | openttd-prismatic-bridge: merge feature/operator-approval (09afefa: the bridge approves nothing itself, a waiting setting is answered pending, POST /decision/resume applies it once the operator approved it in the game) into main. | [research/agent-loop.md](agent-loop.md):91 | none — needs an issue | OBSERVED |
+| handoff | openttd-prismatic-bridge: carry the game tick and a digest of the companies' identities on GET /companies, as this fork's panel records them (tools/research/mcp-rhai/src/panel_decision.rs observe, identity_digest). | [research/agent-loop.md](agent-loop.md):96 | none — needs an issue | OBSERVED |
 | handoff | So Battlebrain keeps an adapter registry (ADAPTERS in tools/research/mcp-rhai/src/battlebrain_contract.rs). For one kernel id, an adapter states the capability it satisfies, how each requirement field maps to the kernel's input and output, with the conversion, whether the… | [research/battlebrain/algoglyph-contract-proposal.md](battlebrain/algoglyph-contract-proposal.md):24 | none — needs an issue | OBSERVED |
 | unreviewed | candidate: Resource reads of a running game span ticks; a planner capture is at one tick only through openttd.resources.read_many | [.ai/repo/knowledge/candidates/a-planner-capture-is-coherent-only-through-read-many.md](../.ai/repo/knowledge/candidates/a-planner-capture-is-coherent-only-through-read-many.md):8 | none — needs an issue | OBSERVED |
 | unreviewed | candidate: AlgoGlyph's track-planning kernel answers found, unreachable or budget, never ok; only found prices a line | [.ai/repo/knowledge/candidates/algoglyph-track-planning-answers-found-unreachable-or-budget.md](../.ai/repo/knowledge/candidates/algoglyph-track-planning-answers-found-unreachable-or-budget.md):8 | none — needs an issue | OBSERVED |
