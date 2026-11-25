@@ -921,6 +921,13 @@ mod tests {
         assert_eq!(r.query_bound(trend, &p(json!({"company": 1, "months": 1}))).unwrap()["rows"],
                    json!([["1951-02", 250.0, -50.0, 250.0, -50.0, 3]]));
         assert_eq!(r.query_bound(trend, &p(json!({"company": 1}))).unwrap_err(), "missing parameter: months");
+        // The capital watch's months (capital_watch.rhai): every company of the latest run, oldest
+        // first, the last sample of each month, within $months of the run's newest month.
+        let capital = sql::query("capital_months").unwrap();
+        assert_eq!(r.parameters(capital).unwrap(), vec!["months"]);
+        assert_eq!(r.query_bound(capital, &p(json!({"months": 1}))).unwrap()["rows"],
+                   json!([[0, "A", "1951-02", 180.0, 0.0, 0.0, 2, 180.0], [1, "B", "1951-02", 250.0, 0.0, 0.0, 3, 250.0]]));
+        assert_eq!(r.query_bound(capital, &p(json!({"months": 18}))).unwrap()["rows"].as_array().unwrap().len(), 4);
         // A value is bound, never pasted: a hostile string is just a company that does not exist.
         let _ = r.query_bound(rank, &p(json!({"company": "0; DROP TABLE runs"})));
         assert_eq!(r.query("SELECT count(*) FROM runs").unwrap()["rows"], json!([[1]]));

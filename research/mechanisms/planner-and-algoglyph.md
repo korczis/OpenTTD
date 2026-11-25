@@ -130,11 +130,11 @@ The script composes what exists and decides nothing of its own:
 | Its rank by value and its value change over the last six months | the store's views `company_latest` and `company_month` |
 | The competition: each company's last quarter, and per transport type the profit per vehicle a year old, with the leader and this company's gap to it | the same calls, `openttd://vehicles` |
 | A fresh portfolio on today's map and money | `POST /api/bots/planned` (mcp-plan, AlgoGlyph track-planning and knapsack-dp), published as `plan.portfolio` and `plan.bot_settings` |
-| The chance that a new line pays | AlgoGlyph `bayes-update` on this company's own lines a year old: earned or lost |
+| The chance that a new line pays | AlgoGlyph `bayes-update` on this company's own lines a year old, earned or lost, kept per mode (rail, road, air, water, by vehicle type). A plan is judged by the modes of the lines it adds: a freight slot or the rail pair is rail, the air pair is air. Where it adds two modes, the weaker lower bound decides. A plan that adds no line is judged on the whole record |
 | The months to pay back the portfolio's investment | AlgoGlyph `pert-monte-carlo`, optimistic, likely and pessimistic at the posterior's upper end, mean and lower end |
 | The verdict | a switch only when the lower end is at least `MIN_PAYS` (0.5) and 80 % of the draws pay back within `HORIZON_MONTHS` (24) |
-| The changes | `build_plan::apply_to` that company: only settings that differ from the bot's live ones, each approval-gated. Nothing new is proposed while an earlier change for the company still waits for the owner, or while another planner holds the company: the shared key `planner.<company>` names it (unset or `replan`: this service) |
-| The record | the shared blackboard `replan.<company>` (a `rhai.shared` event, so on the bus and in the store), and a `plan` record on the Majordomus mesh when the panel has a mesh session |
+| The changes | `build_plan::apply_to` that company, in one call: only settings that differ from the bot's live ones, each approval-gated, after [`bot_floors.rhai`](../../tools/research/mcp-panel/rhai/bot_floors.rhai) `guard` (below). Nothing new is proposed while an earlier change for the company still waits for the owner, or while another planner holds the company: the shared key `planner.<company>` names it (unset or `replan`: this service) |
+| The record | the shared blackboard `replan.<company>` (a `rhai.shared` event, so on the bus and in the store), and a `plan` record on the Majordomus mesh when the panel has a mesh session. `held` is why the round held, as text: another planner, approvals still waiting, or the model's reason. It is null when the round proposed or had nothing to change. `held_by` is the planner refusal, `record.by_mode` and `model.by_mode`/`judged_by` the per-mode record, `floors` what the guard did, and `sent` the settings filed |
 
 The planner's call prices up to 16 rail lines with AlgoGlyph and took 3 min 10 s at load 50, so the
 script raises its own HTTP timeout for that call only (`http_timeout(seconds)`, per script thread).
@@ -167,6 +167,42 @@ line without a route. Details are in
 On 2026-11-22 the first version proposed again every round. The plan's `fr*` slots changed
 from round to round, so the proposals did not collapse onto earlier ones, and about 130 waited unanswered.
 That is why a round now holds while anything waits.
+
+### The plan keeps the bot's autopilot floors
+
+PrismaticAI raises `own_lines` to 10 and `max_routes` to 30, caps `cash_reserve` at 5000, and sets
+`intercity` and `self_steward` only while it has no plan (`main.nut`, `if (b.autopiloted)`). A plan
+is one complete freight slot, the rail pair or the air pair. Once a re-plan gives it one, the bot
+runs on its live values. In game 10487 (2026-11-23) replan filed 36 `ai.set_setting` rows on
+1952-04-05 to 1952-04-07. The owner's chat approved the first. The approval deadline's standing
+verdict `approve` executed the other 35 on 1952-04-12, with nobody answering. On 1952-04-15 the
+heartbeat changed from `own_cap=10 ... autopilot=engaged` to `own_cap=4 ... own_lines=4
+autopilot=growth-on-plan`. The 4 was the run's start string, inert while the floor applied. The
+bot stayed there until the game ended in 2114, with 42 vehicles. Run 12609 did the same through
+three chat approvals (#227, #460, #461) that completed slot `fr10` over nine months. No other path
+handed the bot its slots. The bot started with every slot unset, and the live values of
+`fr_` and `fr2_` are those of approved rows (#31 to #33, #129 to #131).
+
+`bot_floors.rhai` is the panel's one copy of those floors. The test
+`the_floors_are_main_nuts_autopilot_block` (`src/rhai_shared.rs`) reads `main.nut` and fails when
+the two drift. Its `guard(live, diff)` takes the bot's line groups from the names the bot declares
+(`x_from`/`x_to`/`x_cargo`, `x_a`/`x_b`), so it names no slot (rule
+`project.decision-authority-boundaries` B2). It changes a plan's difference in four ways:
+
+1. A plan never turns the autopilot off, because with it off there are no floors.
+2. A line the plan touches is filed whole, so its members go through the same plan.
+3. With the autopilot on, a floor key that the plan proposes is held to its floor.
+4. When the bot would be planned afterwards, each declared floor key whose live value would drop
+   the floor is filed at its floor in the same call. The 1952-04 plan of 10487 would have carried
+   `own_lines=10`.
+
+A bot that is already planned and has lost a floor is offered it back alone while the model holds
+its new plan. An approval of the whole plan at once is the plan batch of `fix/approval-plan-batch`
+(one plan id over every row of one `apply_to`). Until that lands, an approver can still pick single
+rows of a plan by hand, but the deadline's `approve` executes all of them. A mode with no line a
+year old starts at the prior alone, whose lower bound is below `MIN_PAYS`. So replan never proposes the
+first line of a mode. The bot's autopilot builds that first line itself, as it built the trains of
+10487 (a design review by codex, 2026-11-24, named this cold start).
 
 The payback is only as good as the planner's monthly profit, and the planner over-predicts
 ([`the-planner-overpredicts-what-a-line-earns`](../../.ai/repo/knowledge/curated/the-planner-overpredicts-what-a-line-earns.md)).
