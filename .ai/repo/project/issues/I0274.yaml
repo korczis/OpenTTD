@@ -1,0 +1,28 @@
+id: I0274
+milestone: the-strategy-is-reviewed-on-a-cadence
+title: "replan answers gap.<company>.requests with a focused replan, accepted or declined with a reason, and an unanswered request escalates"
+slug: replan-answers-review-requests
+priority: p1
+profile: implementation
+parallel_safe: true
+objective: "Owner: openttd-51 (replan.rhai); J files the requests. gap_watch files requests (a mode focus when one type's volume term dominates; 'more of what earns' when our yield is higher but volume lower) in gap.<company>.requests. replan reads them, records accepted or declined with a reason in replan.<company>, runs off-cycle with the focus (price air candidates; add vehicles to lines that earn), and proposes one superseding plan. A request with no answer within one month escalates in the digest. The live tuner proposes nothing for a setting a pending replan plan holds."
+why: "The planner was never asked about the mode the leader wins with."
+scope:
+- "tools/research/mcp-panel/rhai/replan.rhai"
+- "tools/research/mcp-panel/rhai/gap_watch.rhai"
+- "tools/research/mcp-panel/rhai/prismatic_tune.rhai"
+non_scope:
+- "Any change to the live game's state or processes"
+- "Any change in prismatic-platform or algoglyph"
+depends_on:
+- I0271
+serves:
+- "the-research-bot-competes-and-its-losses-are-explained#a-gap-to-the-leader-is-detected-and-answered"
+acceptance_criteria:
+- "a request with focus air leads to a plan whose candidates include air routes, or a recorded reason why none exist (script test)"
+- "replan's record names the request and its state; a request unanswered for a month appears in the digest"
+validation:
+- "cargo test --release --offline --manifest-path tools/research/mcp-rhai/Cargo.toml --bin mcp-panel"
+evidence_required:
+- validation_run
+created_at: '2026-11-23'
