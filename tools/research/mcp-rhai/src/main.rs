@@ -1227,6 +1227,8 @@ mod tests {
                 "openttd://depots" => super::to_dyn(w["depots"].clone()),
                 "openttd://map/ways" => super::to_dyn(w["ways"].clone()),
                 "openttd://map" => super::to_dyn(w["map"].clone()),
+                // The owner co-plays company 0 as the registered approver (ttd::owner_company()).
+                "openttd://approvals" => super::to_dyn(json!({"data": {"approver_companies": [{"company": 0, "client_id": 2}]}})),
                 other => Err(format!("unexpected read {other}").into()),
             }
         });
@@ -1344,6 +1346,7 @@ mod tests {
             match uri {
                 "openttd://game/state" => super::to_dyn(json!({"game_tick": tick, "game_date": format!("1951-01-{:02}", n + 1)})),
                 "openttd://stations" => super::to_dyn(json!({"data": {"stations": [{"owner": 0}, {"owner": 0}, {"owner": 1}]}})),
+                "openttd://approvals" => super::to_dyn(json!({"data": {"approver_companies": [{"company": 0, "client_id": 2}]}})),
                 "openttd://companies" => super::to_dyn(json!({"data": {"companies": [
                     {"id": 0, "name": "Owner Co", "money": 9000, "fleet": {"train": 1, "road": 25, "ship": 0, "aircraft": 6}},
                     {"id": 1, "name": "Rival", "money": 90000, "fleet": {"train": 0, "road": 10 + n, "ship": 0, "aircraft": 0}}]}})),
@@ -1393,6 +1396,42 @@ mod tests {
         let said = said.lock().unwrap();
         assert_eq!(said.len(), 1, "the owner's company is told once per stall: {said:?}");
         assert!(said[0].starts_with("\"[watchdog] Owner Co: nothing built or bought for 10 game day(s) (threshold 7): 1 approval(s) wait"), "{}", said[0]);
+    }
+
+    /// ttd::owner_company(), the one source of the owner's company every service asks: the
+    /// $OWNER_COMPANY override, else where a registered approver plays (openttd://approvals), else
+    /// the first company the panel's AI runs, else (); a failed source is skipped, never fatal, and
+    /// a script-defined function reaches it through the global import.
+    #[test]
+    fn owner_company_is_derived_from_the_override_the_approver_seat_or_the_panel_ai() {
+        use serde_json::{json, Value};
+        use std::sync::{Arc, Mutex};
+        let case = |over: &str, approvals: Option<Value>, ai: &str, running: Value| -> rhai::Dynamic {
+            let mut e = lib_engine();
+            let over = over.to_string();
+            e.register_fn("env", move |name: &str| -> String { if name == "OWNER_COMPANY" { over.clone() } else { String::new() } });
+            let a = Arc::new(Mutex::new(approvals));
+            e.register_fn("read", move |uri: &str| -> super::R<rhai::Dynamic> {
+                match (uri, a.lock().unwrap().clone()) {
+                    ("openttd://approvals", Some(v)) => super::to_dyn(v),
+                    _ => Err(format!("unexpected read {uri}").into()),
+                }
+            });
+            let ai = ai.to_string();
+            e.register_fn("status", move || -> super::R<rhai::Dynamic> { super::to_dyn(json!({"ai": ai.clone()})) });
+            let r = Arc::new(Mutex::new(running));
+            e.register_fn("api_bots", move || -> super::R<rhai::Dynamic> { super::to_dyn(json!({"running": r.lock().unwrap().clone()})) });
+            e.eval::<rhai::Dynamic>("import \"ttd\" as ttd; fn owner() { ttd::owner_company() } owner()").unwrap()
+        };
+        let seat = |c: Value| Some(json!({"data": {"approver_companies": [{"company": c, "client_id": 2}, {"company": 6, "client_id": 3}]}}));
+        let bots = json!([{"id": 4, "ai": "AAAHogEx"}, {"id": 2.0, "ai": "PrismaticAI"}]);
+        assert_eq!(case("5", seat(json!(1)), "PrismaticAI", bots.clone()).as_int().unwrap(), 5, "the override wins");
+        assert_eq!(case("", seat(json!(1)), "PrismaticAI", bots.clone()).as_int().unwrap(), 1, "then the approver's seat, the first one");
+        assert_eq!(case("", seat(json!(3.0)), "", json!([])).as_int().unwrap(), 3, "a float id is an integer");
+        assert_eq!(case("", Some(json!({"data": {"approver_companies": []}})), "PrismaticAI", bots.clone()).as_int().unwrap(), 2,
+                   "no approver plays: the panel's AI, not another bot");
+        assert_eq!(case("", None, "", bots.clone()).as_int().unwrap(), 4, "approvals unreadable, no AI named: the first running bot");
+        assert!(case("", None, "PrismaticAI", json!([])).is_unit(), "nothing known: ()");
     }
 
     /// The threshold follows the data: the start value until MIN_GAPS quiet times, then 1.5 times

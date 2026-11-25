@@ -21,15 +21,15 @@
 // company 1 in the game); every write is a rhai.shared event on the bus and in the DuckDB store,
 // where the view build_audit has one row per company and game month. A key of a company that no
 // longer has anything to audit is deleted. One chat line, only when the owner's company
-// (OWNER_COMPANY, co-played with PrismaticAI) has a new defect; the first round after the panel's
+// (ttd::owner_company(), co-played with PrismaticAI) has a new defect; the first round after the panel's
 // memory is empty is the baseline and says nothing.
 //
 // Read-only toward the game: it reads resources, writes the panel's memory and chats; it issues no
 // command and approves nothing. BUILD_AUDIT_EVERY_S (default 20) is how often it looks at the date;
 // BUILD_AUDIT_ROUNDS stops it after that many looks (0 or unset: never).
 
-// The owner's company, co-played with PrismaticAI.
-const OWNER_COMPANY = 0;
+import "ttd" as ttd;
+
 // Defects kept in full in a key (all are counted and keyed), and named in the chat line.
 const KEEP = 30;
 const SAY = 3;
@@ -113,7 +113,7 @@ loop {
                                        ways: read("openttd://map/ways"), map: read("openttd://map") });
             let prev = #{};
             for c in audit.companies { prev[`${c.company}`] = shared_get(key_of(c.company)); }
-            let r = round(audit, prev, shared_keys("audit."), OWNER_COMPANY, date);
+            let r = round(audit, prev, shared_keys("audit."), ttd::owner_company(), date);
             for w in r.writes { shared_set(w.key, w.value); }
             for k in r.deletes { shared_delete(k); }
             if type_of(r.chat) != "()" { say(r.chat); }

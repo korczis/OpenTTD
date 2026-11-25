@@ -177,3 +177,28 @@ fn ask_owner(question, seconds) {
 /// (style, town, tile, x, y, vehicle, company, title), see POST /api/news.
 fn news(text) { api_newsShow(#{ text: text }) }
 fn news(text, options) { options.text = text; api_newsShow(options) }
+
+/// The owner's company (0-based; company 1 in the game), the one source every service asks: the
+/// $OWNER_COMPANY override when set; else where a registered approver plays now (openttd://approvals
+/// data.approver_companies, research/coplay.md: the owner co-plays as the registered approver); else
+/// the first company the panel's AI runs (api_bots().running, status().ai); () while none is known.
+/// A failed read only skips that source.
+fn owner_company() {
+    let fixed = env("OWNER_COMPANY");
+    if fixed != "" { return parse_int(fixed); }
+    let seats = [];
+    try { seats = read("openttd://approvals").data.approver_companies ?? []; } catch { }
+    for s in seats {
+        if type_of(s.company) != "()" { return as_company(s.company); }
+    }
+    let ai = "";
+    let running = [];
+    try { ai = status().ai ?? ""; running = api_bots().running ?? []; } catch { }
+    for r in running {
+        if ai == "" || r.ai == ai { return as_company(r.id); }
+    }
+    ()
+}
+
+/// A company id as an integer, whichever number type the JSON gave.
+fn as_company(x) { if type_of(x) == "f64" { x.to_int() } else { x } }
