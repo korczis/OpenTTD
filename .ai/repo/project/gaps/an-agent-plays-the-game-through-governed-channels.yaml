@@ -1,132 +1,140 @@
 intent: an-agent-plays-the-game-through-governed-channels
-observed_at: 81b26a6497a
-recorded_by: "claude-code (Opus 5.5, session cd8d20a8, primary checkout master) from git and research/prismatic-bridge/ARCHITECTURE.md"
-recorded_at: '2026-11-15'
+observed_at: 2dbd575447d
+recorded_by: "claude-code (Opus 5.5, session 7709ab47, openttd-36 milestones fork, worktree doc/gap-record-reobserved) for I0113: every observation of the 2026-11-15 and 2026-11-22 records re-read on origin/master 2dbd575447d from git, the plan records and the cited files, reviewed read-only by codex; the cheap criterion commands were run (jsonschema, adr list, branch lookup); no game, build or live check was run"
+recorded_at: '2026-11-25'
 observations:
 - id: bridge-phase-2
-  statement: "ARCHITECTURE.md records Phase 2 done: buses 0 to 3 and company_value 1 to 11025 on a live server; the measurement was taken in ~/dev/openttd-prismatic-bridge, not here"
-  source: file:research/prismatic-bridge/ARCHITECTURE.md
+  statement: "RESOLVED (I0025, f5ffdf3b17): the route is no longer only a sibling-repository measurement. tools/research/bridge-live-check starts a throwaway dedicated server of this tree, POST /ai/start PrismaticAI through the standalone bridge and polls /companies until company 0 has a bus; I0025 recorded PASS on 2026-11-16. Not re-run in this observation"
+  source: file:tools/research/bridge-live-check
 - id: contract-undefined
-  statement: "/decision/pull has no defined contract beyond {ai, company_id, settings}; Phase 3 is not started"
-  source: file:research/prismatic-bridge/ARCHITECTURE.md
+  statement: "RESOLVED (I0011, 1bacb607ce): /decision/pull has a request and response schema with fixtures; on 2dbd575447d `python3 -m jsonschema -i research/prismatic-bridge/decision-contract.example.json research/prismatic-bridge/decision-contract.schema.json` exits 0"
+  source: file:research/prismatic-bridge/decision-contract.schema.json
 - id: mcp-on-branch
-  statement: "The MCP server (5 commits) is on research/prismatic-mcp-server, cut from the pre-rebase master; master holds none of it"
-  source: "file:.ai/repo/adrs/0008-an-agent-reaches-the-game-through-an-embedded-loopback-mcp-s.md"
+  statement: "RESOLVED (I0017; milestone an-agent-reaches-the-game-over-mcp 53/53 DONE): the MCP server is on master under src/prismatic_mcp/ (server, registry, commands, AI, API, panel and coverage modules); the branch research/prismatic-mcp-server no longer exists on origin"
+  source: file:src/prismatic_mcp/CMakeLists.txt
 - id: no-placement-adr
-  statement: "ARCHITECTURE.md section 3.1 lays out the bridge client options (keep Python, PyO3, Rust rewrite, Elixir+Rustler) and picks none"
-  source: file:research/prismatic-bridge/ARCHITECTURE.md
+  statement: "RESOLVED (I0012, 323413189f): ADR 0032, accepted, decides that the bridge's admin-protocol client is a native Rust service (axum + tokio); `majordomus adr list --status accepted` lists adr-0032 on 2dbd575447d"
+  source: "file:.ai/repo/adrs/0032-the-bridge-s-admin-protocol-client-is-a-native-rust-service-.md"
 - id: ab-not-run
-  statement: "The MCP branch lists the read-path determinism A/B as NOT RUN/STAGED in research/prismatic-mcp/09-testing.md"
-  source: "file:.ai/repo/adrs/0008-an-agent-reaches-the-game-through-an-embedded-loopback-mcp-s.md"
+  statement: "RESOLVED (I0026, DONE 2026-11-16): tools/research/determinism-ab ran one seed (53744) idle, idle again and hammered with MCP reads of 14 resources; 16 of 16 shared days had identical _random.state and no command lines in either arm. research/prismatic-mcp/09-testing.md keeps the old NOT RUN list only under its 'History: the first session' heading. One seed and a read-only load only: I0167 (READY) widens it to three seeds, two running AIs and the panel's polling load"
+  source: file:tools/research/determinism-ab
 - id: bot-knobs-live
-  statement: "PrismaticAI started with aggressiveness=75,max_routes=3,cash_reserve=10000 opened routes in Kindston and Flonham (6 vehicles) and reads the knobs at every heartbeat; changing a knob of a running AI needs openttd.ai.set_setting, not yet in the game"
-  source: file:research/mcp-control.md
+  statement: "PARTLY RESOLVED: openttd.ai.set_setting and the atomic openttd.ai.set_settings now exist in the game (src/prismatic_mcp/prismatic_mcp_ai.cpp:354-358), so a running AI's knobs can change under approval. The criterion's own command (mcp-rhai ttd::bot_log against a running bot whose knobs were changed from the panel, REST and Rhai) was not re-run in this observation, and no issue records it since the tools landed"
+  source: file:src/prismatic_mcp/prismatic_mcp_ai.cpp
 - id: decisions-are-prose
-  statement: "At e4eeae5dda every planning choice is published only as panel.ai / panel.plan {text}; decisions read one live snapshot or a hand constant (OWN_LINES = 8 in panel_bot.rs), calibration lives in research/calibration.json, and mcp-duel reads the plan from the 200 status events"
-  source: file:.ai/repo/knowledge/curated/the-panel-bus-carries-these-event-kinds.md
+  statement: "PARTLY RESOLVED (I0081, I0086; milestone planning-is-generated-from-recorded-history 7/7 DONE): every planning decision publishes a plan.* kind declared in tools/research/mcp-rhai/src/panel_events.rs; I0081 recorded mcp-panel-check 29 passed on 98632381a5 (plan.* 8 of 8 on the bus, ZeroMQ and the store); tools/research/mcp-duel reads the plan from the run's plan.* events through /api/db/query (mcp-duel:20), and AlgoGlyph's flow serve is fed trailing rows from the store (I0086). LIVE: nothing shows Prismatic reading the events or the store for its own decisions; no open issue owns that part (I0168, READY, is the nearest)"
+  source: file:tools/research/mcp-rhai/src/panel_events.rs
 - id: own-lines-was-noise
-  statement: "The +10.4% for own lines came from runs before the held start; the held-start re-measure gave -1.0% over ten years on seed 31337, with the two runs 0.3% apart at month 12"
+  statement: "Still true and now repeated: I0087 (DONE) derived own_lines from stored duels and measured it on held-start pairs over seeds 31337, 4242 and 20208 (-14.7%, -8.7%, +17.6%), none beyond its rival's spread, so PRISMATIC_BOT_FROM_DUELS stays off and OWN_LINES 8 stays. No history-derived default has replaced a hand constant"
   source: file:research/results/duel-20261117T234725-seed31337.md
 - id: planner-reads-one-at-a-time
-  statement: "Added 2026-11-22 from an external review re-checked on master: read_many is used only on mcp-plan's --capture branch (tools/research/mcp-rhai/src/bin/mcp-plan.rs:483); the hub's track_plan reads five resources back to back (hub.rs:1015-1020, hub_algoglyph.rs:116); no plan carries a tick or digest an executor could re-check (I0138-I0149)"
+  statement: "LIVE (owner I0138, READY): read_many is still used only on mcp-plan's --capture path (tools/research/mcp-rhai/src/bin/mcp-plan.rs:66, :85); tools/research/mcp-rhai/src/bin/mcp-intent.rs has no read_many call, and algoglyph.track_plan (tools/research/mcp-rhai/src/hub.rs:881) still reads its resources one by one"
   source: file:tools/research/mcp-rhai/src/bin/mcp-plan.rs
 - id: battlebrain-gate-cannot-pass
-  statement: "Added 2026-11-22 from an external review re-checked on master: research/battlebrain/README.md:186-188 contradicts its own I0097 section (:137-167); the cutover gate (:169-182) cannot pass because none of the three captures is coherent (:152-154); nothing in tools/research/mcp-rhai/src calls the atomic openttd.ai.set_settings (I0150-I0160)"
+  statement: "PARTLY RESOLVED. Resolved by I0117 (#61): a live decision is applied only through one openttd.ai.set_settings approval, refused with no_atomic_apply where the game lacks it (tools/research/mcp-rhai/src/panel_decision.rs:765-770). LIVE (owner I0150, READY): the cutover gate still cannot pass, because the only real capture is not coherent (research/battlebrain/README.md:489-490; the three shadow captures span 28 to 43 ticks, :322-323)"
   source: file:research/battlebrain/README.md
 - id: loop-not-joined
-  statement: "Added 2026-11-22 from an external review re-checked on master: research/agent-loop.md:62 says nothing is joined up, :78-84 shows the decision path proven against a stand-in, I0092 recorded the live Prismatic check NOT RUN, and idempotency keys live in process memory (tools/research/mcp-rhai/src/panel_decision.rs:604-607) (I0168-I0179)"
+  statement: "LIVE (owners I0168 and I0171, READY): research/agent-loop.md:66 still says nothing is joined up, and :83 shows the decision path proven against a stand-in, not a running prismatic_api. Partly resolved: battlebrain serve keeps the keys it served in a persistent ledger (tools/research/mcp-rhai/src/bin/battlebrain.rs:433-437, I0117), but the panel's keyed pulls still live in process memory (tools/research/mcp-rhai/src/panel_decision.rs:626-627)"
   source: file:research/agent-loop.md
 - id: approver-self-declared
-  statement: "Added 2026-11-22 from an external review re-checked on master: on loopback POST /api/approve records `by` unchecked (tools/research/mcp-rhai/src/panel.rs:2382) and approved_by is {channel, declared} (panel_decision.rs:530-552); research/mcp-hub.md:221 says the hub has no authentication while :30-31 documents --bind/--token (I0182-I0188)"
+  statement: "PARTLY RESOLVED (511f3695e6, #286): POST /api/approve now needs the owner secret (tools/research/mcp-rhai/src/panel.rs:727), a live Battlebrain decision is approved only at the game's console, and every change of who may decide is published as governance.changed with the kind of credential that made it (tools/research/mcp-rhai/src/panel_events.rs:95). LIVE (owner I0182, READY): the approver of a decision is still a declared name, recorded and not checked (panel.rs:2918; approved_by is {channel, declared}, panel_decision.rs:526-549), and the hub has no authentication of its own (research/mcp-hub.md:250)"
   source: file:tools/research/mcp-rhai/src/panel.rs
 - id: algoglyph-unreconciled
-  statement: "Added 2026-11-22 from an external review re-checked on master: the bot lays its own path, not the route AlgoGlyph priced (research/mcp-control.md:1017-1021); only mcp-human lays the kernel's pieces (tools/research/mcp-human/src/rail.rs:445-500); calibration compares profit, never build cost (tools/research/mcp-rhai/src/calibrate.rs:7-8) (I0212-I0217)"
+  statement: "LIVE (owner I0212, READY; I0213-I0217 BLOCKED on it): PrismaticAI still lays its own path, and track-planning only decides whether a line is handed over (research/mcp-control.md:1097-1101); only mcp-human lays the kernel's pieces (tools/research/mcp-human/src/rail.rs:122, :154); calibration compares profit, never build cost (tools/research/mcp-rhai/src/calibrate.rs:3-9)"
   source: file:tools/research/mcp-rhai/src/calibrate.rs
 - id: no-network-resource
-  statement: "Added 2026-11-22 from an external review re-checked on master: no MCP resource exposes network or coordinator state (src/prismatic_mcp/prismatic_mcp_server.cpp:329-332 exposes meta and status only), and a remote opponent must build the same commit (research/real-game.md:79-81, ADR 0030) (I0218-I0219)"
-  source: file:research/real-game.md
+  statement: "LIVE (owner I0218, READY; I0219 BLOCKED): the resource table has no network or coordinator resource (src/prismatic_mcp/prismatic_mcp_server.cpp:359-372), and an opponent must build the same commit (research/real-game.md:80, ADR 0030)"
+  source: file:src/prismatic_mcp/prismatic_mcp_server.cpp
 - id: rhai-ide-milestone-done
-  statement: "Added 2026-11-22: milestone rhai-is-a-live-ide is 6/6 done (I0088-I0093), but its criterion's evidence (tools/research/mcp-scripts-check and cargo llvm-cov on mcp-rhai) was not re-run when this gap was re-read"
+  statement: "Unchanged: milestone rhai-is-a-live-ide is 6/6 DONE (I0088-I0093); its criterion's command (tools/research/mcp-scripts-check and cargo llvm-cov on mcp-rhai) was not re-run in this observation either"
   source: file:.ai/repo/project/milestones/rhai-is-a-live-ide.yaml
+- id: battlebrain-no-live-decision
+  statement: "Added 2026-11-25 (external review 2026-11-22, confirmed on 2dbd575447d): no Battlebrain decision has gone live. research/battlebrain/README.md:488 lists 'Cutover (Phase 04): no live decision, no rollback switch, no live run'; milestone battlebrain-decides-live-with-rollback is 0/11, and its live check (I0152) is BLOCKED"
+  source: file:research/battlebrain/README.md
+- id: mcp-exercise-two-percent
+  statement: "Added 2026-11-25 (external review 2026-11-22, confirmed on 2dbd575447d; owner I0183, READY): every command, console command and Script API function is exposed as a tool, but live scenarios called about 2% of the tools and resources and none of openttd.api.* or openttd.cmd.* (README.md:430, knowledge mcp-exercise-coverage-is-two-percent); Count() records a call when it arrives, before any argument check, so a refused call counts as covered (src/prismatic_mcp/prismatic_mcp_coverage.cpp:34-37); the probe runs only from tools/research/mcp-human-e2e:222-241, never from tools/gate.sh"
+  source: file:src/prismatic_mcp/prismatic_mcp_coverage.cpp
 conditions:
 - criterion: the-bridge-steers-a-company
   state: satisfied
-  because: "observed in the sibling repository and recorded in the design; not reproduced here"
+  because: "reproduced on this tree by tools/research/bridge-live-check (I0025, PASS 2026-11-16); not re-run on 2dbd575447d"
   observations:
   - bridge-phase-2
 - criterion: a-decision-contract-is-defined
-  state: missing
-  because: Phase 3 not started
+  state: satisfied
+  because: "the criterion's command exits 0 on 2dbd575447d (I0011)"
   observations:
   - contract-undefined
 - criterion: mcp-reads-live-state
-  state: unknown
-  because: "verified live on the branch on 2026-07-30; not rebuilt on the rebased base"
+  state: satisfied
+  because: "the server is on master, and milestone an-agent-reaches-the-game-over-mcp (53/53) recorded tools/research/mcp-live-check passing; not re-run on 2dbd575447d"
   observations:
   - mcp-on-branch
 - criterion: mcp-mutation-is-approved-and-commanded
-  state: unknown
-  because: "unit tests and the live pause passed on the branch; not rerun since"
+  state: satisfied
+  because: "the approval state machine is covered by openttd_test '[prismatic_mcp]', last recorded passing on lundra for I0110 (1177 assertions in 43 test cases, PR #221); not re-run on 2dbd575447d"
   observations:
   - mcp-on-branch
 - criterion: mcp-is-on-master
-  state: missing
-  because: the branch is not rebased or merged
+  state: satisfied
+  because: "src/prismatic_mcp/ is on master and the old branch is gone, so the criterion's ancestry command has no branch left to test; I0017 landed the series"
   observations:
   - mcp-on-branch
 - criterion: the-bridge-client-placement-is-decided
-  state: missing
-  because: no ADR picks an option
+  state: satisfied
+  because: "adr-0032 is accepted (I0012)"
   observations:
   - no-placement-adr
 - criterion: agent-reads-do-not-perturb-the-game
-  state: missing
-  because: the experiment was never run
+  state: satisfied
+  because: "I0026's determinism A/B passed on one seed with a read-only load; I0167 owns the wider experiment"
   observations:
   - ab-not-run
 - criterion: a-bot-plays-for-the-owner
-  state: missing
-  because: "start-time knobs work end to end; live change waits for openttd.ai.set_setting (C++ side)"
+  state: unknown
+  because: "the live-change tools exist (openttd.ai.set_setting, openttd.ai.set_settings); the criterion's end-to-end command was not re-run, and no issue records it after the tools landed"
   observations:
   - bot-knobs-live
 - criterion: decisions-publish-structured-events
   state: missing
-  because: "no plan.* event exists; the store of I0080 is being written and nothing reads it yet"
+  because: "publishing is done (I0081, plan.* 8 of 8) and mcp-duel and AlgoGlyph read the events or the store, but the criterion also names Prismatic, and nothing shows Prismatic reading them; no open issue owns that part yet"
   observations:
   - decisions-are-prose
 - criterion: history-tuning-is-held-start-proven
   state: missing
-  because: "no default is derived from history; the one measured history-driven change (calibration) averaged about zero over three held-start seeds and stays off"
+  because: "the only history-derived default measured (I0087, three held-start seeds) did not beat its rival's spread, so no hand constant has been replaced; no open issue owns another attempt yet"
   observations:
   - own-lines-was-noise
 - criterion: the-planner-reads-one-coherent-priced-world
   state: missing
-  because: "milestone the-planner-reads-one-coherent-priced-world owns the fix; nothing in it has started"
+  because: "I0138 (READY) owns the coherent read; milestone the-planner-reads-one-coherent-priced-world has not started"
   observations:
   - planner-reads-one-at-a-time
 - criterion: battlebrain-decides-live-with-rollback
   state: missing
-  because: "milestone battlebrain-decides-live-with-rollback owns the fix; nothing in it has started"
+  because: "the atomic apply exists (I0117), but no coherent capture exists (I0150) and no decision has gone live (I0152, BLOCKED); milestone battlebrain-decides-live-with-rollback is 0/11"
   observations:
   - battlebrain-gate-cannot-pass
+  - battlebrain-no-live-decision
 - criterion: prismatic-closes-one-real-loop
   state: missing
-  because: "milestone prismatic-closes-one-real-loop owns the fix; nothing in it has started"
+  because: "I0168 and I0171 (READY) own it; milestone prismatic-closes-one-real-loop has not started"
   observations:
   - loop-not-joined
 - criterion: governed-access-is-authenticated-and-exercised
   state: missing
-  because: "milestone governed-access-is-authenticated-and-every-capability-reaches-every-surface owns the fix; nothing in it has started"
+  because: "approval needs the owner secret, but the approver is still a declared name (I0182), and exercise coverage is about 2%, counted on arrival (I0183); milestone governed-access-is-authenticated-and-every-capability-reaches-every-surface has not started"
   observations:
   - approver-self-declared
+  - mcp-exercise-two-percent
 - criterion: algoglyph-plans-are-accountable
   state: missing
-  because: "milestone algoglyph-is-accountable owns the fix; nothing in it has started"
+  because: "I0212 (READY) owns the cost fixtures; milestone algoglyph-is-accountable has no receipt or fault suite yet"
   observations:
   - algoglyph-unreconciled
 - criterion: a-remote-human-plays-the-bot
   state: missing
-  because: "milestone a-remote-human-plays-the-bot owns the fix; nothing in it has started"
+  because: "I0218 (READY) owns the remote join; milestone a-remote-human-plays-the-bot has not started"
   observations:
   - no-network-resource
 - criterion: rhai-is-a-live-ide
@@ -135,4 +143,5 @@ conditions:
   observations:
   - rhai-ide-milestone-done
 risks:
-- "Upstream API drift may break the MCP module when it is rebased"
+- "Upstream API drift may break the MCP module at each upstream merge (origin/master was 27 commits behind upstream/master on 2026-11-25)"
+- "Five satisfied criteria rest on recorded runs, not on runs at 2dbd575447d; a regression since then would not show here"

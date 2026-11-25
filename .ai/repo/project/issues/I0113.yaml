@@ -27,4 +27,18 @@ validation:
 evidence_required:
   - validation_run
 created_at: '2026-11-22'
-updated_at: '2026-11-22'
+updated_at: 2026-11-25T04:24:29Z
+started_at: 2026-11-25T03:53:43Z
+started_event: sha256:2657ece331f7d055abb3b87638ab9b06edf01fb278c6bbb581015fa16a567fa4
+verified_at: 2026-11-25T04:23:20Z
+verified_event: sha256:644537f39c03d396ac4974f16e6f340599eff98fa7857fda1a692ccffbfc2ff8
+completed_at: 2026-11-25T04:24:29Z
+completed_event: sha256:acde0fa304abe0e23736e344064a1d5b3764ac5e54b65b5cc2dc783c763d6bdb
+evidence:
+  - covers: "validation_run"
+    type: test
+    command: "majordomus intent validate; majordomus plan validate; majordomus doctor; tools/knowledge/refs check; tools/surfaces/surfaces sync; tools/surfaces/surfaces check; tools/check-prismatic-docs.sh; git diff --check"
+    result: "On 2dbd575447d (origin/master) with the re-observed records: intent validate 5 intents, 0 failures (valid); plan validate 23 milestones, 209 issues, 0 failures; doctor 0 FAIL lines (run on 99e98b8adc, the parent of the observed commit); refs check 3343 references, 0 failures; surfaces sync 0 regenerated, check 909 documents, 0 findings; check-prismatic-docs exit 0; diff --check clean. The gap record an-agent-plays-the-game-through-governed-channels is observed at 2dbd575447d: 5 observations RESOLVED, 4 PARTLY RESOLVED, 5 LIVE with owning issues (I0138, I0150, I0168/I0171, I0182, I0212, I0218), 2 added (battlebrain-no-live-decision, mcp-exercise-two-percent; I0183), 1 unchanged; conditions 7 satisfied, 2 unknown, 8 missing. openttd-validates-agent-driven-engineering gained status-surfaces-partly-fixed. Reviewed read-only by codex (one over-claim corrected). NOT RUN: tools/gate.sh (records-only diff, no compiled or tested file changed); no live criterion command was re-run (bridge-live-check, mcp-live-check, mcp-scripts-check), and no game was touched."
+    artifact: ".ai/repo/project/gaps/an-agent-plays-the-game-through-governed-channels.yaml"
+    commit: 2dbd575447d3d24c884e2fa88ec9346f98b49e8a
+    recorded_at: 2026-11-25T04:23:58Z
