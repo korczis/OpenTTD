@@ -35,14 +35,14 @@ unknown attribute, a follow-up that names no issue, or a closing marker with no 
 <!-- surfaces:begin open-findings as=pie -->
 ```mermaid
 pie showData title Open findings by kind
-    %% links: open-findings.md?col=Kind&filter=blocked#findings | open-findings.md?col=Kind&filter=out-of-scope#findings | open-findings.md?col=Kind&filter=not-run#findings | open-findings.md?col=Kind&filter=partial#findings | open-findings.md?col=Kind&filter=staged#findings | open-findings.md?col=Kind&filter=unreviewed#findings | open-findings.md?col=Kind&filter=failed#findings | open-findings.md?col=Kind&filter=handoff#findings
+    %% links: open-findings.md?col=Kind&filter=blocked#findings | open-findings.md?col=Kind&filter=out-of-scope#findings | open-findings.md?col=Kind&filter=not-run#findings | open-findings.md?col=Kind&filter=partial#findings | open-findings.md?col=Kind&filter=staged#findings | open-findings.md?col=Kind&filter=failed#findings | open-findings.md?col=Kind&filter=unreviewed#findings | open-findings.md?col=Kind&filter=handoff#findings
     "blocked" : 81
     "out-of-scope" : 58
     "not-run" : 29
     "partial" : 17
     "staged" : 16
+    "failed" : 10
     "unreviewed" : 9
-    "failed" : 8
     "handoff" : 4
 ```
 <!-- surfaces:end open-findings -->
@@ -54,7 +54,7 @@ pie showData title Open findings by kind
 |---|---|---|
 | blocked | 81 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
 | out-of-scope | 58 | A finished issue left this out (its non_scope) and no open issue names it |
-| failed | 8 | A run or check the records say failed |
+| failed | 10 | A run or check the records say failed |
 | not-run | 29 | A validation the records say did not run |
 | partial | 17 | A capability or run the records say is only partly there |
 | staged | 16 | Designed and written down, not implemented |
@@ -211,6 +211,8 @@ pie showData title Open findings by kind
 | failed | A line that is given up leaves its stations and track behind. Ten of company 0's 12 rail stations have no train. Two of those lines (Wruntwood, Wetston) have no train because of the finding above. The other three (Flardingham - Dretford, Ponninghall - Harnwell, Sunfingburg Farm… | [research/incident-2026-11-23-live-game-15805.md](incident-2026-11-23-live-game-15805.md):211 | none — needs an issue | OBSERVED |
 | failed | The 29 set_setting calls of the re-plan of 1952-05 waited for approval and never reached the bot. It still runs the slots of 1950-02-08. The store has no record of how those approvals ended. | [research/incident-2026-11-23-live-game-15805.md](incident-2026-11-23-live-game-15805.md):255 | none — needs an issue | OBSERVED |
 | failed | In that round track-planning found a route on the map for none of the 21 rail lines, so no line went to the bot unpriced and the round held. | [research/mechanisms/planner-and-algoglyph.md](mechanisms/planner-and-algoglyph.md):148 | none — needs an issue | OBSERVED |
+| failed | One replay of one code does not separate the two codes on these saves. The same pre-fix code eb0d839ce0 on deploy-225.sav was worth 151,321 (0.029) on lundra on 2026-11-24 (AI battle README). Here it was worth 313,078 (0.055). The two runs differ in binary build and host, so… | [research/replay-2026-11-25-after-fixes.md](replay-2026-11-25-after-fixes.md):121 | none — needs an issue | OBSERVED |
+| failed | On both rich saves, master's capital allocator (#276) was idle in all 16 quarters. On final-15805 it bought one train while money rose from 0.74M to 1.19M; on 21647 it bought nothing while money rose from 32.3M to 36.4M. With #285, final-21647-1992.sav is the same: 0 purchases… | [research/replay-2026-11-25-after-fixes.md](replay-2026-11-25-after-fixes.md):171 | none — needs an issue | OBSERVED |
 | not-run | without a base set: ctest 94/94 PASS with -E '^regression', regression reported NOT RUN with a pointer to research/baseset-prerequisite-macos.md, change: PARTIAL (exit 3), no 120 s timeouts; | [I0028](../.ai/repo/project/issues/I0028.yaml):35 | none — needs an issue | OBSERVED |
 | not-run | The economy loop (mcp-human game: reinforce, borrow) is implemented but NOT RUN yet. | [I0045](../.ai/repo/project/issues/I0045.yaml):48 | none — needs an issue | OBSERVED |
 | not-run | NOT RUN: the page in a browser (WebGL terrain, clicks, maximize) - the browser extension was disconnected. | [I0048](../.ai/repo/project/issues/I0048.yaml):34 | none — needs an issue | OBSERVED |
