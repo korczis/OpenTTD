@@ -1679,6 +1679,16 @@ pending request (red-team residual risk 3). Approval is now bound to the owner i
     reads the secret from its file and does): the answer sets the same cookie.
   - When `/dev/urandom` cannot be read the panel has no secret, and approval happens only at the
     console (fails closed).
+- **Every change of who may decide what is on the bus** as one `governance.changed` event
+  (`panel.rs` `Game::governance`, read by the digest's "Who changed governance"): `{setting, from,
+  to, via, credential, origin, user_agent, peer, game_date, game_tick}`. `setting` is
+  `auto_approve` (`POST /api/auto-approve`, or `--auto-approve` at start), `owner_session` (sign-in
+  and sign-out), `approvers` (`POST /api/approvers` `{add}` or `{remove}`) or `approval_deadline`
+  (a `prismatic_mcp approval_deadline` line sent through `POST /api/console`, or
+  `$PRISMATIC_MCP_APPROVAL_DEADLINE` at start). `credential` says which credential the request
+  carried, never the credential: `owner-cookie` (the page's cookie), `token` (the secret in
+  `X-Panel-Owner`) or `none` (nothing, a wrong secret, or the panel's own start). `peer` is the
+  address the panel saw the request come from; a client's own `X-Panel-Peer` header is dropped.
 - **Scripts never approve.** The Rhai `approve(id)` and `auto_approve(true)` raise an error that
   names the console command. They hold no secret, so `POST /api/rhai` cannot approve through them.
 
