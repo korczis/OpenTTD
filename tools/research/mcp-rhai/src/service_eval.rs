@@ -406,7 +406,7 @@ mod tests {
         assert_eq!(one["coverage"]["runs"], json!([{"service": "replan", "run_ms": 2, "episodes": 2, "covered": 1}]));
         // The route on a panel without a store: the store's own answer.
         let g = crate::panel::Game::new(crate::panel::parse_args(&["--bin", "/nonexistent/openttd", "--panel-port", "21"].map(String::from)).unwrap());
-        let (code, out) = h_scores(&g, &Input { query: Query::parse("horizon=2"), body: Value::Null }).unwrap();
+        let (code, out) = h_scores(&g, &Input { query: Query::parse("horizon=2"), body: Value::Null, who: crate::panel::Who::none() }).unwrap();
         assert_eq!(code, 503, "{out}");
         assert!(out["error"].as_str().unwrap().starts_with("store off"), "{out}");
     }
