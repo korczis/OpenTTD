@@ -35,7 +35,7 @@ value.
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by status
     %% links: README.md?col=Status&filter=verified#records-generated | README.md?col=Status&filter=candidate#records-generated | README.md?col=Status&filter=superseded#records-generated | README.md?col=Status&filter=active#records-generated
-    "verified" : 85
+    "verified" : 86
     "candidate" : 9
     "superseded" : 3
     "active" : 2
@@ -48,7 +48,7 @@ pie showData title Documents under .ai/repo/knowledge/ by route
     %% links: README.md?col=Route&filter=platform#records-generated | README.md?col=Route&filter=project#records-generated | README.md?col=Route&filter=#records-generated | README.md?col=Route&filter=enforcement#records-generated | README.md?col=Route&filter=documentation#records-generated | README.md?col=Route&filter=generator#records-generated
     "platform" : 64
     "project" : 23
-    "unknown" : 4
+    "unknown" : 5
     "enforcement" : 3
     "documentation" : 3
     "generator" : 2
@@ -58,10 +58,10 @@ pie showData title Documents under .ai/repo/knowledge/ by route
 <!-- surfaces:begin docs-index dir=.ai/repo/knowledge as=pie by=epistemics -->
 ```mermaid
 pie showData title Documents under .ai/repo/knowledge/ by epistemics
-    %% links: README.md?col=Epistemics&filter=observed#records-generated | README.md?col=Epistemics&filter=inferred#records-generated | README.md?col=Epistemics&filter=decided#records-generated | README.md?col=Epistemics&filter=#records-generated
+    %% links: README.md?col=Epistemics&filter=observed#records-generated | README.md?col=Epistemics&filter=decided#records-generated | README.md?col=Epistemics&filter=inferred#records-generated | README.md?col=Epistemics&filter=#records-generated
     "observed" : 91
+    "decided" : 4
     "inferred" : 3
-    "decided" : 3
     "unknown" : 2
 ```
 <!-- surfaces:end docs-index -->
@@ -150,6 +150,7 @@ pie showData title Documents under .ai/repo/knowledge/ by epistemics
 | [A road depot or bay stop faces its front tile but is not connected to it; drive-through stops run along the road's axis](curated/road-stops-and-depots-need-their-entrance-road.md) | verified | platform | observed | When a bot, a Rhai script or an MCP caller builds a road station, a road depot, a rail depot or a train station. |
 | [AIs and the Game Script run only on the server, and the Game Script keeps ticking while the game is paused](curated/scripts-run-only-on-the-server-and-the-game-script-runs-while-paused.md) | verified | platform | observed | Before designing a bridge, MCP or experiment flow that pauses the game or expects script activity on clients. |
 | [A TextEffectID stored in a game object is per-client view state; game logic must never branch on it](curated/text-effect-ids-are-client-local.md) | verified | platform | observed | When reading or adding a TextEffectID (loading indicators, income text) in a vehicle, station or other pooled object. |
+| [The AI-battle arena runs the repository's current BattleReferee, so its matches log what the fitness rules judge (owner, 2026-11-25)](curated/the-arena-follows-the-repositorys-referee.md) | verified |  | decided | When provisioning or updating the ttd-battle arena, calibrating a fitness rule on arena matches, or wondering why arena match logs lack a field the referee logs. |
 | [PrismaticAI's rail pathfinder: land, level crossings, bridges and tunnels, each taken only as the game allows it](curated/the-bots-rail-pathfinder-lays-plain-track-only.md) | verified | platform | observed | When choosing which planned rail line the owner's bot builds, or reading why a bot company has no trains. |
 | [-c makes the file's folder the working-dir search path, the config directory and the personal directory](curated/the-config-flag-moves-the-personal-directory.md) | verified | platform | observed | When starting OpenTTD with -c for an experiment, a test or a second instance, and looking for its saves, logs, crash files or downloaded content. |
 | [Multiplayer desync detection compares only random.state[0] at sync frames; a divergence that never feeds Random() goes unseen](curated/the-desync-check-compares-only-the-game-random-state.md) | verified | platform | observed | When using 'no desync reported' as evidence that a hook or experiment left clients in step. |
