@@ -1,0 +1,345 @@
+#!/usr/bin/env python3
+"""RESEARCH-ONLY: which cross-repository pieces of the decision path are still missing (I0171).
+
+The agent loop (research/agent-loop.md) needs three things this fork cannot make itself:
+
+  echo       prismatic-platform echoes `observed_digest` in GET /api/openttd/decision
+  approval   openttd-prismatic-bridge's main holds feature/operator-approval (09afefa)
+  companies  openttd-prismatic-bridge's GET /companies carries a game tick and a digest
+
+For each one this prints an OBSERVED verdict, `met`, `missing` or `NOT RUN`, with its evidence (a
+file:line in the other repository's main, or the endpoint's answer) and, while it is not met, the
+request to the repository that owns it.
+
+  echo and companies are judged by the live endpoint. One that does not answer, or answers without
+  deciding (not 200, not JSON), is NOT RUN, never met and never missing. What main's code holds is
+  printed beside it (`main`) as a hint, not as the verdict.
+  approval is judged by git: met when the approval commit is an ancestor of the bridge's main, or
+  when main routes POST /decision/resume and calls no `prismatic_mcp approve` itself (a squash);
+  missing otherwise; NOT RUN when there is no repository or no main to read.
+
+Nothing is changed anywhere: the other repositories are read with `git show`, `git grep`,
+`git merge-base` and `git rev-list` at their main (`origin/main` as last fetched, else `main`;
+`--prismatic-ref`, `--bridge-ref`), never fetched, checked out or written. The echo probe asks
+Prismatic for one decision; Prismatic reads the companies from its own OPENTTD_BRIDGE_URL, and
+nothing is applied.
+
+  agent-loop-deps [--json] [--record DIR]
+                  [--prismatic-repo PATH] [--prismatic-ref REF] [--prismatic-url URL]
+                  [--bridge-repo PATH] [--bridge-ref REF] [--bridge-url URL]
+                  [--approval-commit SHA] [--timeout SECONDS]
+
+Defaults: ~/dev/prismatic-platform, ~/dev/openttd-prismatic-bridge, $PRISMATIC_URL or
+http://127.0.0.1:4004 (prismatic_api in dev), $BRIDGE_URL or http://127.0.0.1:8730 (the bridge's
+BRIDGE_PORT). `--record DIR` also writes the run as agent-loop-deps-<UTC>.json and .md into DIR.
+
+Exit: 0 every dependency met; 1 one or more missing; 3 none missing, one or more NOT RUN;
+4 every one NOT RUN (nothing could be read); 2 a usage error.
+"""
+import argparse
+import datetime
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+SCHEMA = "agent-loop-deps/v1"
+MET, MISSING, NOT_RUN = "met", "missing", "NOT RUN"
+EXIT = {"met": 0, "missing": 1, "partial": 3, "not-run": 4}
+
+APPROVAL_COMMIT = "09afefa79f7fea4e2fb41aeb526b900ea5446abf"
+CONTROLLER = "apps/prismatic_api/lib/prismatic_api/controllers/openttd_controller.ex"
+BRIDGE_MAIN = "bridge/main.py"
+BRIDGE_DIR = "bridge/"
+RESUME_ROUTE = re.compile(r"""@app\.post\(\s*["']/decision/resume["']""")
+COMPANIES_ROUTE = re.compile(r"""@app\.get\(\s*["']/companies["']""")
+SELF_APPROVAL = r"""rcon\(\s*f?["']prismatic_mcp approve"""
+TICK_KEYS = ("tick", "game_tick")
+DIGEST_KEYS = ("digest", "observed_digest")
+
+REQUESTS = {
+    "echo": ("prismatic-platform",
+             "echo `observed_digest`, the digest of the companies it read from OPENTTD_BRIDGE_URL, in "
+             "the answer of GET /api/openttd/decision (OpenttdController#decision, " + CONTROLLER + "); "
+             "this fork's panel already checks an echo (tools/research/mcp-rhai/src/panel_decision.rs "
+             "`freshness`)"),
+    "approval": ("openttd-prismatic-bridge",
+                 "merge feature/operator-approval (09afefa: the bridge approves nothing itself, a waiting "
+                 "setting is answered `pending`, POST /decision/resume applies it once the operator "
+                 "approved it in the game) into main"),
+    "companies": ("openttd-prismatic-bridge",
+                  "carry the game tick and a digest of the companies' identities on GET /companies, as this "
+                  "fork's panel records them (tools/research/mcp-rhai/src/panel_decision.rs `observe`, "
+                  "`identity_digest`)"),
+}
+TITLES = {
+    "echo": "Prismatic echoes observed_digest in GET /api/openttd/decision",
+    "approval": "the bridge's main holds feature/operator-approval",
+    "companies": "the bridge's GET /companies carries a tick and a digest",
+}
+
+
+# ---- git, read only ------------------------------------------------------------------------------
+
+def git(repo, *args):
+    """Run a read-only git command in `repo`: (exit code, stdout)."""
+    env = dict(os.environ, GIT_OPTIONAL_LOCKS="0")
+    p = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env)
+    return p.returncode, p.stdout
+
+
+class Repo:
+    """A repository read at one ref; `error` says why it cannot be read."""
+
+    def __init__(self, name, path, ref=None):
+        self.name, self.path, self.ref, self.sha, self.error = name, Path(path), ref, None, None
+        if git(self.path, "rev-parse", "--git-dir")[0] != 0:
+            self.error = f"no git repository at {self.path}"
+            return
+        for candidate in ([ref] if ref else ["origin/main", "main"]):
+            code, out = git(self.path, "rev-parse", "--verify", "--quiet", candidate + "^{commit}")
+            if code == 0:
+                self.ref, self.sha = candidate, out.strip()
+                return
+        self.error = f"{self.name} at {self.path} has no {ref or 'origin/main or main'}"
+
+    def at(self):
+        return f"{self.name} {self.ref} {self.sha[:10]}"
+
+    def show(self, path):
+        code, out = git(self.path, "show", f"{self.sha}:{path}")
+        return out if code == 0 else None
+
+    def grep(self, pattern, path):
+        """[(path, line, text)] of every line matching the extended regex at the ref."""
+        code, out = git(self.path, "grep", "-n", "-E", pattern, self.sha, "--", path)
+        hits = []
+        for row in out.splitlines() if code == 0 else []:
+            _, file, line, text = row.split(":", 3)
+            hits.append((file, int(line), text.strip()))
+        return hits
+
+    def checkout(self):
+        """The checked-out branch and how far it is from the ref (`main`), or None."""
+        branch = git(self.path, "rev-parse", "--abbrev-ref", "HEAD")[1].strip()
+        head = git(self.path, "rev-parse", "--short=7", "HEAD")[1].strip()
+        code, out = git(self.path, "rev-list", "--left-right", "--count", f"HEAD...{self.sha}")
+        if code != 0 or not head:
+            return None
+        ahead, behind = out.split()
+        return f"checkout {branch} {head}: {ahead} ahead of, {behind} behind {self.ref}"
+
+
+def first_line(text, pattern):
+    for i, line in enumerate(text.splitlines(), 1):
+        if pattern.search(line):
+            return i
+    return None
+
+
+# ---- live endpoints ------------------------------------------------------------------------------
+
+def fetch(url, timeout):
+    """GET url: (status, body) when anything answered, else (None, why it did not)."""
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"Accept": "application/json"}),
+                                    timeout=timeout) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return None, str(getattr(e, "reason", e))
+
+
+def answer(url, timeout):
+    """(JSON body or None, evidence, why it was not run or None)."""
+    status, body = fetch(url, timeout)
+    if status is None:
+        return None, f"GET {url}: unreachable ({body})", "unreachable"
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None, f"GET {url}: {status}, not JSON", "not JSON"
+    text = json.dumps(data, sort_keys=True)
+    evidence = f"GET {url}: {status} {text[:200]}{'...' if len(text) > 200 else ''}"
+    return (data, evidence, None) if status == 200 else (None, evidence, f"answered {status}")
+
+
+# ---- the three dependencies ----------------------------------------------------------------------
+
+def dependency(key, status, evidence, main=None, note=None):
+    owner, request = REQUESTS[key]
+    return {"id": key, "title": TITLES[key], "owner": owner, "status": status, "evidence": evidence,
+            "main": main, "note": note, "request": None if status == MET else f"{owner}: {request}"}
+
+
+def echo(prismatic, url, timeout):
+    if prismatic.error:
+        main = prismatic.error
+    else:
+        hits = prismatic.grep("observed_digest", CONTROLLER)
+        text = prismatic.show(CONTROLLER)
+        if hits:
+            main = f"{prismatic.at()}: echoes it at {hits[0][0]}:{hits[0][1]}"
+        elif text is None:
+            main = f"{prismatic.at()}: no {CONTROLLER}"
+        else:
+            built = first_line(text, re.compile(r"json\(conn,\s*%\{"))
+            main = (f"{prismatic.at()}: no observed_digest in {CONTROLLER}; the decision is answered at "
+                    f"{CONTROLLER}:{built}")
+    data, evidence, why = answer(url.rstrip("/") + "/api/openttd/decision", timeout)
+    if why:
+        return dependency("echo", NOT_RUN, [evidence + "; the echo was not observed"], main)
+    digest = data.get("observed_digest") if isinstance(data, dict) else None
+    if isinstance(digest, str) and digest:
+        return dependency("echo", MET, [evidence], main)
+    return dependency("echo", MISSING, [evidence + "; no observed_digest in the answer"], main)
+
+
+def approval(bridge, commit):
+    if bridge.error:
+        return dependency("approval", NOT_RUN, [bridge.error])
+    text = bridge.show(BRIDGE_MAIN) or ""
+    route = first_line(text, RESUME_ROUTE)
+    selfs = bridge.grep(SELF_APPROVAL, BRIDGE_DIR)
+    known = git(bridge.path, "cat-file", "-e", commit + "^{commit}")[0] == 0
+    ancestor = known and git(bridge.path, "merge-base", "--is-ancestor", commit, bridge.sha)[0] == 0
+    route_at = (f"POST /decision/resume at {BRIDGE_MAIN}:{route}" if route
+                else f"no POST /decision/resume in {BRIDGE_MAIN}")
+    evidence = []
+    if ancestor:
+        evidence.append(f"{commit[:7]} is an ancestor of {bridge.at()}")
+        status = MET
+    else:
+        relation = "not an ancestor of" if known else "unknown to"
+        evidence.append(f"{commit[:7]} is {relation} {bridge.at()}")
+        status = MET if route and not selfs else MISSING
+    evidence.append(route_at)
+    evidence += [f"the bridge approves its own request at {f}:{n}: {t}" for f, n, t in selfs]
+    return dependency("approval", status, evidence, note=bridge.checkout())
+
+
+def companies(bridge, url, timeout):
+    if bridge.error:
+        main = bridge.error
+    else:
+        text = bridge.show(BRIDGE_MAIN) or ""
+        start = first_line(text, COMPANIES_ROUTE)
+        if start is None:
+            main = f"{bridge.at()}: no GET /companies in {BRIDGE_MAIN}"
+        else:
+            lines = text.splitlines()[start - 1:]
+            end = next((i for i, line in enumerate(lines[1:], 1) if line.startswith("@app.")),
+                       len(lines))
+            block = "\n".join(lines[:end])
+            named = [w for w in ("tick", "digest") if w in block]
+            main = (f"{bridge.at()}: GET /companies at {BRIDGE_MAIN}:{start}; its handler names "
+                    + (" and ".join(named) if named else "no tick and no digest"))
+    data, evidence, why = answer(url.rstrip("/") + "/companies", timeout)
+    if why:
+        return dependency("companies", NOT_RUN, [evidence + "; tick and digest were not observed"], main)
+    if isinstance(data, list):
+        lacks = f"; a JSON list of {len(data)} companies, no tick, no digest"
+        return dependency("companies", MISSING, [evidence + lacks], main)
+    if not isinstance(data, dict):
+        lacks = "; not a JSON object, no tick, no digest"
+        return dependency("companies", MISSING, [evidence + lacks], main)
+    tick = next((data[k] for k in TICK_KEYS
+                 if isinstance(data.get(k), int) and not isinstance(data[k], bool)), None)
+    digest = next((data[k] for k in DIGEST_KEYS if isinstance(data.get(k), str) and data[k]), None)
+    lacks = [name for name, value in (("tick", tick), ("digest", digest)) if value is None]
+    if lacks:
+        return dependency("companies", MISSING, [evidence + "; no " + " and no ".join(lacks)], main)
+    return dependency("companies", MET, [evidence + f"; tick {tick}, digest {digest}"], main)
+
+
+# ---- the run -------------------------------------------------------------------------------------
+
+def verdict(deps):
+    statuses = [d["status"] for d in deps]
+    if MISSING in statuses:
+        return "missing"
+    if all(s == NOT_RUN for s in statuses):
+        return "not-run"
+    return "partial" if NOT_RUN in statuses else "met"
+
+
+def run(args):
+    prismatic = Repo("prismatic-platform", args.prismatic_repo, args.prismatic_ref)
+    bridge = Repo("openttd-prismatic-bridge", args.bridge_repo, args.bridge_ref)
+    deps = [echo(prismatic, args.prismatic_url, args.timeout),
+            approval(bridge, args.approval_commit),
+            companies(bridge, args.bridge_url, args.timeout)]
+    counts = {s: sum(d["status"] == s for d in deps) for s in (MET, MISSING, NOT_RUN)}
+    outcome = verdict(deps)
+    return {
+        "schema": SCHEMA,
+        "at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "repositories": {r.name: {"path": str(r.path), "ref": r.ref, "sha": r.sha, "error": r.error}
+                         for r in (prismatic, bridge)},
+        "endpoints": {"prismatic": args.prismatic_url, "bridge": args.bridge_url},
+        "dependencies": deps,
+        "summary": counts,
+        "outcome": outcome,
+        "exit": EXIT[outcome],
+    }
+
+
+def report(result):
+    out = []
+    for d in result["dependencies"]:
+        out.append(f"OBSERVED {d['id']:<9} {d['status']:<7}  {d['title']}")
+        out += [f"  evidence  {e}" for e in d["evidence"]]
+        out += [f"  {label:<9} {d[label]}" for label in ("main", "note") if d[label]]
+        if d["request"]:
+            out.append(f"  request   {d['request']}")
+    s = result["summary"]
+    out.append(f"agent-loop-deps: {s[MET]} met, {s[MISSING]} missing, {s[NOT_RUN]} NOT RUN "
+               f"({result['outcome']}, exit {result['exit']})")
+    return "\n".join(out) + "\n"
+
+
+def record(result, directory):
+    stamp = result["at"].replace("-", "").replace(":", "")
+    base = Path(directory) / f"agent-loop-deps-{stamp}"
+    base.parent.mkdir(parents=True, exist_ok=True)
+    base.with_suffix(".json").write_text(json.dumps(result, indent=2) + "\n")
+    base.with_suffix(".md").write_text(
+        f"# agent-loop-deps, {result['at']}\n\n"
+        "RESEARCH-ONLY. `tools/research/agent-loop-deps` (I0171): the cross-repository pieces of the "
+        "decision path ([agent loop](../agent-loop.md)). Every line is OBSERVED by this run.\n\n"
+        f"```\n{report(result)}```\n")
+    return base
+
+
+def parse(argv):
+    home = Path.home() / "dev"
+    p = argparse.ArgumentParser(prog="agent-loop-deps", description=__doc__.splitlines()[0])
+    p.add_argument("--json", action="store_true", help="print the run as JSON")
+    p.add_argument("--record", metavar="DIR", help="also write the run into DIR (.json and .md)")
+    p.add_argument("--prismatic-repo", default=str(home / "prismatic-platform"))
+    p.add_argument("--prismatic-ref", help="default: origin/main, else main")
+    p.add_argument("--prismatic-url", default=os.environ.get("PRISMATIC_URL") or "http://127.0.0.1:4004")
+    p.add_argument("--bridge-repo", default=str(home / "openttd-prismatic-bridge"))
+    p.add_argument("--bridge-ref", help="default: origin/main, else main")
+    p.add_argument("--bridge-url", default=os.environ.get("BRIDGE_URL") or "http://127.0.0.1:8730")
+    p.add_argument("--approval-commit", default=APPROVAL_COMMIT)
+    p.add_argument("--timeout", type=float, default=3.0)
+    return p.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse(sys.argv[1:] if argv is None else argv)
+    result = run(args)
+    if args.record:
+        result["record"] = str(record(result, args.record))
+    sys.stdout.write(json.dumps(result, indent=2) + "\n" if args.json else report(result))
+    return result["exit"]
+
+
+if __name__ == "__main__":
+    sys.exit(main())
