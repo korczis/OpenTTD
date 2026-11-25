@@ -21,7 +21,7 @@ relations:
 
 # Statement
 
-Session 7709ab47-7786-494d-bbcc-679b293569a7 (openttd-36, Claude Code) received three answers
+Session 7709ab47-7786-494d-bbcc-679b293569a7 (openttd-36, Claude Code) received four answers
 from the owner on 2026-11-25:
 
 1. The owner selected all four generic lessons, plus a free-text instruction to consult the
@@ -34,6 +34,10 @@ from the owner on 2026-11-25:
    #280/#285) are not loaded into it. Those fixes arrive with the next fresh game.
 3. A chat turn asked that everything learned in this session be used to improve the generic
    Majordomus.
+4. Later the same day the owner decided how five panel pull requests land: #283, #311, #305,
+   #263 and #319. openttd-51 may review, but may not approve. Each of the five merges once
+   openttd-51's review finds no defect, the gate passes and CI is green. Other pull requests
+   are not covered.
 
 The records below are the answers, verbatim. They are not a paraphrase. Each block is the
 record that `majordomus question record` writes, the owner-answer/v1 kind that
@@ -167,6 +171,48 @@ settles:
 recorded:
   session: ""
   at: "2026-11-25T07:57:33Z"
+  by: "Tomas Korcak <korczis@gmail.com>"
+```
+
+## A-20261125-panel-prs-land-on-a-clean-review
+
+```yaml
+schema: "owner-answer/v1"
+id: "A-20261125-panel-prs-land-on-a-clean-review"
+channel: "question-tool"
+provider: "claude-code"
+asked:
+  session: "7709ab47-7786-494d-bbcc-679b293569a7"
+  at: "2026-11-25T11:04:36.649Z"
+  session_source: "transcript"
+answered_at: "2026-11-25T17:04:21.158Z"
+text_source: "transcript-checked"
+source:
+  transcript: "7709ab47-7786-494d-bbcc-679b293569a7.jsonl"
+  locator: "toolu_01XxQDbTq5hCbQtC72jZGYt1#0"
+  sha256: "309e2fe7b69e2c2ed3f251fd984169f5ac6b4d54bc4396992fc78358ef6b7687"
+question: "openttd-51 isn't allowed to give approvals: the permission system says an approval from this GitHub account is yours. It can do reviews with findings, without a verdict. The merge decision is therefore yours. How should my panel PRs land? #283 (FunnelRoll before MaintenanceRound): review with no defect, gate PASS, fitness 7/7, CI all green. #311 (replan realised profit): review with no remaining defect, gate PASS, CI running. #305 and #263: gate PASS, openttd-51's review still coming. Plus the #261 fix-up (messages and proposals only for your company)."
+options:
+  - label: "Review clean + CI green (Recommended)"
+    description: "Each of these 5 PRs merges once openttd-51's review finds no defect, the gate passes and CI is green. I record your answer in the repo, verbatim. Other PRs aren't covered."
+  - label: "Now #283 only"
+    description: "Merge only #283 (everything ready). Ask about the others separately."
+  - label: "I decide each one"
+    description: "Merge nothing; I'll ask you for each PR when it's ready."
+selected:
+  - "Review clean + CI green (Recommended)"
+digest:
+  question: "721c7ce27f99132ab827d6950cdfdb74e2a9775d476d36dda14ee7374a2c76ec"
+  answer: "4a5ecfe723d6f718d2fabadf523751cbeb5a12d5a81821a1f5a1a42eff5d360f"
+settles:
+  - "other:#283"
+  - "other:#311"
+  - "other:#305"
+  - "other:#263"
+  - "other:#319"
+recorded:
+  session: ""
+  at: "2026-11-25T17:13:04Z"
   by: "Tomas Korcak <korczis@gmail.com>"
 ```
 
