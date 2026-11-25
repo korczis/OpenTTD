@@ -51,8 +51,11 @@ elitism, crossover and mutation, one record and one edition per generation, at `
 It does not hand the panel's planner lines to PrismaticAI. The bot plays alone, so a battle
 result is not a held-start duel and does not justify changing a default (rule
 `project.a-tuning-claim-needs-held-start-pairs`). It does not build OpenTTD on an arena; a machine
-without a binary is listed and skipped. It compares nothing across editions or match parameters.
-The dashboard is not a page of the panel shell.
+without a binary is listed and skipped. It does not compare one edition with another. `ablate`,
+by contrast, runs the working tree's PrismaticAI in several settings variants on one seed and
+records the standings under `research/results/ablation-*`. Why each company won or lost is not
+yet part of every match record (milestone `every-battle-match-explains-itself`, I0118-I0124). The dashboard
+is not a page of the panel shell.
 
 ## Maturity
 
