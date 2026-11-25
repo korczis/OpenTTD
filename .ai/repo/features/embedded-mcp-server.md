@@ -37,13 +37,13 @@ read-path determinism A/B ran once, on one seed (I0026); no gate repeats it.
   the tool and its canonical arguments, not only their digest
   (`src/prismatic_mcp/prismatic_mcp_detail.h:204:canonical_args`,
   `src/prismatic_mcp/prismatic_mcp_detail.h:214:ClassifySubmit`; I0023); the approved mutation is
-  posted through the command system (`src/prismatic_mcp/prismatic_mcp_server.cpp:964:Post`); a
+  posted through the command system (`src/prismatic_mcp/prismatic_mcp_server.cpp:1073:Post`); a
   company-scoped tool, `src/prismatic_mcp/prismatic_mcp_ai.cpp:354:set_setting`.
 - **tested**: the approval state machine case
-  `src/tests/test_prismatic_mcp.cpp:1040:TEST_CASE` (submit, approve, execute once, refuse replay,
+  `src/tests/test_prismatic_mcp.cpp:1049:TEST_CASE` (submit, approve, execute once, refuse replay,
   changed arguments and another tool), with the other `[prismatic_mcp]` cases of
   `src/tests/test_prismatic_mcp.cpp`.
 - **gated**: the research tier `tools/gate.sh:715:cmd_research` runs them
-  (`tools/gate.sh:748:openttd_test`) when the server is built; `tools/gate.sh change` names that tier
+  (`tools/gate.sh:750:openttd_test`) when the server is built; `tools/gate.sh change` names that tier
   for a change to research-gated code.
 - **documented**: `research/prismatic-mcp/README.md`.

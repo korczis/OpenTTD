@@ -24,7 +24,7 @@ BEGIN, END = "<!-- ingame-menu:begin -->", "<!-- ingame-menu:end -->"
 # What each action does on a click, by its enum name in prismatic_mcp_menu.h.
 ACTIONS = {
     "Console": "runs the console command and shows the console",
-    "Browse": "opens the hub page (base `$PRISMATIC_HUB_URL`, else `http://127.0.0.1:8790`)",
+    "Browse": "opens the hub page (base `$PRISMATIC_HUB_URL`, else the panel's), or for a `panel:` target the panel's (base `$PRISMATIC_PANEL_URL`, else `http://127.0.0.1:8800`)",
     "Ask": "asks for a sentence; it becomes a request of kind `ask`",
     "Request": "queues a request of that kind for the tile under the main view's centre",
     "Toggle": "calls the MCP tool with the boolean it flips, shown checked",

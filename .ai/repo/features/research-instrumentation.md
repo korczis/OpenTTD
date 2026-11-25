@@ -34,8 +34,8 @@ separate evidence.
 
 - **shipped**: `cmake/Options.cmake:65:OPTION_RESEARCH_INSTRUMENTATION`, which defines the macro
   `OTTD_RESEARCH_INSTRUMENTATION` (`cmake/Options.cmake:139:add_definitions`); the command
-  `src/console_cmds.cpp:1779:ConResearchStatus` inside its guard
-  (`src/console_cmds.cpp:1769:OTTD_RESEARCH_INSTRUMENTATION`).
+  `src/console_cmds.cpp:1780:ConResearchStatus` inside its guard
+  (`src/console_cmds.cpp:1770:OTTD_RESEARCH_INSTRUMENTATION`).
 - **tested**: the gate's checks of both halves of the headline: a research build carries
   `research_status` (`tools/gate.sh:739:research_status`), a default build carries no string naming
   research (`tools/gate.sh:561:default_build_free_of_research`), and every source line naming
