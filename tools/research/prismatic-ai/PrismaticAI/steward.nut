@@ -381,31 +381,73 @@ function PrismaticAI::OwnLinesCap(b, money) {
  * year). A line holds two trains on its single track. When one runs all of them, has run at least
  * TWIN_MIN_AGE days, and still has a full trainload waiting, a second line goes between the same
  * two industries: its own track and platforms beside the first one's, its own trains. One twin per
- * line, at most rail_twin_max, one per game month, when money and loan headroom reach line_budget. */
+ * line, at most rail_twin_max, one per game month, when money and loan headroom reach line_budget.
+ *
+ * A twin that could not be built is tried again TWIN_RETRY_DAYS later (`twin_failed`, the day of
+ * the last attempt), and the wait doubles with every failure in a row (`twin_fails`), up to eight
+ * times: a failed attempt can leave track behind (rail.nut) and costs its stations. Only a built
+ * twin marks both lines `twinned`, and the mark holds only while the other line stands (HasOpenTwin):
+ * a closed twin's track and stations are gone (lines.nut CloseLine). Until 2026-11-25 the line was marked
+ * before its twin was built and kept the mark when the build failed, so one failed attempt held it
+ * at trains_max for good: in the owner's live game 21647 the save of 1992-03 marked all five lines
+ * that earned, with "0 twins", and a replay of it bought nothing in two game years while the bank
+ * rose from 33.7M to 35.8M and 479-545 units waited at three of the lines, each at 2 of 2 trains
+ * (research/replay-2026-11-25-after-fixes.md). A single-track line cannot take a third train
+ * instead: with as many trains as the smaller terminus has platforms, an arriving train always finds
+ * one free (rail.nut, head), and with one more the train holding the single track at the entry
+ * signal waits for a platform whose trains wait for the track. */
 const TWIN_MIN_AGE = 180;
+const TWIN_RETRY_DAYS = 365;
+
+/* Whether another open rail line runs between `line`'s two industries for its cargo: its twin. */
+function PrismaticAI::HasOpenTwin(line) {
+	foreach (l in RAIL_LINES) {
+		if (l == line || l.closed || !("from" in l) || !("to" in l)) continue;
+		if (l.from == line.from && l.to == line.to && l.cargo == line.cargo) return true;
+	}
+	return false;
+}
+
+/* Whether `line` may get a twin attempt on day `now`: no twin of it stands, and its last failed
+ * attempt, if any, lies TWIN_RETRY_DAYS back, twice that for each failure in a row after the first,
+ * at most eight times. */
+function PrismaticAI::TwinDue(line, now) {
+	if (("twinned" in line) && PrismaticAI.HasOpenTwin(line)) return false;
+	if (!("twin_failed" in line)) return true;
+	local fails = ("twin_fails" in line) ? line.twin_fails : 1;
+	return now - line.twin_failed >= TWIN_RETRY_DAYS * (1 << min(max(fails, 1) - 1, 3));
+}
 
 function PrismaticAI::TwinLines(b) {
 	if (b.rail_twin_max <= 0 || this.twins >= b.rail_twin_max) return;
 	local headroom = AICompany.GetMaxLoanAmount() - AICompany.GetLoanAmount();
 	if (AICompany.GetBankBalance(AICompany.COMPANY_SELF) + headroom < b.line_budget) return;
+	local now = AIDate.GetCurrentDate();
 	foreach (i, line in RAIL_LINES) {
-		if (line.closed || !("from" in line) || ("twinned" in line)) continue;
+		if (line.closed || !("from" in line) || !PrismaticAI.TwinDue(line, now)) continue;
 		if (!AIIndustry.IsValidIndustry(line.from) || !AIIndustry.IsValidIndustry(line.to)) continue;
 		local s = this.LineStats(line);
 		if (s.trains < line.trains_max || s.capacity <= 0 || s.oldest < TWIN_MIN_AGE) continue;
 		local waiting = PrismaticAI.LineWaiting(line);
 		if (waiting < s.capacity / max(1, s.trains)) continue;
-		line.twinned <- true;
+		/* Counted and dated before the build: a save during the build's days keeps the attempt. */
+		if ("twinned" in line) delete line.twinned;
+		line.twin_fails <- (("twin_fails" in line) ? line.twin_fails : 0) + 1;
+		line.twin_failed <- now;
 		AILog.Info("PrismaticAI: twin for rail line " + (i + 1) + " (" + line.label + "): " + s.trains + " trains running, " + waiting + " waiting");
 		local loan_before = AICompany.GetLoanAmount();
 		AICompany.SetLoanAmount(AICompany.GetMaxLoanAmount());
 		if (PrismaticAI.BuildFreightRailRoute(line.from, line.to, line.cargo, PrismaticAI.RailShape(b)) > 0) {
 			this.twins++;
 			this.routes++;
+			delete line.twin_failed;
+			delete line.twin_fails;
+			line.twinned <- true;
 			RAIL_LINES.top().twinned <- true;
 		} else {
 			AICompany.SetLoanAmount(loan_before);
-			AILog.Info("PrismaticAI: twin not built; loan back to " + AICompany.GetLoanAmount());
+			AILog.Info("PrismaticAI: twin not built; loan back to " + AICompany.GetLoanAmount() + "; failure " + line.twin_fails +
+				" in a row, tried again in " + (TWIN_RETRY_DAYS * (1 << min(line.twin_fails - 1, 3))) + " days");
 		}
 		return;
 	}

@@ -210,6 +210,33 @@ function PrismaticAI::RestoreFromSave(data) {
 	PrismaticAI.RestoreFill(FAILED_PAIRS, PrismaticAI.RestoreField(data, "failed_pairs", {}));
 	PrismaticAI.RestoreFill(MODERNIZE_SET, PrismaticAI.RestoreField(data, "modernize_set", {}));
 	PrismaticAI.RestoreFill(CLAIM_SEEN, PrismaticAI.RestoreField(data, "claims_seen", {}));
+	PrismaticAI.RestoreTwinMarks();
+}
+
+/* After a load, the twins as the lines stand (steward.nut TwinLines, HasOpenTwin). A `twinned` mark
+ * with no open line between the same industries is a failed attempt's (before TwinLines dated
+ * failed attempts, it marked the line before building and kept the mark when the build failed) or
+ * a closed twin's: the line becomes one whose attempt is due now, so a game saved before the fix
+ * gets its twins tried, one a game month. this.twins, which rail_twin_max caps, is counted again
+ * from the open twins: the saved count kept closed ones. */
+function PrismaticAI::RestoreTwinMarks() {
+	local now = AIDate.GetCurrentDate(), open = {};
+	foreach (i, l in RAIL_LINES) {
+		if (!("from" in l) || !("to" in l)) continue;
+		if (!l.closed) {
+			local key = l.from + "-" + l.to + "-" + l.cargo;
+			open[key] <- (open.rawin(key) ? open[key] : 0) + 1;
+		}
+		if (!("twinned" in l) || PrismaticAI.HasOpenTwin(l)) continue;
+		delete l.twinned;
+		l.twin_fails <- 1;
+		l.twin_failed <- now - TWIN_RETRY_DAYS;
+		if (!l.closed) AILog.Info("PrismaticAI: rail line " + (i + 1) + " (" + l.label + ") was marked twinned without a twin; its twin is due again");
+	}
+	local twins = 0;
+	foreach (_, n in open) twins += n - 1;
+	if (twins != this.twins) AILog.Info("PrismaticAI: twins counted from the open lines: " + twins + " (the save said " + this.twins + ")");
+	this.twins = twins;
 }
 
 /* How many tiles of station `st`'s platforms of direction `dir` follow `tile` by the step `d`. */
