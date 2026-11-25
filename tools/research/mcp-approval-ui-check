@@ -105,7 +105,16 @@ try {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.coverage.startJSCoverage({ resetOnNavigation: false });
-  await page.goto(`${base}/?owner=${encodeURIComponent(secret)}`, { waitUntil: 'load' });
+  // The owner's browser signs in through a one-time link (POST /api/owner/once): it redirects to the
+  // page without the query, and serves once; ?owner= redirects the same way.
+  const link = await (await fetch(base + '/api/owner/once', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base, 'X-Panel-Owner': secret }, body: '{}' })).json();
+  check('the run token or nobody makes no sign-in link', (await post('/api/owner/once', {})).status === 401);
+  const signedIn = await page.goto(link.url, { waitUntil: 'load' });
+  check('a one-time link signs the browser in and leaves no query in the address', signedIn.ok() && page.url() === base + '/'
+    && (await context.cookies()).some((c) => c.name.startsWith('mcp_owner_')), page.url());
+  check('a one-time link serves once', (await fetch(link.url, { redirect: 'manual' })).status === 401);
+  const bySecret = await fetch(`${base}/?owner=${encodeURIComponent(secret)}`, { redirect: 'manual' });
+  check('?owner= redirects (303) to the page without the secret', bySecret.status === 303 && bySecret.headers.get('location') === '/');
   await page.goto(base + '/', { waitUntil: 'load' });
   await page.locator('#pending [data-deny="7"]').waitFor({ timeout: 15000 });
   check('each pending approval has its Approve and its Deny', (await page.locator('#pending [data-approve]').count()) === 7

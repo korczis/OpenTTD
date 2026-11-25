@@ -1671,12 +1671,17 @@ pending request (red-team residual risk 3). Approval is now bound to the owner i
     makes the shell's one API client (`static/shell.js` `api`) open the "Owner sign-in" box instead
     of a raw error. It names the secret's file (the answer's `secret_file`) and asks for the secret
     in a password field. `POST /api/owner/login {secret}` sets the HttpOnly, `SameSite=Strict`
-    cookie `mcp_owner_<port>`, kept a year, and answers 204; the refused request is then sent once
+    cookie `mcp_owner_<port>`, kept 12 hours (`OWNER_COOKIE_MAX_AGE`), and answers 204; the refused request is then sent once
     more. A wrong secret answers 401 after a second's delay and says nothing of its length or
     prefix; five wrong ones within a minute answer 429 for the rest of it (`owner_login`).
     `POST /api/owner/logout` clears the cookie. Cancel (or Escape) leaves the refusal shown.
-  - A launcher may still open the page once as `http://127.0.0.1:<port>/?owner=<secret>` (mcp-e2e
-    reads the secret from its file and does): the answer sets the same cookie.
+  - **A launcher opens the page through a one-time link.** `POST /api/owner/once` (the owner
+    secret's alone) answers `{once, url}`; `GET /?once=<nonce>` sets the same cookie once within 60 s
+    and answers 303 to the page without the query, and a spent or unknown nonce answers 401
+    (`owner_once`, `spend_once`). Spending it is a `governance.changed` `owner_session` via
+    `GET ?once=`. mcp-e2e asks for one with the secret on curl's stdin and opens it
+    (`open_owner_page`), so the secret is in no URL, history or process list. `?owner=<secret>`
+    still sets the cookie and also answers 303 to the page without the query.
   - When `/dev/urandom` cannot be read the panel has no secret, and approval happens only at the
     console (fails closed).
 - **Every change of who may decide what is on the bus** as one `governance.changed` event
@@ -1731,7 +1736,7 @@ What this does not stop, measured honestly:
   `ClientNetworkGameSocketHandler::SendChat` refuses the line. Its console refuses `approve` and
   changes to approvers, and so does any input a UI tool injects (`InjectingInput()`). The owner's
   armed co-play client therefore approves through the panel or from an unarmed client.
-- **The page URL with `?owner=` lands in the browser's history.**
+- **A page opened as `?owner=<secret>` by hand still sends the secret in one request**, though the 303 keeps it out of the address bar; the one-time link sends none.
 - **A console approval executes at once** (ADR 0038): an owner-only request approved at the
   game's console runs then, with no caller resubmitting it.
 
