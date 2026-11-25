@@ -839,7 +839,7 @@ pub fn pull_with(g: &Arc<Game>, url: &str, key: Option<&str>) -> Result<(u16, Va
             steps.push(step(format!("reload company {company}'s AI"), g.tool("openttd.ai.reload", json!({"company": company}))));
         }
         for (name, value) in &d.settings {
-            steps.push(step(format!("company {company} {name}={value}"), panel_bot::set_bot_setting(g, &json!(company), name, &json!(value))));
+            steps.push(step(format!("company {company} {name}={value}"), panel_bot::set_bot_setting(g, &json!(company), name, &json!(value), None)));
         }
     } else if let Some(ai) = &d.ai {
         let settings: serde_json::Map<String, Value> = d.settings.iter().map(|(k, v)| (k.clone(), json!(v))).collect();

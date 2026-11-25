@@ -204,6 +204,10 @@ json Validate(std::string_view type, const json &args, json &errors)
 		auto c = AiCompany(args, errors);
 		if (!c) return details;
 		if (!args.contains("name") || !args["name"].is_string()) { errors.push_back("name (string) required"); return details; }
+		if (args.contains("plan") && !detail::ValidPlanId(args["plan"])) {
+			errors.push_back(fmt::format("plan must be 1-{} letters, digits or ._:- (the re-plan these settings belong to)", detail::PLAN_ID_MAX));
+			return details;
+		}
 		json described = CheckSetting(*c, args["name"].get<std::string>(), args.contains("value") ? &args["value"] : nullptr, errors);
 		if (!described.is_null()) details["setting"] = described;
 	} else if (type == "ai.set_settings") {
@@ -352,8 +356,9 @@ json Tools()
 		{"description", "Every company's AI with its settings as its info.nut declares them (range, step, flags, labels), the value the running script reads and the control a form edits each with (control: kind, options, picker, table or group); plus the AIs that can be started"},
 		{"inputSchema", {{"type", "object"}}}});
 	arr.push_back({{"name", "openttd.ai.set_setting"},
-		{"description", "Approval-gated: change one setting of a company's AI; while it runs only settings flagged in_game. The script reads it on its next GetSetting; the verdict reads it back"},
-		{"inputSchema", {{"type", "object"}, {"properties", {{"company", company}, {"name", {{"type", "string"}}}, {"value", {{"type", "integer"}}}}},
+		{"description", "Approval-gated: change one setting of a company's AI; while it runs only settings flagged in_game. The script reads it on its next GetSetting; the verdict reads it back. plan (optional) names the re-plan the setting belongs to: every pending setting of one plan is approved, denied or settled at its deadline together, a newer plan of the company withdraws the older one, and a change without a plan to a setting a pending plan holds is refused"},
+		{"inputSchema", {{"type", "object"}, {"properties", {{"company", company}, {"name", {{"type", "string"}}}, {"value", {{"type", "integer"}}},
+			{"plan", {{"type", "string"}, {"minLength", 1}, {"maxLength", detail::PLAN_ID_MAX}, {"pattern", "^[A-Za-z0-9._:-]+$"}}}}},
 			{"required", json::array({"company", "name", "value"})}}}});
 	arr.push_back({{"name", "openttd.ai.set_settings"},
 		{"description", fmt::format("Approval-gated: change several settings of one company's AI under ONE approval, all applied in the same "
