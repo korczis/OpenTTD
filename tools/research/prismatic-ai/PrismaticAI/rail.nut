@@ -179,10 +179,12 @@ function PrismaticAI::FindRailPath(from, to, from_end, to_end, avoid = null, fro
 		 * and the growth funnel closes a game year that ends inside it (funnel.nut FunnelRoll). Without
 		 * the roll, a heartbeat whose searches ran from 1962 to 1964 on the fitness seed (a 258-tile
 		 * double track, three searches of 80-96 days each) left 1963 with no FUNNEL line, and the
-		 * fitness check failed `no_funnel`. */
+		 * fitness check failed `no_funnel`. The year closes before the round: a round on 1 January
+		 * buys trains of the new year, and after it the old year's line counted them (seed 31337,
+		 * fitness lineup 1: train 315 bought on 1962-01-02 in FUNNEL year=1961 trains_added=2). */
 		if (budget % MAINT_YIELD_NODES == 0) {
-			PrismaticAI.MaintenanceYield();
 			PrismaticAI.FunnelRoll();
+			PrismaticAI.MaintenanceYield();
 		}
 		local cur = open.Pop();
 		if (cur == to) {
