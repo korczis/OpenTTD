@@ -261,6 +261,11 @@ fn a_rhai_helper_stops_when_its_panel_stops_and_its_pidfile_refuses_a_second_cop
     let bad = d.join("bad.log");
     let mut b = cmd(RHAI, &bad).args(["--give-up", "0", "-e", "1"]).spawn().unwrap();
     assert_eq!(wait_exit(&mut b, Duration::from_secs(10)).code(), Some(2), "{}", log_of(&bad));
+    let help = Command::new(RHAI).arg("--help").output().unwrap();
+    assert!(help.status.success() && String::from_utf8_lossy(&help.stdout).contains("--give-up SECS"), "{help:?}");
+    let usage = Command::new(RHAI).arg("--exit-with-parent").output().unwrap();
+    assert_eq!(usage.status.code(), Some(2), "no script is a usage error");
+    assert!(String::from_utf8_lossy(&usage.stderr).contains("--pidfile PATH"), "{usage:?}");
     let fine = d.join("fine.log");
     let mut f = cmd(RHAI, &fine).args(["--panel", "http://127.0.0.1:1", "--pidfile", d.join("one.pid").to_str().unwrap(), "-e", "40 + 2"])
         .stdout(Stdio::piped()).spawn().unwrap();
