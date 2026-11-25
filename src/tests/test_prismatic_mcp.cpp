@@ -2374,8 +2374,6 @@ TEST_CASE("Unattended channels approve only for a company a registered approver 
 	CHECK(rules[2].text.find("from the rules file") == std::string::npos);
 }
 
-#endif /* OTTD_PRISMATIC_MCP_SERVER */
-
 TEST_CASE("The deadline's approve stands in only for a registered approver of the company it names, when asked and at the deadline", "[prismatic_mcp]")
 {
 	DeadlinePolicy approve{30 * DEADLINE_DAY_TICKS, DeadlineVerdict::Approve};
@@ -2441,7 +2439,9 @@ TEST_CASE("A registered key that a second client connects with approves from nei
 	CHECK(DecideChat(f, true) == ChatVerdict::SharedKey);
 	/* A deny executes nothing, so a shared key still withdraws its own company's approval. */
 	CHECK(DecideChat(f, false) == ChatVerdict::Allow);
-	CHECK(ChatVerdictText(ChatVerdict::SharedKey).find("connecte
+	CHECK(ChatVerdictText(ChatVerdict::SharedKey).find("connected twice") != std::string_view::npos);
+}
+
 TEST_CASE("A rule from the rules file and the auto channel hold where #264's deadline would, and say so", "[prismatic_mcp]")
 {
 	namespace R = PrismaticMCP::Rules;
