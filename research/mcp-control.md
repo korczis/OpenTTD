@@ -547,7 +547,11 @@ the panel's mirror above, and the Rhai scripts and services that call `mesh_reco
 json --repo <checkout>` names for the checkout `mcp-e2e` runs from. `$MAJORDOMUS_SESSION` is
 `task-<id>` of the task `majordomus context --json` reports active there: `majordomus start` claims
 the task's scope under that mesh session, on that server. Majordomus admits a write only inside the
-writing session's live claims. Without a server or an active task, the variable stays unset and
+writing session's live claims. A record whose scope lies outside them (replan's names
+`PrismaticAI/info.nut`, which the launching task seldom claims) is refused `out_of_scope` once:
+the client then claims that scope for the session in advisory mode (`POST /api/v1/mesh/claims`,
+overlaps reported, never refused) and writes once more. A second refusal, a refused claim, or a
+record with no scope reaches the script as it came (prismatic-majordomus I4740). Without a server or an active task, the variable stays unset and
 `mcp-e2e` prints `mesh records off:` with the reason. The Rhai scripts then answer `mesh:
 configuration: ...` as before. A value the caller sets wins. An empty value keeps the stack off the
 mesh. `tools/research/mcp-e2e --env` prints the three variables a run would get

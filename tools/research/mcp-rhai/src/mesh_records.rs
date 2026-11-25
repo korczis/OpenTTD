@@ -124,7 +124,22 @@ impl Client {
             m.insert("session".into(), json!(s));
         }
         check_write(&r)?;
-        let v = self.call("POST", "/api/v1/mesh/records", Some(r))?;
+        let v = match self.call("POST", "/api/v1/mesh/records", Some(r.clone())) {
+            // Outside the session's live claims: a long-running writer claims its record's own scope
+            // (advisory: overlaps are reported, never refused) and writes once more (prismatic-
+            // majordomus I4740). Only that refusal, only once, and only for a scope the record names.
+            Err(Error::Refused { code, message, status }) if code == "out_of_scope" => {
+                let scope: Vec<Value> = r["scope"].as_array().cloned().unwrap_or_default();
+                if scope.is_empty() { return Err(Error::Refused { status, code, message }); }
+                let claim = json!({"session": r["session"], "scope": scope, "mode": "advisory",
+                                   "intent": format!("records of {}", r["task"].as_str().unwrap_or("this session"))});
+                if let Err(e) = self.call("POST", "/api/v1/mesh/claims", Some(claim)) {
+                    return Err(Error::Refused { status, code, message: format!("{message}; claiming the record's scope failed: {e}") });
+                }
+                self.call("POST", "/api/v1/mesh/records", Some(r))?
+            }
+            other => other?,
+        };
         let ok = v.get("key").and_then(Value::as_str).is_some_and(|k| k.contains('/')) && v.get("revision").is_some_and(Value::is_u64);
         if !ok { return Err(Error::Invalid("POST /api/v1/mesh/records: no key and revision".into())); }
         Ok(v)
@@ -227,7 +242,10 @@ mod tests {
                 log.lock().unwrap().push(text.clone());
                 let mut parts = text.lines().next().unwrap_or("").split(' ');
                 let key = format!("{} {}", parts.next().unwrap_or(""), parts.next().unwrap_or("").split('?').next().unwrap_or(""));
-                let Some((_, status, body)) = answers.iter().find(|(k, _, _)| *k == key) else { continue };
+                // The answers of one route in their order, the last one again once they are used.
+                let n_seen = log.lock().unwrap().iter().filter(|t| t.lines().next().is_some_and(|l| l.starts_with(&format!("{key} ")))).count();
+                let mine: Vec<_> = answers.iter().filter(|(k, _, _)| *k == key).collect();
+                let Some((_, status, body)) = mine.get(n_seen.saturating_sub(1)).or(mine.last()).copied() else { continue };
                 if *status == 0 { continue; }
                 let _ = write!(s, "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
             }
@@ -263,6 +281,36 @@ mod tests {
         }
         let (b2, _) = fixture(vec![("GET /api/v1/mesh/records", 200, "<html>")]);
         assert!(matches!(client(&b2).records(&Value::Null), Err(Error::Invalid(m)) if m.contains("not JSON")));
+    }
+
+    #[test]
+    fn a_write_outside_the_sessions_claims_claims_its_scope_advisory_and_writes_once_more() {
+        const OUT: &str = r#"{"error": {"code": "out_of_scope", "message": "tools/x.nut is outside session board-p1's live claims"}}"#;
+        let rec = json!({"kind": "plan", "task": "openttd:replan:0", "scope": ["tools/x.nut"], "title": "replan"});
+        // Refused once, claimed, written.
+        let (base, seen) = fixture(vec![("POST /api/v1/mesh/records", 422, OUT), ("POST /api/v1/mesh/records", 200, WROTE),
+                                        ("POST /api/v1/mesh/claims", 200, r#"{"claimed": true}"#)]);
+        assert_eq!(client(&base).write(rec.clone()).unwrap()["key"], "s1/r2");
+        let seen = seen.lock().unwrap();
+        let firsts: Vec<&str> = seen.iter().map(|t| t.lines().next().unwrap_or("")).collect();
+        assert_eq!(firsts.iter().filter(|l| l.starts_with("POST /api/v1/mesh/records ")).count(), 2, "{firsts:?}");
+        let claim = seen.iter().find(|t| t.starts_with("POST /api/v1/mesh/claims ")).expect("a claim");
+        let body: Value = serde_json::from_str(claim.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body, json!({"session": "board-p1", "scope": ["tools/x.nut"], "mode": "advisory", "intent": "records of openttd:replan:0"}));
+        drop(seen);
+        // Refused again after the claim: that refusal reaches the script, and nothing loops.
+        let (b2, seen2) = fixture(vec![("POST /api/v1/mesh/records", 422, OUT), ("POST /api/v1/mesh/claims", 200, r#"{"claimed": true}"#)]);
+        assert!(matches!(client(&b2).write(rec.clone()), Err(Error::Refused { code, .. }) if code == "out_of_scope"));
+        assert_eq!(seen2.lock().unwrap().iter().filter(|t| t.starts_with("POST /api/v1/mesh/records ")).count(), 2);
+        // The claim refused: the write's refusal says so.
+        let (b3, _) = fixture(vec![("POST /api/v1/mesh/records", 422, OUT),
+                                   ("POST /api/v1/mesh/claims", 409, r#"{"error": {"code": "conflict", "message": "held"}}"#)]);
+        assert!(matches!(client(&b3).write(rec), Err(Error::Refused { message, .. }) if message.contains("claiming the record's scope failed")));
+        // A record without a scope is not claimed for: the refusal as it came.
+        let (b4, seen4) = fixture(vec![("POST /api/v1/mesh/records", 422, OUT)]);
+        assert!(matches!(client(&b4).write(json!({"kind": "observation", "task": "t", "scope": [], "title": "x"})),
+                         Err(Error::Refused { code, .. }) if code == "out_of_scope"));
+        assert!(!seen4.lock().unwrap().iter().any(|t| t.starts_with("POST /api/v1/mesh/claims ")));
     }
 
     #[test]
