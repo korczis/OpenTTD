@@ -24,7 +24,8 @@
 // `prismatic_mcp rule allow|deny <glob> [<json>] [--persist] [--via panel]`, `prismatic_mcp rules`,
 // `prismatic_mcp rule remove <id>`, `prismatic_mcp approve|deny <id> <id> ... [--via <c>]`, each with
 // `--nonce <n>` answered by one `[approval-core] {...}` result line; `prismatic_mcp approvers ...`;
-// `fake add <tool> <json, ' for ">` adds a new approval, as a bot asking would.
+// `fake add <tool> <json, ' for ">` adds a new approval, as a bot asking would; `fake insert` adds it
+// first in the queue.
 //
 // Usage (as mcp-panel calls it): mcp-fake-game -D <host:port> -x -g ... -c <cfg> -d ...
 import fs from 'node:fs';
@@ -260,9 +261,10 @@ export function consoleLine(line) {
   if (w[0] === 'prismatic_mcp' && w[1] === 'start') return start(Number(w[2]));
   if (rulesLine(w)) return undefined;
   if (w[0] === 'fake' && w[1] === 'seed' && w[2] === 'bulk') { seedBulk(); return say('(fake) the approvals list\'s queue, rules on'); }
-  if (w[0] === 'fake' && w[1] === 'add') {
+  if (w[0] === 'fake' && (w[1] === 'add' || w[1] === 'insert')) {
     const id = Math.max(0, ...queue.map((a) => a.id)) + 1;
-    queue.push(approval(id, w[2], JSON.parse((w[3] || '{}').replace(/'/g, '"'))));
+    // `insert` puts it first in the queue, above every row a page shows (a re-ordering refresh).
+    queue[w[1] === 'add' ? 'push' : 'unshift'](approval(id, w[2], JSON.parse((w[3] || '{}').replace(/'/g, '"'))));
     say(`(fake) #${id} waits; rules decided ${applyRules().length}`);
     return undefined;
   }

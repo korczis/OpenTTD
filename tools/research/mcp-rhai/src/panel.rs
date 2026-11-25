@@ -1001,15 +1001,32 @@ pub fn core_match(pattern: &Value, value: &Value) -> bool {
     }
 }
 
-/// The argument sets a matcher is tried on to tell whether it narrows anything: one that takes
-/// both is as broad as no matcher at all ({}, {"$": "*"}, {"$ne": null}, ...).
-pub const PROBE_ARGS: &[&str] = &["{}", r#"{"company":0,"x":1}"#];
+/// Whether a matcher value constrains nothing: a non-empty string of `*` only, or an object that
+/// is itself broad (an operator object whose only operator is `$ne`, or a nested matcher).
+fn non_constraining(v: &Value) -> bool {
+    match v {
+        Value::String(t) => !t.is_empty() && t.chars().all(|c| c == '*'),
+        Value::Object(_) => broad_matcher(Some(v)),
+        _ => false,
+    }
+}
 
-/// Whether a matcher takes any arguments: none at all, or one that takes every probe.
+/// Whether a matcher constrains no value (the core's `IsBroadMatcher`, the same structural test):
+/// null, `{}`, or an object whose every entry is non-constraining. Any key, plain or a path
+/// (`$`, `$.a`, `$['a b']`, `$.l[*]`, `$.*`, `$..name`), is non-constraining when its value is a
+/// non-empty string of `*` only, an operator object whose only operator is `$ne`, or a nested
+/// object that is itself broad; a `$ne` entry never narrows. Everything else narrows: a literal,
+/// `""`, a glob with any other character or `?`, `$in`, `$lt`/`$lte`/`$gt`/`$gte`, an array. The
+/// presence of a key alone never narrows.
 pub fn broad_matcher(m: Option<&Value>) -> bool {
-    match m.filter(|m| !m.is_null()) {
-        None => true,
-        Some(m) => PROBE_ARGS.iter().all(|p| core_match(m, &serde_json::from_str(p).unwrap_or(Value::Null))),
+    match m {
+        None | Some(Value::Null) => true,
+        Some(Value::Object(o)) => o.iter().all(|(k, v)| match k.as_str() {
+            "$ne" => true,
+            "$in" | "$lt" | "$lte" | "$gt" | "$gte" => false,
+            _ => non_constraining(v),
+        }),
+        Some(_) => false,
     }
 }
 
@@ -5069,14 +5086,24 @@ mod tests {
         }
         assert!(core_glob("openttd.cmd.*", "openttd.cmd.BuildRoad") && core_glob("a\\*b", "a*b") && !core_glob("a\\*b", "axb") && core_glob("?", "火"));
         assert!(has_wildcard("openttd.*") && !has_wildcard("openttd.ai.set_setting"));
-        for broad in [None, Some(json!({})), Some(json!({"$": "*"})), Some(json!({"$ne": null})), Some(Value::Null)] {
+        // Broad: no value constrained, whatever keys it names (the core's IsBroadMatcher).
+        for broad in [None, Some(Value::Null), Some(json!({})), Some(json!({"$": "*"})), Some(json!({"$ne": null})), Some(json!({"company": "*"})),
+                      Some(json!({"$.*": "*"})), Some(json!({"$..name": "**"})), Some(json!({"a": {"b": "*"}})), Some(json!({"x": {"$ne": null}})),
+                      Some(json!({"$['a b']": "*", "$.l[*]": "***"}))] {
             assert!(broad_matcher(broad.as_ref()), "{broad:?}");
             assert!(rule_line("allow", "openttd.ai.*", broad.as_ref(), false).unwrap_err().contains("approves whatever they ask"), "{broad:?}");
             assert!(rule_line("deny", "openttd.ai.*", broad.as_ref(), false).is_ok(), "a broad deny rule is fine");
             assert!(rule_line("allow", "openttd.ai.set_setting", broad.as_ref(), false).is_ok(), "one tool is fine");
         }
-        assert!(!broad_matcher(Some(&json!({"company": 1}))) && rule_line("allow", "openttd.ai.*", Some(&json!({"company": 1})), false).is_ok());
-        assert!(!broad_matcher(Some(&json!({"x": "*"}))), "takes one probe, not both");
+        // Narrowing: a literal, a glob with another character, an empty string, a comparison, $in, an array.
+        for narrow in [json!({"company": 0}), json!({"name": "a*"}), json!({"n": {"$lt": 5}}), json!({"c": {"$in": [1]}}), json!({"c": ""}),
+                       json!({"c": "?"}), json!({"c": [1]}), json!({"c": true}), json!({"a": {"b": "x"}}), json!({"x": {"$ne": null, "$gt": 1}}),
+                       json!({"company": "*", "name": "max_*"}), json!(5)] {
+            assert!(!broad_matcher(Some(&narrow)), "{narrow}");
+        }
+        assert!(rule_line("allow", "openttd.ai.*", Some(&json!({"company": 1})), false).is_ok());
+        assert!(rule_line("allow", "openttd.ai.*", Some(&json!({"company": "*"})), false).is_err(), "a glob with a broad matcher is refused");
+        assert!(rule_line("allow", "openttd.ai.set_setting", Some(&json!({"company": "*"})), false).is_ok(), "one tool with a broad matcher stays allowed");
     }
 
     /// Real `[approval-core] {...}` lines of the core (src/fixtures/approval-core-lines.txt, written

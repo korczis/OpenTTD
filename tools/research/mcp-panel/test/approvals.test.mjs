@@ -156,8 +156,11 @@ test("the core's matcher and glob, mirrored (panel.rs core_match has the same ca
 });
 
 test('a broad matcher, and the dry run of a rule over the rows the page holds', () => {
-  for (const m of [null, undefined, {}, { $: '*' }, { $ne: null }]) assert.ok(A.broad(m), JSON.stringify(m));
-  assert.ok(!A.broad({ company: 1 }) && !A.broad({ x: '*' }));
+  // The same cases as panel.rs: broad constrains no value, whatever keys it names.
+  for (const m of [null, undefined, {}, { $: '*' }, { $ne: null }, { company: '*' }, { '$.*': '*' }, { '$..name': '**' }, { a: { b: '*' } },
+    { x: { $ne: null } }, { "$['a b']": '*', '$.l[*]': '***' }]) assert.ok(A.broad(m), JSON.stringify(m));
+  for (const m of [{ company: 0 }, { name: 'a*' }, { n: { $lt: 5 } }, { c: { $in: [1] } }, { c: '' }, { c: '?' }, { c: [1] }, { c: true },
+    { a: { b: 'x' } }, { x: { $ne: null, $gt: 1 } }, { company: '*', name: 'max_*' }, 5, [1], { c: null }]) assert.ok(!A.broad(m), JSON.stringify(m));
   const rows = [row(1, 'openttd.ai.set_setting', { company: 1, name: 'max_trains' }), row(2, 'openttd.ai.set_setting', { company: 2, name: 'max_trains' }),
     row(3, 'openttd.ai.set_settings', { company: 1 }, { owner_only: true }), row(4, 'openttd.ai.set_setting', { company: 1 }, { expired: true }),
     row(5, 'openttd.cmd.BuildRoad', { company: 1 }), row(6, 'openttd.ai.set_setting', { company: 1 }, { state: 'consumed' })];
@@ -176,4 +179,14 @@ test('a broad matcher, and the dry run of a rule over the rows the page holds', 
   assert.equal(A.dryRunText({ error: 'x' }), 'x');
   assert.match(A.askHtml('Remove rule #2 (<b>)?', 'Remove'), /Remove rule #2 \(&lt;b&gt;\)\?/);
   assert.ok(A.DECISIVE.has('Enter') && A.DECISIVE.has(' ') && !A.DECISIVE.has('j') && A.GUARD_MS === 400);
+});
+
+test('the rows a refresh moved under the pointer: re-ordered, a row inserted above, a new row', () => {
+  assert.deepEqual(A.movedRows(null, [1, 2, 3]), [], 'none on the first drawing');
+  assert.deepEqual(A.movedRows([1, 2, 3], [1, 2, 3]), []);
+  assert.deepEqual(A.movedRows([1, 2, 3], [2, 3]), [], 'a row leaving above moves nothing');
+  assert.deepEqual(A.movedRows([1, 2, 3], [9, 1, 2, 3]), [9, 1, 2, 3], 'a row inserted above moves every row below it');
+  assert.deepEqual(A.movedRows([1, 2, 3], [1, 2, 3, 4]), [4], 'a row added at the end moves only itself');
+  assert.deepEqual(A.movedRows([1, 2, 3], [2, 1, 3]), [1], 'a re-order moves the row that got a new row above it');
+  assert.equal(A.ROW_GUARD_MS, 600);
 });

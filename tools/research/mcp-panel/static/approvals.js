@@ -189,10 +189,19 @@ export function coreMatch(pattern, value) {
   return typeof value === 'string' ? JSON.stringify(pattern) === value : JSON.stringify(pattern) === JSON.stringify(value);
 }
 
-/** The arguments a matcher is tried on: one that takes both is as broad as none (panel.rs PROBE_ARGS). */
-export const PROBES = [{}, { company: 0, x: 1 }];
-/** Whether a matcher takes any arguments (none, or one that takes every probe). */
-export const broad = (m) => m === null || m === undefined || PROBES.every((p) => coreMatch(m, p));
+/** Whether a matcher constrains no value (panel.rs broad_matcher, the core's IsBroadMatcher): null,
+ *  {}, or an object whose every entry, under any key or path, is a non-empty string of `*` only, an
+ *  operator object whose only operator is $ne, or a nested broad object. Key presence never narrows. */
+export function broad(m) {
+  if (m === null || m === undefined) return true;
+  if (typeof m !== 'object' || Array.isArray(m)) return false;
+  return Object.entries(m).every(([k, v]) => {
+    if (k === '$ne') return true;
+    if (['$in', '$lt', '$lte', '$gt', '$gte'].includes(k)) return false;
+    if (typeof v === 'string') return /^\*+$/.test(v);
+    return !!v && typeof v === 'object' && !Array.isArray(v) && broad(v);
+  });
+}
 /** An MCP tool's action type, the other name a glob matches (openttd.cmd.X -> command.X). */
 export const actionOf = (tool) => String(tool).replace(/^openttd\.cmd\./, 'command.').replace(/^openttd\./, '');
 
@@ -220,6 +229,23 @@ export const dryRunText = (d) => (d.error ? d.error : `Would decide ${d.ids.leng
 export const DECISIVE = new Set(['y', 'a', 'n', 'd', 'Enter', ' ']);
 /** How long after a decision, or after the rows moved under the pointer, a key or click is not taken. */
 export const GUARD_MS = 400;
+/** How long a row a refresh moved (re-ordered, or a row inserted above it) takes no click. */
+export const ROW_GUARD_MS = 600;
+
+/** The rows a refresh moved under a still pointer: each row that is new, or that has above it a row
+ *  that was not above it before (a re-order, a row inserted above). A row only moving up because a
+ *  row above it left is not moved. None on the first drawing. */
+export function movedRows(prev, ids) {
+  if (!prev) return [];
+  const pos = new Map(prev.map((id, i) => [id, i]));
+  const moved = [];
+  ids.forEach((id, i) => {
+    if (!pos.has(id)) { moved.push(id); return; }
+    const before = new Set(prev.slice(0, pos.get(id)));
+    if (ids.slice(0, i).some((a) => !before.has(a))) moved.push(id);
+  });
+  return moved;
+}
 
 /** One failed id of a bulk answer as a person reads it. */
 export const failureText = (r) => `#${r.id}: ${r.code} ${(r.answer && (r.answer.error || r.answer.status)) || ''}`.trim();
@@ -315,7 +341,11 @@ export const confirmHtml = (n, picked) => askHtml(`Approve ${n} ${picked ? 'sele
 /** The list's state: the server's last answer, the filter, the picked rows, the rows decided here
  *  that the server still lists, the focused row and the anchor of a Shift+click range. */
 const S = { view: null, filter: filterOf(globalThis.location?.search), picked: new Set(), gone: new Set(), current: null, anchor: null,
-  order: '', movedAt: 0, pointerAt: 0, lockUntil: 0 };
+  order: '', movedAt: 0, pointerAt: 0, lockUntil: 0, prev: null, rowMovedAt: new Map(), hover: false, queued: null };
+
+/** Whether row `id` moved under the pointer (a refresh re-ordered it or put a row above it) too
+ *  recently to take a click. */
+const rowMoved = (id) => Date.now() - (S.rowMovedAt.get(id) || 0) < ROW_GUARD_MS;
 
 /** Whether a pointer click comes too soon after the rows moved under a pointer that has not moved:
  *  a double click, or a poll that took a row away above, would otherwise decide another row. */
@@ -324,11 +354,13 @@ const tooSoon = (e) => e.detail > 1 || (e.detail >= 1 && Date.now() - S.movedAt 
 /** The rows on the page now (the decided ones left out). */
 const shown = () => rowsOf(S.view ? S.view.approvals : [], S.filter).filter((a) => !S.gone.has(a.id));
 
-function render() {
+function render(fromRefresh = false) {
   const root = $('approvals');
   if (!root || !S.view) return;
   const rows = shown();
   const ids = rows.map((a) => a.id);
+  if (fromRefresh) for (const id of movedRows(S.prev, ids)) S.rowMovedAt.set(id, Date.now());
+  S.prev = ids;
   if (ids.join() !== S.order) { S.order = ids.join(); S.movedAt = Date.now(); }
   for (const id of [...S.picked]) if (!rows.some((a) => a.id === id && decidable(a))) S.picked.delete(id);
   if (!ids.includes(S.current)) S.current = ids[0] ?? null;
@@ -381,10 +413,17 @@ function focusRow(id, role = 'row', scroll = false) {
 async function refresh() {
   const v = await api('/api/approvals', undefined, { shownIn: 'approvals-msg' });
   if (!v.ok) return;
+  // The rows never move under a pointer over the list: the answer waits until it leaves.
+  if (S.hover) { S.queued = v; return; }
+  apply(v);
+}
+
+/** Take the server's answer and draw it (a refresh). */
+function apply(v) {
   S.view = v;
   // A row decided here leaves the set once the server no longer lists it as waiting.
   for (const id of [...S.gone]) if (!v.approvals.some((a) => a.id === id && a.state === 'pending')) S.gone.delete(id);
-  render();
+  render(true);
 }
 
 /** Decide one row: it leaves at once and the next row takes its place and the focus; a failure
@@ -402,7 +441,7 @@ async function decide(id, approve) {
   if (next !== undefined) focusRow(next, role);
   const r = await api(approve ? '/api/approve' : '/api/deny', { id });
   if (r.ok) notify(approve ? `#${id} approved: ${r.status} ${r.command_result ?? ''}`.trim() : `#${id} denied`, 'green');
-  else S.gone.delete(id);
+  else { S.gone.delete(id); render(); }
   refresh();
 }
 
@@ -525,11 +564,18 @@ export function mount() {
   };
   $('approvals-approve-bulk').onclick = (e) => (tooSoon(e) ? undefined : decideBulk(true));
   $('approvals-deny-bulk').onclick = (e) => (tooSoon(e) ? undefined : decideBulk(false));
-  document.addEventListener('pointermove', () => { S.pointerAt = Date.now(); }, { passive: true });
+  document.addEventListener('pointermove', (e) => { S.pointerAt = Date.now(); S.hover = !!e.target.closest?.('#approvals-list'); }, { passive: true });
+  // Leaving the list applies the answer that waited while the pointer was over it.
+  $('approvals-list').addEventListener('pointerleave', () => {
+    S.hover = false;
+    if (S.queued) { const v = S.queued; S.queued = null; apply(v); }
+  });
   $('pending').addEventListener('click', (e) => {
     const t = e.target.closest('[data-approve],[data-deny],[data-select],[data-always],tr[data-row]');
     if (!t) return;
     if ((t.dataset.approve || t.dataset.deny) && tooSoon(e)) return undefined;
+    // A row that a refresh just moved under the pointer takes no Approve, Deny or Always.
+    if ((t.dataset.approve || t.dataset.deny || t.dataset.always) && e.detail >= 1 && rowMoved(Number(t.closest('tr[data-row]').dataset.row))) return undefined;
     if (t.dataset.approve) return decide(Number(t.dataset.approve), true);
     if (t.dataset.deny) return decide(Number(t.dataset.deny), false);
     if (t.dataset.select) return pick(Number(t.dataset.select), t.checked, e.shiftKey);

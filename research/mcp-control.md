@@ -1650,7 +1650,10 @@ built for deciding a long queue fast:
   (a held Enter on a focused Yes included). A double click decides one row. A pointer click within
   400 ms after the rows moved (a decision, a poll that took a row away above) is ignored unless the
   pointer moved since, so the row that slid under a still pointer is never decided by accident; the
-  bulk buttons have the same guard.
+  bulk buttons have the same guard. A row that a refresh moved (re-ordered, or a row inserted above
+  it, or new) takes no Approve, Deny or Always click for 600 ms (`movedRows`). While the pointer is
+  over the list a refresh never moves its rows: the answer waits and is drawn when the pointer
+  leaves.
 - **Selectors.** Tool and company (when the arguments name one) are derived from the queue, with
   counts; a search box over the id, tool and arguments; expired rows hidden unless asked for. The
   filter lives in the address (`a_tool`, `a_company`, `a_q`, `a_expired`).
@@ -1665,10 +1668,14 @@ built for deciding a long queue fast:
   deny winning over allow, and records `approved_via` with the rule; each approval it matched shows
   the rule. The editor shows its dry run as it is typed: the waiting, unexpired approvals the rule
   would decide now (an allow rule never an owner-only one), from the core's matcher mirrored in
-  `approvals.js` (`coreMatch`) and `panel.rs` (`core_match`). An allow rule over several tools that
-  takes any arguments (no matcher, `{}`, `{"$": "*"}`, `{"$ne": null}`, or any matcher that takes
-  both probe argument sets, `PROBE_ARGS`) is called too broad there and refused by `rule_line`, as
-  the core's `BroadAllowRefusal` refuses it. Below the table, the rules list shows effect, tool glob,
+  `approvals.js` (`coreMatch`) and `panel.rs` (`core_match`). An allow rule over several tools with
+  a broad matcher is called too broad there and refused by `rule_line`, as the core's
+  `BroadAllowRefusal` refuses it. Broad is structural, the core's `IsBroadMatcher` (`broad_matcher`,
+  `broad`): null, `{}`, or an object whose every entry, under any plain key or path, is a non-empty
+  string of `*` only, an operator object whose only operator is `$ne`, or a nested broad object
+  (`{"company": "*"}`, `{"$.*": "*"}` are broad). A literal, `""`, a glob with any other character
+  or `?`, `$in`, `$lt`/`$lte`/`$gt`/`$gte` and an array narrow; naming a key alone never does. One
+  tool with a broad matcher stays allowed. Below the table, the rules list shows effect, tool glob,
   matcher, who made it, hits and whether it is kept, each with Remove, which asks first. While the core keeps no rules (its queue answers no `rules`)
   the list says so and "Always…" is off.
 - **Every line the panel sends to a core that keeps rules carries its channel**: `--via panel` on
