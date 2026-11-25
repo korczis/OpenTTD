@@ -59,6 +59,7 @@ flowchart LR
   |---|---|
   | `run_spans` | every run with its start and the next run's start |
   | `company_month` | each company's last sample of each game month: value, money, loan, net, vehicles and the change from the month before |
+  | `game_month` | `company_month` over one game's runs: a panel restarted on a save of its own game starts a new run with a new seed, so a run continues the one before when it starts after that run's first month, at most a month after its last, with a company of the same id and name at the join; each month comes from the newest run that has it (`game_ms` names the game) |
   | `company_latest` | each company's latest month and its rank by value in its run |
   | `run_events` | every event with the run it belongs to |
   | `news` | the news the owner's window showed, one column per field (`type`, `style`, `text`, `advice`, `refs`) |
@@ -85,7 +86,7 @@ flowchart LR
   `POST /api/db/named {name, params}` runs one with the values bound, never pasted into the text.
   Rhai reaches both as `api_dbNamed()` and `api_dbNamedRun(#{name: "company_rank", params:
   #{company: 0}})`. `replan.rhai` reads `company_rank` and `company_trend`, `capital_watch.rhai` reads
-  `capital_months` (every company's month-end net and vehicles of the latest run); `newest_events` is what
+  `capital_months` (every company's month-end net and vehicles of the current game, across its runs: `game_month`); `newest_events` is what
   `/api/db/query` answers without `?sql=`. The panel's own reads are named queries too:
   `calibration_readings` (the calibration), `duel_outcomes` (own_lines from duels),
   `kernel_window` (an action plan's books, `mcp-kernel-feed`), `company_samples` (the history a

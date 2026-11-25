@@ -147,6 +147,14 @@ outputs = ["research/ai-battle/README.md", "research/results"]
 sync = ["python3", "-B", "tools/research/ai-battle/battle.py", "render"]
 check = ["python3", "-B", "tools/research/ai-battle/battle.py", "check"]
 
+# PrismaticAI against its field and the post-mortems (research/strategy/README.md), derived from
+# the ablation records' standings and the research documents' lead paragraphs.
+[[generators.items]]
+id = "strategy-state"
+outputs = ["research/strategy/README.md"]
+sync = ["tools/research/strategy-surfaces", "render"]
+check = ["tools/research/strategy-surfaces", "render", "--check"]
+
 [[generators.items]]
 id = "duel-charts"
 outputs = ["research/results"]

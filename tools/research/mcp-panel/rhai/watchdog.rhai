@@ -25,7 +25,7 @@
 //      blackboard), its money against the bot's line_budget setting, and every panel service the
 //      supervisor reports stalled or given up (api_services(), when the panel has the supervisor).
 // Where it goes: the blackboard, one key per company, watchdog.<company> (a rhai.shared event,
-// so on the bus and in the DuckDB store), and one chat line when the owner's company (OWNER_COMPANY,
+// so on the bus and in the DuckDB store), and one chat line when the owner's company (ttd::owner_company(),
 // co-played with PrismaticAI) becomes stalled, naming the reasons. A stall is said once, until the
 // company makes progress again.
 //
@@ -36,8 +36,8 @@
 // WATCHDOG_ROUNDS stops it after that many rounds (0 or unset: never).
 
 import "derive_lib" as dl;
+import "ttd" as ttd;
 
-const OWNER_COMPANY = 0;
 const ROUND_S = 20;
 // The threshold, in game days: the first one, its bounds, and how it follows the data.
 const START_DAYS = 7;
@@ -166,8 +166,10 @@ loop {
         let pending = status().pending ?? [];
         let services = [];
         try { services = api_services().services ?? []; } catch { }
+        let stalled = [];
         let bots = #{};
         for b in api_bots().running ?? [] { bots[`${b.id}`] = b; }
+        let owner = ttd::owner_company();
         for c in read("openttd://companies").data.companies ?? [] {
             let owned = 0;
             for s in stations { if s.owner == c.id { owned += 1; } }
@@ -179,10 +181,11 @@ loop {
             v.name = c.name;
             v.date = state.game_date;
             if v.stalled {
+                stalled.push(`${c.name} (${v.quiet_days} d)`);
                 let bot = bots[`${c.id}`];
                 let budget = if type_of(bot) == "()" { 0 } else { setting_of(bot, "line_budget") };
                 v.reasons = reasons(c.id, pending, shared_get(`replan.${c.id}`), c.money, budget, services);
-                if c.id == OWNER_COMPANY && !v.said {
+                if c.id == owner && !v.said {
                     say(`${c.name}: nothing built or bought for ${v.quiet_days} game day(s) (threshold ${threshold}): ${joined(v.reasons)}`);
                     v.said = true;
                 }
@@ -192,6 +195,10 @@ loop {
         if gaps.len() > KEEP_GAPS { gaps = gaps.extract(gaps.len() - KEEP_GAPS); }
         shared_set("watchdog.tuning", #{ gaps: gaps, threshold_days: threshold_from(gaps, cold.value), date: state.game_date,
                                          threshold_source: source_of(gaps, cold), cold_start: cold });
+        // One line a round: what it found, and the heartbeat the panel's supervisor reads. A service
+        // that declares `// stall:` and prints nothing for that long is restarted; this one printed
+        // only on errors and was restarted 7 times in 1.9 game years (seed 10487, 2026-11-23).
+        print(`watchdog ${state.game_date}: threshold ${threshold} day(s), stalled: ${if stalled.is_empty() { "none" } else { joined(stalled) }}`);
     } catch (err) {
         print(`watchdog: ${err}`);
     }

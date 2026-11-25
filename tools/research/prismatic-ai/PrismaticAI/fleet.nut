@@ -175,7 +175,10 @@ function PrismaticAI::RouteLoad(k) {
 }
 
 /* Whether route `k` takes one vehicle more by its load: it ran at least load_add_min percent full,
- * or it was not sampled enough to say (load_add_min 0: always). */
+ * or it was not sampled enough to say (load_add_min 0, the default: always). At 50 the gate kept
+ * planes off routes that still paid: 24 replayed 20-year arena matches on 11411cdc4d gave
+ * load_add_min=0 +29.6% geometric company value (22 of 24 better, 0.88 to 2.03) and 332 more planes
+ * (2026-11-23). The 1950-1956 single matches it was tuned on had towns too small to fill a plane. */
 function PrismaticAI::RouteFillsMore(k) {
 	local min_pct = max(0, AIController.GetSetting("load_add_min"));
 	if (min_pct == 0) return true;
