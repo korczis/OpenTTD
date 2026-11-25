@@ -36,7 +36,7 @@ unknown attribute, a follow-up that names no issue, or a closing marker with no 
 ```mermaid
 pie showData title Open findings by kind
     %% links: open-findings.md?col=Kind&filter=blocked#findings | open-findings.md?col=Kind&filter=out-of-scope#findings | open-findings.md?col=Kind&filter=not-run#findings | open-findings.md?col=Kind&filter=partial#findings | open-findings.md?col=Kind&filter=staged#findings | open-findings.md?col=Kind&filter=unreviewed#findings | open-findings.md?col=Kind&filter=failed#findings | open-findings.md?col=Kind&filter=handoff#findings
-    "blocked" : 68
+    "blocked" : 81
     "out-of-scope" : 58
     "not-run" : 29
     "partial" : 17
@@ -52,7 +52,7 @@ pie showData title Open findings by kind
 <!-- surfaces:begin open-findings -->
 | Kind | Count | Meaning |
 |---|---|---|
-| blocked | 68 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
+| blocked | 81 | An open issue waits on an issue that is not done; the follow-up is what it waits on |
 | out-of-scope | 58 | A finished issue left this out (its non_scope) and no open issue names it |
 | failed | 8 | A run or check the records say failed |
 | not-run | 29 | A validation the records say did not run |
@@ -132,6 +132,19 @@ pie showData title Open findings by kind
 | blocked | The planner, its AlgoGlyph pricing and the bot play the Brno real-world scenario, and the run's record reports what was planned, built and earned against the prediction — waits on I0214 (open) | [I0216](../.ai/repo/project/issues/I0216.yaml):20 | [I0214](../.ai/repo/project/issues/I0214.yaml) | DERIVED |
 | blocked | The Director page charts forecast against actual per line, from plan receipts and calibration, each mark leading to its receipt and its line on the map — waits on I0209 (open), I0213 (open), I0214 (open) | [I0217](../.ai/repo/project/issues/I0217.yaml):18 | [I0209](../.ai/repo/project/issues/I0209.yaml), [I0213](../.ai/repo/project/issues/I0213.yaml), [I0214](../.ai/repo/project/issues/I0214.yaml) | DERIVED |
 | blocked | A remote person plays a recorded game against the disclosed bot over the internet, with every change waiting for the host's approval — waits on I0218 (open) | [I0219](../.ai/repo/project/issues/I0219.yaml):19 | [I0218](../.ai/repo/project/issues/I0218.yaml) | DERIVED |
+| blocked | replan's competition block decomposes the gap per vehicle type into a volume term and a yield term, against the leader and the median — waits on I0270 (open) | [I0271](../.ai/repo/project/issues/I0271.yaml):17 | [I0270](../.ai/repo/project/issues/I0270.yaml) | DERIVED |
+| blocked | Regime thresholds come from regimes.json alone, baselines from derived., and every other constant is a declared bootstrap or owner policy — waits on I0270 (open) | [I0272](../.ai/repo/project/issues/I0272.yaml):18 | [I0270](../.ai/repo/project/issues/I0270.yaml) | DERIVED |
+| blocked | Idle capital uses spendable cash, and its lever is the in-bot allocator's declared reserve or line budget — waits on I0272 (open) | [I0273](../.ai/repo/project/issues/I0273.yaml):16 | [I0272](../.ai/repo/project/issues/I0272.yaml) | DERIVED |
+| blocked | replan answers gap..requests with a focused replan, accepted or declined with a reason, and an unanswered request escalates — waits on I0271 (open) | [I0274](../.ai/repo/project/issues/I0274.yaml):18 | [I0271](../.ai/repo/project/issues/I0271.yaml) | DERIVED |
+| blocked | Proposals filed, approved, denied and retired by deadline are counted once, from the approval core's decision events — waits on I0270 (open) | [I0275](../.ai/repo/project/issues/I0275.yaml):19 | [I0270](../.ai/repo/project/issues/I0270.yaml) | DERIVED |
+| blocked | outcome. is a contract key: gap_watch and the digest read it, and its verdict is a flag — waits on I0270 (open) | [I0276](../.ai/repo/project/issues/I0276.yaml):17 | [I0270](../.ai/repo/project/issues/I0270.yaml) | DERIVED |
+| blocked | Calibration becomes an owner-approved runtime switch, proposed with its evidence — waits on I0276 (open) | [I0277](../.ai/repo/project/issues/I0277.yaml):17 | [I0276](../.ai/repo/project/issues/I0276.yaml) | DERIVED |
+| blocked | battle-brain's prediction for the live configuration is checked against the live outcome each quarter before any live row trains it — waits on I0278 (open) | [I0279](../.ai/repo/project/issues/I0279.yaml):18 | [I0278](../.ai/repo/project/issues/I0278.yaml) | DERIVED |
+| blocked | The owner digest reads every contract key and links each number to it — waits on I0270 (open), I0275 (open), I0276 (open) | [I0280](../.ai/repo/project/issues/I0280.yaml):18 | [I0270](../.ai/repo/project/issues/I0270.yaml), [I0275](../.ai/repo/project/issues/I0275.yaml), [I0276](../.ai/repo/project/issues/I0276.yaml) | DERIVED |
+| blocked | A contract writer that stops writing is reported from the age of its key, by R's evaluation and in the digest — waits on I0270 (open) | [I0281](../.ai/repo/project/issues/I0281.yaml):17 | [I0270](../.ai/repo/project/issues/I0270.yaml) | DERIVED |
+| blocked | gap_watch, digest, service_eval and the evolve proposal writer are on boundary B3's list, and none may name an fr slot — waits on I0270 (open) | [I0282](../.ai/repo/project/issues/I0282.yaml):17 | [I0270](../.ai/repo/project/issues/I0270.yaml) | DERIVED |
+| blocked | replan's MIN_PAYS and HORIZON_MONTHS are declared owner policy, published beside the realised payback distribution of the game's own lines — waits on I0276 (open) | [I0283](../.ai/repo/project/issues/I0283.yaml):16 | [I0276](../.ai/repo/project/issues/I0276.yaml) | DERIVED |
+| blocked | A replay of game 12609's recorded store through the cycle flags the aircraft gap and the idle capital in the first quarter they were visible, and stays quiet on controls — waits on I0271 (open), I0272 (open), I0273 (open), I0275 (open) | [I0284](../.ai/repo/project/issues/I0284.yaml):18 | [I0271](../.ai/repo/project/issues/I0271.yaml), [I0272](../.ai/repo/project/issues/I0272.yaml), [I0273](../.ai/repo/project/issues/I0273.yaml), [I0275](../.ai/repo/project/issues/I0275.yaml) | DERIVED |
 | out-of-scope | Answering the contract from prismatic-platform and consuming it in the bridge: each is an issue in its own repository, named here once it exists | [I0011](../.ai/repo/project/issues/I0011.yaml):15 | none — needs an issue | DERIVED |
 | out-of-scope | New MCP tools and resources in src/prismatic_mcp: carried on branch research/mcp-full-auto by the session that owns the C++ side | [I0031](../.ai/repo/project/issues/I0031.yaml):17 | none — needs an issue | DERIVED |
 | out-of-scope | An agent that approves its own decisions: approval stays the operator's act (panel button or the owner's auto-approve switch) | [I0031](../.ai/repo/project/issues/I0031.yaml):18 | none — needs an issue | DERIVED |

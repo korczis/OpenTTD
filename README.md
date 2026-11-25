@@ -796,8 +796,8 @@ from the code. The right-hand column says what was counted.
 | **70** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
 | **24** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
-| **39** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
-| **209** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
+| **40** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
+| **224** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **101** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
 <!-- surfaces:end facts -->
 
@@ -1477,7 +1477,7 @@ choices, with its status (generated from [`.ai/repo/adrs/`](./.ai/repo/adrs/READ
 pie showData title Decisions by status
     %% links: README.md?col=Status&filter=accepted#071-architecture-decisions | README.md?col=Status&filter=proposed#071-architecture-decisions | README.md?col=Status&filter=superseded#071-architecture-decisions
     "accepted" : 36
-    "proposed" : 2
+    "proposed" : 3
     "superseded" : 1
 ```
 <!-- surfaces:end ai-adrs -->
@@ -1526,6 +1526,7 @@ pie showData title Decisions by status
 | [adr-0038](.ai/repo/adrs/0038-one-approval-core-plans-not-settings-every-channel-an-adapter.md) | accepted | One approval core on the game server: a plan is approved as a whole and executes on approval, and every channel (web, console, game command, chat) is an adapter to it |
 | [adr-0039](.ai/repo/adrs/0039-algoglyph-is-a-git-submodule-pinned-at-one-commit-and-its-ru.md) | proposed | AlgoGlyph is a git submodule pinned at one commit, and its Rust kernels run in-process as native-rust catalogue entries |
 | [adr-0041](.ai/repo/adrs/0041-bulk-consent-and-standing-approval-rules.md) | proposed | The owner's bulk consent and standing approval rules: approve or deny all over a filter, and always-allow or always-deny rules of a tool glob and a JSON matcher, applied in the one approval core |
+| [adr-0042](.ai/repo/adrs/0042-a-strategy-review-cycle-runs-on-the-game-s-month-quarter-and.md) | proposed | A strategy review cycle runs on the game's month, quarter and week, judges every company against the leader from recorded data, and turns a lasting gap into a replan request, an approval-gated plan, labelled learning rows and an owner digest |
 <!-- surfaces:end ai-adrs -->
 
 </details>
@@ -1668,6 +1669,7 @@ Milestones of the plan with the issues done and still open, derived from the iss
 | M21 | [The panel has integrity: every control works, every view is derived](.ai/repo/project/milestones/the-panel-has-integrity.yaml) | 0/8 | I0203, I0204, I0205, I0206, I0207, I0208, I0209, I0211 |
 | M22 | [AlgoGlyph is accountable: cost fixtures, plan receipts, predicted versus actual, fault injection](.ai/repo/project/milestones/algoglyph-is-accountable.yaml) | 1/7 | I0212, I0213, I0214, I0215, I0216, I0217 |
 | M23 | [A remote human plays the bot over the internet](.ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml) | 0/2 | I0218, I0219 |
+| M24 | [The strategy is reviewed on the game's week, month and quarter, and a gap to the leader becomes a proposal, a learning row and an owner digest](.ai/repo/project/milestones/the-strategy-is-reviewed-on-a-cadence.yaml) | 0/15 | I0270, I0271, I0272, I0273, I0274, I0275, I0276, I0277, I0278, I0279, I0280, I0281, I0282, I0283, I0284 |
 <!-- surfaces:end ai-plan -->
 
 <!-- surfaces:begin ai-plan as=bar -->
@@ -1683,12 +1685,12 @@ config:
 ---
 xychart-beta
     title "Issues done (bar) and planned (line) per milestone, in plan order"
-    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21", "M22", "M23"]
+    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21", "M22", "M23", "M24"]
     %% series: Issues done | Issues planned
-    %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml | .ai/repo/project/milestones/records-and-status-tell-the-truth.yaml | .ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml | .ai/repo/project/milestones/every-changed-line-is-tested.yaml | .ai/repo/project/milestones/every-battle-match-explains-itself.yaml | .ai/repo/project/milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml | .ai/repo/project/milestones/the-planner-reads-one-coherent-priced-world.yaml | .ai/repo/project/milestones/battlebrain-decides-live-with-rollback.yaml | .ai/repo/project/milestones/evaluations-are-fair-pre-registered-and-paired.yaml | .ai/repo/project/milestones/prismatic-closes-one-real-loop.yaml | .ai/repo/project/milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml | .ai/repo/project/milestones/the-live-agent-workbench.yaml | .ai/repo/project/milestones/the-panel-has-integrity.yaml | .ai/repo/project/milestones/algoglyph-is-accountable.yaml | .ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml
+    %% links: .ai/repo/project/milestones/the-fork-is-a-governed-research-target.yaml | .ai/repo/project/milestones/a-change-is-validated-in-cost-tiers.yaml | .ai/repo/project/milestones/internals-are-observable-with-recorded-provenance.yaml | .ai/repo/project/milestones/prismatic-steers-a-company-through-the-bridge.yaml | .ai/repo/project/milestones/an-agent-reaches-the-game-over-mcp.yaml | .ai/repo/project/milestones/the-fork-is-published-supervised-and-current.yaml | .ai/repo/project/milestones/the-game-wears-the-owners-noir-style.yaml | .ai/repo/project/milestones/planning-is-generated-from-recorded-history.yaml | .ai/repo/project/milestones/rhai-is-a-live-ide.yaml | .ai/repo/project/milestones/records-and-status-tell-the-truth.yaml | .ai/repo/project/milestones/the-toolchain-carries-no-known-vulnerability.yaml | .ai/repo/project/milestones/every-changed-line-is-tested.yaml | .ai/repo/project/milestones/every-battle-match-explains-itself.yaml | .ai/repo/project/milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml | .ai/repo/project/milestones/the-planner-reads-one-coherent-priced-world.yaml | .ai/repo/project/milestones/battlebrain-decides-live-with-rollback.yaml | .ai/repo/project/milestones/evaluations-are-fair-pre-registered-and-paired.yaml | .ai/repo/project/milestones/prismatic-closes-one-real-loop.yaml | .ai/repo/project/milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml | .ai/repo/project/milestones/the-live-agent-workbench.yaml | .ai/repo/project/milestones/the-panel-has-integrity.yaml | .ai/repo/project/milestones/algoglyph-is-accountable.yaml | .ai/repo/project/milestones/a-remote-human-plays-the-bot.yaml | .ai/repo/project/milestones/the-strategy-is-reviewed-on-a-cadence.yaml
     y-axis "Issues done" 0 --> 58.3
-    bar [2, 4, 8, 12, 53, 7, 1, 7, 6, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]
-    line [2, 4, 8, 12, 53, 7, 1, 7, 6, 8, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 7, 2]
+    bar [2, 4, 8, 12, 53, 7, 1, 7, 6, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+    line [2, 4, 8, 12, 53, 7, 1, 7, 6, 8, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 7, 2, 15]
 ```
 <!-- surfaces:end ai-plan -->
 

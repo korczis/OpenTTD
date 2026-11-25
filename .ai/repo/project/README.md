@@ -67,6 +67,7 @@ issues, the same derivation `majordomus plan` makes.
 | M21 | [The panel has integrity: every control works, every view is derived](milestones/the-panel-has-integrity.yaml) | 0/8 | I0203, I0204, I0205, I0206, I0207, I0208, I0209, I0211 |
 | M22 | [AlgoGlyph is accountable: cost fixtures, plan receipts, predicted versus actual, fault injection](milestones/algoglyph-is-accountable.yaml) | 1/7 | I0212, I0213, I0214, I0215, I0216, I0217 |
 | M23 | [A remote human plays the bot over the internet](milestones/a-remote-human-plays-the-bot.yaml) | 0/2 | I0218, I0219 |
+| M24 | [The strategy is reviewed on the game's week, month and quarter, and a gap to the leader becomes a proposal, a learning row and an owner digest](milestones/the-strategy-is-reviewed-on-a-cadence.yaml) | 0/15 | I0270, I0271, I0272, I0273, I0274, I0275, I0276, I0277, I0278, I0279, I0280, I0281, I0282, I0283, I0284 |
 <!-- surfaces:end ai-plan -->
 
 The same derivation as a chart; each bar opens its milestone on the site:
@@ -84,11 +85,11 @@ config:
 ---
 xychart-beta
     title "Issues done (bar) and planned (line) per milestone, in plan order"
-    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21", "M22", "M23"]
+    x-axis ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17", "M18", "M19", "M20", "M21", "M22", "M23", "M24"]
     %% series: Issues done | Issues planned
-    %% links: milestones/the-fork-is-a-governed-research-target.yaml | milestones/a-change-is-validated-in-cost-tiers.yaml | milestones/internals-are-observable-with-recorded-provenance.yaml | milestones/prismatic-steers-a-company-through-the-bridge.yaml | milestones/an-agent-reaches-the-game-over-mcp.yaml | milestones/the-fork-is-published-supervised-and-current.yaml | milestones/the-game-wears-the-owners-noir-style.yaml | milestones/planning-is-generated-from-recorded-history.yaml | milestones/rhai-is-a-live-ide.yaml | milestones/records-and-status-tell-the-truth.yaml | milestones/the-toolchain-carries-no-known-vulnerability.yaml | milestones/every-changed-line-is-tested.yaml | milestones/every-battle-match-explains-itself.yaml | milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml | milestones/the-planner-reads-one-coherent-priced-world.yaml | milestones/battlebrain-decides-live-with-rollback.yaml | milestones/evaluations-are-fair-pre-registered-and-paired.yaml | milestones/prismatic-closes-one-real-loop.yaml | milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml | milestones/the-live-agent-workbench.yaml | milestones/the-panel-has-integrity.yaml | milestones/algoglyph-is-accountable.yaml | milestones/a-remote-human-plays-the-bot.yaml
+    %% links: milestones/the-fork-is-a-governed-research-target.yaml | milestones/a-change-is-validated-in-cost-tiers.yaml | milestones/internals-are-observable-with-recorded-provenance.yaml | milestones/prismatic-steers-a-company-through-the-bridge.yaml | milestones/an-agent-reaches-the-game-over-mcp.yaml | milestones/the-fork-is-published-supervised-and-current.yaml | milestones/the-game-wears-the-owners-noir-style.yaml | milestones/planning-is-generated-from-recorded-history.yaml | milestones/rhai-is-a-live-ide.yaml | milestones/records-and-status-tell-the-truth.yaml | milestones/the-toolchain-carries-no-known-vulnerability.yaml | milestones/every-changed-line-is-tested.yaml | milestones/every-battle-match-explains-itself.yaml | milestones/prismatic-ai-grows-its-fleet-and-survives-its-own-failures.yaml | milestones/the-planner-reads-one-coherent-priced-world.yaml | milestones/battlebrain-decides-live-with-rollback.yaml | milestones/evaluations-are-fair-pre-registered-and-paired.yaml | milestones/prismatic-closes-one-real-loop.yaml | milestones/governed-access-is-authenticated-and-every-capability-reaches-every-surface.yaml | milestones/the-live-agent-workbench.yaml | milestones/the-panel-has-integrity.yaml | milestones/algoglyph-is-accountable.yaml | milestones/a-remote-human-plays-the-bot.yaml | milestones/the-strategy-is-reviewed-on-a-cadence.yaml
     y-axis "Issues done" 0 --> 58.3
-    bar [2, 4, 8, 12, 53, 7, 1, 7, 6, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]
-    line [2, 4, 8, 12, 53, 7, 1, 7, 6, 8, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 7, 2]
+    bar [2, 4, 8, 12, 53, 7, 1, 7, 6, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+    line [2, 4, 8, 12, 53, 7, 1, 7, 6, 8, 1, 4, 7, 13, 12, 11, 7, 12, 7, 10, 8, 7, 2, 15]
 ```
 <!-- surfaces:end ai-plan -->
