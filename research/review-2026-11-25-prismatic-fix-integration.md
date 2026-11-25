@@ -153,6 +153,24 @@ matters with the panel's steward setting targets. No fix here.
 
 ## Validation
 
-A fitness run with lineups 1 and 6 of `battle.json` on seed 31337 (6 years, the arena field,
-`-d script=4`) compared master `8f35e35995` with the fix, one process at a time. The results are
-in the pull request that carries this note.
+Lineups 1 and 6 of `battle.json` `fitness` were run on seed 31337 for master `8f35e35995` and for
+the fix. Each run was 6 years against the arena field at `-d script=4`, one process at a time,
+and each started only while the load average was under 24.
+
+| Run | January rounds that bought before their year's FUNNEL line | Bought after it | Fitness verdict |
+|---|---|---|---|
+| master, lineup 1 | 3 (1963, 1964, 1965) | 0 | PASS |
+| master, lineup 6 | 2 (1961; 1962, company 1) | 0 | FAIL `trainless_stations:1` (claim race A) |
+| fix, lineup 1 | 0 | 2 | FAIL `trainless_stations:1` (self-steward) |
+| fix, lineup 6 | 0 | 3 | PASS |
+
+The counts come from the match logs: a January survey round followed by a purchase, set against
+where the old year's `FUNNEL ... mode=rail` line falls. With the fix, every such line comes before
+the round's purchases. The only fitness failure is `trainless_stations:1`, a rail station without
+a train from 1965-04 to the end of the match. Master shows the same failure in lineup 6, so by the
+owner's fitness rule the fix adds no new kind of failure. The two failures fall on different
+lineups because the matches diverge: the same seed ends at different values on the two trees.
+The fix does not change what the bot decides, but it changes when the script uses its opcodes.
+**PARTIAL:** `tools/gate.sh change` was not run, because it means a full C++ build in this
+worktree and the change touches only Squirrel. `tools/surfaces/surfaces check`,
+`tools/knowledge/refs check` and `python3 -B -m unittest test_prismatic_ai_docs` passed.
