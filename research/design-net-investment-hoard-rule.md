@@ -43,6 +43,15 @@ The **reinvested share** of the window is
 `r` is close to 1 for a company that spends what it earns. AAAHogEx's 98-100% is this quantity.
 `r` is close to 0 for one that banks it, and can be negative for one that sells its vehicles.
 
+**One definition, two readers.** This is the live capital watch's measure, not a second one.
+`capital_watch.rhai` (#278) computes the same identity over the panel's `company_month`: operating
+cash flow is income plus expenses, implied capex is that flow minus the net kept, and reinvestment
+is capex over the flow. It uses the materiality floor `MIN_OCF` (10,000): a quarter whose operating
+cash flow is smaller is unknown, not 0 % or 100 %. The definition lives in one place,
+`research/mechanisms/rhai-scripting.md` "The capital watch". The fitness rule cites it and takes
+the same floor, so the gate and the live watch cannot diverge. The capital watch measured game 12609
+at 62 %, 44 % and then 12 % for PrismaticAI, against AAAHogEx's 98-100 %.
+
 Why not use company value? `CalculateCompanyAssetValue` (`src/economy.cpp:118:CalculateCompanyAssetValue`) counts only
 station facilities and 1.5 × vehicle value. Track, depots, signals and terraforming are not
 assets, so a rail-heavy company that invests heavily would look as if it threw money away.
@@ -52,7 +61,8 @@ for track, and as a stock ratio it also punishes an old company for money it ban
 
 ## The proposed rule
 
-A contestant hoards when some window of `hoard_window` samples (default 8) has all three:
+A contestant hoards when some window of `hoard_window` samples (default 8) has all three, over
+the window's known quarters only (operating cash flow at least `MIN_OCF`, as in the capital watch):
 
 1. `ΣP ≥ invest_profit_floor`: enough profit for the share to mean something (proposed default
    200k over the window; to be calibrated);
@@ -62,6 +72,9 @@ A contestant hoards when some window of `hoard_window` samples (default 8) has a
 
 It reports as `hoards:<t0>..<t1>:kept=<1−r>@<ΣP>`, beside today's form.
 
+- **The early years get a short window.** In 1950-52 the loan policy can freeze construction
+  (the frozen-days gate, #276), and 8 quarters reacts slowly there. In a contestant's first 3 years
+  a window of 4 known quarters is judged, with a stricter `invest_min_share_early`.
 - The existing `hoarding()` stays as it is: it catches the company that stops.
 - `must_not_hoard` in `battle.json` decides which contestants are held to it, as today.
 - A window whose samples lack `loan` or `expenses` is not judged. It does not count them as 0:
@@ -89,8 +102,9 @@ It reports as `hoards:<t0>..<t1>:kept=<1−r>@<ΣP>`, beside today's form.
   come from a referee older than `loan=` (2026-11-23). Their `money` includes borrowed money, so `r`
   would read every repayment as investment.
 - **The store drops the loan.** `SAMPLE_COLS` in `battle.py` has `expenses` but no `loan`, so every
-  match the orchestrator stores reads loan 0, even from a referee that logs it. This hurts today's
-  net-of-loan rule too, whenever it judges stored samples.
+  match the orchestrator stores in `battle.sqlite` reads loan 0, even from a referee that logs it.
+  The rules judge the in-memory series before it is stored (nothing reads `samples` back), so
+  today's verdicts are right. Every offline analysis and calibration from the store is wrong.
 - **The arena logs name companies, not AIs.** The lineup lives with the orchestrator (the GA host).
   A distribution per AI needs that mapping.
 
@@ -99,8 +113,8 @@ It reports as `hoards:<t0>..<t1>:kept=<1−r>@<ΣP>`, beside today's form.
 1. Add `loan` to `SAMPLE_COLS`, with a migration that adds the column to existing stores, and a test
    that a stored sample keeps its loan. This is a fix on its own.
 2. The arena referee (`~/ttd-battle/arena/game/BattleReferee.tar`) follows the repository's referee,
-   so new matches log `loan=`. That is the orchestrator owner's call; openttd-36 owns R4a, the
-   live-like arena.
+   so new matches log `loan=`. The arena runs on the remote orchestrator (dispatched over SSH from
+   another host on the LAN), so this is its owner's call, asked through the owner.
 3. Replay 10487, 12609 and 15805 headless with today's referee, and run the fitness lineup on 5
    seeds. Tabulate `r` per contestant and window.
 4. Pick `invest_min_share` and `invest_profit_floor` from that table. Both falsifiers must hold:
@@ -108,10 +122,15 @@ It reports as `hoards:<t0>..<t1>:kept=<1−r>@<ΣP>`, beside today's form.
 5. Implement `reinvesting()` beside `hoarding()`, with tests over the recorded traces, and record
    the thresholds and their source in `research/ai-battle/README.md`.
 
-## Open questions for the reviewer
+## Review (openttd-36, 2026-11-25)
 
-- Is 8 quarters right for `r`? A rail line takes about a year to pay back, so a shorter window
-  punishes the year a company saves up for one.
-- Should vehicle sales (`ExpensesType::NewVehicles` with a negative cost) count against `r`, or be
-  netted? As written they lower `I`, so a company that sells its fleet scores a low `r`, which is
-  the right verdict.
+- The identity replaces the reviewer's stock proxy, which is dropped. It is one definition with the
+  capital watch (above).
+- 8 quarters is right for the verdict, with the materiality floor and the short window for the
+  first years (above).
+- Vehicle sales count. Sale proceeds raise money and are not expenses, so the identity reads
+  disinvestment (a line closed, an unprofitable vehicle sold) as money not put to work. An
+  autorenew sale and purchase in one quarter nets out by itself, so no exception is needed.
+- The loan column is a separate PR, with a test that a stored sample keeps its loan.
+- Calibration proves the rule both ways. It must fail the live traces (12609 1952-54, the 10487
+  hoard) and pass AAAHogEx (loan near its maximum, cash 6-108k) and our best headless seed.
