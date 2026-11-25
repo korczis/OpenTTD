@@ -1783,6 +1783,148 @@ class Live(unittest.TestCase):
         self.assertTrue(set(t["defaults"]) <= set(t["space"]))
 
 
+class RefereeFollow(unittest.TestCase):
+    """The arena follows the repository's referee (owner, 2026-11-25: new matches log loan=)."""
+    PATH = "tools/research/ai-battle/referee/BattleReferee"
+
+    def setUp(self):
+        if not Export._tracked(self.PATH):
+            self.skipTest("referee not committed yet")
+        self.head = battle.git("rev-parse", "HEAD")
+
+    def cfg(self, tmp, **referee):
+        cache = Path(tmp)
+        return {"cache": cache, "results": cache / "results", "hosts_file": cache / "hosts.json",
+                "baseset": cache / "opengfx-8.0.tar", "match": MC, "contestants": [],
+                "prismatic": {"path": "tools/research/prismatic-ai/PrismaticAI"},
+                "referee": {"path": self.PATH, **referee}}
+
+    def old_arena(self, cfg):
+        game = cfg["cache"] / "arena" / "game"
+        game.mkdir(parents=True)
+        with tarfile.open(game / battle.REFEREE_TAR, "w") as t:   # a pre-loan referee
+            data = b"function Start() {}\n"
+            info = tarfile.TarInfo("BattleReferee/main.nut")
+            info.size = len(data)
+            t.addfile(info, io.BytesIO(data))
+        prov = {"rev": "b" * 40, "dirty": False, "ais": ["PrismaticAI.tar"]}
+        (cfg["cache"] / "arena" / "PROVENANCE.json").write_text(json.dumps(prov))
+        return game / battle.REFEREE_TAR
+
+    def test_refresh_replaces_only_the_referee_and_records_its_commit(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp)
+            tar = self.old_arena(cfg)
+            msg = battle.refresh_referee(cfg)
+            self.assertIn(f"arena referee bbbbbbbbbb -> {self.head[:10]}", msg)
+            self.assertIn("loan=", battle.tar_files(tar)["BattleReferee/main.nut"].decode())
+            self.assertFalse(tar.with_name(battle.REFEREE_TAR + ".new").exists())
+            prov = json.loads((cfg["cache"] / "arena" / "PROVENANCE.json").read_text())
+            self.assertEqual((prov["rev"], prov["referee_rev"], prov["ais"]),
+                             ("b" * 40, self.head, ["PrismaticAI.tar"]))
+            self.assertIn("referee_prepared_at", prov)
+            # Same files again: nothing changes, so neither does the edition.
+            self.assertIsNone(battle.refresh_referee(cfg))
+            self.assertFalse(tar.with_name(battle.REFEREE_TAR + ".new").exists())
+            with mock.patch.object(battle, "log") as log:
+                battle.follow_referee(cfg)
+            log.assert_called_once_with("arena referee is the repository's")
+
+    def test_refresh_refuses_a_missing_or_dirty_arena(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp)
+            with self.assertRaisesRegex(RuntimeError, "no prepared arena"):
+                battle.refresh_referee(cfg)
+            with mock.patch.object(battle, "log") as log:
+                battle.follow_referee(cfg)          # run goes on, and says why it did not follow
+            self.assertIn("referee not followed: no prepared arena", log.call_args[0][0])
+            self.old_arena(cfg)
+            prov = cfg["cache"] / "arena" / "PROVENANCE.json"
+            prov.write_text(json.dumps({"rev": "b" * 40, "dirty": True}))
+            with self.assertRaisesRegex(RuntimeError, "uncommitted"):
+                battle.refresh_referee(cfg)
+
+    def test_follow_can_be_turned_off(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp, follow=False)
+            tar = self.old_arena(cfg)
+            with mock.patch.object(battle, "log") as log:
+                battle.follow_referee(cfg)
+            log.assert_not_called()
+            self.assertNotIn(b"loan=", battle.tar_files(tar)["BattleReferee/main.nut"])
+            with mock.patch.object(battle, "log") as log:
+                battle.follow_referee(self.cfg(tmp))
+            self.assertIn("arena referee bbbbbbbbbb ->", log.call_args[0][0])
+
+    def test_prepare_exports_the_referee_at_its_own_rev(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp, rev="HEAD")
+            if len(battle.git("rev-list", "--max-count=2", "HEAD").split()) < 2:
+                self.skipTest("a shallow clone has no older commit to pin PrismaticAI to")
+            cfg["prismatic"]["rev"] = "HEAD~1"       # a pinned bot is refereed by today's referee
+            cfg["baseset"].write_bytes(b"")
+            with mock.patch.object(battle, "log"):
+                battle.cmd_prepare(cfg, False)
+            prov = json.loads((cfg["cache"] / "arena" / "PROVENANCE.json").read_text())
+            self.assertEqual((prov["rev"], prov["referee_rev"]),
+                             (battle.git("rev-parse", "HEAD~1"), self.head))
+            self.assertIsNone(battle.refresh_referee(cfg))
+
+    def test_cli_referee_only_and_run_follow(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp)
+            conf = Path(tmp, "battle.json")
+            conf.write_text(json.dumps({**{k: str(v) for k, v in cfg.items()
+                                           if isinstance(v, Path)},
+                                        **{k: v for k, v in cfg.items()
+                                           if not isinstance(v, Path)}}))
+            with mock.patch.object(battle, "log") as log:
+                self.assertEqual(battle.main(["prepare", "--referee-only", "--config", str(conf)]), 10)
+            self.assertIn("refusing: no prepared arena", log.call_args[0][0])
+            self.old_arena(cfg)
+            with mock.patch.object(battle, "log") as log:
+                self.assertEqual(battle.main(["prepare", "--referee-only", "--config", str(conf)]), 0)
+            self.assertIn("arena referee bbbbbbbbbb ->", log.call_args[0][0])
+            with mock.patch.object(battle, "log") as log:
+                battle.main(["prepare", "--referee-only", "--config", str(conf)])
+            log.assert_called_once_with("arena referee is already the repository's")
+            with mock.patch.object(battle, "follow_referee") as follow, \
+                    mock.patch.object(battle, "Orchestrator") as orch:
+                battle.main(["run", "--config", str(conf), "--port", "1"])
+            follow.assert_called_once()
+            orch.return_value.run.assert_called_once_with(1)
+
+    def test_records_name_the_referee_commit(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            orch, _ = Guards.orchestrator(tmp)
+            orch.provenance = {"prismatic_path": "p", "referee_path": "r", "rev": "a" * 40,
+                               "referee_rev": "c" * 40, "dirty": False, "baseset": "b", "ais": []}
+            with mock.patch.object(battle, "log"):
+                rec = battle.build_record(orch.cfg, orch)
+            self.assertEqual(rec["provenance"]["referee_rev"], "c" * 40)
+            del orch.provenance["referee_rev"]      # an arena prepared before 2026-11-25
+            self.assertNotIn("referee_rev", battle.build_record(orch.cfg, orch)["provenance"])
+        p = record()["provenance"]
+        self.assertEqual(battle.code_at(p), f"PrismaticAI and referee at `{'a' * 40}`")
+        self.assertEqual(battle.code_at(dict(p, referee_rev="a" * 40)),
+                         f"PrismaticAI and referee at `{'a' * 40}`")
+        self.assertEqual(battle.code_at(dict(p, referee_rev="c" * 40)),
+                         f"PrismaticAI at `{'a' * 40}`, referee at `{'c' * 40}`")
+        rec = record()
+        rec["provenance"]["referee_rev"] = "c" * 40
+        self.assertEqual(battle.validate_record(rec, Records.NAME), [])
+        self.assertIn("referee at `" + "c" * 40, battle.render_md(rec))
+        rec["provenance"]["referee_rev"] = "HEAD"
+        self.assertIn("provenance.referee_rev is not a full commit hash",
+                      "\n".join(battle.validate_record(rec, Records.NAME)))
+
+
 # ------------------------------------------------------------------ live-like arena and replay
 
 LIVE = {"seed": 15805, "slot": 0,
