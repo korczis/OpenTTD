@@ -1447,6 +1447,12 @@ only the decisions of the sentence you just typed. `deny all` is kept for the op
 denial cannot execute anything, it only clears the queue, and a cleared queue is what makes the next
 named approval predictable. Approval is named; denial may be wholesale.
 
+*Amended 2026-11-23 (ADR 0041):* the owner ordered approve all, deny all and standing
+"always allow / always deny" rules. They exist now as the owner's own acts over a filter that the
+owner writes (a tool glob and a JSON matcher), never as a walk of the whole queue by a loop. Every
+id is still approved on its own and printed, and every decision a rule makes names the rule; see
+[the approval gate](mechanisms/approval-gate.md#standing-rules-and-bulk-consent).
+
 `mcp-intent-check` proves the four sentences themselves, driven through `POST /api/console`
 against a **dedicated server** — the `_network_dedicated` branch of `ConPlan`, not the branch the
 owner's own windowed client takes, which is covered separately by `mcp-ask-check`: that each one
