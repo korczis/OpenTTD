@@ -490,7 +490,7 @@ class PrismaticAI extends AIInfo {
 		});
 		AddSetting({
 			name = "modernize",
-			description = "1 (default): once a game month the bot sets the game's autoreplace from every engine it runs to the better one its builders would buy now (same rail type with power, same plane class; modernize.nut); 0: engines are only renewed with the same model.",
+			description = "1 (default): once a game month the bot sets the game's autoreplace from every engine it runs to the better one its builders would buy now (same rail type with power, same plane class; modernize.nut); 0: engines are renewed with the same model, or with the best one built once their model is no longer built (modernize.nut RenewUnbuildable, at either value).",
 			min_value = 0, max_value = 1,
 			easy_value = 1, medium_value = 1, hard_value = 1, custom_value = 1,
 			flags = CONFIG_INGAME | CONFIG_BOOLEAN,

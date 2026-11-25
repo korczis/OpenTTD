@@ -851,6 +851,10 @@ function PrismaticAI::Start() {
 			if (b.rich) this.Modernize(b);
 			else PrismaticAI.ModernizeHold();
 		}
+		/* A vehicle past its age whose model is no longer built gets the best one that is (modernize.nut). */
+		if (PrismaticAI.MonthKey() != this.month) this.RenewUnbuildable();
+		/* Trains reach their depot behind the platform only when sent (modernize.nut ServiceDue). */
+		if (PrismaticAI.MonthKey() != this.month) this.ServiceDue();
 		/* Track follows engines: one network a month moves to a better rail type it can afford (infra.nut). */
 		if (!frozen && b.rich && b.upgrade_track == 1 && PrismaticAI.MonthKey() != this.month) this.UpgradeTrack(b);
 		/* New models offered to us first: taken, like AAAHogEx does (modernize.nut). */

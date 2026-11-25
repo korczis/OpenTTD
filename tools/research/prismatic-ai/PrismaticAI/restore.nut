@@ -84,6 +84,9 @@ function PrismaticAI::Save() {
 		modernize_set = MODERNIZE_SET,
 		/* rail.nut ClaimFresh: when each foreign rail station tile near a producer was first seen. */
 		claims_seen = CLAIM_SEEN,
+		/* modernize.nut ServiceDue: trains on their way to a depot, and those not sent again yet. */
+		service_sent = SERVICE_SENT,
+		service_skip = SERVICE_SKIP,
 	};
 }
 
@@ -210,6 +213,8 @@ function PrismaticAI::RestoreFromSave(data) {
 	PrismaticAI.RestoreFill(FAILED_PAIRS, PrismaticAI.RestoreField(data, "failed_pairs", {}));
 	PrismaticAI.RestoreFill(MODERNIZE_SET, PrismaticAI.RestoreField(data, "modernize_set", {}));
 	PrismaticAI.RestoreFill(CLAIM_SEEN, PrismaticAI.RestoreField(data, "claims_seen", {}));
+	PrismaticAI.RestoreFill(SERVICE_SENT, PrismaticAI.RestoreField(data, "service_sent", {}));
+	PrismaticAI.RestoreFill(SERVICE_SKIP, PrismaticAI.RestoreField(data, "service_skip", {}));
 }
 
 /* How many tiles of station `st`'s platforms of direction `dir` follow `tile` by the step `d`. */

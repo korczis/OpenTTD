@@ -40,7 +40,20 @@ flowchart TB
   fleet, line reconciliation and the loan. The passenger pair takes a heartbeat in which the bot
   started no own freight line. Once it has waited two game years it may take any heartbeat
   (`PairDue`, `TryRailPair`).
-  Old vehicles are renewed by the game's own autorenew.
+  Old vehicles are renewed by the game's own autorenew, which works only in a depot. A train
+  looks for a depot by itself only within 20 tiles of its path, and the bot's depot stands behind a
+  terminus platform, so its trains never went there. Once a game month the bot now sends up to
+  three trains to a depot for service, the most worn first (`modernize.nut` `ServiceDue`). A train
+  goes when it is due for renewal, when an autoreplace rule waits for its engine, or when it is
+  worn to half its engine's reliability. One that has not arrived after 60 days is called back,
+  its tile is logged, and it is left alone for a year. A train due for renewal whose model is no
+  longer built moves into the `PrismaticAI renew` group, whose rule gives it the best engine that
+  fits (`RenewUnbuildable`). A train stopped in a depot two monthly looks in a row is started again
+  when a line owns it, and otherwise loses its orders and joins a line or is sold
+  (`events.nut` `LookAfterVehicles`). In a replay of the owner's game 21647 (save of 1992-03, a
+  loaded host) master replaced none of its five old-model trains at reliability 0 in ten months.
+  This version replaced three of them. Two never reached their depot and are logged with their
+  tiles.
 - **A plan is added on top of the autopilot** (`main.nut` `Behaviour`). With `autopilot=1` a
   planned bot keeps the autopilot's floors: at least 10 own lines, up to 30 routes, intercity roads,
   at most a 5000 reserve. Producers nobody serves are taken by rivals within the first years, and a

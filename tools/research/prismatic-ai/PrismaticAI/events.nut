@@ -445,13 +445,36 @@ function PrismaticAI::OrdersFor(v) {
  * broken lines walked again. */
 function PrismaticAI::LookAfterVehicles() {
 	local seen = {};
+	/* Trains a broken line stopped on purpose (SellOrPark) wait for their line, whatever it holds. */
+	local parked = {};
+	foreach (line in RAIL_LINES) if ("parked" in line) foreach (u in line.parked) parked[u] <- true;
 	foreach (v, _ in AIVehicleList()) {
-		if (AIOrder.GetOrderCount(v) > 0 || this.selling.rawin(v) || this.resizing.rawin(v) || !AIVehicle.IsStoppedInDepot(v)) continue;
+		if (this.selling.rawin(v) || this.resizing.rawin(v) || !AIVehicle.IsStoppedInDepot(v)) continue;
+		/* A train stopped in a depot with orders that no open line owns is as lost to the company as
+		 * one with none: in the owner's game 21647 train 1097 (SH '8P' (Steam)) stood in the depot at
+		 * tile 40665 with the orders of no line from before 1992-03 on and earned nothing. It takes
+		 * the same way, its orders dropped first. */
+		local stood = AIOrder.GetOrderCount(v) > 0 && AIVehicle.GetVehicleType(v) == AIVehicle.VT_RAIL && !parked.rawin(v);
+		local i = stood ? PrismaticAI.LineOfTrain(v) : -1;
+		local lineless = stood && i == -1;
+		if (AIOrder.GetOrderCount(v) > 0 && !stood) continue;
 		local what = "vehicle " + v + " (unit " + AIVehicle.GetUnitNumber(v) + ") in the depot at tile " + AIVehicle.GetLocation(v);
 		if (!this.orphans.rawin(v)) {
 			seen[v] <- true;
-			AILog.Info("PrismaticAI: no orders: " + what + "; given a line's orders or sold next month if it still has none");
+			AILog.Info("PrismaticAI: no orders: " + what + (!stood ? "" : lineless ? " has the orders of no line" : " stands stopped on " + PrismaticAI.LineName(i)) +
+				(stood && !lineless ? "; started next month if it still stands" : "; given a line's orders or sold next month if it still has none"));
 			continue;
+		}
+		/* One of a line's trains stopped in its depot two looks in a row runs again, as a restart does
+		 * (restore.nut); ReconcileLines sells it if the line has a train too many. */
+		if (stood && !lineless) {
+			if (AIVehicle.StartStopVehicle(v)) AILog.Info("PrismaticAI: no orders: " + what + " stood stopped on " + PrismaticAI.LineName(i) + "; started");
+			else seen[v] <- true;
+			continue;
+		}
+		if (lineless) {
+			AIOrder.UnshareOrders(v);
+			while (AIOrder.GetOrderCount(v) > 0) AIOrder.RemoveOrder(v, 0);
 		}
 		local to = this.OrdersFor(v);
 		if (to != null) {

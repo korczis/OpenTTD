@@ -24,6 +24,7 @@
  *   keeps trams trams); a plane never becomes a helicopter or the reverse (the game refuses it), a
  *   small plane never becomes a big one (it would crash on a small airport), and a plane never gets
  *   a shorter range (AIEngine.GetMaximumOrderDistance, 0 = unlimited).
+ * - With `strict` false (RenewUnbuildable) the best engine that fits is enough, better or not.
  * - AIGroup.EnableWagonRemoval(true): a longer locomotive drops wagons from the end, so a train never
  *   grows longer than its platform.
  * A rule is set once per change and logged as "PrismaticAI: modernize: <old> -> <new>". A rule the
@@ -91,7 +92,7 @@ function PrismaticAI::BestRoadEngine(cargo, roadtype = -1, articulated = true) {
  *   with a better capacity x speed;
  * - air: PickPlane's measure (capacity x speed, passengers or the plane's cargo), the same class
  *   (helicopter stays helicopter, a small plane stays small) and no shorter range. */
-function PrismaticAI::SuccessorEngine(v, old) {
+function PrismaticAI::SuccessorEngine(v, old, strict = true) {
 	local type = AIVehicle.GetVehicleType(v);
 	local cargo = PrismaticAI.CarriedCargo(v);
 	if (cargo == -1) cargo = PrismaticAI.PassengerCargo();
@@ -113,21 +114,21 @@ function PrismaticAI::SuccessorEngine(v, old) {
 		if (!AIEngine.HasPowerOnRail(loco, rt)) return -1;
 		if (track != AIRail.RAILTYPE_INVALID && !AIEngine.HasPowerOnRail(loco, track)) return -1;
 		local s = AIEngine.GetMaxSpeed(loco), s0 = AIEngine.GetMaxSpeed(old);
-		if (s > s0 || (s == s0 && AIEngine.GetPower(loco) > AIEngine.GetPower(old))) return loco;
+		if (!strict || s > s0 || (s == s0 && AIEngine.GetPower(loco) > AIEngine.GetPower(old))) return loco;
 		return -1;
 	}
 
 	if (type == AIVehicle.VT_ROAD) {
 		local road = PrismaticAI.BestRoadEngine(cargo, AIEngine.GetRoadType(old), AIEngine.IsArticulated(old));
 		if (road == -1 || road == old) return -1;
-		return AIEngine.GetCapacity(road) * AIEngine.GetMaxSpeed(road) > old_value ? road : -1;
+		return (!strict || AIEngine.GetCapacity(road) * AIEngine.GetMaxSpeed(road) > old_value) ? road : -1;
 	}
 
 	if (type == AIVehicle.VT_AIR) {
 		local pt = AIEngine.GetPlaneType(old);
 		local heli = pt == AIAirport.PT_HELICOPTER;
 		local range = AIEngine.GetMaximumOrderDistance(old);
-		local best = -1, best_value = old_value;
+		local best = -1, best_value = strict ? old_value : -1;
 		foreach (e, _ in AIEngineList(AIVehicle.VT_AIR)) {
 			if (e == old || !AIEngine.IsBuildable(e)) continue;
 			if (AIEngine.GetCargoType(e) != cargo && !AIEngine.CanRefitCargo(e, cargo)) continue;
@@ -148,26 +149,34 @@ function PrismaticAI::SuccessorEngine(v, old) {
  * name found among the company's groups (a reloaded bot), else, with `create`, a new one. null when
  * there is none or the game refused it. */
 function PrismaticAI::ProtectedGroup(vtype, create) {
-	if (MODERNIZE_GROUPS.rawin(vtype) && AIGroup.IsValidGroup(MODERNIZE_GROUPS[vtype])) return MODERNIZE_GROUPS[vtype];
+	return PrismaticAI.BotGroup(MODERNIZE_GROUPS, MODERNIZE_GROUP_NAME, vtype, create, true);
+}
+
+/* The bot's group named `name` for vehicles of `vtype`, cached in `cache` (vehicle type -> id):
+ * the cached one, else one of that name among the company's groups (a reloaded bot), else, with
+ * `create`, a new one; with `protect`, one with autoreplace protection. null when there is none or
+ * the game refused it. */
+function PrismaticAI::BotGroup(cache, name, vtype, create, protect) {
+	if (cache.rawin(vtype) && AIGroup.IsValidGroup(cache[vtype])) return cache[vtype];
 	foreach (id, _ in AIGroupList()) {
-		if (AIGroup.GetVehicleType(id) != vtype || AIGroup.GetName(id) != MODERNIZE_GROUP_NAME) continue;
-		if (!AIGroup.GetAutoReplaceProtection(id) && !AIGroup.EnableAutoReplaceProtection(id, true)) continue;
-		MODERNIZE_GROUPS[vtype] <- id;
+		if (AIGroup.GetVehicleType(id) != vtype || AIGroup.GetName(id) != name) continue;
+		if (protect && !AIGroup.GetAutoReplaceProtection(id) && !AIGroup.EnableAutoReplaceProtection(id, true)) continue;
+		cache[vtype] <- id;
 		return id;
 	}
 	if (!create) return null;
 	local g = AIGroup.CreateGroup(vtype, AIGroup.GROUP_INVALID);
 	if (!AIGroup.IsValidGroup(g)) {
-		AILog.Warning("PrismaticAI: modernize: no protected group: " + AIError.GetLastErrorString());
+		AILog.Warning("PrismaticAI: modernize: no group '" + name + "': " + AIError.GetLastErrorString());
 		return null;
 	}
-	if (!AIGroup.EnableAutoReplaceProtection(g, true)) {
+	if (protect && !AIGroup.EnableAutoReplaceProtection(g, true)) {
 		AILog.Warning("PrismaticAI: modernize: group " + g + " not protected: " + AIError.GetLastErrorString());
 		AIGroup.DeleteGroup(g);
 		return null;
 	}
-	AIGroup.SetName(g, MODERNIZE_GROUP_NAME);
-	MODERNIZE_GROUPS[vtype] <- g;
+	AIGroup.SetName(g, name);
+	cache[vtype] <- g;
 	return g;
 }
 
@@ -176,7 +185,7 @@ function PrismaticAI::ProtectedGroup(vtype, create) {
 function PrismaticAI::ProtectFromReplace(v) {
 	if (!AIVehicle.IsValidVehicle(v) || !AIVehicle.IsPrimaryVehicle(v)) return;
 	/* No rule of the bot's, nothing to be protected from: no group is made (and no command spent). */
-	if (MODERNIZE_SET.len() == 0) return;
+	if (MODERNIZE_SET.len() == 0 && PrismaticAI.RenewGroup(AIVehicle.GetVehicleType(v), false) == null) return;
 	local g = PrismaticAI.ProtectedGroup(AIVehicle.GetVehicleType(v), true);
 	if (g != null && AIVehicle.GetGroupID(v) != g) AIGroup.MoveVehicle(g, v);
 }
@@ -249,6 +258,162 @@ function PrismaticAI::Modernize(b) {
 					" refused: " + AIError.GetLastErrorString());
 			}
 		}
+	}
+}
+
+/* Vehicle type -> the id of the bot's renewal group of that type (RenewGroup). */
+MODERNIZE_RENEW_GROUPS <- {};
+/* The name of those groups, so a reloaded bot finds them again. */
+MODERNIZE_RENEW_NAME <- "PrismaticAI renew";
+
+/* The bot's renewal group for vehicles of `vtype` (BotGroup, not protected). */
+function PrismaticAI::RenewGroup(vtype, create) {
+	return PrismaticAI.BotGroup(MODERNIZE_RENEW_GROUPS, MODERNIZE_RENEW_NAME, vtype, create, false);
+}
+
+/* Once a game month, rich or not and whatever `modernize` says: a vehicle due for renewal whose
+ * engine is no longer built gets the best engine that fits it instead.
+ *
+ * The game's autorenew (main.nut Start) renews like for like only: once a model leaves production
+ * it cannot be built, the renewal fails at every depot visit (autoreplace_cmd.cpp GetNewEngineType),
+ * and the vehicle runs on past its maximum age. Modernize's rules would replace it, but they stand
+ * only while the bot is rich (ModernizeHold) and only for a strictly better successor that every
+ * vehicle of the engine takes. In the owner's game 21647 train 173 was 17971 days old against a
+ * maximum of 7320 with autorenew on.
+ *
+ * Only the vehicles due go: each moves into the renewal group of its type, whose rule maps its old
+ * engine to SuccessorEngine(v, old, false). A rule set with AIGroup.SetAutoReplace replaces at the
+ * next depot visit (the API sets "when old" off), so a rule on GROUP_ALL would also replace every
+ * younger vehicle of that engine at its full price. A vehicle is due from the company's renew months
+ * before its maximum age (AICompany.GetAutoRenewMonths), as autorenew would renew it. The new vehicle
+ * stays in the group; the next month moves every vehicle the group has no rule for (a renewed one)
+ * back to GROUP_DEFAULT. Only a vehicle of GROUP_DEFAULT is taken: one in another group (the
+ * protected hold group, a person's) stays where it is. The money check stays the game's
+ * (Vehicle::NeedsServicing: engine_renew_money plus twice the new engine's price at hand). */
+function PrismaticAI::RenewUnbuildable() {
+	local due_from = AICompany.GetAutoRenewMonths(AICompany.COMPANY_SELF) * 30;
+	/* A renewed train has a new id, as under Modernize's rules. */
+	if (PrismaticAI.RenewGroup(AIVehicle.VT_RAIL, false) != null) PrismaticAI.ForgetReplacedTrains();
+	AIGroup.EnableWagonRemoval(true);
+	this.ReleaseProtected();
+	foreach (vtype in [AIVehicle.VT_RAIL, AIVehicle.VT_ROAD, AIVehicle.VT_WATER, AIVehicle.VT_AIR]) {
+		local g = PrismaticAI.RenewGroup(vtype, false);
+		if (g == null) continue;
+		foreach (v, _ in AIVehicleList_Group(g)) {
+			local e = AIVehicle.GetEngineType(v);
+			if (!AIEngine.IsValidEngine(AIGroup.GetEngineReplacement(g, e)) || AIEngine.IsBuildable(e)) AIGroup.MoveVehicle(AIGroup.GROUP_DEFAULT, v);
+		}
+	}
+	foreach (v, _ in AIVehicleList()) {
+		if (this.selling.rawin(v) || this.resizing.rawin(v) || AIVehicle.GetGroupID(v) != AIGroup.GROUP_DEFAULT) continue;
+		local e = AIVehicle.GetEngineType(v);
+		if (AIEngine.IsBuildable(e) || AIVehicle.GetAge(v) - AIVehicle.GetMaxAge(v) < due_from) continue;
+		local vtype = AIVehicle.GetVehicleType(v);
+		local succ = PrismaticAI.SuccessorEngine(v, e, false);
+		local g = (succ == -1) ? null : PrismaticAI.RenewGroup(vtype, true);
+		if (g == null) {
+			local note = "renew-" + e;
+			if (!MODERNIZE_LOGGED.rawin(note)) {
+				MODERNIZE_LOGGED[note] <- true;
+				AILog.Warning("PrismaticAI: renew: " + PrismaticAI.EngineLabel(e) + " is no longer built and vehicle " + v +
+					" is " + AIVehicle.GetAge(v) + " days old (maximum " + AIVehicle.GetMaxAge(v) + "), " +
+					(succ == -1 ? "but no engine that fits it is built" : "but the bot has no renewal group"));
+			}
+			continue;
+		}
+		local cur = AIGroup.GetEngineReplacement(g, e);
+		/* One rule serves every due vehicle of `e`: one that would take another engine waits. */
+		if (AIEngine.IsValidEngine(cur) && cur != succ && AIEngine.IsBuildable(cur)) continue;
+		if (cur != succ) {
+			if (!AIGroup.SetAutoReplace(g, e, succ)) {
+				AILog.Warning("PrismaticAI: renew: " + PrismaticAI.EngineLabel(e) + " -> " + PrismaticAI.EngineLabel(succ) + " refused: " + AIError.GetLastErrorString());
+				continue;
+			}
+			AILog.Info("PrismaticAI: renew: " + PrismaticAI.EngineLabel(e) + " is no longer built; its vehicles past their age get " +
+				PrismaticAI.EngineLabel(succ) + " at their next depot visit");
+		}
+		if (AIGroup.MoveVehicle(g, v)) {
+			AILog.Info("PrismaticAI: renew: vehicle " + v + " (" + PrismaticAI.EngineLabel(e) + ", " + AIVehicle.GetAge(v) + " days old, maximum " +
+				AIVehicle.GetMaxAge(v) + ") to be renewed as " + PrismaticAI.EngineLabel(succ));
+		}
+	}
+}
+
+/* Trains sent to a depot for service (ServiceDue): vehicle id -> the date they were sent. Saved. */
+SERVICE_SENT <- {};
+/* Trains that did not reach a depot in SERVICE_REACH_DAYS: vehicle id -> the date before which
+ * ServiceDue does not send them again. Saved. */
+SERVICE_SKIP <- {};
+/* At most this many trains are sent for service in a game month, the most worn first. */
+const SERVICE_PER_MONTH = 3;
+/* A train sent for service that is not in a depot after this many days is called back. */
+const SERVICE_REACH_DAYS = 60;
+/* How long a train that could not reach a depot is not sent again. */
+const SERVICE_SKIP_DAYS = 365;
+
+/* Whether train `v` should see a depot now: due for renewal (from the company's renew months before
+ * its maximum age), an autoreplace rule waiting for its engine (Modernize, RenewUnbuildable), or worn
+ * to below half its engine's reliability (servicing restores it). */
+function PrismaticAI::ServiceWanted(v, due_from) {
+	if (AIVehicle.GetAge(v) - AIVehicle.GetMaxAge(v) >= due_from) return true;
+	local e = AIVehicle.GetEngineType(v), g = AIVehicle.GetGroupID(v);
+	local rule = AIGroup.GetEngineReplacement(g, e);
+	if (!AIEngine.IsValidEngine(rule) && g != AIGroup.GROUP_ALL) rule = AIGroup.GetEngineReplacement(AIGroup.GROUP_ALL, e);
+	if (AIEngine.IsValidEngine(rule) && rule != e && AIEngine.IsBuildable(rule)) return true;
+	return 2 * AIVehicle.GetReliability(v) < AIEngine.GetReliability(e);
+}
+
+/* Once a game month: trains that need a depot are sent to one for service.
+ *
+ * A train looks for a depot for service by itself only within pf.yapf.maximum_go_to_depot_penalty
+ * of its path (20 tiles; train_cmd.cpp CheckIfTrainNeedsService), and the bot's depot stands behind
+ * a terminus platform (rail.nut BuildRailDepotBehind), past a platform's station penalties. So its
+ * trains never went: the game's autorenew and the autoreplace rules of Modernize and
+ * RenewUnbuildable act only in a depot, and none of them ever fired. In a replay of the owner's
+ * game 21647 (save of 1992-03, bank 33.7M, the GROUP_ALL rules to 'T.I.M.' (Electric) set), five
+ * trains of old models stood at reliability 0 and none was replaced in ten months; train 173, a
+ * Ginzu 'A4' (Steam) out of production, was 15151 days old against a maximum of 7320. Sent to a
+ * depot for service, three of four were replaced within days.
+ *
+ * A train is sent only while it neither loads at a station nor already heads for a depot, and not
+ * while it is being sold or resized. One that has not reached a depot within SERVICE_REACH_DAYS is
+ * called back and left alone for SERVICE_SKIP_DAYS: in the same replay train 173 stood on one tile
+ * for four months on its way to the depot. */
+function PrismaticAI::ServiceDue() {
+	local now = AIDate.GetCurrentDate();
+	foreach (v, sent in clone SERVICE_SENT) {
+		if (!AIVehicle.IsValidVehicle(v) || AIVehicle.IsInDepot(v) || !AIOrder.IsGotoDepotOrder(v, AIOrder.ORDER_CURRENT)) {
+			delete SERVICE_SENT[v];
+		} else if (now - sent >= SERVICE_REACH_DAYS) {
+			delete SERVICE_SENT[v];
+			SERVICE_SKIP[v] <- now + SERVICE_SKIP_DAYS;
+			local depot = AIOrder.GetOrderDestination(v, AIOrder.ORDER_CURRENT);
+			AILog.Warning("PrismaticAI: service: train " + v + " did not reach the depot at tile " + depot + " in " + (now - sent) +
+				" days; it stands at tile " + AIVehicle.GetLocation(v) + "; called back, not sent again for a year");
+			/* Sending a vehicle that heads for a depot again cancels the trip. */
+			AIVehicle.SendVehicleToDepotForServicing(v);
+		}
+	}
+	foreach (v, until in clone SERVICE_SKIP) if (!AIVehicle.IsValidVehicle(v) || now >= until) delete SERVICE_SKIP[v];
+	local due_from = AICompany.GetAutoRenewMonths(AICompany.COMPANY_SELF) * 30;
+	local trains = AIVehicleList();
+	trains.Valuate(AIVehicle.GetVehicleType);
+	trains.KeepValue(AIVehicle.VT_RAIL);
+	/* The most worn first; the list breaks ties by vehicle id. */
+	trains.Valuate(AIVehicle.GetReliability);
+	trains.Sort(AIList.SORT_BY_VALUE, AIList.SORT_ASCENDING);
+	local n_sent = 0;
+	foreach (v, _ in trains) {
+		if (n_sent >= SERVICE_PER_MONTH) break;
+		if (SERVICE_SENT.rawin(v) || SERVICE_SKIP.rawin(v) || this.selling.rawin(v) || this.resizing.rawin(v)) continue;
+		local state = AIVehicle.GetState(v);
+		if (AIVehicle.IsInDepot(v) || (state != AIVehicle.VS_RUNNING && state != AIVehicle.VS_BROKEN) || AIOrder.IsGotoDepotOrder(v, AIOrder.ORDER_CURRENT)) continue;
+		if (!PrismaticAI.ServiceWanted(v, due_from)) continue;
+		if (!AIVehicle.SendVehicleToDepotForServicing(v)) continue;
+		SERVICE_SENT[v] <- now;
+		n_sent++;
+		AILog.Info("PrismaticAI: service: train " + v + " (" + PrismaticAI.EngineLabel(AIVehicle.GetEngineType(v)) + ", " + AIVehicle.GetAge(v) + " of " +
+			AIVehicle.GetMaxAge(v) + " days, reliability " + AIVehicle.GetReliability(v) + "%) to a depot for service");
 	}
 }
 
