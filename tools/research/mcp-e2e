@@ -253,6 +253,23 @@ for ((n = 2; n <= INSTANCES; n++)); do
   EXTRA_PIDS+=($!)
   echo "==> instance $n of $INSTANCES starting (log $TMP/instance-$n.log)"
 done
+# register_owner_approver URL CLIENT_ID SECRET_FILE: makes the owner's client an in-game approver
+# through the panel's owner route POST /api/approvers (/api/console refuses every approvers line,
+# #258). The secret comes from the owner's own 0600 file; curl reads the header from stdin, so the
+# secret is never in a command line, a process list or this script's output.
+# Tested by tools/research/test_mcp_e2e_approver.py, which runs this function as written here.
+register_owner_approver() {
+  local url="$1" id="$2" file="$3" reg
+  if [[ -r "$file" && -s "$file" ]]; then
+    reg="$(printf 'X-Panel-Owner: %s\n' "$(tr -d '[:space:]' < "$file")" \
+      | curl -s -X POST -H @- -H 'Content-Type: application/json' -d "{\"add\":$id}" "$url/api/approvers" \
+      | jq -r '.error // ([.output[]? | select(test("approver"))] | last) // empty' 2>/dev/null || true)"
+    echo "==> approver: the owner's client #$id (${reg:-no answer})"
+  else
+    echo "mcp-e2e: --coplay: no owner secret file ($file), so the owner's client is no approver; approve in the panel" >&2
+  fi
+}
+
 # The owner's browser signs in by opening the panel with the owner secret once (the cookie it sets
 # is what Approve and auto-approve check). The secret is read from the owner's own 0600 file, which
 # mcp-panel keeps stable across restarts, and never printed; without the file the plain URL opens.
@@ -351,17 +368,8 @@ if [[ "$GUI" == 1 ]]; then
       sleep 1
     done
     if [[ -n "$OWNER_ID" ]]; then
-      # /api/console refuses every approvers line (#258): the owner's route registers the
-      # approver, with the owner secret from the owner's own 0600 file. curl reads the header from
-      # stdin, so the secret is never in a command line, a process list or this script's output.
-      if [[ -r "$OWNER_SECRET_FILE" && -s "$OWNER_SECRET_FILE" ]]; then
-        REG="$(printf 'X-Panel-Owner: %s\n' "$(tr -d '[:space:]' < "$OWNER_SECRET_FILE")" \
-          | curl -s -X POST -H @- -H 'Content-Type: application/json' -d "{\"add\":$OWNER_ID}" "$URL/api/approvers" \
-          | jq -r '.error // ([.output[]? | select(test("approver"))] | last) // empty' 2>/dev/null || true)"
-        echo "==> approver: the owner's client #$OWNER_ID (${REG:-no answer})"
-      else
-        echo "mcp-e2e: --coplay: no owner secret file ($OWNER_SECRET_FILE), so the owner's client is no approver; approve in the panel" >&2
-      fi
+      # /api/console refuses every approvers line (#258): the owner's route registers it.
+      register_owner_approver "$URL" "$OWNER_ID" "$OWNER_SECRET_FILE"
     else
       echo "mcp-e2e: --coplay: the owner's client did not join within 60 s; no approver registered (approve in the panel)" >&2
     fi
