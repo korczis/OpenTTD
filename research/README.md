@@ -149,6 +149,18 @@ Generated from each document's title and first paragraph (`tools/surfaces/surfac
 | [ablation-20261119T094213-seed1251879686](results/ablation-20261119T094213-seed1251879686.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
 | [ablation-20261119T131147-seed1807087905](results/ablation-20261119T131147-seed1807087905.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
 | [ablation-20261119T140023-seed725554694](results/ablation-20261119T140023-seed725554694.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T000649-seed15805-master](results/ablation-20261123T000649-seed15805-master.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T000649-seed2927-master](results/ablation-20261123T000649-seed2927-master.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T000931-seed31337-master](results/ablation-20261123T000931-seed31337-master.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T000931-seed4242-master](results/ablation-20261123T000931-seed4242-master.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T010437-seed15805-now](results/ablation-20261123T010437-seed15805-now.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T010437-seed15805-pr245](results/ablation-20261123T010437-seed15805-pr245.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T010437-seed2927-now](results/ablation-20261123T010437-seed2927-now.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T010437-seed2927-pr245](results/ablation-20261123T010437-seed2927-pr245.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T010626-seed31337-now](results/ablation-20261123T010626-seed31337-now.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T010626-seed31337-pr245](results/ablation-20261123T010626-seed31337-pr245.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T010626-seed4242-now](results/ablation-20261123T010626-seed4242-now.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
+| [ablation-20261123T010626-seed4242-pr245](results/ablation-20261123T010626-seed4242-pr245.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
 | [ablation-20261124T165730-seed15805](results/ablation-20261124T165730-seed15805.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
 | [ablation-20261124T170132-seed2927](results/ablation-20261124T170132-seed2927.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
 | [ablation-20261124T170455-seed31337](results/ablation-20261124T170455-seed31337.md) | Derived from its .json by tools/research/ai-battle/battle.py ablate --write; do not edit. |
@@ -598,6 +610,7 @@ Generated from each document's title and first paragraph (`tools/surfaces/surfac
 | [Battle post-mortem: edition 155d18ea50071e72](results/postmortem-155d18ea50071e72.md) | RESEARCH-ONLY. Derived by battle-postmortem from the edition's match records; do not edit. How it is computed: research/battle-postmortem.md. |
 | [The Rhai IDE: edit, run, debug and inspect scripts in the panel](rhai-ide.md) | RESEARCH-ONLY. Milestone rhai-is-a-live-ide (issues I0088 to I0093). This page states what the panel's Scripts page is meant to become and what is built so far. The status table below is the only place a part is... |
 | [Rust performance benchmarks](rust-bench.md) | How fast the Rust host runs the hot paths of the panel and the planner, measured by criterion benchmarks in tools/research/mcp-rhai/benches/hot_paths.rs, recorded as rust-bench/v1 JSON under results/ by... |
+| [PrismaticAI strategy state](strategy/README.md) | RESEARCH-ONLY. Where PrismaticAI stands against the AIs it actually plays, and what the post-mortems found. Both tables below are derived from the repository's records by tools/research/strategy-surfaces render,... |
 | [Research-mode tooling](tooling.md) | This document is the detailed reference for tools/research/research, the canonical entry point that turns the policy in AGENTS.md §"Research-mode access to internals" and this directory's README.md into runnable,... |
 | [Playing on official public servers: the vanilla client](vanilla-client.md) | RESEARCH-ONLY tooling, not a change to the game. Issue I0071; ADR 0030; complements net-compat.md (ADR 0029), which is about games you run. |
 <!-- surfaces:end docs-index -->
