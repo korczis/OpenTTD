@@ -65,7 +65,12 @@ Loopback HTTP API, for any external controller (scripts, agents, Prismatic):
 | `POST /api/pause` | `{"pause": bool}` | the approval-gated pause |
 | `POST /api/approve` | `{"id"}` | the owner's approval; the game server carries it out at once and the answer is the decision it recorded (ADR 0038). 401 without the owner secret, 403 for an owner-only tool (the answer names `prismatic_mcp approve <id>`), 404 for an approval the server does not hold, 409 for one not pending, 422 when the game rejected it, 504 when no decision came |
 | `POST /api/deny` | `{"id"}` | withdraw a pending decision through the same core (`prismatic_mcp deny <id>`): it enacts nothing, so no owner secret is needed. 200 with the approval now `denied`, 404 for one the server does not hold, 409 for one not pending, 504 when the server did not mark it denied. The home page's Deny button calls it |
-| `POST /api/approvers` | `{"add": <client id>}`, `{"remove": "<key prefix>"}` or `{}` | the owner says who may approve from inside the game (`prismatic_mcp approvers add\|remove`, or the list); owner secret, else 401; 422 when the game printed a refusal. `/api/console` refuses every `approvers` line |
+| `GET /api/approvals` | | the game server's whole queue for the approvals list: every approval with its `matched_rule`, marked `owner_only` and `decidable`; the core's standing `rules` and `rules_supported` (false while the core keeps none) |
+| `POST /api/approve/many`, `POST /api/deny/many` | `{"ids": [..]}` | the owner decides the rows a person picked. With the approval-rules core: the ids the panel may not decide are answered here (403 owner-only, 404, 409), the rest go in ONE line `prismatic_mcp approve\|deny <id> ... --via panel --nonce <n>` and the core's result line names each (decided 200, refused 403, skipped 409). With an older core: one decision per id. One result per id, and how many went through. Owner secret, else 401 |
+| `POST /api/approvers` | `{"add": <client id>}`, `{"remove": "<key prefix>"}` or `{}` | the owner says who may approve from inside the game (`prismatic_mcp approvers ...`); owner secret, else 401; 422 when the game printed a refusal. `/api/console` refuses every `approvers` line |
+| `POST /api/approve/all`, `POST /api/deny/all` | `{"tool"?, "match"?}` | the core's own bulk lines over a tool glob and a JSON matcher: `prismatic_mcp approve all [<glob> [<matcher>]] --via panel`, `prismatic_mcp deny all [...]`. Owner secret; 501 while the core keeps no rules, 422 with the line it refused with |
+| `POST /api/rules` | `{"effect": "allow"\|"deny", "tool", "match"?, "persist"?}` | a standing rule, as Claude's always allow / always deny: `prismatic_mcp rule allow\|deny <glob> [<matcher>] [--persist] --via panel`; 200 with the rule as the core lists it, 400 for a bad glob or matcher (or an allow rule naming an owner-only tool), 422, 501, 504. Owner secret |
+| `POST /api/rules/remove` | `{"id"}` | `prismatic_mcp rule remove <id>`: 200 once the core no longer lists it, 404 for a rule it does not hold. Owner secret |
 | `POST /api/auto-approve` | `{"on": bool}` | `on: true` needs the owner secret (401 without it); `on: false` is open to anyone |
 | `POST /api/owner/login` | `{"secret"}` | the owner signs this browser in: the secret (from its file, see [the owner secret](#approval-is-bound-to-the-owner)) sets the HttpOnly cookie `mcp_owner_<port>` and answers 204; a wrong one 401 after a delay, five within a minute 429 |
 | `POST /api/owner/logout` | | clears that cookie; 204 |
@@ -542,7 +547,11 @@ the panel's mirror above, and the Rhai scripts and services that call `mesh_reco
 json --repo <checkout>` names for the checkout `mcp-e2e` runs from. `$MAJORDOMUS_SESSION` is
 `task-<id>` of the task `majordomus context --json` reports active there: `majordomus start` claims
 the task's scope under that mesh session, on that server. Majordomus admits a write only inside the
-writing session's live claims. Without a server or an active task, the variable stays unset and
+writing session's live claims. A record whose scope lies outside them (replan's names
+`PrismaticAI/info.nut`, which the launching task seldom claims) is refused `out_of_scope` once:
+the client then claims that scope for the session in advisory mode (`POST /api/v1/mesh/claims`,
+overlaps reported, never refused) and writes once more. A second refusal, a refused claim, or a
+record with no scope reaches the script as it came (prismatic-majordomus I4740). Without a server or an active task, the variable stays unset and
 `mcp-e2e` prints `mesh records off:` with the reason. The Rhai scripts then answer `mesh:
 configuration: ...` as before. A value the caller sets wins. An empty value keeps the stack off the
 mesh. `tools/research/mcp-e2e --env` prints the three variables a run would get
@@ -682,8 +691,11 @@ absent.
   company's trains, road vehicles, aircraft and ships, value and money. Only the owner's company
   is the owner's bot: `ai.log` lines (and their newspapers) of other companies, other PrismaticAI
   instances in an arena included, are not relayed. The company is `$NARRATOR_COMPANY` when set,
-  else the first running company of the panel's AI (`/api/status` `ai`, `/api/bots` `running`),
-  the one `mcp-e2e --coplay` joins. When it starts and at every game quarter it also says how many
+  else `ttd::owner_company()` (`rhai/ttd.rhai`), the one source the watchdog and the build audit
+  ask too: `$OWNER_COMPANY` when set, else the company a registered approver plays now
+  (`openttd://approvals` `data.approver_companies`, research/coplay.md), else the first running
+  company of the panel's AI (`/api/status` `ai`, `/api/bots` `running`), the one
+  `mcp-e2e --coplay` joins. When it starts and at every game quarter it also says how many
   of the bot's requests wait for an Approve in the panel (`/api/status` `pending` for that
   company) and when the oldest was made: an approval-gated plan (for example `replan.rhai`'s
   settings) otherwise waits unseen while auto-approve is off. Run it beside the
@@ -782,7 +794,13 @@ on its own is auto-approve, and that is the owner's call (knowledge
   command in `list_cmds` (`con_companies()`, `con_newgame("42")`; `list_cmds` counts them), and one per operation
   of the panel's OpenAPI document (`api_<operationId>`: `api_bots()`, `api_botStart(#{...})`,
   `api_tool_openttd_game_set_pause(#{pause: true})`). A tool, console command or panel route added
-  to the game is a Rhai function the next time a script starts.
+  to the game is a Rhai function the next time a script starts. While the panel's game runs
+  (`/api/status` `server_running`) but does not list its tools or commands yet, as for a service
+  started right after the panel came up, the derivation asks again every 2 s for up to
+  `$PRISMATIC_RHAI_DERIVE_WAIT_S` (default 60) and says on stderr when the script starts without
+  them; with no game it does not wait.
+- `ttd::owner_company()` is the owner's company every service asks (watchdog, build audit,
+  narrator): `$OWNER_COMPANY`, else where a registered approver plays, else the panel's AI.
 - `import "ttd" as ttd;` loads `tools/research/mcp-panel/rhai/ttd.rhai` (`MCP_RHAI_PATH` overrides),
   the high-level commands: `state`, `companies`, `wait_running`, `new_game`, `start_ai`,
   `set_pause` (waits for the operator's approval, never approves itself), `report`, `watch`.
@@ -1662,7 +1680,75 @@ The same refusal covers who may approve in the game (`approvers`, now `POST /api
 owner secret), the approval core's standing rules (`rule`, `rules`), its channel and result markers
 (`--via`, `--nonce`: the core trusts a stdin line without `--via` as the console's own) and `deny
 all`, in every spelling `console_word` accepts; Rhai's `console()` goes through `/api/console`, so
-it is refused the same.
+it is refused the same. The owner routes below send them.
+
+### The approvals list and standing rules
+
+The home page's **Approvals** section (`static/approvals.js`, reading `GET /api/approvals`) is
+built for deciding a long queue fast:
+
+- **Yes and No at one place.** Every row has its Yes and No in the column after its checkbox, the
+  same x on every row and large targets. A decided row leaves at once and the next row slides under
+  the pointer with the focus, so the owner clicks down the queue without moving the mouse. A failure
+  brings the row back with the API client's toast. The list is redrawn only when it changed, so a
+  poll never swallows a click.
+- **Picks.** A checkbox per row, a header checkbox for every row the filter shows (indeterminate
+  when some), Shift+click for a range, Space on a focused row. "Approve all (n)" and "Deny all (n)"
+  act on the rows the filter shows, and become "Approve selected (n)" and "Deny selected (n)" while
+  rows are picked. Approve asks first, naming the count. Both go through `POST /api/approve/many`
+  and `/api/deny/many`, one decision per id through the same core, so each id answers as
+  `/api/approve` and `/api/deny` would; failures are named in one red toast. (The core's own `approve
+  all` takes a glob, not the rows a person picked; `POST /api/approve/all` offers it to clients.)
+- **Guards against deciding the wrong row.** A held key decides one row, never the queue: auto-repeat
+  of y, a, n, d, Enter and Space is ignored, and no decisive key is taken for 400 ms after a decision
+  (a held Enter on a focused Yes included). A double click decides one row. A pointer click within
+  400 ms after the rows moved (a decision, a poll that took a row away above) is ignored unless the
+  pointer moved since, so the row that slid under a still pointer is never decided by accident; the
+  bulk buttons have the same guard. A row that a refresh moved (re-ordered, or a row inserted above
+  it, or new) takes no Approve, Deny or Always click for 600 ms (`movedRows`). While the pointer is
+  over the list a refresh never moves its rows: the answer waits and is drawn when the pointer
+  leaves.
+- **Selectors.** Tool and company (when the arguments name one) are derived from the queue, with
+  counts; a search box over the id, tool and arguments; expired rows hidden unless asked for. The
+  filter lives in the address (`a_tool`, `a_company`, `a_q`, `a_expired`).
+- **Keys**, with a row focused: `j`/`k` (or the arrows) move, `y`, `a` or Enter approve, `n` or `d`
+  deny, Space picks. The page lists them above the table.
+- **Owner-only rows** (`openttd.ai.set_settings`) say "decide at the game's console" with the
+  command, have no Yes, no No and no pick, and their rule editor offers only always deny.
+- **Standing rules.** "Always…" on a row opens a small editor prefilled with the row's tool and its
+  arguments as a JSON matcher (plain keys match a subset, `$.a.b` and `$.list[*]` keys are JSON
+  paths, a string is a glob, `"*"` any present value), allow or deny, and "keep across restarts".
+  The core (feature/approval-rules) keeps the rules and applies them to waiting and new approvals,
+  deny winning over allow, and records `approved_via` with the rule; each approval it matched shows
+  the rule. The editor shows its dry run as it is typed: the waiting, unexpired approvals the rule
+  would decide now (an allow rule never an owner-only one), from the core's matcher mirrored in
+  `approvals.js` (`coreMatch`) and `panel.rs` (`core_match`). An allow rule over several tools with
+  a broad matcher is called too broad there and refused by `rule_line`, as the core's
+  `BroadAllowRefusal` refuses it. Broad is structural, the core's `IsBroadMatcher` (`broad_matcher`,
+  `broad`): null, `{}`, or an object whose every entry, under any plain key or path, is a non-empty
+  string of `*` only, an operator object whose only operator is `$ne`, or a nested broad object
+  (`{"company": "*"}`, `{"$.*": "*"}` are broad). A literal, `""`, a glob with any other character
+  or `?`, `$in`, `$lt`/`$lte`/`$gt`/`$gte` and an array narrow; naming a key alone never does. One
+  tool with a broad matcher stays allowed. Below the table, the rules list shows effect, tool glob,
+  matcher, who made it, hits and whether it is kept, each with Remove, which asks first. While the core keeps no rules (its queue answers no `rules`)
+  the list says so and "Always…" is off.
+- **Every line the panel sends to a core that keeps rules carries its channel**: `--via panel` on
+  every approve and deny (one, many, all) and every rule, `--via auto` for the auto-approve switch
+  (`decide_line`, `approve_all_line`, `deny_all_line`, `rule_line`, `via_of`). The core cannot tell
+  stdin lines apart: it trusts a line without `--via` as the console's own, records the channel, and
+  never lets the panel's lines decide an owner-only tool. An older core (no `rules` in its queue)
+  gets neither flag.
+- **One result line per command.** The bulk and rule routes send `--nonce <n>` and wait only for
+  the core's `[approval-core] {"nonce", "ok", "decided", "refused", "skipped", "rule_id", "error"}`
+  line with that nonce (`core_line`, `core_result`): 200 when ok, 422 with the core's `error`
+  ("is not a tool glob", "the matcher is not JSON"), 504 when none came within 3 s. Per id:
+  `decided` 200, `rejected` 422 with the game's reason (approved and carried out, the command
+  refused), `refused` and `skipped` 409 (an entry is an id or `{id, error}`).
+  `tools/research/mcp-rhai/src/fixtures/approval-core-lines.txt` holds the real core's result lines,
+  and `the_real_cores_result_lines_are_read` reads every one. A matcher travels as
+  one console token (`matcher_token`): compact JSON, every `"` as `\"` (the game's tokenizer turns it
+  back), every `;` as `\u003b`, the whole quoted, so no text inside it can end the line or add a
+  command; a glob holds letters, digits and `. _ - * ?` only (`rule_glob`).
 
 ### The panel's Approve and Deny, in Chrome
 
@@ -1674,6 +1760,11 @@ answer: Approve gets 200 executed, 422 rejected, 504 with no decision, 409 consu
 page as a toast. The server's queue must then hold what the buttons did, and every line the change
 adds to `static/app.js` must have run in Chrome (its JS coverage). No process the run started may be
 left. It needs no game build, and the Research Rust workflow runs it on every change to the panel.
+Its last part drives the approvals list against the stand-in's approval-rules core (`fake seed bulk`):
+every checkbox way, the filters and their address, Yes and No under one pointer position, every key,
+Approve selected with its confirmation, Deny all, the rule editor and its refusals, rules deciding
+waiting and new approvals, an allow rule that leaves an owner-only row to the console, Remove, and
+every line of `static/approvals.js` run in Chrome.
 
 ### Approval is bound to the owner
 
@@ -1714,7 +1805,9 @@ pending request (red-team residual risk 3). Approval is now bound to the owner i
     in a password field. `POST /api/owner/login {secret}` sets the HttpOnly, `SameSite=Strict`
     cookie `mcp_owner_<port>`, kept 12 hours (`OWNER_COOKIE_MAX_AGE`), and answers 204; the refused request is then sent once
     more. A wrong secret answers 401 after a second's delay and says nothing of its length or
-    prefix; five wrong ones within a minute answer 429 for the rest of it (`owner_login`).
+    prefix; five wrong ones within a minute answer 429 for the rest of it (`owner_login`). The
+    right secret is checked first and always signs in: guesses from any local caller never lock
+    the owner out.
     `POST /api/owner/logout` clears the cookie. Cancel (or Escape) leaves the refusal shown.
   - **A launcher opens the page through a one-time link.** `POST /api/owner/once` (the owner
     secret's alone) answers `{once, url}`; `GET /?once=<nonce>` sets the same cookie once within 60 s

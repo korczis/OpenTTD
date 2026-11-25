@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""RESEARCH-ONLY. The strategy state of PrismaticAI as derived surfaces (research/strategy/README.md).
+
+    tools/research/strategy-surfaces render [--check]
+    tools/research/strategy-surfaces import --log <file> --tree <dir> --variant <name=settings>
+        --seed <n> --years <n> --field <AI,AI,...> [--slot <n>] [--config <battle.json>]
+        [--binary <file>] [--note <text>]
+    tools/research/strategy-surfaces --help
+
+`render` rewrites two regions of research/strategy/README.md from the repository's own records,
+and with --check writes nothing and exits 11 while one is stale (`surfaces check` runs it):
+
+  strategy-evals      PrismaticAI against its field, per seed: rank, value, strongest rival, the
+                      gap (best rival / PrismaticAI, lower is better, 1 = parity) and the mode mix,
+                      from every tracked ablation record (research/results/ablation-*.json) whose
+                      rows carry `standings`; grouped into cohorts of comparable runs (tree,
+                      settings, field, slot, years, start year), each summarised and charted.
+  strategy-incidents  Every research document whose lead paragraph is labelled as a post-mortem or
+                      a root-cause analysis (LABELS): its date, title, label, the seeds its lead
+                      names, and which of the others it links and is linked from.
+
+`import` records one run after the fact as an ablation record, from the log `battle.py ablate
+--log-dir` kept: the row is built by battle.py's own `ablation_row`, the tree's commit and whether
+its PrismaticAI was dirty are read from --tree, the run's start from the log's first timestamp, and
+the provenance (log and binary sha256, binary version, this command) is kept under `imported`,
+and the record's id ends in the variant's name, since runs of several trees start in one second.
+The run's exit status is not in a log, so it is recorded as unknown (null).
+
+Exit status: 0 ok, 2 usage, 10 a record or document the derivation cannot read, 11 drift (--check).
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import importlib.util
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[1]
+PAGE = REPO / "research" / "strategy" / "README.md"
+DOCS = "research"
+# The lead-paragraph labels that make a document a post-mortem of the strategy (its first paragraph
+# opens with one, bold or not, as a whole word). A tool page (battle-postmortem.md) opens
+# with "RESEARCH-ONLY." and is not one.
+LABELS = ("Post-mortem", "Root-cause analysis")
+REGIONS = ("strategy-evals", "strategy-incidents")
+DATE = re.compile(r"\b(20\d\d-\d\d-\d\d)\b")
+SEED = re.compile(r"\bseeds? (\d{3,})\b")
+LINK = re.compile(r"\]\(([^)\s#]+\.md)(?:#[^)]*)?\)")
+CODE_PATH = re.compile(r"`([\w./-]+\.md)`")
+REMOTE = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?$")
+EVALS_ANCHOR = "#evaluations-against-the-field"
+LOG_TIME = re.compile(r"^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\]", re.M)
+BINARY_VERSION = re.compile(rb"\b(20\d{6}-[\w.-]+-g[0-9a-f]{10})\b")
+
+
+def load_battle():
+    """battle.py as a module: the records' schema, parser and renderer are its own."""
+    spec = importlib.util.spec_from_file_location("battle", HERE / "ai-battle" / "battle.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+battle = load_battle()
+
+
+class Unreadable(Exception):
+    """A record or document the derivation cannot read; the message names it."""
+
+
+# ------------------------------------------------------------------------------------ evaluations
+def eval_rows(records: list[tuple[str, dict]]) -> list[dict]:
+    """One row per (record, variant) whose standings are recorded: everything the tables show,
+    derived from the record alone."""
+    out = []
+    for fname, rec in records:
+        errs = battle.validate_ablation(rec, fname)
+        if errs:
+            raise Unreadable("; ".join(errs))
+        mc = rec["match_cfg"]
+        for r in rec["rows"]:
+            if "standings" not in r:
+                continue
+            others = sorted(((e["value"], e["key"]) for e in r["standings"] if e["key"] != r["variant"]),
+                            reverse=True)
+            rival_value, rival = others[0] if others else (0, "-")
+            out.append({
+                "record": rec["id"], "seed": rec["seed"], "variant": r["variant"],
+                "cohort": (r["variant"], rec["rev"], r["settings"], tuple(rec["field"]),
+                           rec.get("slot", 0), rec["years"], mc.get("start_year")),
+                "rank": 1 + sum(e["value"] > r["value"] for e in r["standings"]),
+                "of": len(r["standings"]), "value": r["value"], "rival": rival,
+                "rival_value": rival_value, "gap": gap(rival_value, r["value"]),
+                "mix": (r["rail"], r["road"], r["air"]), "t": r["t"]})
+    return out
+
+
+def gap(rival: int, own: int) -> float | None:
+    """Best rival / PrismaticAI; None when either value is not positive (no finite ratio)."""
+    return rival / own if rival > 0 and own > 0 else None
+
+
+def fmt_gap(g: float | None) -> str:
+    return "n/a" if g is None else f"{g:.1f}x"
+
+
+def cohorts(rows: list[dict]) -> list[dict]:
+    """Rows of comparable runs grouped, in the order their first record was written."""
+    out: dict[tuple, dict] = {}
+    for r in sorted(rows, key=lambda r: (r["record"], r["variant"])):
+        c = out.setdefault(r["cohort"], {"key": r["cohort"], "rows": []})
+        c["rows"].append(r)
+    for i, c in enumerate(out.values(), 1):
+        c["id"] = f"C{i}"
+        c["rows"].sort(key=lambda r: (r["seed"], r["record"]))
+        gaps = [r["gap"] for r in c["rows"] if r["gap"] is not None]
+        c["geo"] = math.exp(sum(map(math.log, gaps)) / len(gaps)) if gaps else None
+        c["worst"] = max(gaps) if gaps else None
+        c["excluded"] = len(c["rows"]) - len(gaps)
+    return list(out.values())
+
+
+def commit_url(root: Path) -> str | None:
+    """The web address of a commit of this repository, from its `origin` remote (GitHub only)."""
+    try:
+        url = git(root, "remote", "get-url", "origin")
+    except subprocess.CalledProcessError:
+        return None
+    m = REMOTE.search(url)
+    return f"https://github.com/{m[1]}/commit/" if m else None
+
+
+def render_evals(records: list[tuple[str, dict]], commits: str | None = None) -> str:
+    rows = eval_rows(records)
+    if not rows:
+        return "No ablation record carries `standings` yet."
+    groups = cohorts(rows)
+    link = lambda rid: f"[{rid}](../results/{rid}.md)"  # noqa: E731
+    out = ["Cohorts: runs of one tree, one settings line, one field, one start slot and one length.",
+           "The gap is the best rival's final company value over PrismaticAI's: lower is better,",
+           "1.0x is parity. Its mean is geometric over the cohort's seeds.", "",
+           "| Cohort | Variant | Tree | Field | Years from | Seeds | Sum of values | Gap (geometric mean) "
+           "| Worst gap | Ranks |", "|---|---|---|---|---|---|---|---|---|---|"]
+    for c in groups:
+        variant, rev, _settings, field, _slot, years, start = c["key"]
+        ranks = ", ".join(f"{r['rank']}/{r['of']}" for r in c["rows"])
+        excluded = f" ({c['excluded']} without a ratio)" if c["excluded"] else ""
+        tree = f"[`{rev[:10]}`]({commits}{rev})" if commits else f"`{rev[:10]}`"
+        out.append(f"| {c['id']} | {variant} | {tree} | {len(field)} AIs | {years} from {start} | "
+                   f"{', '.join(str(r['seed']) for r in c['rows'])} | "
+                   f"{sum(r['value'] for r in c['rows']):,} | {fmt_gap(c['geo'])}{excluded} | "
+                   f"{fmt_gap(c['worst'])} | {ranks} |")
+    out += ["", "| Cohort | Seed | Rank | PrismaticAI value | Strongest rival | Rival value | Gap "
+            "| Rail / road / air | Record |", "|---|---|---|---|---|---|---|---|---|"]
+    for c in groups:
+        for r in c["rows"]:
+            out.append(f"| {c['id']} | {r['seed']} | {r['rank']}/{r['of']} | {r['value']:,} | {r['rival']} | "
+                       f"{r['rival_value']:,} | {fmt_gap(r['gap'])} | {'/'.join(map(str, r['mix']))} | "
+                       f"{link(r['record'])} |")
+    out += ["", "Fields and settings of the cohorts, as the records hold them:", ""]
+    alike: dict[tuple, list[str]] = {}
+    for c in groups:
+        _variant, _rev, settings, field, slot, _years, _start = c["key"]
+        alike.setdefault((field, slot, settings), []).append(c["id"])
+    for (field, slot, settings), ids in alike.items():
+        out.append(f"- {', '.join(ids)}: field {', '.join(field)}; PrismaticAI in slot {slot}; "
+                   f"settings `{settings or '(defaults)'}`")
+    charted = [c for c in groups if c["geo"] is not None]
+    if charted:
+        names = [c["id"] for c in charted]
+        out += ["", battle.mermaid_xy("Best rival / PrismaticAI by cohort (lower is better)", names,
+                                      [("Geometric mean", [round(c["geo"], 2) for c in charted]),
+                                       ("Worst seed", [round(c["worst"], 2) for c in charted])],
+                                      "Gap (x)")]
+    return "\n".join(out)
+
+
+# -------------------------------------------------------------------------------------- incidents
+def lead(text: str) -> tuple[str, str]:
+    """(title, lead paragraph) of a Markdown document: its first H1 and the paragraph after it."""
+    m = re.search(r"^# (.+)$", text, re.M)
+    if not m:
+        return "", ""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text[m.end():]) if p.strip()]
+    return m[1].strip(), (paras[0] if paras else "")
+
+
+def label_of(para: str) -> str | None:
+    for label in LABELS:
+        if re.match(rf"(\*\*)?{re.escape(label)}\b", para):
+            return label
+    return None
+
+
+def capitalized(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
+def incidents(files: list[Path], root: Path) -> list[dict]:
+    """Every document among `files` whose lead paragraph carries a label, with what it says of
+    itself and its links to the others."""
+    docs = []
+    for f in files:
+        title, para = lead(f.read_text())
+        label = label_of(para)
+        if not label:
+            continue
+        rel = f.relative_to(root).as_posix()
+        date = DATE.search(f.name) or DATE.search(para)
+        if not date:
+            raise Unreadable(f"{rel}: a {label.lower()} with no date in its file name or lead paragraph")
+        text = f.read_text()
+        links = {(f.parent / m).resolve() for m in LINK.findall(text)}
+        links |= {(base / m).resolve() for m in CODE_PATH.findall(text) for base in (f.parent, root)
+                  if (base / m).is_file()}
+        docs.append({"path": f.resolve(), "rel": rel, "date": date[1], "label": label,
+                     "title": capitalized(re.sub(r"^Incident [\d\- to]+:\s*", "", title)),
+                     "seeds": sorted(set(SEED.findall(para)), key=int), "links": links})
+    paths = {d["path"] for d in docs}
+    for d in docs:
+        d["refers"] = sorted(p for p in d["links"] & paths if p != d["path"])
+        d["referred"] = sorted(e["path"] for e in docs if d["path"] in e["links"] and e is not d)
+    return sorted(docs, key=lambda d: (d["date"], d["rel"]), reverse=True)
+
+
+def render_incidents(files: list[Path], root: Path, page: Path, evaluated: set[int] | None = None) -> str:
+    """The incidents table; a seed some evaluation ran on links to the evaluations above."""
+    docs = incidents(files, root)
+    evaluated = evaluated or set()
+    if not docs:
+        return "No research document is labelled as a post-mortem yet."
+
+    def href(p: Path) -> str:
+        return Path(os.path.relpath(p, page.parent.resolve())).as_posix()
+
+    def names(ps: list[Path]) -> str:
+        return ", ".join(f"[{p.stem}]({href(p)})" for p in ps) or "-"
+    out = ["| Date | Document | Kind | Seeds | Links to | Linked from |", "|---|---|---|---|---|---|"]
+    for d in docs:
+        out.append(f"| {d['date']} | [{d['title']}]({href(d['path'])}) | {d['label']} | "
+                   f"{', '.join(f'[{x}]({EVALS_ANCHOR})' if int(x) in evaluated else x for x in d['seeds']) or '-'} | "
+                   f"{names(d['refers'])} | {names(d['referred'])} |")
+    return "\n".join(out)
+
+
+# ------------------------------------------------------------------------------------------ pages
+def replace(text: str, name: str, body: str) -> str:
+    begin, end = f"<!-- {name}:begin -->", f"<!-- {name}:end -->"
+    if begin not in text or end not in text:
+        raise Unreadable(f"{name}: region markers missing")
+    head, rest = text.split(begin, 1)
+    _, tail = rest.split(end, 1)
+    note = f"<!-- derived by `tools/research/strategy-surfaces render`; `surfaces check` fails when stale -->"
+    return f"{head}{begin}\n{note}\n\n{body}\n\n{end}{tail}"
+
+
+def tracked(pathspec: str, root: Path) -> list[Path]:
+    """Markdown files git would commit under `pathspec`: tracked, or new and not ignored."""
+    out = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", pathspec],
+                         cwd=root, check=True, capture_output=True, text=True).stdout
+    return sorted({root / f for f in out.splitlines() if f.endswith(".md") and (root / f).is_file()})
+
+
+def render(check: bool, page: Path = PAGE, root: Path = REPO, results: Path | None = None) -> int:
+    records = [(f.name, json.loads(f.read_text()))
+               for f in battle.tracked_records(battle.ABLATION_GLOB, results, root)]
+    try:
+        text = page.read_text()
+        new = replace(text, "strategy-evals", render_evals(records, commit_url(root)))
+        evaluated = {r["seed"] for r in eval_rows(records)}
+        new = replace(new, "strategy-incidents", render_incidents(tracked(DOCS, root), root, page, evaluated))
+    except Unreadable as e:
+        print(f"strategy-surfaces: {e}", file=sys.stderr)
+        return 10
+    if new == text:
+        print(f"strategy-surfaces: {page.relative_to(root)} current")
+        return 0
+    if check:
+        print(f"strategy-surfaces: {page.relative_to(root)} is stale "
+              "(run tools/research/strategy-surfaces render)", file=sys.stderr)
+        return 11
+    page.write_text(new)
+    print(f"strategy-surfaces: {page.relative_to(root)} rewritten")
+    return 0
+
+
+# ----------------------------------------------------------------------------------------- import
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def git(tree: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=tree, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def import_record(a: argparse.Namespace, results: Path | None = None) -> dict:
+    """The ablation record of one run, built from its kept log (see the module's help)."""
+    results = results or battle.RESULTS_DIR
+    text = a.log.read_text()
+    first = LOG_TIME.search(text)
+    if not first:
+        raise Unreadable(f"{a.log}: no timestamped line to date the run by")
+    started = dt.datetime.strptime(first[1], "%Y-%m-%d %H:%M:%S").astimezone(dt.timezone.utc)
+    cfg = json.loads(a.config.read_text())
+    name, _, settings = a.variant.partition("=")
+    field = a.field.split(",")
+    row = battle.ablation_row(name, settings, None, text, field, a.slot)
+    row["vs_first"] = battle.ablation_vs_first([row])[0]
+    # Runs of several trees start in the same second, so an imported id also names its variant.
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-").lower()
+    rid = f"ablation-{started.strftime('%Y%m%dT%H%M%S')}-seed{a.seed}-{slug}"
+    imported = {"log": a.log.name, "log_sha256": sha256(a.log), "by": "tools/research/strategy-surfaces import"}
+    if a.binary:
+        version = BINARY_VERSION.search(a.binary.read_bytes())
+        imported.update(binary=version[1].decode() if version else a.binary.name,
+                        binary_sha256=sha256(a.binary))
+    if a.note:
+        imported["note"] = a.note
+    rec = {"schema": battle.ABLATION_SCHEMA, "id": rid, "generated_at": started.isoformat(timespec="seconds"),
+           "seed": a.seed, "years": a.years, "field": field, "slot": a.slot,
+           "match_cfg": dict(cfg["match"], years=a.years), "rev": git(a.tree, "rev-parse", "HEAD"),
+           "tree_dirty": bool(git(a.tree, "status", "--porcelain", "--", cfg["prismatic"]["path"])),
+           "rows": [row], "imported": imported}
+    errs = battle.validate_ablation(rec, f"{rid}.json")
+    if errs:
+        raise Unreadable("; ".join(errs))
+    if (results / f"{rid}.json").exists():
+        raise Unreadable(f"{rid}.json exists already")
+    (results / f"{rid}.json").write_text(json.dumps(rec, indent=1) + "\n")
+    (results / f"{rid}.md").write_text(battle.render_ablation_md(rec))
+    print(f"strategy-surfaces: wrote research/results/{rid}.{{json,md}}")
+    return rec
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="command", required=True)
+    r = sub.add_parser("render", help="rewrite the regions of research/strategy/README.md")
+    r.add_argument("--check", action="store_true", help="write nothing; exit 11 when stale")
+    i = sub.add_parser("import", help="record one run from its kept log as an ablation record")
+    i.add_argument("--log", type=Path, required=True)
+    i.add_argument("--tree", type=Path, required=True, help="the checkout the run's PrismaticAI came from")
+    i.add_argument("--variant", required=True, help="name=settings, as `battle.py ablate --variant`")
+    i.add_argument("--seed", type=int, required=True)
+    i.add_argument("--years", type=int, required=True)
+    i.add_argument("--field", required=True, help="the opponents, comma-separated, in start order")
+    i.add_argument("--slot", type=int, default=0)
+    i.add_argument("--config", type=Path, default=battle.DEFAULT_CONFIG, help="the battle config the run used")
+    i.add_argument("--binary", type=Path, help="the openttd binary the run used")
+    i.add_argument("--note", help="what the record cannot say for itself")
+    a = ap.parse_args(argv)
+    if a.command == "render":
+        return render(a.check)
+    try:
+        import_record(a)
+    except Unreadable as e:
+        print(f"strategy-surfaces: {e}", file=sys.stderr)
+        return 10
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
