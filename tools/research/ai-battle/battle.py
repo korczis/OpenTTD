@@ -99,6 +99,9 @@ import time
 import urllib.parse
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import regimes  # noqa: E402  (failure regimes: research/failure-regimes.md)
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 DEFAULT_CONFIG = HERE / "battle.json"
@@ -3507,6 +3510,13 @@ def anomalies(series: list[dict], errors: int, rules: dict) -> list[str]:
     return out
 
 
+def match_regimes(m: dict, key: str, fit: dict) -> list[dict]:
+    """The failure regimes of contestant `key` in one match, against the contestants that are not
+    PrismaticAI (a sibling is not a rival: two copies are judged against the same field)."""
+    rivals = [c["key"] for c in m["lineup"] if not c["ai"].startswith("PrismaticAI")]
+    return regimes.detect(m["series"], key, [k for k in rivals if k != key], fit.get("regimes"))
+
+
 def fitness_verdict(m: dict, fit: dict) -> list[str]:
     """The fitness check's failures for one finished local match (empty: PASS)."""
     fails = []
@@ -3528,6 +3538,11 @@ def fitness_verdict(m: dict, fit: dict) -> list[str]:
         fails += [f"{c['key']}: {b}" for b in bad]
     fails += sibling_producers(m)
     fails += trainless_stations(m, fit["rules"])
+    # Failure regimes (research/failure-regimes.md): a contestant held healthy must not stop
+    # expanding while its rivals grow, nor fall behind the strongest rival faster than the field.
+    for c in m["lineup"]:
+        if c["ai"].startswith("PrismaticAI") and c["key"] in fit.get("must_be_healthy", []):
+            fails += regimes.failures(match_regimes(m, c["key"], fit), c["key"], fit.get("regimes"))
     fails += funnel_gaps(m, fit.get("must_funnel", []))
     fails += frozen_construction(m, fit)
     # A contestant held to run trains ends with at least one: the test_trainless lineup refuses every
@@ -3613,6 +3628,8 @@ def cmd_fitness(cfg: dict) -> int:
                 print(f"fitness[{i}]: {c['key']:26} value {s[-1]['value'] if s else 0:>12,}  vehicles "
                       f"peak {peak:>4} final {final:>4}  "
                       f"{' '.join(anomalies(s, m['errors'].get(c['key'], 0), fit['rules'])) or 'ok'}")
+                for r in match_regimes(m, c["key"], fit):
+                    print(f"fitness[{i}]: {c['key']:26} regime {regimes.describe(r)}")
             for cid, reps in sorted(m["capital"].items()):
                 if cid < len(lineup):
                     early = [r for r in reps if r["year"] < mc["start_year"] + fit["rules"].get("frozen_years", 3)]

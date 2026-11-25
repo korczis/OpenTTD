@@ -310,7 +310,10 @@ The first editions showed two failures. The battle now catches both by itself.
   `fitness.must_be_healthy`. The null
   driver is deterministic, so the verdict is stable. `tools/gate.sh change` runs it whenever
   `tools/research/prismatic-ai` or `tools/research/ai-battle` changes. Without an arena cache it
-  says NOT RUN.
+  says NOT RUN. It also fails on a failure regime of a healthy PrismaticAI
+  (`regime:no_expansion`, `regime:widening_gap`), judged against the non-PrismaticAI contestants
+  of the same match, and prints every regime of every contestant
+  ([failure regimes](../failure-regimes.md)).
 - **Self-monitoring while the battle runs.** The orchestrator attaches `anomalies` to every
   contestant of every match, live:
   - `fleet_drop:<peak>-><now>`: the fleet fell below `anomaly_rules.fleet_keep` of a peak of at
