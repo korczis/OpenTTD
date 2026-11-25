@@ -15,6 +15,7 @@ records a commit can hold (git index in a hook).
 import importlib.util
 import io
 import json
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -1038,6 +1039,32 @@ class Telemetry(unittest.TestCase):
             self.assertIn("error", st.query("SELECT 1; DROP TABLE matches"))
             lineup = json.loads(st.query("SELECT lineup FROM matches")["rows"][0][0])
             self.assertEqual(lineup[0], {"key": "A", "ai": "A", "settings": ""})
+
+    def test_store_keeps_each_samples_loan_in_a_new_and_in_an_old_store(self):
+        # The hoard rules judge money net of the loan; a stored sample must keep the loan for any
+        # analysis that judges it later (research/design-net-investment-hoard-rule.md).
+        with tempfile.TemporaryDirectory() as tmp:
+            old = Path(tmp) / "old.sqlite"
+            db = sqlite3.connect(old)  # a store from before the loan column
+            db.executescript(battle.SCHEMA.replace(" loan INTEGER,", ""))
+            db.execute("INSERT INTO samples (edition, match_id, contestant, t, money) "
+                       "VALUES ('e0', 'm-0000', 'A', '1960-01', 7)")
+            db.commit()
+            db.close()
+            for path in (Path(tmp) / "new.sqlite", old):
+                st = battle.Store(path)
+                m = match("m-0001", "h1", 1, [3, 2, 1])
+                m.update(edition="e1", started_at=0.0, ticks=1,
+                         lineup=[{"key": k, "ai": k} for k in KEYS])
+                for series in m["series"].values():
+                    for s in series:
+                        s.update(money=900_000, loan=300_000)
+                st.match(m)
+                rows = st.query("SELECT money, loan FROM samples WHERE edition = 'e1'")["rows"]
+                self.assertTrue(rows, path.name)
+                self.assertEqual({tuple(r) for r in rows}, {(900_000, 300_000)}, path.name)
+            older = battle.Store(old).query("SELECT loan FROM samples WHERE edition = 'e0'")["rows"]
+            self.assertEqual(older, [(None,)], "a sample from before the column reads unrecorded")
 
     def test_fitness_fails_when_a_never_last_bot_is_last(self):
         lineup = [{"ai": "PrismaticAI", "key": "PrismaticAI"}, {"ai": "X", "key": "X"}]
