@@ -314,6 +314,7 @@ Examples from [`tools/research/mcp-panel/rhai/`](tools/research/mcp-panel/rhai/)
 | [`rail_steward.rhai`](tools/research/mcp-panel/rhai/rail_steward.rhai) | keeps every rail line paying: reads the game each round, decides per line and hands the bot a target to reconcile |
 | [`rail_monitor.rhai`](tools/research/mcp-panel/rhai/rail_monitor.rhai) | watches the bot's railway in the background and posts what is wrong to the Majordomus board |
 | [`build_audit.rhai`](tools/research/mcp-panel/rhai/build_audit.rhai) | once a game month judges what every company built (depots one cannot drive out of, duplicate depots and stations, bay against drive-through stops), keeps it per company for every agent, and says in chat when the owner's company has a new defect |
+| [`capital_watch.rhai`](tools/research/mcp-panel/rhai/capital_watch.rhai) | once a game month measures how much of its operating cash flow every company reinvests, how many years of income sit in its bank and how its fleet grows against its leader, and keeps it per company on the blackboard; read-only |
 | [`demo.rhai`](tools/research/mcp-panel/rhai/demo.rhai) | a game driven entirely from outside, from a new world to a final report |
 | [`arena.rhai`](tools/research/mcp-panel/rhai/arena.rhai) | keeps a lineup of company AIs playing as desired state and reports the standings in chat and as a newspaper |
 
@@ -790,9 +791,9 @@ from the code. The right-hand column says what was counted.
 | **24** | [live MCP resources (`openttd://…`): map, towns, stations, vehicles, companies, …](research/prismatic-mcp/07-resource-catalog.md) | `^\s*\{"openttd://` in `src/prismatic_mcp/prismatic_mcp_server.cpp` |
 | **46** | [unit test cases for the MCP server (Catch2, `[prismatic_mcp]`)](research/prismatic-mcp/09-testing.md) | `^TEST_CASE\(` in `src/tests/test_prismatic_mcp.cpp` |
 | **80** | [recorded bot-vs-bot duels, each with its JSON and its write-up](tools/research/mcp-duel) | tracked files `research/results/duel-*.json` |
-| **61** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
+| **62** | [research tools and checks (`tools/research/*`, shell and Python)](research/tooling.md) | tracked files `tools/research/*` |
 | **13** | [Rust programs: panel, hub, planner, Rhai runner, coverage, …](research/mcp-control.md) | tracked files `tools/research/mcp-rhai/src/bin/*.rs` |
-| **22** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
+| **24** | [Rhai scripts that drive a live game (director, narrator, steward, …)](research/mcp-control.md) | tracked files `tools/research/mcp-panel/rhai/*.rhai` |
 | **38** | [architecture decisions (ADRs)](.ai/repo/adrs/README.md) | tracked files `.ai/repo/adrs/0*.md` |
 | **209** | [planned issues, each with its evidence](.ai/repo/project/README.md) | tracked files `.ai/repo/project/issues/*.yaml` |
 | **99** | [knowledge records (curated and candidates)](.ai/repo/knowledge/README.md) | tracked files `.ai/repo/knowledge/*/*.md` |
@@ -801,9 +802,9 @@ from the code. The right-hand column says what was counted.
 <!-- surfaces:begin facts group=tooling as=pie -->
 ```mermaid
 pie showData title Counted from the sources: tooling
-    "research tools and checks (tools/research/, shell and Python)" : 61
+    "research tools and checks (tools/research/, shell and Python)" : 62
     "Rust programs: panel, hub, planner, Rhai runner, coverage, …" : 13
-    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 22
+    "Rhai scripts that drive a live game (director, narrator, steward, …)" : 24
 ```
 <!-- surfaces:end facts -->
 
@@ -1356,6 +1357,7 @@ itself (generated):
 |---|---|
 | [Research / validation layer](research/README.md) | This directory is part of this fork's own process scaffolding, not upstream OpenTTD material — see AGENTS.md for the full context (this repo is a personal research fork used as a validation target for the Prismatic... |
 | [The agent loop: retrieve, coordinate, decide, approve, act, verify](research/agent-loop.md) | RESEARCH-ONLY. The owner asked (2026-11-19) for one real loop: an agent retrieves versioned evidence with citations, coordinates through a shared blackboard, forms a decision from observed bridge and game state,... |
+| [Analysis 2026-11-23: why PrismaticAI loses to AAAHogEx, and why nothing reacted](research/analysis-2026-11-23-why-prismatic-loses.md) | Post-mortem and synthesis for the owner's live 8-company games on :8800 (seeds 2927, 15805 with its continuation, 12609 and 10487) and the headless evaluations of 2026-11-22/23. It answers five questions. Why does... |
 | [Experiment report: baseset-prerequisite-macos](research/baseset-prerequisite-macos.md) | The four regression ctest cases (regression_regression, regression_stationlist, regression_gs, regression_gs_compat) require a base graphics set to be installed, even though they run headless (-vnull -snull -mnull).... |
 | [Battle brain and live tuner](research/battle-brain.md) | RESEARCH-ONLY. Self-improvement in two loops, both fed from the LAN battle's recorded data: |
 | [Battle post-mortem](research/battle-postmortem.md) | RESEARCH-ONLY. After each round of the LAN AI battle, the post-mortem answers where each contestant loses, and PrismaticAI above all. battle.py already writes a post-mortem per match into its machine store.... |
@@ -1363,6 +1365,7 @@ itself (generated):
 | [Co-play: the owner and the bot in one company](research/coplay.md) | RESEARCH-ONLY, UNSTABLE. A server-side join policy behind OPTION_RESEARCH_INSTRUMENTATION. Default off. |
 | [Duel evidence audit and a frozen duel set](research/duel-evidence-audit.md) | RESEARCH-ONLY. What the recorded duels (research/results/duel-.json) hold constant and what they let vary, and one set of duels run with every input frozen and named. Tool: tools/research/mcp-duel; scoreboard:... |
 | [Experiment report:](research/experiment-template.md) | List the exact commands run and their outcome. Don't summarize away detail — "ran the tests" is not enough, "tools/gate.sh change -> exit 0, 98/98 tests" is. |
+| [PrismaticAI's growth funnel: where a line stops before it pays](research/growth-funnel.md) | PrismaticAI logs one FUNNEL line per transport mode once a game year. Each line counts the stages a new line passes: candidate discovery, affordability, construction, and operation that pays. The code is... |
 | [Incident 2026-11-19 to 11-22: an unowned AI battle held three machines, and master's CI broke twice](research/incident-2026-11-19-ai-battle-overload.md) | Post-mortem. Two failures overlapped. For three days the AI battle tournament held this Mac and the Linux build host at their limits, and nobody on either machine could tell whose processes they were. In the same... |
 | [Incident 2026-11-22: four PrismaticAI companies of one map built on the same mines](research/incident-2026-11-22-sibling-industries.md) | Post-mortem. In the owner's live 8-company game on :8800 (seed 2927, master c5bf32182a), four companies ran PrismaticAI: 0, 1, 6 and 7. Two or more of them built rail lines from the same mine or forest, so each such... |
 | [Incident 2026-11-23: PrismaticAI ran one train for eight years in the owner's live game](research/incident-2026-11-23-live-game-15805.md) | Post-mortem. In the owner's live 8-company game on :8800 (seed 15805, start 1950, binary 20261122-master-g6d1eda39e1), company 0 runs PrismaticAI and the owner co-plays it. By the end of 1957 AAAHogEx was worth... |
