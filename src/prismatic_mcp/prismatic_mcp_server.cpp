@@ -591,8 +591,11 @@ struct PendingApproval {
 	ApprovalState state = ApprovalState::Pending;
 };
 
-static int CompanyOf(const PendingApproval &a); // below, with the chat channel
-static std::vector<detail::ApproverSeat> CurrentApproverSeats(); // below, with the approvers
+} // anonymous namespace
+/* Defined below, with the chat channel and the approvers, outside the anonymous namespace. */
+static int CompanyOf(const PendingApproval &a);
+static std::vector<detail::ApproverSeat> CurrentApproverSeats();
+namespace {
 
 /** One change of who approves from where: an approver joined or left a company, or its key was connected twice. */
 struct ApproverEvent {
