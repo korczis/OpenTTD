@@ -687,8 +687,11 @@ absent.
   company's trains, road vehicles, aircraft and ships, value and money. Only the owner's company
   is the owner's bot: `ai.log` lines (and their newspapers) of other companies, other PrismaticAI
   instances in an arena included, are not relayed. The company is `$NARRATOR_COMPANY` when set,
-  else the first running company of the panel's AI (`/api/status` `ai`, `/api/bots` `running`),
-  the one `mcp-e2e --coplay` joins. When it starts and at every game quarter it also says how many
+  else `ttd::owner_company()` (`rhai/ttd.rhai`), the one source the watchdog and the build audit
+  ask too: `$OWNER_COMPANY` when set, else the company a registered approver plays now
+  (`openttd://approvals` `data.approver_companies`, research/coplay.md), else the first running
+  company of the panel's AI (`/api/status` `ai`, `/api/bots` `running`), the one
+  `mcp-e2e --coplay` joins. When it starts and at every game quarter it also says how many
   of the bot's requests wait for an Approve in the panel (`/api/status` `pending` for that
   company) and when the oldest was made: an approval-gated plan (for example `replan.rhai`'s
   settings) otherwise waits unseen while auto-approve is off. Run it beside the
@@ -787,7 +790,13 @@ on its own is auto-approve, and that is the owner's call (knowledge
   command in `list_cmds` (`con_companies()`, `con_newgame("42")`; `list_cmds` counts them), and one per operation
   of the panel's OpenAPI document (`api_<operationId>`: `api_bots()`, `api_botStart(#{...})`,
   `api_tool_openttd_game_set_pause(#{pause: true})`). A tool, console command or panel route added
-  to the game is a Rhai function the next time a script starts.
+  to the game is a Rhai function the next time a script starts. While the panel's game runs
+  (`/api/status` `server_running`) but does not list its tools or commands yet, as for a service
+  started right after the panel came up, the derivation asks again every 2 s for up to
+  `$PRISMATIC_RHAI_DERIVE_WAIT_S` (default 60) and says on stderr when the script starts without
+  them; with no game it does not wait.
+- `ttd::owner_company()` is the owner's company every service asks (watchdog, build audit,
+  narrator): `$OWNER_COMPANY`, else where a registered approver plays, else the panel's AI.
 - `import "ttd" as ttd;` loads `tools/research/mcp-panel/rhai/ttd.rhai` (`MCP_RHAI_PATH` overrides),
   the high-level commands: `state`, `companies`, `wait_running`, `new_game`, `start_ai`,
   `set_pause` (waits for the operator's approval, never approves itself), `report`, `watch`.
