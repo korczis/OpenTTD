@@ -1547,7 +1547,7 @@ mod tests {
             let own = line.call("air", 6, 7, ()); own.monthly_profit = 777.0;
             let zero = line.call("bus", 8, 9, ()); zero.monthly_profit = 0.0;
             // Another company's freight line: no price in this company's plan, so nothing, whatever its option says.
-            let theirs = line.call("freight_rail", 8, 9, 1); theirs.monthly_profit = 400.0;
+            let theirs = line.call("freight_rail", 8, 9, 1); theirs.monthly_profit = 400.0; theirs.kind = "freight";
             let mixed = predicted_monthly([line.call("freight_rail", 7, 9, 1), line.call("bus", 1, 2, ()), own, line.call("air", 4, 5, ()), zero, theirs],
                                           #{ "7>9:1": 5300.4 }, rec);
             let losing = record_of(0, [v.call(0, "road", [1, 2], -500, 900)]);

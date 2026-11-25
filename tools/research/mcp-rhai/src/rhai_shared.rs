@@ -527,7 +527,7 @@ mod tests {
                                       {"id": 6, "name": "P6", "ai": "PrismaticAI", "settings": live},
                                       {"id": 7, "name": "P7", "ai": "PrismaticAI", "settings": live}]});
         e.register_fn("api_bots", move || dynamic(bots.clone()));
-        let line = |p: i64| json!({"mode": "freight_rail", "cargo": "Coal", "cargo_id": 1,
+        let line = |p: i64| json!({"kind": "freight", "mode": "freight_rail", "cargo": "Coal", "cargo_id": 1,
                                    "from": {"id": format!("industry:{p}"), "name": format!("Mine {p}")}, "to": {"id": "industry:99", "name": "Plant"}});
         let entry = |c: f64, p: i64| json!({"company": c, "start_ai": start.replace("{p}", &p.to_string()),
                                             "freight": [{"from": p, "to": 99, "cargo_id": 1, "monthly_profit": 5000.0}]});

@@ -90,9 +90,6 @@ const TYPES = ["train", "road", "aircraft", "ship"];
 const MODE_OF_TYPE = #{ train: "rail", road: "road", aircraft: "air", ship: "water" };
 // The record's mode of a portfolio line's mode (mcp-plan's MODE_NAMES and FREIGHT_MODES).
 const MODE_OF_PLAN = #{ bus: "road", truck: "road", rail: "rail", freight_rail: "rail", air: "air", ship: "water" };
-// The freight modes: such a chosen line is this company's only when its own plan prices it (another
-// company's producer otherwise), so it is never priced from the option or the record.
-const FREIGHT_PLAN_MODES = ["truck", "freight_rail"];
 
 // The paths a plan record claims on the mesh, which refuses a claim of none: a plan changes the
 // AI settings PrismaticAI declares there.
@@ -280,7 +277,9 @@ fn predicted_monthly(chosen, priced, rec) {
         let id = |x| { let s = `${x.id ?? x}`; let p = s.split(":"); p[p.len() - 1] };
         let k = `${id.call(c.from)}>${id.call(c.to)}:${c.cargo_id ?? ""}`;
         if k in priced { out.monthly += priced[k].to_int(); out.planner += 1; continue; }
-        if global::FREIGHT_PLAN_MODES.contains(c.mode) { out.unpriced += 1; continue; }
+        // A freight line (the planner's kind) is this company's only when its own plan prices it
+        // (another company's producer otherwise), so it is never priced from the option or the record.
+        if c.kind == "freight" { out.unpriced += 1; continue; }
         let own = c.monthly_profit;
         if (type_of(own) == "f64" || type_of(own) == "i64") && own > 0 { out.monthly += own.to_int(); out.planner += 1; continue; }
         let r = realised_monthly(rec, c.mode);
